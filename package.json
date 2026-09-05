@@ -73,6 +73,7 @@
     "wait-on": "^8.0.1"
   },
   "build": {
+    "afterPack": "scripts/adhoc-sign.mjs",
     "appId": "com.dytschgo.imnota",
     "productName": "Imnota",
     "asar": true,
@@ -105,7 +106,7 @@
         "zip"
       ],
       "category": "public.app-category.graphics-design",
-      "identity": "-",
+      "identity": null,
       "hardenedRuntime": false
     },
     "publish": {
