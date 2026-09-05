@@ -41,6 +41,7 @@ import type {
 import { DEFAULT_TAGS, EMPTY_NOTES, nowIso } from '../shared/utils';
 import { generateMarkdown } from '../shared/markdown';
 import { renderAnnotatedImage } from './export-image';
+import { prepareContext } from './prepare-context';
 import { useAppStore } from './store';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { Logo } from './components/Logo';
@@ -48,6 +49,7 @@ import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './co
 import { Toolbar } from './components/Toolbar';
 import { UpdateControl } from './components/UpdateControl';
 import { ProblemDescriptionEditor } from './components/ProblemDescriptionEditor';
+import { CombinedContextCopy } from './components/CombinedContextCopy';
 import { version as appVersion } from '../../package.json';
 
 // Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
@@ -75,6 +77,8 @@ export default function App() {
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [clipboardBusy, setClipboardBusy] = useState(false);
+  const preparingContext = useRef(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [attachments, setAttachments] = useState<{
     folderPath: string;
@@ -375,26 +379,21 @@ export default function App() {
     setRedo((items) => items.slice(0, -1));
   }
   async function copyContext() {
+    if (preparingContext.current) return;
+    preparingContext.current = true;
     try {
-      const markdown = await buildMarkdown();
-      if (!markdown) return;
       const result = await exportPackage(false);
       if (!result) return;
-      await window.imnota.copyText(markdown);
-      setAttachments({ ...result, markdown });
+      await window.imnota.copyText(result.markdown);
+      setAttachments(result);
       showToast(
-        `AI context copied · ${selectedShots().length} screenshot${selectedShots().length === 1 ? '' : 's'}`,
+        `AI context copied · ${result.images.length} screenshot${result.images.length === 1 ? '' : 's'}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The context could not be copied.');
+    } finally {
+      preparingContext.current = false;
     }
-  }
-  function selectedShots() {
-    return (
-      store.snapshot?.project.screenshots.filter(
-        (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
-      ) ?? []
-    );
   }
   const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
@@ -423,34 +422,31 @@ export default function App() {
   async function exportPackage(openFolder = true) {
     if (!store.snapshot) return;
     try {
-      const markdown = await buildMarkdown();
-      const shots = selectedShots();
-      const annotatedImages = [];
-      for (const [index, shot] of shots.entries()) {
-        showToast(`Rendering screenshot ${index + 1} of ${shots.length}…`);
-        const content =
-          shot.id === activeShot?.id && lastLoadedId.current === shot.id && image
-            ? { image, annotations, notes }
-            : await window.imnota.loadScreenshotContent({
-                projectPath: store.snapshot!.projectPath,
-                screenshot: shot,
-              });
-        annotatedImages.push({
-          filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-          dataUrl: await renderAnnotatedImage(content.image, content.annotations),
-        });
-      }
+      const prepared = await prepareContext(
+        {
+          project: store.snapshot.project,
+          projectPath: store.snapshot.projectPath,
+          roundId: store.exportAllRounds ? undefined : store.activeRoundId,
+          active:
+            activeShot && lastLoadedId.current === activeShot.id && image
+              ? { id: activeShot.id, content: { image, annotations, notes } }
+              : undefined,
+        },
+        window.imnota.loadScreenshotContent,
+        renderAnnotatedImage,
+        (index, count) => showToast(`Rendering screenshot ${index} of ${count}…`),
+      );
       const result = await window.imnota.exportPackage({
-        projectPath: store.snapshot.projectPath,
-        roundId: store.exportAllRounds ? undefined : store.activeRoundId,
-        markdown,
-        annotatedImages: annotatedImages.filter((item) => item.dataUrl),
-        includeOriginal: store.snapshot.project.exportPreferences.includeOriginalScreenshots,
-        includeAnnotations: store.snapshot.project.exportPreferences.includeAnnotationMetadata,
+        projectPath: prepared.projectPath,
+        roundId: prepared.roundId,
+        markdown: prepared.markdown,
+        annotatedImages: prepared.images,
+        includeOriginal: prepared.preferences.includeOriginalScreenshots,
+        includeAnnotations: prepared.preferences.includeAnnotationMetadata,
       });
       showToast(`Exported ${result.count} screenshot${result.count === 1 ? '' : 's'} to the project folder`);
       if (openFolder) await window.imnota.openPath(result.folderPath);
-      return { folderPath: result.folderPath, images: annotatedImages };
+      return { folderPath: result.folderPath, images: prepared.images, markdown: prepared.markdown };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The export could not be created.');
     }
@@ -565,7 +561,7 @@ export default function App() {
             }}
           />
         ) : store.view === 'context' ? (
-          <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} />
+          <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
         ) : (
           <Workspace
             onFlush={async () => {
@@ -648,20 +644,28 @@ export default function App() {
       )}
       {attachments && (
         <Modal
-          title="Attach your visual references"
-          description="The Markdown is copied. Paste it into your AI assistant, then copy and paste each image below, or attach the exported PNG files. Copying an image replaces the clipboard text."
-          onClose={() => setAttachments(null)}
+          title="Share context and images"
+          description="Markdown is copied. Try combined copy below, or paste the text and attach the exported PNGs. Individual image copying replaces clipboard text."
+          onClose={() => {
+            if (!clipboardBusy) setAttachments(null);
+          }}
         >
-          <p>
-            {attachments.images.length} annotated images · {attachments.folderPath}
-          </p>
-          <div className="modal-form">
+          <div className="modal-form sharing-content">
+            <CombinedContextCopy
+              markdown={attachments.markdown}
+              images={attachments.images}
+              onBusyChange={setClipboardBusy}
+            />
+            <p className="helper sharing-folder">
+              {attachments.images.length} annotated images · {attachments.folderPath}
+            </p>
             {attachments.images.map((item) => (
-              <div key={item.filename}>
+              <div className="sharing-file" key={item.filename}>
                 <label>
                   <input type="checkbox" /> Attached {item.filename}
                 </label>
                 <Button
+                  disabled={clipboardBusy}
                   onClick={async () => {
                     try {
                       await window.imnota.copyImage(item.dataUrl);
@@ -675,8 +679,24 @@ export default function App() {
                 </Button>
               </div>
             ))}
-            <Button onClick={() => window.imnota.copyText(attachments.markdown)}>Copy Markdown again</Button>
-            <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>Open export folder</Button>
+            <div className="sharing-actions">
+              <Button
+                disabled={clipboardBusy}
+                onClick={async () => {
+                  try {
+                    await window.imnota.copyText(attachments.markdown);
+                    showToast('Markdown copied.');
+                  } catch {
+                    setError('Markdown could not be copied. Open the exported context.md file instead.');
+                  }
+                }}
+              >
+                Copy Markdown again
+              </Button>
+              <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>
+                Open export folder
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
@@ -1638,9 +1658,11 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
 function ContextBuilder({
   buildMarkdown,
   onExport,
+  onCopy,
 }: {
   buildMarkdown: () => Promise<string>;
   onExport: () => void;
+  onCopy: () => void;
 }) {
   const store = useAppStore();
   const [markdown, setMarkdown] = useState('');
@@ -1734,12 +1756,7 @@ function ContextBuilder({
           </label>
         </div>
         <div className="context-actions">
-          <Button
-            variant="primary"
-            onClick={() => {
-              void window.imnota.copyText(markdown);
-            }}
-          >
+          <Button variant="primary" onClick={onCopy}>
             <Clipboard size={16} />
             Copy AI context
           </Button>

@@ -36,6 +36,11 @@ import {
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import { ensureRound, migrateRounds, screenshotPath } from './rounds.js';
 import { noteToMarkdown, parseNotesMarkdown } from '../src/shared/notes.js';
+import {
+  clipboardContextHtml,
+  clipboardPngDimensions,
+  MAX_CLIPBOARD_PNG_LENGTH,
+} from '../src/shared/clipboard-context.js';
 import { createUpdateCheck } from './update-check.js';
 import type { UpdateStatus } from '../src/shared/types.js';
 
@@ -339,6 +344,11 @@ function registerIpc(): void {
       }),
     ]),
     'system:copy-text': z.tuple([z.string().max(2_000_000)]),
+    'system:copy-context': z.tuple([
+      z
+        .object({ markdown: z.string().max(2_000_000), imageDataUrl: png.max(MAX_CLIPBOARD_PNG_LENGTH) })
+        .strict(),
+    ]),
     'system:copy-image': z.tuple([png]),
     'recovery:save': z.tuple([
       z.object({
@@ -762,6 +772,15 @@ function registerIpc(): void {
     if (image.isEmpty()) throw new Error('The image could not be copied. Export it as PNG instead.');
     clipboard.writeImage(image);
   });
+  handle('system:copy-context', async (_event, input) => {
+    const size = clipboardPngDimensions(input.imageDataUrl);
+    const image = nativeImage.createFromDataURL(input.imageDataUrl);
+    if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
+      throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
+    const html = clipboardContextHtml(input.markdown);
+    // All preparation and validation precede the single clipboard mutation.
+    clipboard.write({ text: input.markdown, html, image });
+  });
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     await atomicWrite(
@@ -971,6 +990,7 @@ app.whenReady().then(async () => {
         const reopened = await api.loadProject(project.projectPath);
         if (reopened.project.screenshots.length !== 100 || Object.keys(reopened.thumbnails).length !== 100) throw new Error('100-image project lost screenshots or thumbnails');
         reopened.project.exportPreferences.includedFields = ['summary'];
+        reopened.project.screenshots.forEach((shot, index) => { shot.includeInExport = index < 2; });
         await api.saveProject(project.projectPath, reopened.project);
         return { syntheticImages: 100, dimensions: '1920x1080', importMs: Math.round(importedMs), warmReopenMs: Math.round(performance.now() - before) };
       })()`);
@@ -1129,6 +1149,58 @@ app.whenReady().then(async () => {
       );
       if (!savedAnnotations.some((a: { text?: string }) => a.text === 'Saved inline feedback'))
         throw new Error('Inline text was not persisted');
+      // Add an opaque redaction to the second synthetic reference, then verify
+      // its actual pixels in the composed clipboard output below.
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const screenshot = ${JSON.stringify(textProject.screenshots[1])};
+        const projectPath = ${JSON.stringify(path.join(fixture, 'performance'))};
+        const content = await window.imnota.loadScreenshotContent({ projectPath, screenshot });
+        content.annotations.push({ id: 'clipboard-mask', kind: 'blur', x: 20, y: 20, width: 80, height: 80, opacity: 0.1, zIndex: 100 });
+        await window.imnota.saveScreenshotContent({ projectPath, screenshot, notes: content.notes, annotations: content.annotations });
+      })()`);
+      // Exercise the same context action from the builder, then the experimental
+      // combined-copy button. Only the two included references should be copied.
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const wait = async (find) => {
+          for (let i = 0; i < 200; i++) { const found = find(); if (found) return found; await new Promise(resolve => setTimeout(resolve, 50)); }
+          throw new Error('Sharing UI timed out');
+        };
+        [...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === 'Context Builder').click();
+        const copy = await wait(() => [...document.querySelectorAll('.context-builder button')].find(b => b.textContent.trim() === 'Copy AI context'));
+        copy.click();
+        const combined = await wait(() => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes('Copy text + image')));
+        if (document.querySelectorAll('[role="dialog"] input[type="checkbox"]').length !== 2) throw new Error('Excluded screenshots entered sharing package');
+        combined.click();
+        await wait(() => [...document.querySelectorAll('[role="dialog"] [role="status"]')].find(e => e.textContent.includes('Text and image are on the clipboard')));
+      })()`);
+      const contextClipboard = clipboard.readText();
+      const sheet = clipboard.readImage();
+      if (
+        !contextClipboard.includes('A single clear problem description') ||
+        sheet.isEmpty() ||
+        !clipboard.readHTML().includes('<pre>')
+      )
+        throw new Error('Combined clipboard lost text, HTML or image');
+      if (sheet.getSize().width !== 1952 || sheet.getSize().height !== pngSize.height + 1080 + 128)
+        throw new Error(
+          'Contact sheet changed native resolution or selection: ' + JSON.stringify(sheet.getSize()),
+        );
+      const sheetPng = sheet.toPNG();
+      const maskPixel = sheet
+        .crop({ x: 16 + 60, y: pngSize.height + 112 + 60, width: 1, height: 1 })
+        .toBitmap();
+      // nativeImage bitmap channels are BGRA on the supported desktop hosts.
+      if (!maskPixel.equals(Buffer.from([18, 13, 11, 255])))
+        throw new Error('Combined clipboard did not preserve opaque redaction');
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        try { await window.imnota.copyContext({ markdown: 'must not replace', imageDataUrl: 'data:image/png;base64,aGVsbG8=' }); throw new Error('Invalid PNG accepted'); }
+        catch (error) { if (error.message === 'Invalid PNG accepted') throw error; }
+      })()`);
+      if (clipboard.readText() !== contextClipboard || !clipboard.readImage().toPNG().equals(sheetPng))
+        throw new Error('Failed combined copy changed clipboard');
+      console.log(
+        'Combined clipboard smoke passed: builder action, two full-resolution annotated references, exclusions, crop, opaque redaction, text + HTML + PNG and unchanged clipboard on invalid input.',
+      );
       if (process.env.IMNOTA_SMOKE_SCREENSHOT) {
         mainWindow!.showInactive();
         await new Promise((resolve) => setTimeout(resolve, 500));

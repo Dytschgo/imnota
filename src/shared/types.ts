@@ -189,6 +189,7 @@ export interface ImnotaBridge {
   exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
   copyText(text: string): Promise<void>;
+  copyContext(input: { markdown: string; imageDataUrl: string }): Promise<void>;
   copyImage(dataUrl: string): Promise<void>;
   saveRecovery(input: {
     projectPath: string;

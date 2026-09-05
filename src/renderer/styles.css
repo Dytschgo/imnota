@@ -1433,6 +1433,41 @@ button:disabled {
 .modal-form {
   padding: 20px 22px 22px;
 }
+.sharing-content,
+.combined-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.combined-copy {
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.sharing-content p {
+  margin: 0;
+}
+.sharing-folder,
+.sharing-file label {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.sharing-file,
+.sharing-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sharing-file {
+  justify-content: space-between;
+}
+.sharing-file .btn {
+  flex-shrink: 0;
+}
+.sharing-actions {
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
