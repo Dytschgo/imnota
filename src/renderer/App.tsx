@@ -45,6 +45,7 @@ import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { Logo } from './components/Logo';
 import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
 import { Toolbar } from './components/Toolbar';
+import { version as appVersion } from '../../package.json';
 
 // Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
 // Hierarchy: the screenshot canvas wins through area and contrast; controls stay compact and peripheral.
@@ -663,7 +664,7 @@ export default function App() {
               Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
               telemetry by default.
             </p>
-            <span className="muted">Version 0.1.0 · MIT License · Built by Dytschgo</span>
+            <span className="muted">Version {appVersion} · MIT License · Built by Dytschgo</span>
           </div>
         </Modal>
       )}

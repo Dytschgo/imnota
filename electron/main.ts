@@ -803,11 +803,13 @@ app.whenReady().then(async () => {
       })()`);
       console.log('Synthetic project benchmark:', JSON.stringify(metrics));
       // Reopen through the real React boot flow, draw a crop, then use the PNG action.
-      await mainWindow!.loadFile(path.join(__dirname, '../../dist/index.html'));
+      const previousWindow = mainWindow!;
+      await createWindow();
+      previousWindow.destroy();
       await mainWindow!.webContents.executeJavaScript(`new Promise((resolve, reject) => {
         let tries = 0;
         const check = () => {
-          if (document.querySelector('.konvajs-content canvas')) return resolve(true);
+          if (document.querySelector('.konvajs-content canvas') && document.querySelector('.canvas-meta')?.textContent.includes('1920 × 1080')) return resolve(true);
           if (++tries > 200) return reject(new Error('Annotation workspace did not render'));
           setTimeout(check, 50);
         }; check();

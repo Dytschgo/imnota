@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — First downloadable release
+## 0.1.2 — First downloadable release
 
 - Universal Mac ZIP and DMG, Windows installers and Linux packages.
 - Verified Mac archive launch, installer checksums and previous-app backups.
@@ -9,6 +9,8 @@
 - Added project-wide search, annotation clipboard and expanded properties.
 - Added recovery and 100-image smoke checks; cache thumbnails and render exports sequentially.
 - Mac updates use a download link until Apple Developer signing is configured.
+
+The 0.1.1 tag was a failed release attempt and did not publish downloadable assets. This version fixes the cross-platform test fixtures and checkout line endings and verifies installation from the public Mac download.
 
 ## 0.1.0 — Development foundation (not published)
 
