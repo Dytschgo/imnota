@@ -62,6 +62,12 @@ jobs:
       - name: Verify packaged Mac application
         if: matrix.os == 'macos-latest'
         run: bash scripts/verify-mac.sh
+      - name: Smoke packaged Windows application
+        if: matrix.os == 'windows-latest'
+        run: node scripts/verify-packaged.mjs windows
+      - name: Smoke packaged Linux application
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
       - uses: actions/upload-artifact@v7
         with:
           name: imnota-${{ matrix.os }}

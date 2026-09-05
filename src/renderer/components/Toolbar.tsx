@@ -15,6 +15,7 @@ import {
   ZoomOut,
   Maximize2,
   MoreHorizontal,
+  Minus,
 } from 'lucide-react';
 import type { AnnotationKind } from '../../shared/types';
 import { IconButton } from './ui';
@@ -23,7 +24,7 @@ type ToolChoice = 'select' | AnnotationKind | 'eraser';
 const tools: Array<{ id: ToolChoice; label: string; icon: typeof MousePointer2 }> = [
   { id: 'select', label: 'Select and move', icon: MousePointer2 },
   { id: 'arrow', label: 'Arrow', icon: MoveRight },
-  { id: 'line', label: 'Line', icon: RectangleHorizontal },
+  { id: 'line', label: 'Line', icon: Minus },
   { id: 'rectangle', label: 'Rectangle', icon: Square },
   { id: 'rounded-rectangle', label: 'Rounded rectangle', icon: RectangleHorizontal },
   { id: 'ellipse', label: 'Ellipse', icon: Circle },

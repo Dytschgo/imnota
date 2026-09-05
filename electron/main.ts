@@ -36,45 +36,34 @@ import {
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import { ensureRound, migrateRounds, screenshotPath } from './rounds.js';
 import { noteToMarkdown, parseNotesMarkdown } from '../src/shared/notes.js';
-import { createUpdateCheck } from './update-check.js';
-import type { UpdateStatus } from '../src/shared/types.js';
+import {
+  clipboardContextHtml,
+  clipboardPngDimensions,
+  MAX_CLIPBOARD_PNG_LENGTH,
+} from '../src/shared/clipboard-context.js';
+import { UpdateController } from './update-controller.js';
+import { discoverRelease } from './releases.js';
+import { prepareNativeUpdate } from './native-update.js';
+
+// Smoke never reads or writes the installed application's profile or caches.
+if (process.env.IMNOTA_SMOKE === '1') {
+  const profile = process.env.IMNOTA_SMOKE_USER_DATA;
+  if (!profile || !path.isAbsolute(profile) || !existsSync(profile))
+    throw new Error('Run smoke tests through scripts/smoke.mjs with an isolated profile.');
+  app.setPath('userData', profile);
+  app.setPath('sessionData', profile);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
-let updateStatus: UpdateStatus = { state: 'idle', currentVersion: app.getVersion() };
-function sendUpdate(status: UpdateStatus) {
-  updateStatus = { currentVersion: app.getVersion(), ...status };
-  mainWindow?.webContents.send('update:status', updateStatus);
-}
-const checkForUpdates = createUpdateCheck(
-  async () => {
-    if (!app.isPackaged || process.env.IMNOTA_SMOKE === '1') {
-      sendUpdate({ state: 'idle', message: 'Update checks are available in installed release builds.' });
-      return;
-    }
-    if (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') return;
-    sendUpdate({ state: 'checking' });
-    const result = await autoUpdater.checkForUpdates();
-    if (!result && updateStatus.state === 'checking')
-      sendUpdate({
-        state: 'idle',
-        message:
-          'Update checking is unavailable for this installation. Use the latest release download instead.',
-      });
-  },
-  () =>
-    sendUpdate({
-      state: 'error',
-      message:
-        'Could not check for updates. Check your connection and try again. Your projects are unchanged.',
-    }),
-);
+let updateController: UpdateController;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
   interfaceScale: 1,
   openRecentOnLaunch: true,
   confirmBeforeDeletion: true,
+  updateChannel: 'stable',
 };
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
@@ -241,7 +230,7 @@ async function importOne(
   if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
   const project = await readProject(projectPath);
   const round = project.rounds.find((r) => r.id === (roundId ?? project.rounds[0].id));
-  if (!round || round.archived) throw new Error('Choose an active feedback round before importing.');
+  if (!round || round.archived) throw new Error('Choose an active subfolder before importing.');
   await ensureRound(projectPath, round.id);
   const storedFilename = await uniqueStoredName(projectPath, originalFilename);
   await atomicWrite(
@@ -339,6 +328,11 @@ function registerIpc(): void {
       }),
     ]),
     'system:copy-text': z.tuple([z.string().max(2_000_000)]),
+    'system:copy-context': z.tuple([
+      z
+        .object({ markdown: z.string().max(2_000_000), imageDataUrl: png.max(MAX_CLIPBOARD_PNG_LENGTH) })
+        .strict(),
+    ]),
     'system:copy-image': z.tuple([png]),
     'recovery:save': z.tuple([
       z.object({
@@ -358,6 +352,7 @@ function registerIpc(): void {
       if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
         throw new Error('Untrusted IPC sender.');
       const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
+      if (channel.startsWith('update:')) return listener(event, ...validated);
       const result = pending.then(() => listener(event, ...validated));
       pending = result.catch(() => undefined);
       return result;
@@ -375,8 +370,14 @@ function registerIpc(): void {
     return settings;
   });
   handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
-    settings = { ...settings, ...input };
-    await atomicWrite(settingsFile(), JSON.stringify(settings, null, 2));
+    const next = { ...settings, ...input };
+    const persist = async () => {
+      await atomicWrite(settingsFile(), JSON.stringify(next, null, 2));
+      settings = next;
+    };
+    if (next.updateChannel !== settings.updateChannel)
+      await updateController.switchChannel(next.updateChannel, persist);
+    else await persist();
     return settings;
   });
   handle('projects:list', async () => {
@@ -463,6 +464,21 @@ function registerIpc(): void {
       .sort((a, b) => a.position - b.position)
       .map((s, position) => ({ ...s, position }));
     project.updatedAt = nowIso();
+    // Editing the primary description opts it into export. Loading an older
+    // project and autosaving unchanged notes must preserve its exclusions.
+    if (!project.exportPreferences.includedFields.includes('problem')) {
+      await assertNoLinks(path.join(safePath, trustedShot.notesFile));
+      const previousNotes = parseNotesMarkdown(
+        await fs
+          .readFile(path.join(safePath, trustedShot.notesFile), 'utf8')
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return '';
+            throw error;
+          }),
+      );
+      if (previousNotes.problem !== input.notes.problem)
+        project.exportPreferences.includedFields.push('problem');
+    }
     await atomicWrite(
       path.join(safePath, '.imnota-recovery.json'),
       JSON.stringify(
@@ -569,7 +585,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     const source = project.rounds.find((r) => r.id === input.roundId);
-    if (input.action !== 'create' && !source) throw new Error('Feedback round not found.');
+    if (input.action !== 'create' && !source) throw new Error('Subfolder not found.');
     if (input.action === 'rename') source!.name = input.name;
     else if (input.action === 'archive') source!.archived = !source!.archived;
     else {
@@ -654,7 +670,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     if (input.roundId && !project.rounds.some((round) => round.id === input.roundId))
-      throw new Error('Feedback round not found.');
+      throw new Error('Subfolder not found.');
     const folder = input.roundId
       ? path.join(safePath, 'rounds', input.roundId, 'exports')
       : path.join(safePath, 'exports');
@@ -667,7 +683,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     if (input.roundId && !project.rounds.some((r) => r.id === input.roundId))
-      throw new Error('Feedback round not found.');
+      throw new Error('Subfolder not found.');
     const exportDir = input.roundId
       ? path.join(safePath, 'rounds', input.roundId, 'exports')
       : path.join(safePath, 'exports');
@@ -747,6 +763,15 @@ function registerIpc(): void {
     if (image.isEmpty()) throw new Error('The image could not be copied. Export it as PNG instead.');
     clipboard.writeImage(image);
   });
+  handle('system:copy-context', async (_event, input) => {
+    const size = clipboardPngDimensions(input.imageDataUrl);
+    const image = nativeImage.createFromDataURL(input.imageDataUrl);
+    if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
+      throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
+    const html = clipboardContextHtml(input.markdown);
+    // All preparation and validation precede the single clipboard mutation.
+    clipboard.write({ text: input.markdown, html, image });
+  });
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     await atomicWrite(
@@ -762,45 +787,35 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(projectPath);
     await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
   });
-  handle('update:download', async () => {
-    if (process.platform === 'darwin') {
-      await shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
-      return;
-    }
-    if (app.isPackaged) await autoUpdater.downloadUpdate();
-  });
-  handle('update:check', () => checkForUpdates());
-  handle('update:status', () => updateStatus);
-  handle('update:install', () => {
-    if (process.platform === 'darwin') {
-      void shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
-      return;
-    }
-    if (app.isPackaged) autoUpdater.quitAndInstall();
-  });
+  // Long network operations run outside the filesystem IPC queue.
+  handle('update:download', () => updateController.download());
+  handle('update:check', () => updateController.check());
+  handle('update:status', () => updateController.getStatus());
+  handle('update:install', () => updateController.install());
 }
 
 function configureAutoUpdates(): void {
-  if (!app.isPackaged) return;
-  // Apple Developer signing is needed for Squirrel.Mac updates; ad-hoc builds use a download link.
-  autoUpdater.autoDownload = process.platform !== 'darwin';
-  autoUpdater.autoInstallOnAppQuit = process.platform !== 'darwin';
-  const send = sendUpdate;
-  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
-  autoUpdater.on('update-available', (info) => send({ state: 'available', version: info.version }));
-  autoUpdater.on('update-not-available', () => send({ state: 'not-available' }));
-  autoUpdater.on('download-progress', (progress) =>
-    send({ state: 'downloading', percent: progress.percent }),
-  );
-  autoUpdater.on('update-downloaded', (info) => send({ state: 'downloaded', version: info.version }));
-  autoUpdater.on('error', () =>
-    send({
-      state: 'error',
-      message:
-        'The update could not be checked or downloaded. Check your connection and try again. Your projects are unchanged.',
-    }),
-  );
-  setTimeout(() => void checkForUpdates(), 8000);
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  updateController = new UpdateController(settings.updateChannel, {
+    currentVersion: app.getVersion(),
+    enabled: app.isPackaged && process.env.IMNOTA_SMOKE !== '1',
+    manual: process.platform === 'darwin',
+    discover: (channel) => discoverRelease(channel, process.platform),
+    prepare: (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+    download: () => autoUpdater.downloadUpdate(),
+    install: () => autoUpdater.quitAndInstall(),
+    open: (url) => shell.openExternal(url),
+    emit: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
+        mainWindow.webContents.send('update:status', status);
+    },
+  });
+  autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
+  // Promise handlers own errors so late native events cannot change channels.
+  autoUpdater.on('error', () => undefined);
+  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1')
+    setTimeout(() => void updateController.check(), 8000);
 }
 
 async function createWindow(): Promise<void> {
@@ -821,14 +836,22 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
     },
   });
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) await mainWindow.loadURL(devUrl);
-  else await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  const createdWindow = mainWindow;
+  createdWindow.on('closed', () => {
+    if (mainWindow === createdWindow) mainWindow = null;
+  });
+  createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
-  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  createdWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  try {
+    if (devUrl) await createdWindow.loadURL(devUrl);
+    else await createdWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+  } catch (error) {
+    if (!createdWindow.isDestroyed()) throw error;
+  }
 }
 
 app.whenReady().then(async () => {
@@ -837,6 +860,7 @@ app.whenReady().then(async () => {
   if (stored)
     try {
       settings = { ...settings, ...JSON.parse(stored) };
+      settings.updateChannel = settings.updateChannel === 'nightly' ? 'nightly' : 'stable';
     } catch {
       /* reset corrupt preferences */
     }
@@ -850,11 +874,14 @@ app.whenReady().then(async () => {
       },
     });
   });
+  configureAutoUpdates();
   registerIpc();
   await createWindow();
   if (process.env.IMNOTA_SMOKE === '1') {
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(app.getPath('temp'), 'imnota-smoke-')));
     try {
+      if (process.env.IMNOTA_EXPECT_VERSION && app.getVersion() !== process.env.IMNOTA_EXPECT_VERSION)
+        throw new Error('Packaged application version does not match the release candidate.');
       settings.workspacePath = fixture;
       const source = path.join(fixture, 'fixture.png');
       await fs.writeFile(
@@ -955,6 +982,9 @@ app.whenReady().then(async () => {
         const before = performance.now();
         const reopened = await api.loadProject(project.projectPath);
         if (reopened.project.screenshots.length !== 100 || Object.keys(reopened.thumbnails).length !== 100) throw new Error('100-image project lost screenshots or thumbnails');
+        reopened.project.exportPreferences.includedFields = ['summary'];
+        reopened.project.screenshots.forEach((shot, index) => { shot.includeInExport = index < 2; });
+        await api.saveProject(project.projectPath, reopened.project);
         return { syntheticImages: 100, dimensions: '1920x1080', importMs: Math.round(importedMs), warmReopenMs: Math.round(performance.now() - before) };
       })()`);
       console.log('Synthetic project benchmark:', JSON.stringify(metrics));
@@ -1016,6 +1046,12 @@ app.whenReady().then(async () => {
         'Renderer smoke passed: reopened workspace, crop drawing and cropped PNG export.',
         JSON.stringify(pngSize),
       );
+      if (
+        (await readProject(path.join(fixture, 'performance'))).exportPreferences.includedFields.includes(
+          'problem',
+        )
+      )
+        throw new Error('Unchanged autosave modified legacy export exclusions');
       mainWindow!.showInactive();
       await new Promise((resolve) => setTimeout(resolve, 500));
       await mainWindow!.webContents.executeJavaScript(`(async () => {
@@ -1031,14 +1067,27 @@ app.whenReady().then(async () => {
         await delay();
         if (canvas().width <= afterRail + 100) throw new Error('Collapsing inspector did not expand canvas');
         const afterInspector = canvas().width;
+        if (!document.querySelector('.sidebar [aria-label="Check for app updates"]') || !document.querySelector('.sidebar [aria-label="Hide navigation"]')) throw new Error('Navigation controls must be inside sidebar');
+        document.querySelector('.sidebar [aria-label="Hide navigation"]').focus();
         document.querySelector('[aria-label="Hide navigation"]').click();
         await delay();
         if (canvas().width <= afterInspector + 100) throw new Error('Collapsing navigation did not expand canvas');
+        if (document.activeElement?.getAttribute('aria-label') !== 'Show navigation') throw new Error('Collapse control lost keyboard focus');
+        if (!document.querySelector('.sidebar-collapsed [aria-label="Check for app updates"]')) throw new Error('Refresh must remain accessible when sidebar collapsed');
+        document.querySelector('.sidebar-collapsed [aria-label="Check for app updates"]').click();
+        await delay();
+        if ((await window.imnota.getUpdateStatus()).state !== 'idle') throw new Error('Sidebar refresh failed in offline smoke mode');
         document.querySelector('[aria-label="Show navigation"]').click();
         document.querySelector('[aria-label="Toggle inspector"]').click();
         document.querySelector('[aria-label="Expand screenshot list"]').click();
         await delay();
         const wrap = document.querySelector('.canvas-wrap');
+        const problemField = document.querySelector('.inspector textarea');
+        if (!problemField || document.querySelectorAll('.inspector textarea').length !== 1) throw new Error('Inspector must have one problem description editor');
+        if (!document.querySelector('[aria-label="Subfolder"]')) throw new Error('Subfolder selector missing');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(problemField, 'A single clear problem description');
+        problemField.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 900));
         const target = document.querySelector('.konvajs-content');
         const originX = Number(wrap.dataset.imageX);
         target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 40, deltaY: 20 }));
@@ -1046,12 +1095,16 @@ app.whenReady().then(async () => {
         if (Number(wrap.dataset.imageX) !== originX - 40) throw new Error('Trackpad panning failed');
         window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
         await delay();
+        // CI desktops can fit this large image below 10%, making text hit targets subpixel-sized.
+        // Exercise editing at actual size, centred in the visible canvas on every platform.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }));
+        await delay();
         document.querySelector('[aria-label="Text"]').click();
         await delay();
         const b = target.getBoundingClientRect();
         const scale = Number(wrap.dataset.imageScale);
-        const x = b.x + Number(wrap.dataset.imageX) + 100 * scale;
-        const y = b.y + Number(wrap.dataset.imageY) + 100 * scale;
+        const x = b.x + b.width / 2;
+        const y = b.y + b.height / 2;
         const pointer = (type, px = x, py = y) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: px, clientY: py, button: 0, buttons: 1 }));
         pointer('mousedown'); await delay(); pointer('mouseup'); await delay();
         const editor = document.querySelector('[aria-label="Edit annotation text"]');
@@ -1078,6 +1131,13 @@ app.whenReady().then(async () => {
         'Feedback smoke passed: independent round duplication, rename/archive/restore, image clipboard, three panel toggles, bounded canvas, trackpad pan and inline text confirm/cancel.',
       );
       const textProject = await readProject(path.join(fixture, 'performance'));
+      const persistedNotes = parseNotesMarkdown(
+        await fs.readFile(path.join(fixture, 'performance', textProject.screenshots[0].notesFile), 'utf8'),
+      );
+      if (persistedNotes.problem !== 'A single clear problem description')
+        throw new Error('Problem description was not persisted');
+      if (!textProject.exportPreferences.includedFields.includes('problem'))
+        throw new Error('Edited problem description was not included after reopen');
       const savedAnnotations = JSON.parse(
         await fs.readFile(
           path.join(fixture, 'performance', textProject.screenshots[0].annotationFile),
@@ -1086,6 +1146,82 @@ app.whenReady().then(async () => {
       );
       if (!savedAnnotations.some((a: { text?: string }) => a.text === 'Saved inline feedback'))
         throw new Error('Inline text was not persisted');
+      // Add an opaque redaction to the second synthetic reference, then verify
+      // its actual pixels in the composed clipboard output below.
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const screenshot = ${JSON.stringify(textProject.screenshots[1])};
+        const projectPath = ${JSON.stringify(path.join(fixture, 'performance'))};
+        const content = await window.imnota.loadScreenshotContent({ projectPath, screenshot });
+        content.annotations.push({ id: 'clipboard-mask', kind: 'blur', x: 20, y: 20, width: 80, height: 80, opacity: 0.1, zIndex: 100 });
+        await window.imnota.saveScreenshotContent({ projectPath, screenshot, notes: content.notes, annotations: content.annotations });
+      })()`);
+      // Exercise the same context action from the builder, then the experimental
+      // combined-copy button. Only the two included references should be copied.
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const wait = async (find) => {
+          for (let i = 0; i < 200; i++) { const found = find(); if (found) return found; await new Promise(resolve => setTimeout(resolve, 50)); }
+          throw new Error('Sharing UI timed out');
+        };
+        [...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === 'Context Builder').click();
+        const copy = await wait(() => [...document.querySelectorAll('.context-builder button')].find(b => b.textContent.trim() === 'Copy AI context'));
+        copy.click();
+        const combined = await wait(() => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes('Copy text + image')));
+        if (document.querySelectorAll('[role="dialog"] input[type="checkbox"]').length !== 2) throw new Error('Excluded screenshots entered sharing package');
+        combined.click();
+        await wait(() => [...document.querySelectorAll('[role="dialog"] [role="status"]')].find(e => e.textContent.includes('Text and image are on the clipboard')));
+      })()`);
+      const contextClipboard = clipboard.readText();
+      const sheet = clipboard.readImage();
+      if (
+        !contextClipboard.includes('A single clear problem description') ||
+        sheet.isEmpty() ||
+        !clipboard.readHTML().includes('<pre>')
+      )
+        throw new Error('Combined clipboard lost text, HTML or image');
+      if (sheet.getSize().width !== 1952 || sheet.getSize().height !== pngSize.height + 1080 + 128)
+        throw new Error(
+          'Contact sheet changed native resolution or selection: ' + JSON.stringify(sheet.getSize()),
+        );
+      const sheetPng = sheet.toPNG();
+      const maskPixel = sheet
+        .crop({ x: 16 + 60, y: pngSize.height + 112 + 60, width: 1, height: 1 })
+        .toBitmap();
+      // nativeImage bitmap channels are BGRA on the supported desktop hosts.
+      if (!maskPixel.equals(Buffer.from([18, 13, 11, 255])))
+        throw new Error('Combined clipboard did not preserve opaque redaction');
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        try { await window.imnota.copyContext({ markdown: 'must not replace', imageDataUrl: 'data:image/png;base64,aGVsbG8=' }); throw new Error('Invalid PNG accepted'); }
+        catch (error) { if (error.message === 'Invalid PNG accepted') throw error; }
+      })()`);
+      if (clipboard.readText() !== contextClipboard || !clipboard.readImage().toPNG().equals(sheetPng))
+        throw new Error('Failed combined copy changed clipboard');
+      console.log(
+        'Combined clipboard smoke passed: builder action, two full-resolution annotated references, exclusions, crop, opaque redaction, text + HTML + PNG and unchanged clipboard on invalid input.',
+      );
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const wait = async (find) => { for (let i=0;i<200;i++) { const value=find(); if(value) return value; await new Promise(resolve=>setTimeout(resolve,25)); } throw new Error('Channel UI timed out'); };
+        document.querySelector('[role="dialog"] [aria-label="Close"]').click();
+        await wait(()=>!document.querySelector('[role="dialog"]'));
+        [...document.querySelectorAll('.sidebar button')].find(b=>b.textContent.trim()==='Settings').click();
+        const select = await wait(()=>[...document.querySelectorAll('.settings-section select')].find(s=>[...s.options].some(o=>o.value==='nightly')));
+        if(select.value!=='stable') throw new Error('Old settings did not default to stable');
+        select.value='nightly'; select.dispatchEvent(new Event('change',{bubbles:true}));
+        const cancel=await wait(()=>[...document.querySelectorAll('[role="dialog"] button')].find(b=>b.textContent==='Keep Stable'));
+        if((await window.imnota.getSettings()).updateChannel!=='stable') throw new Error('Channel changed before confirmation');
+        cancel.click();
+        select.value='nightly'; select.dispatchEvent(new Event('change',{bubbles:true}));
+        const confirm=await wait(()=>[...document.querySelectorAll('[role="dialog"] button')].find(b=>b.textContent==='Use Nightly')); confirm.click();
+        await wait(()=>select.value==='nightly'&&!select.disabled&&!document.querySelector('[role="dialog"]'));
+        if((await window.imnota.getSettings()).updateChannel!=='nightly') throw new Error('Nightly setting not persisted');
+        await window.imnota.checkForUpdates();
+        if((await window.imnota.getUpdateStatus()).channel!=='nightly') throw new Error('Refresh checked the wrong channel');
+        try { await window.imnota.setSettings({updateChannel:'invalid'}); throw new Error('Invalid channel accepted'); } catch(error) { if(error.message==='Invalid channel accepted') throw error; }
+      })()`);
+      if (JSON.parse(await fs.readFile(settingsFile(), 'utf8')).updateChannel !== 'nightly')
+        throw new Error('Nightly channel was not saved on disk');
+      console.log(
+        'Channel smoke passed: default stable, nightly confirm/cancel, persisted settings, selected-channel refresh and IPC enum rejection.',
+      );
       if (process.env.IMNOTA_SMOKE_SCREENSHOT) {
         mainWindow!.showInactive();
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1097,10 +1233,20 @@ app.whenReady().then(async () => {
       console.log(
         'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, recovery, 100-image project, ZIP export and traversal rejection.',
       );
+      if (process.env.IMNOTA_SMOKE_RESULT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_RESULT,
+          JSON.stringify({ passed: true, version: app.getVersion() }),
+        );
       await fs.rm(fixture, { recursive: true, force: true });
       app.exit(0);
     } catch (error) {
       console.error(error);
+      if (process.env.IMNOTA_SMOKE_RESULT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_RESULT,
+          JSON.stringify({ passed: false, version: app.getVersion(), error: String(error) }),
+        );
       console.error(
         'Renderer state:',
         await mainWindow!.webContents.executeJavaScript(
@@ -1117,7 +1263,6 @@ app.whenReady().then(async () => {
     }
     return;
   }
-  configureAutoUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });

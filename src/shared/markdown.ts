@@ -4,7 +4,7 @@ import { annotationLabel } from './utils.js';
 const fieldLabels: Record<keyof NoteFields, string> = {
   summary: 'Summary',
   observation: 'Observation',
-  problem: 'Problem',
+  problem: 'Problem description',
   expectedBehaviour: 'Expected Behaviour',
   requestedChange: 'Requested Change',
   technicalDetails: 'Technical Details',
@@ -38,9 +38,10 @@ export function generateMarkdown(
         `### Screenshot ${index + 1}: ${shot.title || shot.originalFilename}`,
         '',
         `File: ${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-        `Feedback round: ${project.rounds.find((round) => round.id === shot.roundId)?.name ?? 'First feedback'}`,
+        `Subfolder: ${project.rounds.find((round) => round.id === shot.roundId)?.name ?? 'Subfolder 1'}`,
         '',
       );
+      out.push(section('Description', shot.description));
       p.includedFields.forEach((key) => out.push(section(fieldLabels[key], note[key])));
       const anns = [...(annotations[shot.id] ?? [])].sort((a, b) => a.zIndex - b.zIndex);
       if (anns.length) out.push('Annotations:', ...anns.map((a) => `- ${annotationLabel(a)}`), '');

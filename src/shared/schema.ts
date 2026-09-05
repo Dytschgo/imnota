@@ -99,7 +99,7 @@ export function validateProject(value: unknown): ProjectData {
   const parsed = projectSchema.parse(value);
   const ids = new Set(parsed.rounds.map((round) => round.id));
   if (ids.size !== parsed.rounds.length || parsed.screenshots.some((shot) => !ids.has(shot.roundId)))
-    throw new Error('Project contains invalid feedback round references.');
+    throw new Error('Project contains invalid subfolder references.');
   if (new Set(parsed.screenshots.map((shot) => shot.id)).size !== parsed.screenshots.length)
     throw new Error('Project contains duplicate screenshot IDs.');
   if (
@@ -110,7 +110,7 @@ export function validateProject(value: unknown): ProjectData {
         shot.notesFile !== `rounds/${shot.roundId}/notes/${shot.storedFilename}.md`,
     )
   )
-    throw new Error('Screenshot file references do not match its feedback round.');
+    throw new Error('Screenshot file references do not match its subfolder.');
   return { ...parsed, exportPreferences: parsed.exportPreferences ?? { ...DEFAULT_EXPORT_PREFERENCES } };
 }
 
@@ -167,5 +167,6 @@ export const settingsPatchSchema = z
     interfaceScale: z.number().min(0.75).max(2).optional(),
     openRecentOnLaunch: z.boolean().optional(),
     confirmBeforeDeletion: z.boolean().optional(),
+    updateChannel: z.enum(['stable', 'nightly']).optional(),
   })
   .strict();

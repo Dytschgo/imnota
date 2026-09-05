@@ -132,14 +132,34 @@ button:disabled {
   background: var(--surface);
 }
 .sidebar-top {
-  padding: 3px 10px 28px;
+  padding: 3px 10px 12px;
 }
-.navigation-toggle {
+.sidebar-controls {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 6px 16px;
+}
+.sidebar-links:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sidebar.sidebar-collapsed {
+  width: 64px;
+  flex-basis: 64px;
+  padding-inline: 8px;
+}
+.sidebar-collapsed .sidebar-top {
+  padding: 3px 0 12px;
+  display: flex;
+  justify-content: center;
+}
+.sidebar-collapsed .sidebar-controls {
+  flex-direction: column;
+  padding-inline: 0;
 }
 .round-controls {
   padding: 12px;
@@ -1054,6 +1074,32 @@ button:disabled {
   margin: 0;
   font-size: 13px;
 }
+.screenshot-details > summary,
+.previous-notes > summary {
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 8px 0;
+}
+.screenshot-details[open] > summary {
+  margin-bottom: 12px;
+}
+.screenshot-details .field-grid {
+  margin-bottom: 16px;
+}
+.previous-notes p {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.previous-notes dt {
+  color: var(--ink-2);
+  font-size: 12px;
+  margin-top: 12px;
+}
+.previous-notes dd {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .inspector-scroll {
   min-height: 0;
   overflow: auto;
@@ -1387,6 +1433,54 @@ button:disabled {
 .modal-form {
   padding: 20px 22px 22px;
 }
+.sharing-content,
+.combined-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.combined-copy {
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.sharing-content p {
+  margin: 0;
+}
+.sharing-folder,
+.sharing-file label {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.sharing-file,
+.sharing-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sharing-file {
+  justify-content: space-between;
+}
+.sharing-file .btn {
+  flex-shrink: 0;
+}
+.sharing-actions {
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.update-settings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.update-settings > p {
+  margin: 0;
+}
+.update-settings > .field {
+  width: 100%;
+  margin: 0;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1480,6 +1574,10 @@ kbd {
   }
 }
 @media (max-width: 950px) {
+  .sidebar-controls {
+    flex-direction: column;
+    padding-inline: 0;
+  }
   .sidebar {
     width: 60px;
     flex-basis: 60px;

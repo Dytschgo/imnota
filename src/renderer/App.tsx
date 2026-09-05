@@ -41,12 +41,15 @@ import type {
 import { DEFAULT_TAGS, EMPTY_NOTES, nowIso } from '../shared/utils';
 import { generateMarkdown } from '../shared/markdown';
 import { renderAnnotatedImage } from './export-image';
+import { prepareContext } from './prepare-context';
 import { useAppStore } from './store';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { Logo } from './components/Logo';
 import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
 import { Toolbar } from './components/Toolbar';
 import { UpdateControl } from './components/UpdateControl';
+import { ProblemDescriptionEditor } from './components/ProblemDescriptionEditor';
+import { CombinedContextCopy } from './components/CombinedContextCopy';
 import { version as appVersion } from '../../package.json';
 
 // Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
@@ -74,6 +77,8 @@ export default function App() {
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [clipboardBusy, setClipboardBusy] = useState(false);
+  const preparingContext = useRef(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [attachments, setAttachments] = useState<{
     folderPath: string;
@@ -374,26 +379,21 @@ export default function App() {
     setRedo((items) => items.slice(0, -1));
   }
   async function copyContext() {
+    if (preparingContext.current) return;
+    preparingContext.current = true;
     try {
-      const markdown = await buildMarkdown();
-      if (!markdown) return;
       const result = await exportPackage(false);
       if (!result) return;
-      await window.imnota.copyText(markdown);
-      setAttachments({ ...result, markdown });
+      await window.imnota.copyText(result.markdown);
+      setAttachments(result);
       showToast(
-        `AI context copied · ${selectedShots().length} screenshot${selectedShots().length === 1 ? '' : 's'}`,
+        `AI context copied · ${result.images.length} screenshot${result.images.length === 1 ? '' : 's'}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The context could not be copied.');
+    } finally {
+      preparingContext.current = false;
     }
-  }
-  function selectedShots() {
-    return (
-      store.snapshot?.project.screenshots.filter(
-        (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
-      ) ?? []
-    );
   }
   const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
@@ -422,34 +422,31 @@ export default function App() {
   async function exportPackage(openFolder = true) {
     if (!store.snapshot) return;
     try {
-      const markdown = await buildMarkdown();
-      const shots = selectedShots();
-      const annotatedImages = [];
-      for (const [index, shot] of shots.entries()) {
-        showToast(`Rendering screenshot ${index + 1} of ${shots.length}…`);
-        const content =
-          shot.id === activeShot?.id && lastLoadedId.current === shot.id && image
-            ? { image, annotations, notes }
-            : await window.imnota.loadScreenshotContent({
-                projectPath: store.snapshot!.projectPath,
-                screenshot: shot,
-              });
-        annotatedImages.push({
-          filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-          dataUrl: await renderAnnotatedImage(content.image, content.annotations),
-        });
-      }
+      const prepared = await prepareContext(
+        {
+          project: store.snapshot.project,
+          projectPath: store.snapshot.projectPath,
+          roundId: store.exportAllRounds ? undefined : store.activeRoundId,
+          active:
+            activeShot && lastLoadedId.current === activeShot.id && image
+              ? { id: activeShot.id, content: { image, annotations, notes } }
+              : undefined,
+        },
+        window.imnota.loadScreenshotContent,
+        renderAnnotatedImage,
+        (index, count) => showToast(`Rendering screenshot ${index} of ${count}…`),
+      );
       const result = await window.imnota.exportPackage({
-        projectPath: store.snapshot.projectPath,
-        roundId: store.exportAllRounds ? undefined : store.activeRoundId,
-        markdown,
-        annotatedImages: annotatedImages.filter((item) => item.dataUrl),
-        includeOriginal: store.snapshot.project.exportPreferences.includeOriginalScreenshots,
-        includeAnnotations: store.snapshot.project.exportPreferences.includeAnnotationMetadata,
+        projectPath: prepared.projectPath,
+        roundId: prepared.roundId,
+        markdown: prepared.markdown,
+        annotatedImages: prepared.images,
+        includeOriginal: prepared.preferences.includeOriginalScreenshots,
+        includeAnnotations: prepared.preferences.includeAnnotationMetadata,
       });
       showToast(`Exported ${result.count} screenshot${result.count === 1 ? '' : 's'} to the project folder`);
       if (openFolder) await window.imnota.openPath(result.folderPath);
-      return { folderPath: result.folderPath, images: annotatedImages };
+      return { folderPath: result.folderPath, images: prepared.images, markdown: prepared.markdown };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The export could not be created.');
     }
@@ -502,41 +499,8 @@ export default function App() {
         if (hasProject) void handleDrop(event);
       }}
     >
-      {store.navigationOpen && <Sidebar />}
+      {renderSidebar()}
       <main className="main-shell">
-        <div className="navigation-toggle">
-          <IconButton
-            label="Check for app updates"
-            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
-            onClick={async () => {
-              try {
-                await window.imnota.checkForUpdates();
-                const status = await window.imnota.getUpdateStatus();
-                showToast(
-                  status.message ??
-                    (status.state === 'not-available'
-                      ? 'You’re on the latest version.'
-                      : status.state === 'available'
-                        ? `Imnota ${status.version} is available. Open Settings for update options.`
-                        : status.state === 'downloaded'
-                          ? 'Update ready. Restart to install.'
-                          : 'Checking app updates…'),
-                );
-              } catch {
-                setError('Could not check for updates. Check your connection and try again.');
-              }
-            }}
-          >
-            <RefreshCw size={16} />
-          </IconButton>
-          <IconButton
-            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
-            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
-          >
-            <PanelLeft size={16} />
-          </IconButton>
-          {!store.navigationOpen && <Logo compact />}
-        </div>
         <Topbar
           onNew={() => setModal('new')}
           onOpen={async () => {
@@ -597,7 +561,7 @@ export default function App() {
             }}
           />
         ) : store.view === 'context' ? (
-          <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} />
+          <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
         ) : (
           <Workspace
             onFlush={async () => {
@@ -619,7 +583,7 @@ export default function App() {
                   filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
                   dataUrl,
                 });
-                showToast('Annotated PNG saved in this feedback round’s exports folder.');
+                showToast('Annotated PNG saved in this subfolder’s exports folder.');
               } catch (err) {
                 setError(
                   `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
@@ -680,20 +644,28 @@ export default function App() {
       )}
       {attachments && (
         <Modal
-          title="Attach your visual references"
-          description="The Markdown is copied. Paste it into your AI assistant, then copy and paste each image below, or attach the exported PNG files. Copying an image replaces the clipboard text."
-          onClose={() => setAttachments(null)}
+          title="Share context and images"
+          description="Markdown is copied. Try combined copy below, or paste the text and attach the exported PNGs. Individual image copying replaces clipboard text."
+          onClose={() => {
+            if (!clipboardBusy) setAttachments(null);
+          }}
         >
-          <p>
-            {attachments.images.length} annotated images · {attachments.folderPath}
-          </p>
-          <div className="modal-form">
+          <div className="modal-form sharing-content">
+            <CombinedContextCopy
+              markdown={attachments.markdown}
+              images={attachments.images}
+              onBusyChange={setClipboardBusy}
+            />
+            <p className="helper sharing-folder">
+              {attachments.images.length} annotated images · {attachments.folderPath}
+            </p>
             {attachments.images.map((item) => (
-              <div key={item.filename}>
+              <div className="sharing-file" key={item.filename}>
                 <label>
                   <input type="checkbox" /> Attached {item.filename}
                 </label>
                 <Button
+                  disabled={clipboardBusy}
                   onClick={async () => {
                     try {
                       await window.imnota.copyImage(item.dataUrl);
@@ -707,8 +679,24 @@ export default function App() {
                 </Button>
               </div>
             ))}
-            <Button onClick={() => window.imnota.copyText(attachments.markdown)}>Copy Markdown again</Button>
-            <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>Open export folder</Button>
+            <div className="sharing-actions">
+              <Button
+                disabled={clipboardBusy}
+                onClick={async () => {
+                  try {
+                    await window.imnota.copyText(attachments.markdown);
+                    showToast('Markdown copied.');
+                  } catch {
+                    setError('Markdown could not be copied. Open the exported context.md file instead.');
+                  }
+                }}
+              >
+                Copy Markdown again
+              </Button>
+              <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>
+                Open export folder
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
@@ -765,7 +753,9 @@ export default function App() {
               Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
               telemetry by default.
             </p>
-            <span className="muted">Version {appVersion} · MIT License · Built by Dytschgo</span>
+            <span className="muted">
+              Version {updateStatus?.currentVersion ?? appVersion} · MIT License · Built by Dytschgo
+            </span>
           </div>
         </Modal>
       )}
@@ -789,58 +779,95 @@ export default function App() {
     </div>
   );
 
-  function Sidebar() {
+  function renderSidebar() {
     const nav = [
       { id: 'projects', label: 'Projects', icon: Layers3 },
       { id: 'recent', label: 'Recent', icon: BookOpen },
       { id: 'favourites', label: 'Favourites', icon: Heart },
     ];
     return (
-      <aside className="sidebar">
+      <aside
+        className={`sidebar ${store.navigationOpen ? '' : 'sidebar-collapsed'}`}
+        aria-label="Side navigation"
+      >
         <div className="sidebar-top">
-          <Logo />
+          <Logo compact={!store.navigationOpen} />
         </div>
-        <nav aria-label="Primary">
-          <span className="nav-label">Library</span>
-          {nav.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              className={`nav-item ${store.view === id ? 'active' : ''}`}
-              onClick={() =>
-                store.set({
-                  view: id as any,
-                  snapshot:
-                    id === 'projects' || id === 'recent' || id === 'favourites' ? null : store.snapshot,
-                })
+        <div className="sidebar-controls">
+          <IconButton
+            label="Check for app updates"
+            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
+            onClick={async () => {
+              try {
+                await window.imnota.checkForUpdates();
+                const status = await window.imnota.getUpdateStatus();
+                showToast(
+                  status.message ??
+                    (status.state === 'not-available'
+                      ? 'You’re on the latest version.'
+                      : status.state === 'available'
+                        ? `Imnota ${status.version} is available. Open Settings for update options.`
+                        : status.state === 'downloaded'
+                          ? 'Update ready. Restart to install.'
+                          : 'Checking app updates…'),
+                );
+              } catch {
+                setError('Could not check for updates. Check your connection and try again.');
               }
-            >
-              <Icon size={16} />
-              {label}
-              {id === 'favourites' && store.projects.filter((p) => p.favourite).length > 0 && (
-                <span className="nav-count">{store.projects.filter((p) => p.favourite).length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-spacer" />
-        <nav>
-          <span className="nav-label">Workspace</span>
-          <button
-            className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
-            onClick={() => store.set({ view: 'settings', snapshot: null })}
+            }}
           >
-            <Settings2 size={16} />
-            Settings
-          </button>
-          <button className="nav-item" onClick={() => setModal('shortcuts')}>
-            <Keyboard size={16} />
-            Shortcuts <kbd>{platformKey} /</kbd>
-          </button>
-          <button className="nav-item" onClick={() => setModal('about')}>
-            <Info size={16} />
-            About
-          </button>
-        </nav>
+            <RefreshCw size={16} />
+          </IconButton>
+          <IconButton
+            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
+            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
+          >
+            <PanelLeft size={16} />
+          </IconButton>
+        </div>
+        <div className="sidebar-links" hidden={!store.navigationOpen}>
+          <nav aria-label="Primary">
+            <span className="nav-label">Library</span>
+            {nav.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                className={`nav-item ${store.view === id ? 'active' : ''}`}
+                onClick={() =>
+                  store.set({
+                    view: id as any,
+                    snapshot:
+                      id === 'projects' || id === 'recent' || id === 'favourites' ? null : store.snapshot,
+                  })
+                }
+              >
+                <Icon size={16} />
+                {label}
+                {id === 'favourites' && store.projects.filter((p) => p.favourite).length > 0 && (
+                  <span className="nav-count">{store.projects.filter((p) => p.favourite).length}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-spacer" />
+          <nav>
+            <span className="nav-label">Workspace</span>
+            <button
+              className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
+              onClick={() => store.set({ view: 'settings', snapshot: null })}
+            >
+              <Settings2 size={16} />
+              Settings
+            </button>
+            <button className="nav-item" onClick={() => setModal('shortcuts')}>
+              <Keyboard size={16} />
+              Shortcuts <kbd>{platformKey} /</kbd>
+            </button>
+            <button className="nav-item" onClick={() => setModal('about')}>
+              <Info size={16} />
+              About
+            </button>
+          </nav>
+        </div>
       </aside>
     );
   }
@@ -1277,11 +1304,8 @@ function Inspector({
       <div className="inspector-heading">
         <div>
           <span className="eyebrow">SCREENSHOT {String(shot.position + 1).padStart(2, '0')}</span>
-          <h2>Context notes</h2>
+          <h2>Screenshot context</h2>
         </div>
-        <IconButton label="Inspector options" onClick={() => undefined}>
-          <MoreVertical size={16} />
-        </IconButton>
       </div>
       <div className="inspector-scroll">
         <TextInput
@@ -1289,79 +1313,79 @@ function Inspector({
           value={shot.title}
           onChange={(event) => updateShot({ title: event.target.value })}
         />
-        <TextArea
-          label="Description"
-          rows={2}
-          placeholder="A short description for the AI agent"
-          value={shot.description}
-          onChange={(event) => updateShot({ description: event.target.value })}
+        <ProblemDescriptionEditor
+          notes={notes}
+          description={shot.description}
+          onChange={(next) => {
+            setNotes(next);
+            const project = store.snapshot!.project;
+            if (
+              next.problem !== notes.problem &&
+              !project.exportPreferences.includedFields.includes('problem')
+            )
+              store.updateProject({
+                ...project,
+                exportPreferences: {
+                  ...project.exportPreferences,
+                  includedFields: [...project.exportPreferences.includedFields, 'problem'],
+                },
+              });
+          }}
         />
-        <div className="field-grid">
-          <label className="field">
-            <span className="field-label">Status</span>
-            <select
-              value={shot.status}
-              onChange={(event) => updateShot({ status: event.target.value as any })}
-            >
-              <option value="draft">Draft</option>
-              <option value="ready">Ready</option>
-              <option value="needs-review">Needs review</option>
-              <option value="completed">Completed</option>
-            </select>
-          </label>
-          <label className="field">
-            <span className="field-label">Priority</span>
-            <select
-              value={shot.priority}
-              onChange={(event) => updateShot({ priority: event.target.value as any })}
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </label>
-        </div>
-        <div className="field">
-          <span className="field-label">Tags</span>
-          <div className="tag-editor">
-            {shot.tags.map((tag: string) => (
-              <button
-                key={tag}
-                className="tag"
-                onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
+        <details className="screenshot-details">
+          <summary>Screenshot details</summary>
+          <div className="field-grid">
+            <label className="field">
+              <span className="field-label">Status</span>
+              <select
+                value={shot.status}
+                onChange={(event) => updateShot({ status: event.target.value as any })}
               >
-                {tag}
-                <X size={11} />
-              </button>
-            ))}
-            <button
-              className="tag-add"
-              onClick={() => {
-                const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
-                if (next) updateShot({ tags: [...shot.tags, next] });
-              }}
-            >
-              <Plus size={12} />
-              Add tag
-            </button>
+                <option value="draft">Draft</option>
+                <option value="ready">Ready</option>
+                <option value="needs-review">Needs review</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Priority</span>
+              <select
+                value={shot.priority}
+                onChange={(event) => updateShot({ priority: event.target.value as any })}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <div className="note-section">
-          <span className="section-label">Written context</span>
-          {(Object.keys(notes) as Array<keyof NoteFields>).map((key) => (
-            <TextArea
-              key={key}
-              label={key
-                .replace(/[A-Z]/g, (letter) => ` ${letter}`)
-                .replace(/^./, (letter) => letter.toUpperCase())}
-              rows={key === 'additionalNotes' ? 3 : 2}
-              placeholder="Optional"
-              value={notes[key]}
-              onChange={(event) => setNotes({ ...notes, [key]: event.target.value })}
-            />
-          ))}
-        </div>
+          <div className="field">
+            <span className="field-label">Tags</span>
+            <div className="tag-editor">
+              {shot.tags.map((tag: string) => (
+                <button
+                  key={tag}
+                  className="tag"
+                  onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
+                >
+                  {tag}
+                  <X size={11} />
+                </button>
+              ))}
+              <button
+                className="tag-add"
+                onClick={() => {
+                  const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
+                  if (next) updateShot({ tags: [...shot.tags, next] });
+                }}
+              >
+                <Plus size={12} />
+                Add tag
+              </button>
+            </div>
+          </div>
+        </details>
         {selectedAnnotation && (
           <div className="annotation-properties">
             <span className="section-label">Selected annotation</span>
@@ -1558,7 +1582,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
       }
       setAction(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The feedback round could not be saved.');
+      setError(err instanceof Error ? err.message : 'The subfolder could not be saved.');
     } finally {
       setBusy(false);
     }
@@ -1566,9 +1590,9 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
   return (
     <div className="round-controls">
       <label className="field">
-        <span className="field-label">Feedback round</span>
+        <span className="field-label">Subfolder</span>
         <select
-          aria-label="Feedback round"
+          aria-label="Subfolder"
           value={store.activeRoundId}
           onChange={(event) =>
             store.set({
@@ -1595,7 +1619,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
               setAction(item);
               setName(
                 item === 'create'
-                  ? `Feedback ${project.rounds.length + 1}`
+                  ? `Subfolder ${project.rounds.length + 1}`
                   : item === 'duplicate'
                     ? `${current.name} copy`
                     : current.name,
@@ -1603,7 +1627,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
             }}
           >
             {item === 'create'
-              ? 'New round'
+              ? 'New subfolder'
               : item === 'archive' && current.archived
                 ? 'Restore'
                 : item[0].toUpperCase() + item.slice(1)}
@@ -1612,20 +1636,20 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
       </div>
       {action && (
         <Modal
-          title={`${action === 'archive' && current.archived ? 'Restore' : action} feedback round`}
+          title={`${action === 'archive' && current.archived ? 'Restore' : action === 'create' ? 'New' : action[0].toUpperCase() + action.slice(1)} subfolder`}
           description={
             action === 'archive'
-              ? 'Archiving keeps the screenshots and notes. Archived rounds remain available in the selector.'
-              : 'Each round keeps its own screenshots, annotations and notes.'
+              ? 'Archiving keeps the screenshots and notes. Archived subfolders remain available in the selector.'
+              : 'Each subfolder keeps its own screenshots, annotations and notes.'
           }
           onClose={() => {
             if (!busy) setAction(null);
           }}
         >
-          <TextInput label="Round name" value={name} onChange={(event) => setName(event.target.value)} />
+          <TextInput label="Subfolder name" value={name} onChange={(event) => setName(event.target.value)} />
           {error && <p role="alert">{error}</p>}
           <Button busy={busy} disabled={!name.trim()} onClick={() => void submit()}>
-            Save round
+            Save subfolder
           </Button>
         </Modal>
       )}
@@ -1636,9 +1660,11 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
 function ContextBuilder({
   buildMarkdown,
   onExport,
+  onCopy,
 }: {
   buildMarkdown: () => Promise<string>;
   onExport: () => void;
+  onCopy: () => void;
 }) {
   const store = useAppStore();
   const [markdown, setMarkdown] = useState('');
@@ -1680,7 +1706,7 @@ function ContextBuilder({
         <div className="context-intro">
           <span className="eyebrow">ASSEMBLE A BRIEF</span>
           <h1>Context Builder</h1>
-          <p>Current round: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
+          <p>Subfolder: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
           <p>Choose the evidence an AI agent should see, then copy or export a clean Markdown brief.</p>
         </div>
         <TextArea
@@ -1711,7 +1737,7 @@ function ContextBuilder({
               checked={store.exportAllRounds}
               onChange={(event) => store.set({ exportAllRounds: event.target.checked })}
             />
-            Export all feedback rounds
+            Export all subfolders
           </label>
           <span className="section-label">Package contents</span>
           <label className="check-row">
@@ -1732,12 +1758,7 @@ function ContextBuilder({
           </label>
         </div>
         <div className="context-actions">
-          <Button
-            variant="primary"
-            onClick={() => {
-              void window.imnota.copyText(markdown);
-            }}
-          >
+          <Button variant="primary" onClick={onCopy}>
             <Clipboard size={16} />
             Copy AI context
           </Button>

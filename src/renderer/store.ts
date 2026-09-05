@@ -32,6 +32,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     interfaceScale: 1,
     openRecentOnLaunch: true,
     confirmBeforeDeletion: true,
+    updateChannel: 'stable',
   },
   projects: [],
   snapshot: null,

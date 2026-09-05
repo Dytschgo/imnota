@@ -3,7 +3,18 @@
 set -euo pipefail
 
 repository="Dytschgo/imnota"
-download_base="https://github.com/${repository}/releases/latest/download"
+release_tag="${IMNOTA_RELEASE_TAG:-}"
+if [ -n "$release_tag" ] && ! [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "IMNOTA_RELEASE_TAG must be an exact stable tag." >&2
+  exit 1
+fi
+if [ -n "$release_tag" ]; then
+  download_base="https://github.com/${repository}/releases/download/${release_tag}"
+  release_description="release ${release_tag}"
+else
+  download_base="https://github.com/${repository}/releases/latest/download"
+  release_description="latest stable release"
+fi
 temporary_directory="$(mktemp -d)"
 
 cleanup() {
@@ -15,7 +26,7 @@ trap cleanup EXIT
 case "$(uname -s)" in
   Darwin)
     archive_path="${temporary_directory}/Imnota-mac.zip"
-    echo "Downloading the latest Imnota release for macOS..."
+    echo "Downloading Imnota ${release_description} for macOS..."
     if ! curl --fail --location --retry 3 --output "$archive_path" "${download_base}/Imnota-mac.zip"; then
       echo "Download failed. No installed app was changed. Check https://github.com/${repository}/releases and try again." >&2
       exit 1

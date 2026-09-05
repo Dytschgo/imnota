@@ -23,6 +23,7 @@ const bridge: ImnotaBridge = {
   exportPackage: (input) => ipcRenderer.invoke('exports:package', input),
   openPath: (targetPath) => ipcRenderer.invoke('system:open-path', targetPath),
   copyText: (text) => ipcRenderer.invoke('system:copy-text', text),
+  copyContext: (input) => ipcRenderer.invoke('system:copy-context', input),
   copyImage: (dataUrl) => ipcRenderer.invoke('system:copy-image', dataUrl),
   saveRecovery: (input) => ipcRenderer.invoke('recovery:save', input),
   clearRecovery: (projectPath) => ipcRenderer.invoke('recovery:clear', projectPath),

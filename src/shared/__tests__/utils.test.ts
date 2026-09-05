@@ -11,6 +11,7 @@ describe('Imnota data helpers', () => {
     const project = emptyProject('Review', 'A brief');
     expect(project.schemaVersion).toBe(2);
     expect(project.screenshots).toEqual([]);
+    expect(project.rounds[0].name).toBe('Subfolder 1');
     expect(project.exportPreferences.includeAnnotationMetadata).toBe(true);
   });
   it('rejects traversal outside an approved workspace', () => {

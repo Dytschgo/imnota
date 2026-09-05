@@ -74,26 +74,23 @@ corepack pnpm build
 
 ## Publishing updates
 
-When you tell the release agent to release a new version, it can run the guarded release command below. The command requires a clean `main` branch, runs formatting, linting, type checking, tests and a production build, then creates and pushes the matching version tag.
+When you ask to release a new version, the guarded release command requires a clean, exact `origin/main` commit and an acceptance record for that version. The record includes feature checks, platform package/install checks, independent review and recovery guidance. Formatting, linting, type checking, tests and a production build must also pass before tagging. See [the release-readiness process](docs/release-readiness.md).
 
 ```bash
-corepack pnpm release patch
-corepack pnpm release minor
-corepack pnpm release major
-corepack pnpm release 0.2.0
+corepack pnpm release 0.3.0 --evidence .git/release-evidence.json
 ```
 
-With protected `main`, prepare the new `package.json` version and changelog in a PR and obtain independent approval first. After merging and pulling `main`, publish that exact version (for example `corepack pnpm release 0.2.0`). The release command only tags the reviewed `origin/main` commit; it does not bypass review or push version changes directly to main. `patch`/`minor`/`major` indicate the next version to prepare and report that requirement when it is not yet merged.
+Prepare the new `package.json` version and changelog in a PR and obtain independent approval first. After merging and pulling main, collect evidence and publish that exact version; `0.3.0` above is an example, not an existing release. The release command does not push version changes directly to main. `patch`/`minor`/`major` identify the next version to prepare and report that requirement when it is not yet merged. This local guard is not a substitute for GitHub branch/tag protection.
 
 Use `--dry-run` to validate the repository and release checks without changing files or pushing anything:
 
 ```bash
-corepack pnpm release patch --dry-run
+corepack pnpm release 0.3.0 --evidence .git/release-evidence.json --dry-run
 ```
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
-Packaged clients check the repository releases when they launch. Use the refresh icon in the top bar or Settings → App updates → Check for updates to check again immediately. Windows and AppImage clients download updates and offer a restart action. This ad-hoc-signed Mac release shows a download link for newer versions; automatic Mac installation requires Apple Developer signing, which is not configured yet. Branch and pull request builds never publish releases.
+Packaged clients check the selected release channel when they launch. Use the refresh icon in the sidebar or Settings → App updates → Check for updates to check again. Choose **Stable (recommended)** or opt into **Nightly (preview)** in the same Settings section. Checks do not automatically download, install or downgrade. Windows and AppImage clients offer download and restart actions; the ad-hoc-signed Mac build opens the exact selected release page for manual replacement. Branch and pull request builds never publish releases. Nightly publication uses a manual, gated workflow on reviewed main commits; see [nightly build instructions](docs/nightly-builds.md).
 
 ## Project structure
 
@@ -128,7 +125,7 @@ Feedback rounds keep iterations separate inside a project. Create, rename, dupli
 
 Pan with Select on the image, Space-drag, middle-drag or trackpad scrolling. Pinch or Ctrl/Command-wheel zooms at the cursor. Use `0` to fit and `1` for actual size. Double-click text to edit; Enter saves, Shift+Enter adds a line, Escape cancels.
 
-“Copy AI context” copies the Markdown and prepares annotated PNGs. Its attachment checklist offers individual image-copy actions and the export folder. Paste the text first, then paste or attach the images: copying an image replaces clipboard text, and target AI applications differ in attachment support.
+“Copy AI context” copies Markdown and opens a sharing dialog with annotated PNGs. **Copy text + image (experimental)** places text and one annotated image on the clipboard together; multiple references become one labelled image at full resolution. The receiving app may paste only one format. The dialog retains individual image-copy actions and the export folder as a fallback. For that fallback, paste text first, then paste or attach images: copying an individual image replaces clipboard text. Oversized combined images are refused instead of made unreadably small.
 
 ## Privacy and security
 

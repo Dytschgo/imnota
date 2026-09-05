@@ -78,7 +78,7 @@ export function emptyProject(name: string, description: string, tags: string[] =
   const date = nowIso();
   return {
     schemaVersion: 2,
-    rounds: [{ id: '001-first-feedback', name: 'First feedback', archived: false, createdAt: date }],
+    rounds: [{ id: '001-first-feedback', name: 'Subfolder 1', archived: false, createdAt: date }],
     id: createId('project'),
     name: name.trim() || 'Untitled project',
     description: description.trim(),
