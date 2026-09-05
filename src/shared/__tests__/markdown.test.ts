@@ -55,5 +55,22 @@ describe('Markdown context generation', () => {
     expect(markdown).toContain('- Step 1');
     expect(markdown).not.toContain('Observation:');
     expect(markdown).not.toContain('## Instructions for the AI Agent');
+    expect(markdown).toContain('Subfolder: Subfolder 1');
+    expect(markdown).not.toContain('Feedback round:');
+    expect(markdown.match(/Problem description:/g)).toHaveLength(1);
+
+    // Existing exclusions stay intact until a user edits the primary description.
+    project.exportPreferences.includedFields = ['summary'];
+    project.screenshots[0].description = 'Legacy screenshot description';
+    project.rounds[0].name = 'Feedback 2';
+    const legacyBrief = generateMarkdown(project, project.screenshots, { shot1: note }, {});
+    expect(legacyBrief).toContain('Subfolder: Feedback 2');
+    expect(legacyBrief).toContain('Description:\nLegacy screenshot description');
+    expect(legacyBrief).not.toContain('Problem description:');
+    expect(legacyBrief).toContain('Summary:\nThe form is hard to scan.');
+    project.exportPreferences.includedFields.push('problem');
+    expect(generateMarkdown(project, project.screenshots, { shot1: note }, {})).toContain(
+      'Problem description:\nThe error is below the fold.',
+    );
   });
 });

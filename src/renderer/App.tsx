@@ -47,6 +47,7 @@ import { Logo } from './components/Logo';
 import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
 import { Toolbar } from './components/Toolbar';
 import { UpdateControl } from './components/UpdateControl';
+import { ProblemDescriptionEditor } from './components/ProblemDescriptionEditor';
 import { version as appVersion } from '../../package.json';
 
 // Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
@@ -619,7 +620,7 @@ export default function App() {
                   filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
                   dataUrl,
                 });
-                showToast('Annotated PNG saved in this feedback round’s exports folder.');
+                showToast('Annotated PNG saved in this subfolder’s exports folder.');
               } catch (err) {
                 setError(
                   `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
@@ -1277,11 +1278,8 @@ function Inspector({
       <div className="inspector-heading">
         <div>
           <span className="eyebrow">SCREENSHOT {String(shot.position + 1).padStart(2, '0')}</span>
-          <h2>Context notes</h2>
+          <h2>Screenshot context</h2>
         </div>
-        <IconButton label="Inspector options" onClick={() => undefined}>
-          <MoreVertical size={16} />
-        </IconButton>
       </div>
       <div className="inspector-scroll">
         <TextInput
@@ -1289,79 +1287,79 @@ function Inspector({
           value={shot.title}
           onChange={(event) => updateShot({ title: event.target.value })}
         />
-        <TextArea
-          label="Description"
-          rows={2}
-          placeholder="A short description for the AI agent"
-          value={shot.description}
-          onChange={(event) => updateShot({ description: event.target.value })}
+        <ProblemDescriptionEditor
+          notes={notes}
+          description={shot.description}
+          onChange={(next) => {
+            setNotes(next);
+            const project = store.snapshot!.project;
+            if (
+              next.problem !== notes.problem &&
+              !project.exportPreferences.includedFields.includes('problem')
+            )
+              store.updateProject({
+                ...project,
+                exportPreferences: {
+                  ...project.exportPreferences,
+                  includedFields: [...project.exportPreferences.includedFields, 'problem'],
+                },
+              });
+          }}
         />
-        <div className="field-grid">
-          <label className="field">
-            <span className="field-label">Status</span>
-            <select
-              value={shot.status}
-              onChange={(event) => updateShot({ status: event.target.value as any })}
-            >
-              <option value="draft">Draft</option>
-              <option value="ready">Ready</option>
-              <option value="needs-review">Needs review</option>
-              <option value="completed">Completed</option>
-            </select>
-          </label>
-          <label className="field">
-            <span className="field-label">Priority</span>
-            <select
-              value={shot.priority}
-              onChange={(event) => updateShot({ priority: event.target.value as any })}
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </label>
-        </div>
-        <div className="field">
-          <span className="field-label">Tags</span>
-          <div className="tag-editor">
-            {shot.tags.map((tag: string) => (
-              <button
-                key={tag}
-                className="tag"
-                onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
+        <details className="screenshot-details">
+          <summary>Screenshot details</summary>
+          <div className="field-grid">
+            <label className="field">
+              <span className="field-label">Status</span>
+              <select
+                value={shot.status}
+                onChange={(event) => updateShot({ status: event.target.value as any })}
               >
-                {tag}
-                <X size={11} />
-              </button>
-            ))}
-            <button
-              className="tag-add"
-              onClick={() => {
-                const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
-                if (next) updateShot({ tags: [...shot.tags, next] });
-              }}
-            >
-              <Plus size={12} />
-              Add tag
-            </button>
+                <option value="draft">Draft</option>
+                <option value="ready">Ready</option>
+                <option value="needs-review">Needs review</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Priority</span>
+              <select
+                value={shot.priority}
+                onChange={(event) => updateShot({ priority: event.target.value as any })}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <div className="note-section">
-          <span className="section-label">Written context</span>
-          {(Object.keys(notes) as Array<keyof NoteFields>).map((key) => (
-            <TextArea
-              key={key}
-              label={key
-                .replace(/[A-Z]/g, (letter) => ` ${letter}`)
-                .replace(/^./, (letter) => letter.toUpperCase())}
-              rows={key === 'additionalNotes' ? 3 : 2}
-              placeholder="Optional"
-              value={notes[key]}
-              onChange={(event) => setNotes({ ...notes, [key]: event.target.value })}
-            />
-          ))}
-        </div>
+          <div className="field">
+            <span className="field-label">Tags</span>
+            <div className="tag-editor">
+              {shot.tags.map((tag: string) => (
+                <button
+                  key={tag}
+                  className="tag"
+                  onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
+                >
+                  {tag}
+                  <X size={11} />
+                </button>
+              ))}
+              <button
+                className="tag-add"
+                onClick={() => {
+                  const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
+                  if (next) updateShot({ tags: [...shot.tags, next] });
+                }}
+              >
+                <Plus size={12} />
+                Add tag
+              </button>
+            </div>
+          </div>
+        </details>
         {selectedAnnotation && (
           <div className="annotation-properties">
             <span className="section-label">Selected annotation</span>
@@ -1558,7 +1556,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
       }
       setAction(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The feedback round could not be saved.');
+      setError(err instanceof Error ? err.message : 'The subfolder could not be saved.');
     } finally {
       setBusy(false);
     }
@@ -1566,9 +1564,9 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
   return (
     <div className="round-controls">
       <label className="field">
-        <span className="field-label">Feedback round</span>
+        <span className="field-label">Subfolder</span>
         <select
-          aria-label="Feedback round"
+          aria-label="Subfolder"
           value={store.activeRoundId}
           onChange={(event) =>
             store.set({
@@ -1595,7 +1593,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
               setAction(item);
               setName(
                 item === 'create'
-                  ? `Feedback ${project.rounds.length + 1}`
+                  ? `Subfolder ${project.rounds.length + 1}`
                   : item === 'duplicate'
                     ? `${current.name} copy`
                     : current.name,
@@ -1603,7 +1601,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
             }}
           >
             {item === 'create'
-              ? 'New round'
+              ? 'New subfolder'
               : item === 'archive' && current.archived
                 ? 'Restore'
                 : item[0].toUpperCase() + item.slice(1)}
@@ -1612,20 +1610,20 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
       </div>
       {action && (
         <Modal
-          title={`${action === 'archive' && current.archived ? 'Restore' : action} feedback round`}
+          title={`${action === 'archive' && current.archived ? 'Restore' : action === 'create' ? 'New' : action[0].toUpperCase() + action.slice(1)} subfolder`}
           description={
             action === 'archive'
-              ? 'Archiving keeps the screenshots and notes. Archived rounds remain available in the selector.'
-              : 'Each round keeps its own screenshots, annotations and notes.'
+              ? 'Archiving keeps the screenshots and notes. Archived subfolders remain available in the selector.'
+              : 'Each subfolder keeps its own screenshots, annotations and notes.'
           }
           onClose={() => {
             if (!busy) setAction(null);
           }}
         >
-          <TextInput label="Round name" value={name} onChange={(event) => setName(event.target.value)} />
+          <TextInput label="Subfolder name" value={name} onChange={(event) => setName(event.target.value)} />
           {error && <p role="alert">{error}</p>}
           <Button busy={busy} disabled={!name.trim()} onClick={() => void submit()}>
-            Save round
+            Save subfolder
           </Button>
         </Modal>
       )}
@@ -1680,7 +1678,7 @@ function ContextBuilder({
         <div className="context-intro">
           <span className="eyebrow">ASSEMBLE A BRIEF</span>
           <h1>Context Builder</h1>
-          <p>Current round: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
+          <p>Subfolder: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
           <p>Choose the evidence an AI agent should see, then copy or export a clean Markdown brief.</p>
         </div>
         <TextArea
@@ -1711,7 +1709,7 @@ function ContextBuilder({
               checked={store.exportAllRounds}
               onChange={(event) => store.set({ exportAllRounds: event.target.checked })}
             />
-            Export all feedback rounds
+            Export all subfolders
           </label>
           <span className="section-label">Package contents</span>
           <label className="check-row">

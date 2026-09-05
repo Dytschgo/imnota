@@ -241,7 +241,7 @@ async function importOne(
   if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
   const project = await readProject(projectPath);
   const round = project.rounds.find((r) => r.id === (roundId ?? project.rounds[0].id));
-  if (!round || round.archived) throw new Error('Choose an active feedback round before importing.');
+  if (!round || round.archived) throw new Error('Choose an active subfolder before importing.');
   await ensureRound(projectPath, round.id);
   const storedFilename = await uniqueStoredName(projectPath, originalFilename);
   await atomicWrite(
@@ -463,6 +463,21 @@ function registerIpc(): void {
       .sort((a, b) => a.position - b.position)
       .map((s, position) => ({ ...s, position }));
     project.updatedAt = nowIso();
+    // Editing the primary description opts it into export. Loading an older
+    // project and autosaving unchanged notes must preserve its exclusions.
+    if (!project.exportPreferences.includedFields.includes('problem')) {
+      await assertNoLinks(path.join(safePath, trustedShot.notesFile));
+      const previousNotes = parseNotesMarkdown(
+        await fs
+          .readFile(path.join(safePath, trustedShot.notesFile), 'utf8')
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return '';
+            throw error;
+          }),
+      );
+      if (previousNotes.problem !== input.notes.problem)
+        project.exportPreferences.includedFields.push('problem');
+    }
     await atomicWrite(
       path.join(safePath, '.imnota-recovery.json'),
       JSON.stringify(
@@ -569,7 +584,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     const source = project.rounds.find((r) => r.id === input.roundId);
-    if (input.action !== 'create' && !source) throw new Error('Feedback round not found.');
+    if (input.action !== 'create' && !source) throw new Error('Subfolder not found.');
     if (input.action === 'rename') source!.name = input.name;
     else if (input.action === 'archive') source!.archived = !source!.archived;
     else {
@@ -654,7 +669,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     if (input.roundId && !project.rounds.some((round) => round.id === input.roundId))
-      throw new Error('Feedback round not found.');
+      throw new Error('Subfolder not found.');
     const folder = input.roundId
       ? path.join(safePath, 'rounds', input.roundId, 'exports')
       : path.join(safePath, 'exports');
@@ -667,7 +682,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     if (input.roundId && !project.rounds.some((r) => r.id === input.roundId))
-      throw new Error('Feedback round not found.');
+      throw new Error('Subfolder not found.');
     const exportDir = input.roundId
       ? path.join(safePath, 'rounds', input.roundId, 'exports')
       : path.join(safePath, 'exports');
@@ -955,6 +970,8 @@ app.whenReady().then(async () => {
         const before = performance.now();
         const reopened = await api.loadProject(project.projectPath);
         if (reopened.project.screenshots.length !== 100 || Object.keys(reopened.thumbnails).length !== 100) throw new Error('100-image project lost screenshots or thumbnails');
+        reopened.project.exportPreferences.includedFields = ['summary'];
+        await api.saveProject(project.projectPath, reopened.project);
         return { syntheticImages: 100, dimensions: '1920x1080', importMs: Math.round(importedMs), warmReopenMs: Math.round(performance.now() - before) };
       })()`);
       console.log('Synthetic project benchmark:', JSON.stringify(metrics));
@@ -1016,6 +1033,12 @@ app.whenReady().then(async () => {
         'Renderer smoke passed: reopened workspace, crop drawing and cropped PNG export.',
         JSON.stringify(pngSize),
       );
+      if (
+        (await readProject(path.join(fixture, 'performance'))).exportPreferences.includedFields.includes(
+          'problem',
+        )
+      )
+        throw new Error('Unchanged autosave modified legacy export exclusions');
       mainWindow!.showInactive();
       await new Promise((resolve) => setTimeout(resolve, 500));
       await mainWindow!.webContents.executeJavaScript(`(async () => {
@@ -1039,6 +1062,12 @@ app.whenReady().then(async () => {
         document.querySelector('[aria-label="Expand screenshot list"]').click();
         await delay();
         const wrap = document.querySelector('.canvas-wrap');
+        const problemField = document.querySelector('.inspector textarea');
+        if (!problemField || document.querySelectorAll('.inspector textarea').length !== 1) throw new Error('Inspector must have one problem description editor');
+        if (!document.querySelector('[aria-label="Subfolder"]')) throw new Error('Subfolder selector missing');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(problemField, 'A single clear problem description');
+        problemField.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 900));
         const target = document.querySelector('.konvajs-content');
         const originX = Number(wrap.dataset.imageX);
         target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 40, deltaY: 20 }));
@@ -1078,6 +1107,13 @@ app.whenReady().then(async () => {
         'Feedback smoke passed: independent round duplication, rename/archive/restore, image clipboard, three panel toggles, bounded canvas, trackpad pan and inline text confirm/cancel.',
       );
       const textProject = await readProject(path.join(fixture, 'performance'));
+      const persistedNotes = parseNotesMarkdown(
+        await fs.readFile(path.join(fixture, 'performance', textProject.screenshots[0].notesFile), 'utf8'),
+      );
+      if (persistedNotes.problem !== 'A single clear problem description')
+        throw new Error('Problem description was not persisted');
+      if (!textProject.exportPreferences.includedFields.includes('problem'))
+        throw new Error('Edited problem description was not included after reopen');
       const savedAnnotations = JSON.parse(
         await fs.readFile(
           path.join(fixture, 'performance', textProject.screenshots[0].annotationFile),

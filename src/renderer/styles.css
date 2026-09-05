@@ -1054,6 +1054,32 @@ button:disabled {
   margin: 0;
   font-size: 13px;
 }
+.screenshot-details > summary,
+.previous-notes > summary {
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 8px 0;
+}
+.screenshot-details[open] > summary {
+  margin-bottom: 12px;
+}
+.screenshot-details .field-grid {
+  margin-bottom: 16px;
+}
+.previous-notes p {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.previous-notes dt {
+  color: var(--ink-2);
+  font-size: 12px;
+  margin-top: 12px;
+}
+.previous-notes dd {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .inspector-scroll {
   min-height: 0;
   overflow: auto;
