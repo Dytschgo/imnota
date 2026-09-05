@@ -27,6 +27,11 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: bash -n scripts/install.sh
+      - name: Configure Electron sandbox helper
+        run: |
+          sandbox_helper="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
+          sudo chown root:root "$sandbox_helper"
+          sudo chmod 4755 "$sandbox_helper"
       - run: xvfb-run --auto-servernum pnpm smoke
 
   package:
