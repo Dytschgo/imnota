@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "project_example",
+  "name": "Example screenshot review",
+  "description": "A metadata-only example. Add screenshots locally to try the workflow.",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "status": "active",
+  "tags": ["UX", "Question"],
+  "favourite": false,
+  "screenshots": [],
+  "exportPreferences": {
+    "includeOriginalScreenshots": false,
+    "includeAnnotationMetadata": true,
+    "includedFields": [
+      "summary",
+      "observation",
+      "problem",
+      "expectedBehaviour",
+      "requestedChange",
+      "technicalDetails",
+      "aiInstruction"
+    ],
+    "overallInstructions": "",
+    "desiredOutcome": "",
+    "technicalConstraints": "",
+    "template": "default"
+  }
+}
