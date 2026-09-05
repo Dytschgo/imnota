@@ -1095,12 +1095,16 @@ app.whenReady().then(async () => {
         if (Number(wrap.dataset.imageX) !== originX - 40) throw new Error('Trackpad panning failed');
         window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
         await delay();
+        // CI desktops can fit this large image below 10%, making text hit targets subpixel-sized.
+        // Exercise editing at actual size, centred in the visible canvas on every platform.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }));
+        await delay();
         document.querySelector('[aria-label="Text"]').click();
         await delay();
         const b = target.getBoundingClientRect();
         const scale = Number(wrap.dataset.imageScale);
-        const x = b.x + Number(wrap.dataset.imageX) + 100 * scale;
-        const y = b.y + Number(wrap.dataset.imageY) + 100 * scale;
+        const x = b.x + b.width / 2;
+        const y = b.y + b.height / 2;
         const pointer = (type, px = x, py = y) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: px, clientY: py, button: 0, buttons: 1 }));
         pointer('mousedown'); await delay(); pointer('mouseup'); await delay();
         const editor = document.querySelector('[aria-label="Edit annotation text"]');
