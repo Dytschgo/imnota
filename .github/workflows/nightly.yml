@@ -1,0 +1,168 @@
+name: Build nightly prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact immutable main commit SHA to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    # workflow_dispatch can be launched from another ref; nightly candidates may only originate on main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      version: ${{ steps.candidate.outputs.version }}
+      tag: ${{ steps.candidate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: candidate
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
+          actual="$(git rev-parse "$REQUESTED_SHA^{commit}")"
+          test "$actual" = "${REQUESTED_SHA,,}"
+          git fetch origin main
+          git merge-base --is-ancestor "$actual" origin/main
+          date_utc="$(date -u +%Y%m%d)"
+          base_version="$(git show "$actual:package.json" | node -e "let input=''; process.stdin.on('data', chunk => input += chunk).on('end', () => process.stdout.write(JSON.parse(input).version))")"
+          version="$(node scripts/release-channel.mjs nightly-version "$base_version" "$date_utc" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: node --test scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs
+      - run: pnpm build
+      - run: bash -n scripts/install.sh
+      - name: Configure Electron sandbox helper
+        run: |
+          sandbox_helper="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
+          sudo chown root:root "$sandbox_helper"
+          sudo chmod 4755 "$sandbox_helper"
+      - run: xvfb-run --auto-servernum pnpm smoke
+
+  package:
+    needs: [guard, quality]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            command: pnpm exec electron-builder --linux --publish never --config.extraMetadata.version=${{ needs.guard.outputs.version }} --config.publish.channel=nightly --config.publish.releaseType=prerelease
+          - os: windows-latest
+            platform: windows
+            command: pnpm exec electron-builder --win --publish never --config.extraMetadata.version=${{ needs.guard.outputs.version }} --config.publish.channel=nightly --config.publish.releaseType=prerelease
+          - os: macos-latest
+            platform: macos
+            command: pnpm exec electron-builder --mac --universal --publish never --config.extraMetadata.version=${{ needs.guard.outputs.version }} --config.publish.channel=nightly --config.publish.releaseType=prerelease
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Verify and launch the macOS nightly archive
+        if: matrix.platform == 'macos'
+        run: bash scripts/verify-mac.sh
+        env:
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Smoke packaged Windows nightly
+        if: matrix.platform == 'windows'
+        run: node scripts/verify-packaged.mjs windows
+        env:
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Smoke packaged Linux nightly
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
+        env:
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nightly-${{ matrix.platform }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/nightly*.yml
+          if-no-files-found: error
+
+  publish:
+    needs: [guard, quality, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          path: release-assets
+          merge-multiple: true
+      - name: Validate nightly manifests and assets
+        run: node scripts/stage-release-assets.mjs release-assets '${{ needs.guard.outputs.version }}' nightly nightly
+      - name: Create draft prerelease with verified assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.guard.outputs.tag }}
+          target_commitish: ${{ needs.guard.outputs.sha }}
+          draft: true
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
+      - name: Publish the verified prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.guard.outputs.tag }}
+          target_commitish: ${{ needs.guard.outputs.sha }}
+          draft: false
+          prerelease: true
+          make_latest: false

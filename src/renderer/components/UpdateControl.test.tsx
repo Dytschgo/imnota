@@ -1,12 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { UpdateControl } from './UpdateControl';
 import type { ImnotaBridge, UpdateStatus } from '../../shared/types';
+import { useAppStore } from '../store';
 afterEach(cleanup);
 function setup() {
+  useAppStore.setState({ settings: { ...useAppStore.getState().settings, updateChannel: 'stable' } });
   let listener: (status: UpdateStatus) => void = () => {};
   const check = vi.fn(async () => {
     listener({ state: 'not-available', currentVersion: '0.2.0' });
+  });
+  const setSettings = vi.fn(async (patch) => {
+    const settings = { ...useAppStore.getState().settings, ...patch };
+    listener({ state: 'checking', currentVersion: '0.2.0', channel: settings.updateChannel });
+    return settings;
   });
   window.imnota = {
     onUpdateStatus: (fn: typeof listener) => {
@@ -15,10 +22,11 @@ function setup() {
     },
     getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.0' }),
     checkForUpdates: check,
+    setSettings,
     downloadUpdate: vi.fn(async () => {}),
     installUpdate: vi.fn(async () => {}),
   } as unknown as ImnotaBridge;
-  return { check, emit: (status: UpdateStatus) => listener(status) };
+  return { check, setSettings, emit: (status: UpdateStatus) => listener(status) };
 }
 it('checks on demand and shows the up-to-date result', async () => {
   const api = setup();
@@ -26,6 +34,48 @@ it('checks on demand and shows the up-to-date result', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
   await waitFor(() => expect(api.check).toHaveBeenCalledOnce());
   expect(await screen.findByText('You’re on the latest version.')).toBeInTheDocument();
+});
+
+it('requires confirmation before nightly and supports cancelling without changing settings', async () => {
+  const api = setup();
+  render(<UpdateControl />);
+  await screen.findByText(/v0.2.0/);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Update channel' }), {
+    target: { value: 'nightly' },
+  });
+  expect(screen.getByRole('dialog')).toHaveTextContent('Back up your workspace');
+  expect(api.setSettings).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Keep Stable' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('stable');
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'nightly' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Use Nightly' }));
+  await waitFor(() => expect(api.setSettings).toHaveBeenCalledWith({ updateChannel: 'nightly' }));
+  expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
+});
+
+it('disables channel changes while checking, downloading or awaiting installation', async () => {
+  const api = setup();
+  render(<UpdateControl />);
+  for (const state of ['checking', 'downloading', 'downloaded'] as const) {
+    await act(async () => api.emit({ state, channel: 'stable' }));
+    expect(screen.getByRole('combobox')).toBeDisabled();
+  }
+});
+
+it('shows a manual selected-channel download instead of silently downgrading', async () => {
+  const api = setup();
+  render(<UpdateControl />);
+  await act(async () =>
+    api.emit({
+      state: 'not-available',
+      channel: 'stable',
+      manualDownload: true,
+      message: 'Automatic downgrades are disabled.',
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Open selected channel download' }));
+  await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
 });
 it('shows actionable failure and allows retry', async () => {
   const api = setup();

@@ -753,7 +753,9 @@ export default function App() {
               Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
               telemetry by default.
             </p>
-            <span className="muted">Version {appVersion} · MIT License · Built by Dytschgo</span>
+            <span className="muted">
+              Version {updateStatus?.currentVersion ?? appVersion} · MIT License · Built by Dytschgo
+            </span>
           </div>
         </Modal>
       )}

@@ -90,7 +90,7 @@ corepack pnpm release 0.3.0 --evidence .git/release-evidence.json --dry-run
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
-Packaged clients check the repository releases when they launch. Use the refresh icon in the sidebar or Settings → App updates → Check for updates to check again immediately. Windows and AppImage clients download updates and offer a restart action. This ad-hoc-signed Mac release shows a download link for newer versions; automatic Mac installation requires Apple Developer signing, which is not configured yet. Branch and pull request builds never publish releases. Stable/nightly channels and an in-app channel selector are [planned, not yet enabled](docs/stable-nightly-release-plan.md).
+Packaged clients check the selected release channel when they launch. Use the refresh icon in the sidebar or Settings → App updates → Check for updates to check again. Choose **Stable (recommended)** or opt into **Nightly (preview)** in the same Settings section. Checks do not automatically download, install or downgrade. Windows and AppImage clients offer download and restart actions; the ad-hoc-signed Mac build opens the exact selected release page for manual replacement. Branch and pull request builds never publish releases. Nightly publication uses a manual, gated workflow on reviewed main commits; see [nightly build instructions](docs/nightly-builds.md).
 
 ## Project structure
 

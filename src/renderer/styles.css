@@ -1468,6 +1468,19 @@ button:disabled {
   flex-wrap: wrap;
   margin-top: 4px;
 }
+.update-settings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.update-settings > p {
+  margin: 0;
+}
+.update-settings > .field {
+  width: 100%;
+  margin: 0;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

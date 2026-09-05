@@ -5,10 +5,31 @@ on:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.classify.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel="$(node scripts/release-channel.mjs classify-tag "$GITHUB_REF_NAME")"
+          test "$channel" = stable
+          candidate="$(git rev-parse "$GITHUB_REF^{commit}")"
+          git fetch --force origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$candidate" origin/main
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
   package:
+    needs: classify
+    if: needs.classify.outputs.channel == 'stable'
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +58,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: node --test scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs
       - name: Verify release version
         run: node -e "const expected = 'v' + require('./package.json').version; if (process.env.GITHUB_REF_NAME !== expected) { console.error('Release tag ' + process.env.GITHUB_REF_NAME + ' does not match package version ' + expected); process.exit(1); }"
+      - name: Set expected stable package version
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'IMNOTA_EXPECT_VERSION=' + require('./package.json').version + String.fromCharCode(10))"
       - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -46,6 +70,12 @@ jobs:
         if: matrix.platform == 'macos'
         shell: bash
         run: bash scripts/verify-mac.sh
+      - name: Smoke packaged Windows application
+        if: matrix.platform == 'windows'
+        run: node scripts/verify-packaged.mjs windows
+      - name: Smoke packaged Linux application
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}
@@ -61,39 +91,32 @@ jobs:
   publish:
     needs: package
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: release-assets
           merge-multiple: true
-      - name: Add stable installer names
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp "$(find release-assets -maxdepth 1 -type f -name 'Imnota Setup *.exe' -print -quit)" release-assets/Imnota-Setup.exe
-          cp "$(find release-assets -maxdepth 1 -type f -name '*-mac.zip' -print -quit)" release-assets/Imnota-mac.zip
-          cp "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' -print -quit)" release-assets/Imnota.AppImage
-          # Match electron-builder's update manifest URLs; GitHub otherwise replaces spaces with dots.
-          for asset in release-assets/*; do
-            filename="$(basename "$asset")"
-            safe_name="${filename// /-}"
-            if [ "$filename" != "$safe_name" ]; then mv "$asset" "release-assets/$safe_name"; fi
-          done
-          for manifest in release-assets/latest*.yml; do
-            while IFS= read -r filename; do
-              test -f "release-assets/$filename"
-            done < <(sed -n 's/^[[:space:]]*- url: //p' "$manifest")
-          done
-          cd release-assets
-          sha256sum * > SHA256SUMS.txt
+      - name: Stage exact stable release assets
+        run: node scripts/stage-release-assets.mjs release-assets "${GITHUB_REF_NAME#v}" latest stable
       - uses: softprops/action-gh-release@v3
         with:
-          draft: false
+          tag_name: ${{ github.ref_name }}
+          draft: true
           prerelease: false
+          make_latest: false
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: false
 
   verify-public-mac-install:
     needs: publish
@@ -110,5 +133,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Download and install the published Mac release
         run: bash scripts/install.sh
+        env:
+          IMNOTA_RELEASE_TAG: ${{ github.ref_name }}
+      - name: Set exact public version expectation
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'IMNOTA_EXPECT_VERSION=' + process.env.GITHUB_REF_NAME.slice(1) + String.fromCharCode(10))"
       - name: Test the installed public download
         run: node scripts/smoke.mjs "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota"
+
+  promote-latest:
+    needs: verify-public-mac-install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mark the verified stable release as Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)"
+          test -n "$release_id"
+          export RELEASE_ID="$release_id"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f make_latest=true

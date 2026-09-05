@@ -117,11 +117,17 @@ export interface WorkspaceSettings {
   interfaceScale: number;
   openRecentOnLaunch: boolean;
   confirmBeforeDeletion: boolean;
+  updateChannel: UpdateChannel;
 }
+
+export type UpdateChannel = 'stable' | 'nightly';
 
 export type UpdateState =
   'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
 export interface UpdateStatus {
+  channel?: UpdateChannel;
+  releaseUrl?: string;
+  manualDownload?: boolean;
   currentVersion?: string;
   state: UpdateState;
   version?: string;

@@ -41,45 +41,29 @@ import {
   clipboardPngDimensions,
   MAX_CLIPBOARD_PNG_LENGTH,
 } from '../src/shared/clipboard-context.js';
-import { createUpdateCheck } from './update-check.js';
-import type { UpdateStatus } from '../src/shared/types.js';
+import { UpdateController } from './update-controller.js';
+import { discoverRelease } from './releases.js';
+import { prepareNativeUpdate } from './native-update.js';
+
+// Smoke never reads or writes the installed application's profile or caches.
+if (process.env.IMNOTA_SMOKE === '1') {
+  const profile = process.env.IMNOTA_SMOKE_USER_DATA;
+  if (!profile || !path.isAbsolute(profile) || !existsSync(profile))
+    throw new Error('Run smoke tests through scripts/smoke.mjs with an isolated profile.');
+  app.setPath('userData', profile);
+  app.setPath('sessionData', profile);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
-let updateStatus: UpdateStatus = { state: 'idle', currentVersion: app.getVersion() };
-function sendUpdate(status: UpdateStatus) {
-  updateStatus = { currentVersion: app.getVersion(), ...status };
-  mainWindow?.webContents.send('update:status', updateStatus);
-}
-const checkForUpdates = createUpdateCheck(
-  async () => {
-    if (!app.isPackaged || process.env.IMNOTA_SMOKE === '1') {
-      sendUpdate({ state: 'idle', message: 'Update checks are available in installed release builds.' });
-      return;
-    }
-    if (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') return;
-    sendUpdate({ state: 'checking' });
-    const result = await autoUpdater.checkForUpdates();
-    if (!result && updateStatus.state === 'checking')
-      sendUpdate({
-        state: 'idle',
-        message:
-          'Update checking is unavailable for this installation. Use the latest release download instead.',
-      });
-  },
-  () =>
-    sendUpdate({
-      state: 'error',
-      message:
-        'Could not check for updates. Check your connection and try again. Your projects are unchanged.',
-    }),
-);
+let updateController: UpdateController;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
   interfaceScale: 1,
   openRecentOnLaunch: true,
   confirmBeforeDeletion: true,
+  updateChannel: 'stable',
 };
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
@@ -368,6 +352,7 @@ function registerIpc(): void {
       if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
         throw new Error('Untrusted IPC sender.');
       const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
+      if (channel.startsWith('update:')) return listener(event, ...validated);
       const result = pending.then(() => listener(event, ...validated));
       pending = result.catch(() => undefined);
       return result;
@@ -385,8 +370,14 @@ function registerIpc(): void {
     return settings;
   });
   handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
-    settings = { ...settings, ...input };
-    await atomicWrite(settingsFile(), JSON.stringify(settings, null, 2));
+    const next = { ...settings, ...input };
+    const persist = async () => {
+      await atomicWrite(settingsFile(), JSON.stringify(next, null, 2));
+      settings = next;
+    };
+    if (next.updateChannel !== settings.updateChannel)
+      await updateController.switchChannel(next.updateChannel, persist);
+    else await persist();
     return settings;
   });
   handle('projects:list', async () => {
@@ -796,45 +787,35 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(projectPath);
     await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
   });
-  handle('update:download', async () => {
-    if (process.platform === 'darwin') {
-      await shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
-      return;
-    }
-    if (app.isPackaged) await autoUpdater.downloadUpdate();
-  });
-  handle('update:check', () => checkForUpdates());
-  handle('update:status', () => updateStatus);
-  handle('update:install', () => {
-    if (process.platform === 'darwin') {
-      void shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
-      return;
-    }
-    if (app.isPackaged) autoUpdater.quitAndInstall();
-  });
+  // Long network operations run outside the filesystem IPC queue.
+  handle('update:download', () => updateController.download());
+  handle('update:check', () => updateController.check());
+  handle('update:status', () => updateController.getStatus());
+  handle('update:install', () => updateController.install());
 }
 
 function configureAutoUpdates(): void {
-  if (!app.isPackaged) return;
-  // Apple Developer signing is needed for Squirrel.Mac updates; ad-hoc builds use a download link.
-  autoUpdater.autoDownload = process.platform !== 'darwin';
-  autoUpdater.autoInstallOnAppQuit = process.platform !== 'darwin';
-  const send = sendUpdate;
-  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
-  autoUpdater.on('update-available', (info) => send({ state: 'available', version: info.version }));
-  autoUpdater.on('update-not-available', () => send({ state: 'not-available' }));
-  autoUpdater.on('download-progress', (progress) =>
-    send({ state: 'downloading', percent: progress.percent }),
-  );
-  autoUpdater.on('update-downloaded', (info) => send({ state: 'downloaded', version: info.version }));
-  autoUpdater.on('error', () =>
-    send({
-      state: 'error',
-      message:
-        'The update could not be checked or downloaded. Check your connection and try again. Your projects are unchanged.',
-    }),
-  );
-  setTimeout(() => void checkForUpdates(), 8000);
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  updateController = new UpdateController(settings.updateChannel, {
+    currentVersion: app.getVersion(),
+    enabled: app.isPackaged && process.env.IMNOTA_SMOKE !== '1',
+    manual: process.platform === 'darwin',
+    discover: (channel) => discoverRelease(channel, process.platform),
+    prepare: (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+    download: () => autoUpdater.downloadUpdate(),
+    install: () => autoUpdater.quitAndInstall(),
+    open: (url) => shell.openExternal(url),
+    emit: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
+        mainWindow.webContents.send('update:status', status);
+    },
+  });
+  autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
+  // Promise handlers own errors so late native events cannot change channels.
+  autoUpdater.on('error', () => undefined);
+  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1')
+    setTimeout(() => void updateController.check(), 8000);
 }
 
 async function createWindow(): Promise<void> {
@@ -855,14 +836,22 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
     },
   });
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) await mainWindow.loadURL(devUrl);
-  else await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  const createdWindow = mainWindow;
+  createdWindow.on('closed', () => {
+    if (mainWindow === createdWindow) mainWindow = null;
+  });
+  createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
-  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  createdWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  try {
+    if (devUrl) await createdWindow.loadURL(devUrl);
+    else await createdWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+  } catch (error) {
+    if (!createdWindow.isDestroyed()) throw error;
+  }
 }
 
 app.whenReady().then(async () => {
@@ -871,6 +860,7 @@ app.whenReady().then(async () => {
   if (stored)
     try {
       settings = { ...settings, ...JSON.parse(stored) };
+      settings.updateChannel = settings.updateChannel === 'nightly' ? 'nightly' : 'stable';
     } catch {
       /* reset corrupt preferences */
     }
@@ -884,11 +874,14 @@ app.whenReady().then(async () => {
       },
     });
   });
+  configureAutoUpdates();
   registerIpc();
   await createWindow();
   if (process.env.IMNOTA_SMOKE === '1') {
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(app.getPath('temp'), 'imnota-smoke-')));
     try {
+      if (process.env.IMNOTA_EXPECT_VERSION && app.getVersion() !== process.env.IMNOTA_EXPECT_VERSION)
+        throw new Error('Packaged application version does not match the release candidate.');
       settings.workspacePath = fixture;
       const source = path.join(fixture, 'fixture.png');
       await fs.writeFile(
@@ -1201,6 +1194,30 @@ app.whenReady().then(async () => {
       console.log(
         'Combined clipboard smoke passed: builder action, two full-resolution annotated references, exclusions, crop, opaque redaction, text + HTML + PNG and unchanged clipboard on invalid input.',
       );
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const wait = async (find) => { for (let i=0;i<200;i++) { const value=find(); if(value) return value; await new Promise(resolve=>setTimeout(resolve,25)); } throw new Error('Channel UI timed out'); };
+        document.querySelector('[role="dialog"] [aria-label="Close"]').click();
+        await wait(()=>!document.querySelector('[role="dialog"]'));
+        [...document.querySelectorAll('.sidebar button')].find(b=>b.textContent.trim()==='Settings').click();
+        const select = await wait(()=>[...document.querySelectorAll('.settings-section select')].find(s=>[...s.options].some(o=>o.value==='nightly')));
+        if(select.value!=='stable') throw new Error('Old settings did not default to stable');
+        select.value='nightly'; select.dispatchEvent(new Event('change',{bubbles:true}));
+        const cancel=await wait(()=>[...document.querySelectorAll('[role="dialog"] button')].find(b=>b.textContent==='Keep Stable'));
+        if((await window.imnota.getSettings()).updateChannel!=='stable') throw new Error('Channel changed before confirmation');
+        cancel.click();
+        select.value='nightly'; select.dispatchEvent(new Event('change',{bubbles:true}));
+        const confirm=await wait(()=>[...document.querySelectorAll('[role="dialog"] button')].find(b=>b.textContent==='Use Nightly')); confirm.click();
+        await wait(()=>select.value==='nightly'&&!select.disabled&&!document.querySelector('[role="dialog"]'));
+        if((await window.imnota.getSettings()).updateChannel!=='nightly') throw new Error('Nightly setting not persisted');
+        await window.imnota.checkForUpdates();
+        if((await window.imnota.getUpdateStatus()).channel!=='nightly') throw new Error('Refresh checked the wrong channel');
+        try { await window.imnota.setSettings({updateChannel:'invalid'}); throw new Error('Invalid channel accepted'); } catch(error) { if(error.message==='Invalid channel accepted') throw error; }
+      })()`);
+      if (JSON.parse(await fs.readFile(settingsFile(), 'utf8')).updateChannel !== 'nightly')
+        throw new Error('Nightly channel was not saved on disk');
+      console.log(
+        'Channel smoke passed: default stable, nightly confirm/cancel, persisted settings, selected-channel refresh and IPC enum rejection.',
+      );
       if (process.env.IMNOTA_SMOKE_SCREENSHOT) {
         mainWindow!.showInactive();
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1212,6 +1229,11 @@ app.whenReady().then(async () => {
       console.log(
         'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, recovery, 100-image project, ZIP export and traversal rejection.',
       );
+      if (process.env.IMNOTA_SMOKE_RESULT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_RESULT,
+          JSON.stringify({ passed: true, version: app.getVersion() }),
+        );
       await fs.rm(fixture, { recursive: true, force: true });
       app.exit(0);
     } catch (error) {
@@ -1232,7 +1254,6 @@ app.whenReady().then(async () => {
     }
     return;
   }
-  configureAutoUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });

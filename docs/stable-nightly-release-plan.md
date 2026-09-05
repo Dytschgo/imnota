@@ -1,6 +1,8 @@
 # Stable and nightly builds
 
-Status: plan, not an enabled distribution system. Prepared on 2026-09-05 with Luna (`gpt-5.6-luna`), Terra (`gpt-5.6-terra`) and Astra review. The local release-readiness gate is a separate implementation; no nightly release, channel selector or GitHub protection change has been published.
+Status: implemented locally; awaiting merge and the first authorised nightly workflow run. See [nightly build instructions](nightly-builds.md) for current behaviour. The original proposal below was prepared on 2026-09-05 with Luna (`gpt-5.6-luna`), Terra (`gpt-5.6-terra`) and Astra review. No nightly release or GitHub protection change has been published as part of implementation.
+
+Implementation adjustment: native Windows/Linux checks now use a generic feed pinned to the exact discovered GitHub release, avoiding the GitHub provider's missing-channel fallback. Channel changes are locked during checks as well as downloads, preventing stale native operations from crossing channels. Automatic downloads and install-on-quit are disabled. The schedule remains off until the manual publication path is proven.
 
 ## Product decision
 

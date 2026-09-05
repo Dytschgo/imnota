@@ -167,5 +167,6 @@ export const settingsPatchSchema = z
     interfaceScale: z.number().min(0.75).max(2).optional(),
     openRecentOnLaunch: z.boolean().optional(),
     confirmBeforeDeletion: z.boolean().optional(),
+    updateChannel: z.enum(['stable', 'nightly']).optional(),
   })
   .strict();

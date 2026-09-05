@@ -69,6 +69,6 @@ The validator checks completeness and candidate identity. It cannot authenticate
 
 Keep the prior stable installer available. If a release fails, stop promotion and tell users which tested version to reinstall. Back up workspaces before testing schema changes; older versions may reject newer project data. Do not silently downgrade project files or delete backups.
 
-macOS builds are currently ad-hoc signed, not Apple-notarised. Record actual Gatekeeper/install results and Intel/Apple Silicon coverage separately. Current CI launches the packaged Mac archive but does not yet install and launch Windows/Linux artifacts automatically; those checks need manual evidence until the planned pipeline work lands.
+macOS builds are currently ad-hoc signed, not Apple-notarised. Record actual Gatekeeper/install results and Intel/Apple Silicon coverage separately. CI now includes packaged Windows portable and extracted Linux AppImage smoke alongside the packaged Mac archive check. These are launch/core-workflow tests, not a substitute for testing NSIS/deb installation, Gatekeeper prompts or real update installation on target machines. Do not mark those manual checks passed solely from a package job.
 
-Test the guard with `node --test scripts/release-readiness.test.mjs` (also included in `pnpm test`). See [stable/nightly planning](stable-nightly-release-plan.md) for channel selection and pipeline enforcement work still to implement.
+Test the guard with `node --test scripts/release-readiness.test.mjs` (also included in `pnpm test`). See [nightly build instructions](nightly-builds.md) for channel selection, guarded publishing and remaining rollout validation.
