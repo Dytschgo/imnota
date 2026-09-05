@@ -74,6 +74,17 @@ jobs:
           cp "$(find release-assets -maxdepth 1 -type f -name 'Imnota Setup *.exe' -print -quit)" release-assets/Imnota-Setup.exe
           cp "$(find release-assets -maxdepth 1 -type f -name '*-mac.zip' -print -quit)" release-assets/Imnota-mac.zip
           cp "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' -print -quit)" release-assets/Imnota.AppImage
+          # Match electron-builder's update manifest URLs; GitHub otherwise replaces spaces with dots.
+          for asset in release-assets/*; do
+            filename="$(basename "$asset")"
+            safe_name="${filename// /-}"
+            if [ "$filename" != "$safe_name" ]; then mv "$asset" "release-assets/$safe_name"; fi
+          done
+          for manifest in release-assets/latest*.yml; do
+            while IFS= read -r filename; do
+              test -f "release-assets/$filename"
+            done < <(sed -n 's/^[[:space:]]*- url: //p' "$manifest")
+          done
           cd release-assets
           sha256sum * > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
