@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — First downloadable release
+## 0.1.3 — First downloadable release
 
 - Universal Mac ZIP and DMG, Windows installers and Linux packages.
 - Verified Mac archive launch, installer checksums and previous-app backups.
