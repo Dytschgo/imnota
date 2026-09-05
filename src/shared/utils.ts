@@ -77,7 +77,8 @@ export function priorityColor(priority: Priority): string {
 export function emptyProject(name: string, description: string, tags: string[] = []): ProjectData {
   const date = nowIso();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    rounds: [{ id: '001-first-feedback', name: 'First feedback', archived: false, createdAt: date }],
     id: createId('project'),
     name: name.trim() || 'Untitled project',
     description: description.trim(),

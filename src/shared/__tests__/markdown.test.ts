@@ -30,6 +30,7 @@ describe('Markdown context generation', () => {
     project.exportPreferences.desiredOutcome = 'Make the error impossible to miss.';
     project.screenshots = [
       {
+        roundId: '001-first-feedback',
         id: 'shot1',
         originalFilename: 'screen.png',
         storedFilename: '001-screen.png',

@@ -1,4 +1,11 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import {
+  useEffect,
+  useRef,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from 'react';
 import { LoaderCircle } from 'lucide-react';
 
 export function Button({
@@ -69,6 +76,44 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+        ) ?? [],
+      );
+    (focusable()[0] ?? dialog)?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current();
+      }
+      if (event.key === 'Tab') {
+        const items = focusable();
+        const first = items[0];
+        const last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    dialog?.addEventListener('keydown', keydown);
+    return () => {
+      dialog?.removeEventListener('keydown', keydown);
+      previous?.focus();
+    };
+  }, []);
   return (
     <div
       className="modal-backdrop"
@@ -77,7 +122,14 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <section
+        ref={dialogRef}
+        tabIndex={-1}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <div className="modal-header">
           <div>
             <h2 id="modal-title">{title}</h2>

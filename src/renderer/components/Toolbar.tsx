@@ -65,6 +65,7 @@ export function Toolbar({
             key={id}
             label={label}
             className={tool === id ? 'is-active' : ''}
+            aria-pressed={tool === id}
             onClick={() => setTool(id)}
           >
             <Icon size={18} />
@@ -88,6 +89,12 @@ export function Toolbar({
         </IconButton>
         <IconButton label="Fit screenshot (0)" onClick={onFit}>
           <Maximize2 size={17} />
+        </IconButton>
+        <IconButton
+          label="Actual size (1)"
+          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }))}
+        >
+          1:1
         </IconButton>
       </div>
     </div>

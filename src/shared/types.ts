@@ -41,6 +41,7 @@ export interface Annotation {
 }
 
 export interface ScreenshotRecord {
+  roundId: string;
   id: string;
   originalFilename: string;
   storedFilename: string;
@@ -81,7 +82,8 @@ export interface ExportPreferences {
 }
 
 export interface ProjectData {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
+  rounds: FeedbackRound[];
   id: string;
   name: string;
   description: string;
@@ -92,6 +94,12 @@ export interface ProjectData {
   favourite: boolean;
   screenshots: ScreenshotRecord[];
   exportPreferences: ExportPreferences;
+}
+export interface FeedbackRound {
+  id: string;
+  name: string;
+  archived: boolean;
+  createdAt: string;
 }
 
 export interface ProjectSnapshot {
@@ -111,8 +119,10 @@ export interface WorkspaceSettings {
   confirmBeforeDeletion: boolean;
 }
 
-export type UpdateState = 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+export type UpdateState =
+  'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
 export interface UpdateStatus {
+  currentVersion?: string;
   state: UpdateState;
   version?: string;
   percent?: number;
@@ -127,6 +137,7 @@ export interface ImagePayload {
 }
 
 export interface ExportRequest {
+  roundId?: string;
   projectPath: string;
   markdown: string;
   annotatedImages: Array<{ filename: string; dataUrl: string }>;
@@ -153,16 +164,32 @@ export interface ImnotaBridge {
     projectPath: string;
     screenshot: ScreenshotRecord;
   }): Promise<{ image: ImagePayload; annotations: Annotation[]; notes: NoteFields }>;
-  importImageFiles(input: { projectPath: string; paths: string[] }): Promise<ProjectSnapshot>;
-  pasteImage(projectPath: string): Promise<ProjectSnapshot>;
+  importImageFiles(input: {
+    projectPath: string;
+    paths: string[];
+    roundId?: string;
+  }): Promise<ProjectSnapshot>;
+  pasteImage(projectPath: string, roundId?: string): Promise<ProjectSnapshot>;
+  editRound(input: {
+    projectPath: string;
+    action: 'create' | 'rename' | 'duplicate' | 'archive';
+    roundId?: string;
+    name: string;
+  }): Promise<ProjectSnapshot>;
   duplicateScreenshot(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<ProjectSnapshot>;
   duplicateProject(projectPath: string): Promise<ProjectSnapshot>;
   archiveProject(projectPath: string): Promise<void>;
   deleteProject(projectPath: string): Promise<void>;
-  exportAnnotatedImage(input: { projectPath: string; filename: string; dataUrl: string }): Promise<string>;
+  exportAnnotatedImage(input: {
+    projectPath: string;
+    filename: string;
+    dataUrl: string;
+    roundId?: string;
+  }): Promise<string>;
   exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
   copyText(text: string): Promise<void>;
+  copyImage(dataUrl: string): Promise<void>;
   saveRecovery(input: {
     projectPath: string;
     project: ProjectData;
@@ -173,6 +200,8 @@ export interface ImnotaBridge {
   getDroppedFilePath(file: File): string;
   onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
   downloadUpdate(): Promise<void>;
+  checkForUpdates(): Promise<void>;
+  getUpdateStatus(): Promise<UpdateStatus>;
   installUpdate(): Promise<void>;
 }
 

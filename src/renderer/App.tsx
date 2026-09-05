@@ -19,6 +19,7 @@ import {
   PanelLeft,
   PanelRight,
   Plus,
+  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
@@ -45,6 +46,7 @@ import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { Logo } from './components/Logo';
 import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
 import { Toolbar } from './components/Toolbar';
+import { UpdateControl } from './components/UpdateControl';
 import { version as appVersion } from '../../package.json';
 
 // Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
@@ -73,7 +75,11 @@ export default function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [attachments, setAttachments] = useState<{
+    folderPath: string;
+    markdown: string;
+    images: Array<{ filename: string; dataUrl: string }>;
+  } | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedId = useRef<string | null>(null);
@@ -204,6 +210,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
+      if (target instanceof HTMLElement && target.closest('[role="dialog"]')) return;
       const typing =
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
@@ -255,9 +262,7 @@ export default function App() {
       } else if (event.key === 'Escape') {
         setTool('select');
         setSelectedAnnotation(null);
-      } else if (event.key === '+' || event.key === '=') setZoom((value) => Math.min(2, value + 0.1));
-      else if (event.key === '-') setZoom((value) => Math.max(0.5, value - 0.1));
-      else if (event.key === '0') setZoom(1);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -324,6 +329,7 @@ export default function App() {
     try {
       const snapshot = await window.imnota.importImageFiles({
         projectPath: store.snapshot.projectPath,
+        roundId: store.activeRoundId,
         paths,
       });
       await openSnapshot(snapshot);
@@ -341,7 +347,7 @@ export default function App() {
   async function pasteImage() {
     if (!store.snapshot) return;
     try {
-      await openSnapshot(await window.imnota.pasteImage(store.snapshot.projectPath));
+      await openSnapshot(await window.imnota.pasteImage(store.snapshot.projectPath, store.activeRoundId));
       await refreshProjects();
       showToast('Screenshot pasted');
     } catch (err) {
@@ -368,11 +374,13 @@ export default function App() {
     setRedo((items) => items.slice(0, -1));
   }
   async function copyContext() {
-    const markdown = await buildMarkdown();
-    if (!markdown) return;
     try {
+      const markdown = await buildMarkdown();
+      if (!markdown) return;
+      const result = await exportPackage(false);
+      if (!result) return;
       await window.imnota.copyText(markdown);
-      await exportPackage();
+      setAttachments({ ...result, markdown });
       showToast(
         `AI context copied · ${selectedShots().length} screenshot${selectedShots().length === 1 ? '' : 's'}`,
       );
@@ -381,11 +389,17 @@ export default function App() {
     }
   }
   function selectedShots() {
-    return store.snapshot?.project.screenshots.filter((shot) => shot.includeInExport) ?? [];
+    return (
+      store.snapshot?.project.screenshots.filter(
+        (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
+      ) ?? []
+    );
   }
   const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
-    const shots = store.snapshot.project.screenshots.filter((shot) => shot.includeInExport);
+    const shots = store.snapshot.project.screenshots.filter(
+      (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
+    );
     const cache: Record<string, { annotations: Annotation[]; notes: NoteFields }> = {
       ...(activeShot && lastLoadedId.current === activeShot.id
         ? { [activeShot.id]: { annotations, notes } }
@@ -404,8 +418,8 @@ export default function App() {
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.notes ?? EMPTY_NOTES])),
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.annotations ?? []])),
     );
-  }, [store.snapshot, activeShot, annotations, notes]);
-  async function exportPackage() {
+  }, [store.snapshot, store.activeRoundId, store.exportAllRounds, activeShot, annotations, notes]);
+  async function exportPackage(openFolder = true) {
     if (!store.snapshot) return;
     try {
       const markdown = await buildMarkdown();
@@ -427,13 +441,15 @@ export default function App() {
       }
       const result = await window.imnota.exportPackage({
         projectPath: store.snapshot.projectPath,
+        roundId: store.exportAllRounds ? undefined : store.activeRoundId,
         markdown,
         annotatedImages: annotatedImages.filter((item) => item.dataUrl),
         includeOriginal: store.snapshot.project.exportPreferences.includeOriginalScreenshots,
         includeAnnotations: store.snapshot.project.exportPreferences.includeAnnotationMetadata,
       });
       showToast(`Exported ${result.count} screenshot${result.count === 1 ? '' : 's'} to the project folder`);
-      await window.imnota.openPath(result.folderPath);
+      if (openFolder) await window.imnota.openPath(result.folderPath);
+      return { folderPath: result.folderPath, images: annotatedImages };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The export could not be created.');
     }
@@ -480,14 +496,47 @@ export default function App() {
     );
   return (
     <div
-      className="app-shell"
+      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         if (hasProject) void handleDrop(event);
       }}
     >
-      <Sidebar />
+      {store.navigationOpen && <Sidebar />}
       <main className="main-shell">
+        <div className="navigation-toggle">
+          <IconButton
+            label="Check for app updates"
+            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
+            onClick={async () => {
+              try {
+                await window.imnota.checkForUpdates();
+                const status = await window.imnota.getUpdateStatus();
+                showToast(
+                  status.message ??
+                    (status.state === 'not-available'
+                      ? 'You’re on the latest version.'
+                      : status.state === 'available'
+                        ? `Imnota ${status.version} is available. Open Settings for update options.`
+                        : status.state === 'downloaded'
+                          ? 'Update ready. Restart to install.'
+                          : 'Checking app updates…'),
+                );
+              } catch {
+                setError('Could not check for updates. Check your connection and try again.');
+              }
+            }}
+          >
+            <RefreshCw size={16} />
+          </IconButton>
+          <IconButton
+            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
+            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
+          >
+            <PanelLeft size={16} />
+          </IconButton>
+          {!store.navigationOpen && <Logo compact />}
+        </div>
         <Topbar
           onNew={() => setModal('new')}
           onOpen={async () => {
@@ -501,7 +550,12 @@ export default function App() {
           onSearch={() => document.getElementById('project-search')?.focus()}
           onCopy={copyContext}
           onOpenExport={async () => {
-            if (store.snapshot) await window.imnota.openPath(`${store.snapshot.projectPath}/exports`);
+            if (store.snapshot)
+              await window.imnota.openPath(
+                store.exportAllRounds
+                  ? `${store.snapshot.projectPath}/exports`
+                  : `${store.snapshot.projectPath}/rounds/${store.activeRoundId}/exports`,
+              );
           }}
           onToggleFavourite={() => void toggleFavourite()}
         />
@@ -546,16 +600,26 @@ export default function App() {
           <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} />
         ) : (
           <Workspace
+            onFlush={async () => {
+              if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id)
+                await window.imnota.saveScreenshotContent({
+                  projectPath: store.snapshot.projectPath,
+                  screenshot: activeShot,
+                  annotations,
+                  notes,
+                });
+            }}
             onExportImage={async () => {
               if (!store.snapshot || !activeShot || !image) return;
               try {
                 const dataUrl = await renderAnnotatedImage(image, annotations);
                 await window.imnota.exportAnnotatedImage({
                   projectPath: store.snapshot.projectPath,
+                  roundId: activeShot.roundId,
                   filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
                   dataUrl,
                 });
-                showToast('Annotated PNG saved in the project exports folder.');
+                showToast('Annotated PNG saved in this feedback round’s exports folder.');
               } catch (err) {
                 setError(
                   `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
@@ -570,7 +634,7 @@ export default function App() {
             onMessage={showToast}
             onTool={setTool}
             tool={tool}
-            image={image}
+            image={activeShot?.id === lastLoadedId.current ? image : null}
             annotations={annotations}
             selectedAnnotation={selectedAnnotation}
             stageRef={stageRef}
@@ -578,9 +642,12 @@ export default function App() {
             onRedo={redoAction}
             canUndo={history.length > 0}
             canRedo={redo.length > 0}
-            onZoom={(delta: number) => setZoom((value) => Math.max(0.5, Math.min(2, value + delta)))}
-            onFit={() => setZoom(1)}
-            zoom={zoom}
+            onZoom={(delta: number) =>
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? '+' : '-' }))
+            }
+            onFit={() => {
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
+            }}
             saving={saving}
             notes={notes}
             setNotes={setNotes}
@@ -610,6 +677,40 @@ export default function App() {
           <Check size={16} />
           {toast}
         </div>
+      )}
+      {attachments && (
+        <Modal
+          title="Attach your visual references"
+          description="The Markdown is copied. Paste it into your AI assistant, then copy and paste each image below, or attach the exported PNG files. Copying an image replaces the clipboard text."
+          onClose={() => setAttachments(null)}
+        >
+          <p>
+            {attachments.images.length} annotated images · {attachments.folderPath}
+          </p>
+          <div className="modal-form">
+            {attachments.images.map((item) => (
+              <div key={item.filename}>
+                <label>
+                  <input type="checkbox" /> Attached {item.filename}
+                </label>
+                <Button
+                  onClick={async () => {
+                    try {
+                      await window.imnota.copyImage(item.dataUrl);
+                      showToast('Image copied. Paste it into your AI assistant.');
+                    } catch {
+                      setError('Image could not be copied. Attach the exported PNG instead.');
+                    }
+                  }}
+                >
+                  Copy image
+                </Button>
+              </div>
+            ))}
+            <Button onClick={() => window.imnota.copyText(attachments.markdown)}>Copy Markdown again</Button>
+            <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>Open export folder</Button>
+          </div>
+        </Modal>
       )}
       {modal === 'new' && (
         <Modal
@@ -740,10 +841,6 @@ export default function App() {
             About
           </button>
         </nav>
-        <div className="privacy-note">
-          <ShieldCheck size={14} />
-          <span>Your files stay on this device.</span>
-        </div>
       </aside>
     );
   }
@@ -974,9 +1071,13 @@ function Workspace(props: any) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   async function reorderScreenshot(targetIndex: number) {
     if (dragIndex === null || dragIndex === targetIndex || !store.snapshot) return;
-    const screenshots = [...store.snapshot.project.screenshots];
-    const [moved] = screenshots.splice(dragIndex, 1);
-    screenshots.splice(targetIndex, 0, moved);
+    const ordered = store.snapshot.project.screenshots.filter((shot) => shot.roundId === store.activeRoundId);
+    const [moved] = ordered.splice(dragIndex, 1);
+    ordered.splice(targetIndex, 0, moved);
+    let cursor = 0;
+    const screenshots = store.snapshot.project.screenshots.map((shot) =>
+      shot.roundId === store.activeRoundId ? ordered[cursor++] : shot,
+    );
     const project = {
       ...store.snapshot.project,
       screenshots: screenshots.map((item, position) => ({ ...item, position })),
@@ -991,7 +1092,13 @@ function Workspace(props: any) {
     }
   }
   return (
-    <section className="workspace" onDrop={props.onDrop}>
+    <section
+      className="workspace"
+      style={{
+        gridTemplateColumns: `${store.leftPanelOpen ? 'minmax(180px, 236px)' : '48px'} minmax(0, 1fr)${store.rightPanelOpen ? ' minmax(240px, 302px)' : ''}`,
+      }}
+      onDrop={props.onDrop}
+    >
       <div className={`shot-rail ${store.leftPanelOpen ? '' : 'collapsed'}`}>
         <div className="rail-heading">
           <div>
@@ -999,7 +1106,7 @@ function Workspace(props: any) {
             <strong>{store.snapshot?.project.name}</strong>
           </div>
           <IconButton
-            label="Collapse screenshot list"
+            label={store.leftPanelOpen ? 'Collapse screenshot list' : 'Expand screenshot list'}
             onClick={() => store.set({ leftPanelOpen: !store.leftPanelOpen })}
           >
             <PanelLeft size={17} />
@@ -1007,37 +1114,40 @@ function Workspace(props: any) {
         </div>
         {store.leftPanelOpen && (
           <>
+            <RoundControls onFlush={props.onFlush} />
             <div className="shot-list">
-              {store.snapshot?.project.screenshots.map((item: ScreenshotRecord, index: number) => (
-                <button
-                  key={item.id}
-                  draggable
-                  className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''}`}
-                  onDragStart={() => setDragIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.stopPropagation();
-                    void reorderScreenshot(index);
-                  }}
-                  onClick={() => props.onSelect(item.id)}
-                >
-                  <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
-                  <div className="thumb">
-                    {store.snapshot?.thumbnails[item.id] ? (
-                      <img src={store.snapshot.thumbnails[item.id]} alt="" />
-                    ) : (
-                      <FileImage size={18} />
-                    )}
-                  </div>
-                  <span className="shot-copy">
-                    <strong>{item.title || item.originalFilename}</strong>
-                    <small>
-                      <span className={`status-dot status-${item.status}`} />
-                      {item.status.replace('-', ' ')} · {item.priority}
-                    </small>
-                  </span>
-                </button>
-              ))}
+              {store.snapshot?.project.screenshots
+                .filter((item) => item.roundId === store.activeRoundId)
+                .map((item: ScreenshotRecord, index: number) => (
+                  <button
+                    key={item.id}
+                    draggable
+                    className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''}`}
+                    onDragStart={() => setDragIndex(index)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.stopPropagation();
+                      void reorderScreenshot(index);
+                    }}
+                    onClick={() => props.onSelect(item.id)}
+                  >
+                    <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
+                    <div className="thumb">
+                      {store.snapshot?.thumbnails[item.id] ? (
+                        <img src={store.snapshot.thumbnails[item.id]} alt="" />
+                      ) : (
+                        <FileImage size={18} />
+                      )}
+                    </div>
+                    <span className="shot-copy">
+                      <strong>{item.title || item.originalFilename}</strong>
+                      <small>
+                        <span className={`status-dot status-${item.status}`} />
+                        {item.status.replace('-', ' ')} · {item.priority}
+                      </small>
+                    </span>
+                  </button>
+                ))}
             </div>
             <div className="rail-actions">
               <Button variant="soft" onClick={props.onImport}>
@@ -1072,7 +1182,6 @@ function Workspace(props: any) {
             >
               <Download size={17} />
             </IconButton>
-            <span className="zoom-readout">{Math.round((props.zoom ?? 1) * 100)}%</span>
             <span className={`save-state ${props.saving}`}>
               <span className="save-dot" />
               {props.saving === 'saving' ? 'Saving…' : props.saving === 'error' ? 'Save failed' : 'Saved'}
@@ -1091,11 +1200,11 @@ function Workspace(props: any) {
             annotations={props.annotations}
             selectedId={props.selectedAnnotation}
             tool={props.tool}
-            zoom={props.zoom}
             onChange={props.onChangeAnnotations}
             onSelect={props.onSelectAnnotation}
             onMessage={props.onMessage}
             stageRef={props.stageRef}
+            onTool={props.onTool}
           />
         ) : (
           <EmptyState
@@ -1418,6 +1527,112 @@ function Inspector({
   );
 }
 
+function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
+  const store = useAppStore();
+  const project = store.snapshot!.project;
+  const current = project.rounds.find((r) => r.id === store.activeRoundId)!;
+  const [action, setAction] = useState<'create' | 'rename' | 'duplicate' | 'archive' | null>(null);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function submit() {
+    if (!action || !name.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onFlush();
+      const snapshot = await window.imnota.editRound({
+        projectPath: store.snapshot!.projectPath,
+        roundId: current.id,
+        action,
+        name,
+      });
+      store.setProject(snapshot);
+      if (action === 'create' || action === 'duplicate') {
+        const roundId = snapshot.project.rounds.at(-1)!.id;
+        store.set({
+          activeRoundId: roundId,
+          activeScreenshotId:
+            snapshot.project.screenshots.find((shot) => shot.roundId === roundId)?.id ?? null,
+        });
+      }
+      setAction(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The feedback round could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="round-controls">
+      <label className="field">
+        <span className="field-label">Feedback round</span>
+        <select
+          aria-label="Feedback round"
+          value={store.activeRoundId}
+          onChange={(event) =>
+            store.set({
+              activeRoundId: event.target.value,
+              activeScreenshotId:
+                project.screenshots.find((shot) => shot.roundId === event.target.value)?.id ?? null,
+            })
+          }
+        >
+          {project.rounds.map((round) => (
+            <option key={round.id} value={round.id}>
+              {round.name}
+              {round.archived ? ' (archived)' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="round-actions">
+        {(['create', 'rename', 'duplicate', 'archive'] as const).map((item) => (
+          <Button
+            key={item}
+            variant="ghost"
+            onClick={() => {
+              setAction(item);
+              setName(
+                item === 'create'
+                  ? `Feedback ${project.rounds.length + 1}`
+                  : item === 'duplicate'
+                    ? `${current.name} copy`
+                    : current.name,
+              );
+            }}
+          >
+            {item === 'create'
+              ? 'New round'
+              : item === 'archive' && current.archived
+                ? 'Restore'
+                : item[0].toUpperCase() + item.slice(1)}
+          </Button>
+        ))}
+      </div>
+      {action && (
+        <Modal
+          title={`${action === 'archive' && current.archived ? 'Restore' : action} feedback round`}
+          description={
+            action === 'archive'
+              ? 'Archiving keeps the screenshots and notes. Archived rounds remain available in the selector.'
+              : 'Each round keeps its own screenshots, annotations and notes.'
+          }
+          onClose={() => {
+            if (!busy) setAction(null);
+          }}
+        >
+          <TextInput label="Round name" value={name} onChange={(event) => setName(event.target.value)} />
+          {error && <p role="alert">{error}</p>}
+          <Button busy={busy} disabled={!name.trim()} onClick={() => void submit()}>
+            Save round
+          </Button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function ContextBuilder({
   buildMarkdown,
   onExport,
@@ -1465,6 +1680,7 @@ function ContextBuilder({
         <div className="context-intro">
           <span className="eyebrow">ASSEMBLE A BRIEF</span>
           <h1>Context Builder</h1>
+          <p>Current round: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
           <p>Choose the evidence an AI agent should see, then copy or export a clean Markdown brief.</p>
         </div>
         <TextArea
@@ -1489,6 +1705,14 @@ function ContextBuilder({
           onChange={(event) => updatePrefs({ technicalConstraints: event.target.value })}
         />
         <div className="context-settings">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={store.exportAllRounds}
+              onChange={(event) => store.set({ exportAllRounds: event.target.checked })}
+            />
+            Export all feedback rounds
+          </label>
           <span className="section-label">Package contents</span>
           <label className="check-row">
             <input
@@ -1539,7 +1763,12 @@ function ContextBuilder({
             <h2>{busy ? 'Building preview…' : 'context.md'}</h2>
           </div>
           <span className="preview-count">
-            {project.screenshots.filter((s) => s.includeInExport).length} references
+            {
+              project.screenshots.filter(
+                (s) => s.includeInExport && (store.exportAllRounds || s.roundId === store.activeRoundId),
+              ).length
+            }{' '}
+            references
           </span>
         </div>
         <pre className="markdown-preview">
@@ -1560,6 +1789,7 @@ function SettingsView() {
         <p>Imnota keeps preferences local to this device and never sends project data anywhere.</p>
       </div>
       <div className="settings-grid">
+        <UpdateControl />
         <div className="settings-section">
           <h2>General</h2>
           <label className="field">
