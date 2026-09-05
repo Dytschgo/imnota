@@ -59,6 +59,9 @@ jobs:
       - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Verify packaged Mac application
+        if: matrix.os == 'macos-latest'
+        run: bash scripts/verify-mac.sh
       - uses: actions/upload-artifact@v4
         with:
           name: imnota-${{ matrix.os }}

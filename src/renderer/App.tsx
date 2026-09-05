@@ -555,8 +555,10 @@ export default function App() {
                   dataUrl,
                 });
                 showToast('Annotated PNG saved in the project exports folder.');
-              } catch {
-                setError('The PNG could not be exported. Check the workspace and try again.');
+              } catch (err) {
+                setError(
+                  `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
+                );
               }
             }}
             onImport={() => fileInputRef.current?.click()}

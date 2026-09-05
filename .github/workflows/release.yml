@@ -45,15 +45,7 @@ jobs:
       - name: Verify and launch the macOS release archive
         if: matrix.platform == 'macos'
         shell: bash
-        run: |
-          set -euo pipefail
-          archive="$(find release -maxdepth 1 -name '*-mac.zip' -print -quit)"
-          test -n "$archive"
-          destination="$(mktemp -d)"
-          ditto -x -k "$archive" "$destination"
-          codesign --verify --deep --strict "$destination/Imnota.app"
-          lipo -verify_arch arm64 x86_64 "$destination/Imnota.app/Contents/MacOS/Imnota"
-          node scripts/smoke.mjs "$destination/Imnota.app/Contents/MacOS/Imnota"
+        run: bash scripts/verify-mac.sh
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}

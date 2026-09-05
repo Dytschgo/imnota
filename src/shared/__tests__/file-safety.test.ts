@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, readdir, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,7 +34,7 @@ describe('filesystem and IPC boundaries', () => {
     );
   });
   it('writes complete JSON under contention and cleans temporary files', async () => {
-    const folder = await mkdtemp(path.join(tmpdir(), 'imnota-write-test-'));
+    const folder = await realpath(await mkdtemp(path.join(tmpdir(), 'imnota-write-test-')));
     try {
       const target = path.join(folder, 'project.json');
       await Promise.all(
@@ -47,8 +47,8 @@ describe('filesystem and IPC boundaries', () => {
     }
   });
   it('blocks directory junctions before writing outside the workspace', async () => {
-    const folder = await mkdtemp(path.join(tmpdir(), 'imnota-link-test-'));
-    const outside = await mkdtemp(path.join(tmpdir(), 'imnota-outside-test-'));
+    const folder = await realpath(await mkdtemp(path.join(tmpdir(), 'imnota-link-test-')));
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), 'imnota-outside-test-')));
     try {
       await symlink(outside, path.join(folder, 'exports'), process.platform === 'win32' ? 'junction' : 'dir');
       await expect(assertNoLinks(path.join(folder, 'exports', 'context.md'))).rejects.toThrow('Linked');

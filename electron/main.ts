@@ -846,7 +846,7 @@ app.whenReady().then(async () => {
         'exports',
         performanceProject.screenshots[0].storedFilename.replace(/\.[^.]+$/, '') + '-annotated.png',
       );
-      for (let attempt = 0; attempt < 100 && !existsSync(exportedPng); attempt++)
+      for (let attempt = 0; attempt < 400 && !existsSync(exportedPng); attempt++)
         await new Promise((resolve) => setTimeout(resolve, 50));
       const pngSize = nativeImage.createFromPath(exportedPng).getSize();
       if (pngSize.width < 900 || pngSize.width > 1020 || pngSize.height < 500 || pngSize.height > 580)
@@ -867,6 +867,12 @@ app.whenReady().then(async () => {
       app.exit(0);
     } catch (error) {
       console.error(error);
+      console.error(
+        'Renderer state:',
+        await mainWindow!.webContents.executeJavaScript(
+          `JSON.stringify({ error: document.querySelector('.error-banner')?.textContent, toast: document.querySelector('[role="status"]')?.textContent, canvas: document.querySelector('.canvas-meta')?.textContent, title: document.querySelector('.topbar')?.textContent })`,
+        ),
+      );
       if (process.env.IMNOTA_SMOKE_SCREENSHOT)
         await fs.writeFile(
           process.env.IMNOTA_SMOKE_SCREENSHOT,
