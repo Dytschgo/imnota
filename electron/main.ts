@@ -1054,9 +1054,16 @@ app.whenReady().then(async () => {
         await delay();
         if (canvas().width <= afterRail + 100) throw new Error('Collapsing inspector did not expand canvas');
         const afterInspector = canvas().width;
+        if (!document.querySelector('.sidebar [aria-label="Check for app updates"]') || !document.querySelector('.sidebar [aria-label="Hide navigation"]')) throw new Error('Navigation controls must be inside sidebar');
+        document.querySelector('.sidebar [aria-label="Hide navigation"]').focus();
         document.querySelector('[aria-label="Hide navigation"]').click();
         await delay();
         if (canvas().width <= afterInspector + 100) throw new Error('Collapsing navigation did not expand canvas');
+        if (document.activeElement?.getAttribute('aria-label') !== 'Show navigation') throw new Error('Collapse control lost keyboard focus');
+        if (!document.querySelector('.sidebar-collapsed [aria-label="Check for app updates"]')) throw new Error('Refresh must remain accessible when sidebar collapsed');
+        document.querySelector('.sidebar-collapsed [aria-label="Check for app updates"]').click();
+        await delay();
+        if ((await window.imnota.getUpdateStatus()).state !== 'idle') throw new Error('Sidebar refresh failed in offline smoke mode');
         document.querySelector('[aria-label="Show navigation"]').click();
         document.querySelector('[aria-label="Toggle inspector"]').click();
         document.querySelector('[aria-label="Expand screenshot list"]').click();

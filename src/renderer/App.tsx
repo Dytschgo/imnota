@@ -503,41 +503,8 @@ export default function App() {
         if (hasProject) void handleDrop(event);
       }}
     >
-      {store.navigationOpen && <Sidebar />}
+      {renderSidebar()}
       <main className="main-shell">
-        <div className="navigation-toggle">
-          <IconButton
-            label="Check for app updates"
-            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
-            onClick={async () => {
-              try {
-                await window.imnota.checkForUpdates();
-                const status = await window.imnota.getUpdateStatus();
-                showToast(
-                  status.message ??
-                    (status.state === 'not-available'
-                      ? 'You’re on the latest version.'
-                      : status.state === 'available'
-                        ? `Imnota ${status.version} is available. Open Settings for update options.`
-                        : status.state === 'downloaded'
-                          ? 'Update ready. Restart to install.'
-                          : 'Checking app updates…'),
-                );
-              } catch {
-                setError('Could not check for updates. Check your connection and try again.');
-              }
-            }}
-          >
-            <RefreshCw size={16} />
-          </IconButton>
-          <IconButton
-            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
-            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
-          >
-            <PanelLeft size={16} />
-          </IconButton>
-          {!store.navigationOpen && <Logo compact />}
-        </div>
         <Topbar
           onNew={() => setModal('new')}
           onOpen={async () => {
@@ -790,58 +757,95 @@ export default function App() {
     </div>
   );
 
-  function Sidebar() {
+  function renderSidebar() {
     const nav = [
       { id: 'projects', label: 'Projects', icon: Layers3 },
       { id: 'recent', label: 'Recent', icon: BookOpen },
       { id: 'favourites', label: 'Favourites', icon: Heart },
     ];
     return (
-      <aside className="sidebar">
+      <aside
+        className={`sidebar ${store.navigationOpen ? '' : 'sidebar-collapsed'}`}
+        aria-label="Side navigation"
+      >
         <div className="sidebar-top">
-          <Logo />
+          <Logo compact={!store.navigationOpen} />
         </div>
-        <nav aria-label="Primary">
-          <span className="nav-label">Library</span>
-          {nav.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              className={`nav-item ${store.view === id ? 'active' : ''}`}
-              onClick={() =>
-                store.set({
-                  view: id as any,
-                  snapshot:
-                    id === 'projects' || id === 'recent' || id === 'favourites' ? null : store.snapshot,
-                })
+        <div className="sidebar-controls">
+          <IconButton
+            label="Check for app updates"
+            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
+            onClick={async () => {
+              try {
+                await window.imnota.checkForUpdates();
+                const status = await window.imnota.getUpdateStatus();
+                showToast(
+                  status.message ??
+                    (status.state === 'not-available'
+                      ? 'You’re on the latest version.'
+                      : status.state === 'available'
+                        ? `Imnota ${status.version} is available. Open Settings for update options.`
+                        : status.state === 'downloaded'
+                          ? 'Update ready. Restart to install.'
+                          : 'Checking app updates…'),
+                );
+              } catch {
+                setError('Could not check for updates. Check your connection and try again.');
               }
-            >
-              <Icon size={16} />
-              {label}
-              {id === 'favourites' && store.projects.filter((p) => p.favourite).length > 0 && (
-                <span className="nav-count">{store.projects.filter((p) => p.favourite).length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-spacer" />
-        <nav>
-          <span className="nav-label">Workspace</span>
-          <button
-            className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
-            onClick={() => store.set({ view: 'settings', snapshot: null })}
+            }}
           >
-            <Settings2 size={16} />
-            Settings
-          </button>
-          <button className="nav-item" onClick={() => setModal('shortcuts')}>
-            <Keyboard size={16} />
-            Shortcuts <kbd>{platformKey} /</kbd>
-          </button>
-          <button className="nav-item" onClick={() => setModal('about')}>
-            <Info size={16} />
-            About
-          </button>
-        </nav>
+            <RefreshCw size={16} />
+          </IconButton>
+          <IconButton
+            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
+            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
+          >
+            <PanelLeft size={16} />
+          </IconButton>
+        </div>
+        <div className="sidebar-links" hidden={!store.navigationOpen}>
+          <nav aria-label="Primary">
+            <span className="nav-label">Library</span>
+            {nav.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                className={`nav-item ${store.view === id ? 'active' : ''}`}
+                onClick={() =>
+                  store.set({
+                    view: id as any,
+                    snapshot:
+                      id === 'projects' || id === 'recent' || id === 'favourites' ? null : store.snapshot,
+                  })
+                }
+              >
+                <Icon size={16} />
+                {label}
+                {id === 'favourites' && store.projects.filter((p) => p.favourite).length > 0 && (
+                  <span className="nav-count">{store.projects.filter((p) => p.favourite).length}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-spacer" />
+          <nav>
+            <span className="nav-label">Workspace</span>
+            <button
+              className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
+              onClick={() => store.set({ view: 'settings', snapshot: null })}
+            >
+              <Settings2 size={16} />
+              Settings
+            </button>
+            <button className="nav-item" onClick={() => setModal('shortcuts')}>
+              <Keyboard size={16} />
+              Shortcuts <kbd>{platformKey} /</kbd>
+            </button>
+            <button className="nav-item" onClick={() => setModal('about')}>
+              <Info size={16} />
+              About
+            </button>
+          </nav>
+        </div>
       </aside>
     );
   }

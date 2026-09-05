@@ -10,7 +10,7 @@ This update applies the explicit feedback from the second set of screenshots:
 - Collapse status, priority and tags under Screenshot details.
 - Give the Line tool a line icon instead of a rectangle icon.
 
-The screenshot references mention moving controls with “goes here”, “instead of here” and “This should move to the Side Nav”. The supplied images do not show those annotations or a clear target. Those placement changes are pending clarification; no relocation is inferred from an unmarked screenshot.
+Placement clarified: the refresh and sidebar-collapse controls sit in the side navigation beneath the logo. Collapsing leaves a narrow rail so refresh and expand remain accessible. The annotation toolbar stays above the canvas. The macOS traffic-light safe area remains unchanged.
 
 Validation covers a single editor, preserved older fields, plain-text rendering, export labels and old export preferences, plus the Electron save/reopen workflow. This is a source update, not a new published release.
 
