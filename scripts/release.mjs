@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,7 +48,7 @@ function nextVersion(currentVersion, request) {
   if (/^\d+\.\d+\.\d+$/.test(request)) {
     const explicit = parseVersion(request);
     if (explicit.every((part, index) => part === current[index])) {
-      throw new Error(`Version ${request} is already the current version`);
+      return request;
     }
     for (let index = 0; index < current.length; index += 1) {
       if (explicit[index] > current[index]) return request;
@@ -70,17 +70,14 @@ function nextVersion(currentVersion, request) {
   return formatVersion(next);
 }
 
-function writePackageVersion(version) {
-  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
-  packageJson.version = version;
-  const temporaryPath = `${packagePath}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
-  renameSync(temporaryPath, packagePath);
-}
-
 const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
 const version = nextVersion(packageJson.version, requestedVersion);
 const tag = `v${version}`;
+if (!dryRun && version !== packageJson.version) {
+  throw new Error(
+    `Prepare version ${version} in package.json through a reviewed pull request first. After it merges, run pnpm release ${version} from main. Branch protections are not bypassed.`,
+  );
+}
 
 if (capture('git', ['status', '--porcelain'])) {
   throw new Error('The working tree is not clean. Commit or stash changes before releasing.');
@@ -105,6 +102,9 @@ if (
 command('git', ['fetch', 'origin', 'main']);
 command(process.execPath, ['scripts/secret-scan.mjs']);
 command('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD']);
+if (capture('git', ['rev-parse', 'HEAD']) !== capture('git', ['rev-parse', 'origin/main'])) {
+  throw new Error('Release only the exact reviewed origin/main commit. Pull main before releasing.');
+}
 const remoteTag = command('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`], {
   capture: true,
   allowFailure: true,
@@ -123,15 +123,14 @@ for (const script of ['format:check', 'lint', 'typecheck', 'test', 'build']) {
 }
 
 if (dryRun) {
-  console.log(`Dry run complete. Would commit, tag ${tag}, and push main plus ${tag}.`);
+  console.log(
+    `Dry run complete. Version ${version} must be merged through a reviewed PR before its tag can be published.`,
+  );
   process.exit(0);
 }
 
-writePackageVersion(version);
-command('git', ['add', 'package.json']);
-command('git', ['commit', '-m', `release: ${tag}`]);
 command('git', ['tag', '-a', tag, '-m', `Imnota ${tag}`]);
-command('git', ['push', '--atomic', 'origin', 'main', `refs/tags/${tag}`]);
+command('git', ['push', 'origin', `refs/tags/${tag}`]);
 
 console.log(
   `Release ${tag} pushed. GitHub Actions will publish it at https://github.com/Dytschgo/imnota/releases/tag/${tag}`,

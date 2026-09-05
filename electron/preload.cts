@@ -13,7 +13,8 @@ const bridge: ImnotaBridge = {
   saveScreenshotContent: (input) => ipcRenderer.invoke('projects:save-screenshot', input),
   loadScreenshotContent: (input) => ipcRenderer.invoke('screenshots:load-content', input),
   importImageFiles: (input) => ipcRenderer.invoke('screenshots:import-files', input),
-  pasteImage: (projectPath) => ipcRenderer.invoke('screenshots:paste', projectPath),
+  pasteImage: (projectPath, roundId) => ipcRenderer.invoke('screenshots:paste', projectPath, roundId),
+  editRound: (input) => ipcRenderer.invoke('rounds:edit', input),
   duplicateScreenshot: (input) => ipcRenderer.invoke('screenshots:duplicate', input),
   duplicateProject: (projectPath) => ipcRenderer.invoke('projects:duplicate', projectPath),
   archiveProject: (projectPath) => ipcRenderer.invoke('projects:archive', projectPath),
@@ -22,6 +23,7 @@ const bridge: ImnotaBridge = {
   exportPackage: (input) => ipcRenderer.invoke('exports:package', input),
   openPath: (targetPath) => ipcRenderer.invoke('system:open-path', targetPath),
   copyText: (text) => ipcRenderer.invoke('system:copy-text', text),
+  copyImage: (dataUrl) => ipcRenderer.invoke('system:copy-image', dataUrl),
   saveRecovery: (input) => ipcRenderer.invoke('recovery:save', input),
   clearRecovery: (projectPath) => ipcRenderer.invoke('recovery:clear', projectPath),
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),
@@ -34,6 +36,8 @@ const bridge: ImnotaBridge = {
     return () => ipcRenderer.removeListener('update:status', listener);
   },
   downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  getUpdateStatus: () => ipcRenderer.invoke('update:status'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
 };
 

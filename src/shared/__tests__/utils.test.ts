@@ -9,7 +9,7 @@ describe('Imnota data helpers', () => {
   });
   it('creates a versioned project with safe defaults', () => {
     const project = emptyProject('Review', 'A brief');
-    expect(project.schemaVersion).toBe(1);
+    expect(project.schemaVersion).toBe(2);
     expect(project.screenshots).toEqual([]);
     expect(project.exportPreferences.includeAnnotationMetadata).toBe(true);
   });

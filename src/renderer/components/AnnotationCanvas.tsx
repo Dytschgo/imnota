@@ -15,6 +15,7 @@ import type Konva from 'konva';
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
 import { createId } from '../../shared/utils';
 import { pixelatedRegion } from '../pixelate';
+import { zoomAt } from '../viewport';
 
 const COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -61,9 +62,9 @@ function defaultAnnotation(
   if (kind === 'text')
     return {
       ...base,
-      text: 'Mark what matters',
-      fill: '#ffffff',
-      stroke: '#ffffff',
+      text: 'Text',
+      fill: COLORS.red,
+      stroke: COLORS.red,
       fontSize: 24,
       width: 260,
       height: 42,
@@ -88,21 +89,21 @@ export function AnnotationCanvas({
   annotations,
   selectedId,
   tool,
-  zoom = 1,
   onChange,
   onSelect,
   onMessage,
   stageRef,
+  onTool,
 }: {
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedId: string | null;
   tool: AnnotationKind | 'select' | 'eraser';
-  zoom?: number;
   onChange: (annotations: Annotation[]) => void;
   onSelect: (id: string | null) => void;
   onMessage?: (message: string) => void;
   stageRef: MutableRefObject<Konva.Stage | null>;
+  onTool?: (tool: 'select') => void;
 }) {
   void onMessage;
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,69 @@ export function AnnotationCanvas({
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [draft, setDraft] = useState<Annotation | null>(null);
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editingId = editing?.id;
+  useEffect(() => {
+    if (editingId) {
+      editorRef.current?.focus();
+      editorRef.current?.select();
+    }
+  }, [editingId]);
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.matches('input, textarea, select') ||
+          event.target.isContentEditable ||
+          event.target.closest('[role="dialog"]'))
+      )
+        return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setSpaceHeld(true);
+      }
+      if (event.key === 'Escape') {
+        setDraft(null);
+        pan.current = null;
+        onSelect(null);
+      }
+      if (['+', '=', '-'].includes(event.key)) {
+        event.preventDefault();
+        setViewport((v) =>
+          zoomAt(v, { x: size.width / 2, y: size.height / 2 }, event.key === '-' ? 1 / 1.1 : 1.1),
+        );
+      }
+      if (event.key === '1' && image)
+        setViewport({ x: (size.width - image.width) / 2, y: (size.height - image.height) / 2, scale: 1 });
+      if (event.key === '0' && image) {
+        const fit = Math.max(
+          0.02,
+          Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1),
+        );
+        setViewport({
+          x: (size.width - image.width * fit) / 2,
+          y: (size.height - image.height * fit) / 2,
+          scale: fit,
+        });
+      }
+    };
+    const up = () => {
+      setSpaceHeld(false);
+      pan.current = null;
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', up);
+    };
+  }, [image, size, onSelect]);
   useEffect(() => {
     if (!image?.dataUrl) {
       setImageObj(null);
@@ -133,13 +197,21 @@ export function AnnotationCanvas({
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
-  const scale = useMemo(
-    () =>
-      image ? Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1) * zoom : 1,
-    [image, size, zoom],
-  );
-  const canvasWidth = image ? image.width * scale : size.width - 64;
-  const canvasHeight = image ? image.height * scale : size.height - 64;
+  useEffect(() => {
+    if (!image) return;
+    const fit = Math.max(
+      0.02,
+      Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1),
+    );
+    setViewport({
+      x: (size.width - image.width * fit) / 2,
+      y: (size.height - image.height * fit) / 2,
+      scale: fit,
+    });
+  }, [image, size]);
+  const scale = 1;
+  const canvasWidth = size.width;
+  const canvasHeight = size.height;
   const pixelated = useMemo(
     () =>
       new Map(
@@ -160,9 +232,21 @@ export function AnnotationCanvas({
   }, [selectedId, annotations]);
   function point(event: Konva.KonvaEventObject<MouseEvent>) {
     const p = event.target.getStage()?.getPointerPosition();
-    return p ? { x: p.x / scale, y: p.y / scale } : null;
+    return p ? { x: (p.x - viewport.x) / viewport.scale, y: (p.y - viewport.y) / viewport.scale } : null;
   }
   function onDown(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (editing) return;
+    if (
+      event.evt.button === 1 ||
+      spaceHeld ||
+      (tool === 'select' && event.target === event.target.getStage())
+    ) {
+      event.evt.preventDefault();
+      const pointer = event.target.getStage()?.getPointerPosition();
+      if (pointer) pan.current = { ...pointer, originX: viewport.x, originY: viewport.y };
+      return;
+    }
+    if (event.evt.button !== 0 || event.target.getParent()?.className === 'Transformer') return;
     if (tool === 'select') return;
     const p = point(event);
     if (!p) return;
@@ -175,7 +259,18 @@ export function AnnotationCanvas({
     setDraft(defaultAnnotation(tool, p.x, p.y, p.x + 2, p.y + 2, annotations.length));
   }
   function onMove(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (pan.current) {
+      const p = event.target.getStage()?.getPointerPosition();
+      if (p)
+        setViewport((v) => ({
+          ...v,
+          x: pan.current!.originX + p.x - pan.current!.x,
+          y: pan.current!.originY + p.y - pan.current!.y,
+        }));
+      return;
+    }
     if (!draft) return;
+    if (['text', 'callout', 'step'].includes(draft.kind)) return;
     const p = point(event);
     if (!p) return;
     if (draft.kind === 'pen')
@@ -195,6 +290,10 @@ export function AnnotationCanvas({
     else setDraft({ ...draft, width: p.x - draft.x, height: p.y - draft.y });
   }
   function onUp() {
+    if (pan.current) {
+      pan.current = null;
+      return;
+    }
     if (!draft) return;
     if (
       Math.abs(draft.width ?? 0) < 4 &&
@@ -208,13 +307,16 @@ export function AnnotationCanvas({
       ...annotations,
       {
         ...draft,
-        x: Math.min(draft.x, draft.x + (draft.width ?? 0)),
-        y: Math.min(draft.y, draft.y + (draft.height ?? 0)),
+        x: draft.points ? draft.x : Math.min(draft.x, draft.x + (draft.width ?? 0)),
+        y: draft.points ? draft.y : Math.min(draft.y, draft.y + (draft.height ?? 0)),
         width: Math.abs(draft.width ?? 0),
         height: Math.abs(draft.height ?? 0),
       },
     ]);
     onSelect(draft.id);
+    if (draft.kind === 'text' || draft.kind === 'callout')
+      setEditing({ id: draft.id, text: draft.text ?? '' });
+    onTool?.('select');
     setDraft(null);
   }
   function update(id: string, patch: Partial<Annotation>) {
@@ -228,7 +330,14 @@ export function AnnotationCanvas({
       y: a.y * scale,
       rotation: a.rotation,
       opacity: a.kind === 'blur' ? 1 : a.opacity,
-      draggable: tool === 'select',
+      draggable: tool === 'select' && !spaceHeld && !editing,
+      visible: editing?.id !== a.id,
+      onDblClick: () => {
+        if (a.kind === 'text' || a.kind === 'callout') setEditing({ id: a.id, text: a.text ?? '' });
+      },
+      onDblTap: () => {
+        if (a.kind === 'text' || a.kind === 'callout') setEditing({ id: a.id, text: a.text ?? '' });
+      },
       onClick: () => onSelect(a.id),
       onTap: () => onSelect(a.id),
       onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) =>
@@ -363,10 +472,19 @@ export function AnnotationCanvas({
     );
   }
   return (
-    <div className="canvas-wrap" ref={wrapRef}>
+    <div
+      className="canvas-wrap"
+      style={{ cursor: spaceHeld ? 'grab' : tool === 'select' ? 'default' : 'crosshair' }}
+      ref={wrapRef}
+      data-image-x={viewport.x}
+      data-image-y={viewport.y}
+      data-image-scale={viewport.scale}
+    >
       <div className="canvas-meta">
         <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
-        <span>{tool === 'select' ? 'Select and move' : `Tool: ${tool}`}</span>
+        <span>
+          {Math.round(viewport.scale * 100)}% · {tool === 'select' ? 'Select and move' : `Tool: ${tool}`}
+        </span>
       </div>
       {imageObj ? (
         <Stage
@@ -377,49 +495,62 @@ export function AnnotationCanvas({
           onMouseDown={onDown}
           onMouseMove={onMove}
           onMouseUp={onUp}
+          onMouseLeave={() => {
+            pan.current = null;
+          }}
+          onWheel={(event) => {
+            event.evt.preventDefault();
+            if (event.evt.ctrlKey || event.evt.metaKey) {
+              const p = event.target.getStage()?.getPointerPosition();
+              if (!p) return;
+              setViewport((v) => zoomAt(v, p, Math.exp(-event.evt.deltaY * 0.01)));
+            } else setViewport((v) => ({ ...v, x: v.x - event.evt.deltaX, y: v.y - event.evt.deltaY }));
+          }}
           onClick={(event) => {
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
           <Layer>
-            <KonvaImage image={imageObj} width={canvasWidth} height={canvasHeight} listening={false} />
-            {[...annotations].sort((a, b) => a.zIndex - b.zIndex).map(renderAnnotation)}
-            {draft && renderAnnotation(draft)}
-            <Transformer
-              ref={transformerRef}
-              rotateEnabled={
-                !['crop', 'pixelate'].includes(annotations.find((a) => a.id === selectedId)?.kind ?? '')
-              }
-              keepRatioEnabled={false}
-              borderStroke="#6857f5"
-              anchorStroke="#6857f5"
-              anchorFill="#fff"
-              anchorSize={10}
-              onTransformEnd={() => {
-                const node = transformerRef.current?.nodes()[0];
-                if (node && selectedId) {
-                  const selected = annotations.find((a) => a.id === selectedId);
-                  const width = Math.max(2, (selected?.width ?? node.width() / scale) * node.scaleX());
-                  const height = Math.max(2, (selected?.height ?? node.height() / scale) * node.scaleY());
-                  update(selectedId, {
-                    x: node.x() / scale - (selected?.kind === 'ellipse' ? width / 2 : 0),
-                    y: node.y() / scale - (selected?.kind === 'ellipse' ? height / 2 : 0),
-                    rotation: node.rotation(),
-                    width,
-                    height,
-                    ...(selected?.points
-                      ? {
-                          points: selected.points.map(
-                            (point, index) => point * (index % 2 === 0 ? node.scaleX() : node.scaleY()),
-                          ),
-                        }
-                      : {}),
-                  });
-                  node.scaleX(1);
-                  node.scaleY(1);
+            <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
+              <KonvaImage image={imageObj} width={image?.width} height={image?.height} listening={false} />
+              {[...annotations].sort((a, b) => a.zIndex - b.zIndex).map(renderAnnotation)}
+              {draft && renderAnnotation(draft)}
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled={
+                  !['crop', 'pixelate'].includes(annotations.find((a) => a.id === selectedId)?.kind ?? '')
                 }
-              }}
-            />
+                keepRatioEnabled={false}
+                borderStroke="#6857f5"
+                anchorStroke="#6857f5"
+                anchorFill="#fff"
+                anchorSize={10}
+                onTransformEnd={() => {
+                  const node = transformerRef.current?.nodes()[0];
+                  if (node && selectedId) {
+                    const selected = annotations.find((a) => a.id === selectedId);
+                    const width = Math.max(2, (selected?.width ?? node.width() / scale) * node.scaleX());
+                    const height = Math.max(2, (selected?.height ?? node.height() / scale) * node.scaleY());
+                    update(selectedId, {
+                      x: node.x() / scale - (selected?.kind === 'ellipse' ? width / 2 : 0),
+                      y: node.y() / scale - (selected?.kind === 'ellipse' ? height / 2 : 0),
+                      rotation: node.rotation(),
+                      width,
+                      height,
+                      ...(selected?.points
+                        ? {
+                            points: selected.points.map(
+                              (point, index) => point * (index % 2 === 0 ? node.scaleX() : node.scaleY()),
+                            ),
+                          }
+                        : {}),
+                    });
+                    node.scaleX(1);
+                    node.scaleY(1);
+                  }
+                }}
+              />
+            </Group>
           </Layer>
         </Stage>
       ) : (
@@ -427,7 +558,47 @@ export function AnnotationCanvas({
           <span>Import a screenshot to begin marking context.</span>
         </div>
       )}
-      <div className="canvas-hint">Drag to draw. Select an annotation to move, resize or delete.</div>
+      {editing &&
+        (() => {
+          const a = annotations.find((item) => item.id === editing.id);
+          if (!a) return null;
+          return (
+            <textarea
+              ref={editorRef}
+              aria-label="Edit annotation text"
+              className="canvas-text-editor"
+              value={editing.text}
+              style={{
+                left: viewport.x + a.x * viewport.scale,
+                top: viewport.y + a.y * viewport.scale,
+                width: Math.max(160, (a.width ?? 260) * viewport.scale),
+                minHeight: Math.max(60, (a.height ?? 42) * viewport.scale),
+                fontSize: Math.max(12, (a.fontSize ?? 24) * viewport.scale),
+                transform: `rotate(${a.rotation ?? 0}deg)`,
+              }}
+              onChange={(event) => setEditing({ ...editing, text: event.target.value })}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setEditing(null);
+                }
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  update(a.id, { text: editing.text });
+                  setEditing(null);
+                }
+              }}
+              onBlur={() => {
+                update(a.id, { text: editing.text });
+                setEditing(null);
+              }}
+            />
+          );
+        })()}
+      <div className="canvas-hint">
+        Space + drag to pan · Pinch to zoom · 0 fit · 1 actual size · Double-click text to edit
+      </div>
     </div>
   );
 }

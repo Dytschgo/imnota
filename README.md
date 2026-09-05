@@ -83,6 +83,8 @@ corepack pnpm release major
 corepack pnpm release 0.2.0
 ```
 
+With protected `main`, prepare the new `package.json` version and changelog in a PR and obtain independent approval first. After merging and pulling `main`, publish that exact version (for example `corepack pnpm release 0.2.0`). The release command only tags the reviewed `origin/main` commit; it does not bypass review or push version changes directly to main. `patch`/`minor`/`major` indicate the next version to prepare and report that requirement when it is not yet merged.
+
 Use `--dry-run` to validate the repository and release checks without changing files or pushing anything:
 
 ```bash
@@ -91,7 +93,7 @@ corepack pnpm release patch --dry-run
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
-Packaged clients check the repository releases when they launch. Windows and AppImage clients download updates and offer a restart action. This ad-hoc-signed Mac release shows a download link for newer versions; automatic Mac installation requires Apple Developer signing, which is not configured yet. Branch and pull request builds never publish releases.
+Packaged clients check the repository releases when they launch. Use the refresh icon in the top bar or Settings → App updates → Check for updates to check again immediately. Windows and AppImage clients download updates and offer a restart action. This ad-hoc-signed Mac release shows a download link for newer versions; automatic Mac installation requires Apple Developer signing, which is not configured yet. Branch and pull request builds never publish releases.
 
 ## Project structure
 
@@ -111,13 +113,22 @@ An Imnota workspace is a folder selected by the user. Each project contains:
 ```text
 My Project/
   project.json
-  screenshots/
-  annotations/
-  notes/
+  rounds/
+    001-first-feedback/
+      screenshots/
+      annotations/
+      notes/
+      exports/
   exports/
 ```
 
 `project.json` is versioned with `schemaVersion`. Annotations are JSON, notes are Markdown, and the original screenshots are never overwritten by the annotation layer. See [docs/data-format.md](docs/data-format.md).
+
+Feedback rounds keep iterations separate inside a project. Create, rename, duplicate, archive or restore them from the screenshot panel. Copy/export uses the current round unless “Export all feedback rounds” is enabled in Context Builder. Existing version-1 projects retain their original files and a metadata backup when migrated.
+
+Pan with Select on the image, Space-drag, middle-drag or trackpad scrolling. Pinch or Ctrl/Command-wheel zooms at the cursor. Use `0` to fit and `1` for actual size. Double-click text to edit; Enter saves, Shift+Enter adds a line, Escape cancels.
+
+“Copy AI context” copies the Markdown and prepares annotated PNGs. Its attachment checklist offers individual image-copy actions and the export folder. Paste the text first, then paste or attach the images: copying an image replaces clipboard text, and target AI applications differ in attachment support.
 
 ## Privacy and security
 

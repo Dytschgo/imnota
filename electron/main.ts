@@ -10,7 +10,6 @@ const { autoUpdater } = updater;
 import type {
   ExportRequest,
   ImagePayload,
-  NoteFields,
   ProjectData,
   ProjectListItem,
   ProjectSnapshot,
@@ -35,9 +34,41 @@ import {
   filenameSchema,
 } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { ensureRound, migrateRounds, screenshotPath } from './rounds.js';
+import { noteToMarkdown, parseNotesMarkdown } from '../src/shared/notes.js';
+import { createUpdateCheck } from './update-check.js';
+import type { UpdateStatus } from '../src/shared/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let updateStatus: UpdateStatus = { state: 'idle', currentVersion: app.getVersion() };
+function sendUpdate(status: UpdateStatus) {
+  updateStatus = { currentVersion: app.getVersion(), ...status };
+  mainWindow?.webContents.send('update:status', updateStatus);
+}
+const checkForUpdates = createUpdateCheck(
+  async () => {
+    if (!app.isPackaged || process.env.IMNOTA_SMOKE === '1') {
+      sendUpdate({ state: 'idle', message: 'Update checks are available in installed release builds.' });
+      return;
+    }
+    if (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') return;
+    sendUpdate({ state: 'checking' });
+    const result = await autoUpdater.checkForUpdates();
+    if (!result && updateStatus.state === 'checking')
+      sendUpdate({
+        state: 'idle',
+        message:
+          'Update checking is unavailable for this installation. Use the latest release download instead.',
+      });
+  },
+  () =>
+    sendUpdate({
+      state: 'error',
+      message:
+        'Could not check for updates. Check your connection and try again. Your projects are unchanged.',
+    }),
+);
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -74,6 +105,7 @@ async function assertProjectPath(projectPath: string): Promise<string> {
     'annotations',
     'notes',
     'exports',
+    'rounds',
     '.imnota-recovery.json',
   ])
     await assertNoLinks(path.join(resolved, name));
@@ -83,34 +115,13 @@ async function assertProjectPath(projectPath: string): Promise<string> {
 async function readProject(projectPath: string): Promise<ProjectData> {
   await assertNoLinks(path.join(projectPath, 'project.json'));
   const raw = await fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
-  const parsed = validateProject(JSON.parse(raw));
-  if (parsed.schemaVersion > 1)
-    throw new Error(
-      'This project was created by a newer version of Imnota. Update Imnota or make a backup before opening it.',
-    );
+  const parsed = await migrateRounds(projectPath, validateProject(JSON.parse(raw)));
   return {
     ...parsed,
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
     screenshots: [...parsed.screenshots].sort((a, b) => a.position - b.position),
   };
-}
-
-function noteToMarkdown(notes: NoteFields): string {
-  return Object.entries(notes)
-    .filter(([, value]) => value.trim())
-    .map(([key, value]) => `## ${key}\n\n${value.trim()}\n`)
-    .join('\n');
-}
-
-function parseNotesMarkdown(markdown: string): NoteFields {
-  const notes = { ...EMPTY_NOTES };
-  const re = /^## ([a-zA-Z]+)\s*\n\s*([\s\S]*?)(?=\n## |$)/gm;
-  for (const match of markdown.matchAll(re)) {
-    const key = match[1] as keyof NoteFields;
-    if (key in notes) notes[key] = match[2].trim();
-  }
-  return notes;
 }
 
 function imageType(filename: string): string {
@@ -128,7 +139,7 @@ async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
   const thumbnails: Record<string, string> = {};
   await Promise.all(
     project.screenshots.map(async (shot) => {
-      const filePath = path.join(projectPath, 'screenshots', shot.storedFilename);
+      const filePath = screenshotPath(projectPath, shot);
       await assertNoLinks(filePath);
       const stat = await fs.stat(filePath);
       const cached = thumbnailCache.get(filePath);
@@ -221,6 +232,7 @@ async function importOne(
   projectPath: string,
   sourcePath: string,
   originalFilename = path.basename(sourcePath),
+  roundId?: string,
 ): Promise<void> {
   const ext = path.extname(originalFilename).toLowerCase();
   if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext))
@@ -228,10 +240,17 @@ async function importOne(
   const image = nativeImage.createFromPath(sourcePath);
   if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
   const project = await readProject(projectPath);
+  const round = project.rounds.find((r) => r.id === (roundId ?? project.rounds[0].id));
+  if (!round || round.archived) throw new Error('Choose an active feedback round before importing.');
+  await ensureRound(projectPath, round.id);
   const storedFilename = await uniqueStoredName(projectPath, originalFilename);
-  await fs.copyFile(sourcePath, path.join(projectPath, 'screenshots', storedFilename));
+  await atomicWrite(
+    path.join(projectPath, 'rounds', round.id, 'screenshots', storedFilename),
+    await fs.readFile(sourcePath),
+  );
   const timestamp = nowIso();
   project.screenshots.push({
+    roundId: round.id,
     id: `shot_${crypto.randomUUID()}`,
     originalFilename,
     storedFilename,
@@ -243,8 +262,8 @@ async function importOne(
     tags: [],
     priority: 'medium',
     status: 'draft',
-    annotationFile: `annotations/${storedFilename}.json`,
-    notesFile: `notes/${storedFilename}.md`,
+    annotationFile: `rounds/${round.id}/annotations/${storedFilename}.json`,
+    notesFile: `rounds/${round.id}/notes/${storedFilename}.md`,
     originalWidth: image.getSize().width,
     originalHeight: image.getSize().height,
     includeInExport: true,
@@ -254,7 +273,7 @@ async function importOne(
 }
 
 async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Promise<ImagePayload> {
-  const filePath = path.join(projectPath, 'screenshots', screenshot.storedFilename);
+  const filePath = screenshotPath(projectPath, screenshot);
   await assertNoLinks(filePath);
   if (!isWithin(projectPath, filePath)) throw new Error('Image path is outside the project.');
   const image = nativeImage.createFromPath(filePath);
@@ -291,9 +310,24 @@ function registerIpc(): void {
     'screenshots:load-content': z.tuple([screenshotInput]),
     'screenshots:duplicate': z.tuple([screenshotInput]),
     'screenshots:import-files': z.tuple([
-      z.object({ projectPath: pathInput, paths: z.array(pathInput).min(1).max(50) }),
+      z.object({
+        projectPath: pathInput,
+        paths: z.array(pathInput).min(1).max(50),
+        roundId: filenameSchema.optional(),
+      }),
     ]),
-    'exports:annotated-image': z.tuple([imageExport.extend({ projectPath: pathInput })]),
+    'screenshots:paste': z.tuple([pathInput, filenameSchema.optional()]),
+    'rounds:edit': z.tuple([
+      z.object({
+        projectPath: pathInput,
+        action: z.enum(['create', 'rename', 'duplicate', 'archive']),
+        roundId: filenameSchema.optional(),
+        name: z.string().trim().min(1).max(120),
+      }),
+    ]),
+    'exports:annotated-image': z.tuple([
+      imageExport.extend({ projectPath: pathInput, roundId: filenameSchema.optional() }),
+    ]),
     'exports:package': z.tuple([
       z.object({
         projectPath: pathInput,
@@ -301,9 +335,11 @@ function registerIpc(): void {
         annotatedImages: z.array(imageExport).max(1000),
         includeOriginal: z.boolean(),
         includeAnnotations: z.boolean(),
+        roundId: filenameSchema.optional(),
       }),
     ]),
     'system:copy-text': z.tuple([z.string().max(2_000_000)]),
+    'system:copy-image': z.tuple([png]),
     'recovery:save': z.tuple([
       z.object({
         projectPath: pathInput,
@@ -313,6 +349,8 @@ function registerIpc(): void {
       }),
     ]),
     'update:download': z.tuple([]),
+    'update:check': z.tuple([]),
+    'update:status': z.tuple([]),
     'update:install': z.tuple([]),
   };
   const handle: typeof ipcMain.handle = (channel, listener) => {
@@ -381,6 +419,7 @@ function registerIpc(): void {
     await fs.mkdir(path.join(folder, 'annotations'), { recursive: true });
     await fs.mkdir(path.join(folder, 'notes'), { recursive: true });
     await fs.mkdir(path.join(folder, 'exports'), { recursive: true });
+    await ensureRound(folder, '001-first-feedback');
     await atomicWrite(
       path.join(folder, 'project.json'),
       JSON.stringify(emptyProject(input.name, input.description, input.tags), null, 2),
@@ -401,16 +440,24 @@ function registerIpc(): void {
   );
   handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
     const safePath = await assertProjectPath(projectPath);
+    validateProject(project);
     await atomicWrite(
       path.join(safePath, 'project.json'),
-      JSON.stringify({ ...project, schemaVersion: 1, updatedAt: nowIso() }, null, 2),
+      JSON.stringify({ ...project, schemaVersion: 2, updatedAt: nowIso() }, null, 2),
     );
   });
   handle('projects:save-screenshot', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    if (!project.screenshots.some((s) => s.id === input.screenshot.id))
-      throw new Error('Screenshot does not belong to this project.');
+    const trustedShot = project.screenshots.find((s) => s.id === input.screenshot.id);
+    if (!trustedShot) throw new Error('Screenshot does not belong to this project.');
+    input.screenshot = {
+      ...input.screenshot,
+      roundId: trustedShot.roundId,
+      storedFilename: trustedShot.storedFilename,
+      annotationFile: trustedShot.annotationFile,
+      notesFile: trustedShot.notesFile,
+    };
     project.screenshots = project.screenshots
       .map((s) => (s.id === input.screenshot.id ? { ...input.screenshot, updatedAt: nowIso() } : s))
       .sort((a, b) => a.position - b.position)
@@ -429,13 +476,10 @@ function registerIpc(): void {
       ),
     );
     await atomicWrite(
-      path.join(safePath, 'annotations', input.screenshot.annotationFile.split('/').pop()),
+      path.join(safePath, input.screenshot.annotationFile),
       JSON.stringify(input.annotations, null, 2),
     );
-    await atomicWrite(
-      path.join(safePath, 'notes', input.screenshot.notesFile.split('/').pop()),
-      noteToMarkdown(input.notes),
-    );
+    await atomicWrite(path.join(safePath, input.screenshot.notesFile), noteToMarkdown(input.notes));
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     await fs.unlink(path.join(safePath, '.imnota-recovery.json'));
   });
@@ -445,8 +489,8 @@ function registerIpc(): void {
     const screenshot = project.screenshots.find((shot) => shot.id === input.screenshot.id);
     if (!screenshot) throw new Error('Screenshot does not belong to this project.');
     input.screenshot = screenshot;
-    const annotationPath = path.join(safePath, 'annotations', path.basename(input.screenshot.annotationFile));
-    const notesPath = path.join(safePath, 'notes', path.basename(input.screenshot.notesFile));
+    const annotationPath = path.join(safePath, input.screenshot.annotationFile);
+    const notesPath = path.join(safePath, input.screenshot.notesFile);
     await assertNoLinks(annotationPath);
     await assertNoLinks(notesPath);
     const [image, annotationsRaw, notesRaw] = await Promise.all([
@@ -464,10 +508,10 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     if (!Array.isArray(input.paths) || input.paths.length > 50)
       throw new Error('Choose up to 50 screenshots at a time.');
-    for (const source of input.paths) await importOne(safePath, source);
+    for (const source of input.paths) await importOne(safePath, source, path.basename(source), input.roundId);
     return makeSnapshot(safePath);
   });
-  handle('screenshots:paste', async (_event, projectPath: string) => {
+  handle('screenshots:paste', async (_event, projectPath: string, roundId?: string) => {
     const safePath = await assertProjectPath(projectPath);
     const image = clipboard.readImage();
     if (image.isEmpty())
@@ -475,7 +519,7 @@ function registerIpc(): void {
     const filename = `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     const temp = path.join(app.getPath('temp'), filename);
     await fs.writeFile(temp, image.toPNG());
-    await importOne(safePath, temp, filename);
+    await importOne(safePath, temp, filename, roundId);
     await fs.unlink(temp).catch(() => undefined);
     return makeSnapshot(safePath);
   });
@@ -486,10 +530,10 @@ function registerIpc(): void {
     if (!source) throw new Error('Screenshot not found.');
     const ext = path.extname(source.storedFilename);
     const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
-    await assertNoLinks(path.join(safePath, 'screenshots', source.storedFilename));
+    await assertNoLinks(screenshotPath(safePath, source));
     for (const [original, destination, fallback] of [
-      [source.annotationFile, `annotations/${name}.json`, '[]'],
-      [source.notesFile, `notes/${name}.md`, ''],
+      [source.annotationFile, `rounds/${source.roundId}/annotations/${name}.json`, '[]'],
+      [source.notesFile, `rounds/${source.roundId}/notes/${name}.md`, ''],
     ]) {
       await assertNoLinks(path.join(safePath, original));
       const contents = await fs
@@ -501,8 +545,8 @@ function registerIpc(): void {
       await atomicWrite(path.join(safePath, destination), contents);
     }
     await fs.copyFile(
-      path.join(safePath, 'screenshots', source.storedFilename),
-      path.join(safePath, 'screenshots', name),
+      screenshotPath(safePath, source),
+      path.join(safePath, 'rounds', source.roundId, 'screenshots', name),
     );
     const timestamp = nowIso();
     project.screenshots.push({
@@ -514,11 +558,62 @@ function registerIpc(): void {
       position: project.screenshots.length,
       createdAt: timestamp,
       updatedAt: timestamp,
-      annotationFile: `annotations/${name}.json`,
-      notesFile: `notes/${name}.md`,
+      annotationFile: `rounds/${source.roundId}/annotations/${name}.json`,
+      notesFile: `rounds/${source.roundId}/notes/${name}.md`,
     });
     project.updatedAt = timestamp;
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
+    return makeSnapshot(safePath);
+  });
+  handle('rounds:edit', async (_event, input) => {
+    const safePath = await assertProjectPath(input.projectPath);
+    const project = await readProject(safePath);
+    const source = project.rounds.find((r) => r.id === input.roundId);
+    if (input.action !== 'create' && !source) throw new Error('Feedback round not found.');
+    if (input.action === 'rename') source!.name = input.name;
+    else if (input.action === 'archive') source!.archived = !source!.archived;
+    else {
+      const id = `${String(project.rounds.length + 1).padStart(3, '0')}-${slugify(input.name)}-${crypto.randomUUID().slice(0, 8)}`;
+      await ensureRound(safePath, id);
+      project.rounds.push({ id, name: input.name, archived: false, createdAt: nowIso() });
+      if (input.action === 'duplicate') {
+        for (const shot of project.screenshots.filter((s) => s.roundId === source!.id)) {
+          const storedFilename = `${String(project.screenshots.length + 1).padStart(3, '0')}-${sanitizeFilename(shot.originalFilename)}`;
+          const copy: ScreenshotRecord = {
+            ...shot,
+            id: `shot_${crypto.randomUUID()}`,
+            roundId: id,
+            storedFilename,
+            annotationFile: `rounds/${id}/annotations/${storedFilename}.json`,
+            notesFile: `rounds/${id}/notes/${storedFilename}.md`,
+            position: project.screenshots.length,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+          };
+          await assertNoLinks(screenshotPath(safePath, shot));
+          await atomicWrite(
+            screenshotPath(safePath, copy),
+            await fs.readFile(screenshotPath(safePath, shot)),
+          );
+          for (const [from, to, fallback] of [
+            [shot.annotationFile, copy.annotationFile, '[]'],
+            [shot.notesFile, copy.notesFile, ''],
+          ]) {
+            await assertNoLinks(path.join(safePath, from));
+            const content = await fs
+              .readFile(path.join(safePath, from), 'utf8')
+              .catch((error: NodeJS.ErrnoException) => {
+                if (error.code === 'ENOENT') return fallback;
+                throw error;
+              });
+            await atomicWrite(path.join(safePath, to), content);
+          }
+          project.screenshots.push(copy);
+        }
+      }
+    }
+    project.updatedAt = nowIso();
+    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(validateProject(project), null, 2));
     return makeSnapshot(safePath);
   });
   handle('projects:duplicate', async (_event, projectPath: string) => {
@@ -557,7 +652,12 @@ function registerIpc(): void {
   });
   handle('exports:annotated-image', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
-    const folder = path.join(safePath, 'exports');
+    const project = await readProject(safePath);
+    if (input.roundId && !project.rounds.some((round) => round.id === input.roundId))
+      throw new Error('Feedback round not found.');
+    const folder = input.roundId
+      ? path.join(safePath, 'rounds', input.roundId, 'exports')
+      : path.join(safePath, 'exports');
     const filename = sanitizeFilename(input.filename, 'annotated.png').replace(/\.png$/i, '') + '.png';
     const target = path.join(folder, filename);
     await atomicWrite(target, Buffer.from(input.dataUrl.split(',')[1], 'base64'));
@@ -565,34 +665,65 @@ function registerIpc(): void {
   });
   handle('exports:package', async (_event, input: ExportRequest) => {
     const safePath = await assertProjectPath(input.projectPath);
-    const exportDir = path.join(safePath, 'exports');
-    await fs.mkdir(exportDir, { recursive: true });
     const project = await readProject(safePath);
+    if (input.roundId && !project.rounds.some((r) => r.id === input.roundId))
+      throw new Error('Feedback round not found.');
+    const exportDir = input.roundId
+      ? path.join(safePath, 'rounds', input.roundId, 'exports')
+      : path.join(safePath, 'exports');
+    await assertNoLinks(exportDir);
+    await fs.mkdir(exportDir, { recursive: true });
+    const included = project.screenshots.filter(
+      (s) => s.includeInExport && (!input.roundId || s.roundId === input.roundId),
+    );
     const briefPath = path.join(exportDir, 'context.md');
     await atomicWrite(briefPath, input.markdown);
     const zip = new JSZip();
     zip.file('context.md', input.markdown);
-    zip.file('project.json', JSON.stringify(project, null, 2));
+    zip.file(
+      'project.json',
+      JSON.stringify(
+        {
+          ...project,
+          screenshots: included,
+          rounds: input.roundId
+            ? project.rounds.filter((round) => round.id === input.roundId)
+            : project.rounds,
+        },
+        null,
+        2,
+      ),
+    );
     for (const image of input.annotatedImages) {
       const buffer = Buffer.from(image.dataUrl.split(',')[1], 'base64');
       await atomicWrite(path.join(exportDir, image.filename), buffer);
-      zip.file(`annotated/${image.filename}`, buffer);
+      zip.file(image.filename, buffer);
     }
     if (input.includeOriginal) {
-      for (const shot of project.screenshots.filter((s) => s.includeInExport)) {
-        await assertNoLinks(path.join(safePath, 'screenshots', shot.storedFilename));
-        const buffer = await fs.readFile(path.join(safePath, 'screenshots', shot.storedFilename));
-        zip.file(`original/${shot.storedFilename}`, buffer);
+      for (const shot of included) {
+        await assertNoLinks(screenshotPath(safePath, shot));
+        const buffer = await fs.readFile(screenshotPath(safePath, shot));
+        zip.file(`rounds/${shot.roundId}/screenshots/${shot.storedFilename}`, buffer);
       }
     }
     if (input.includeAnnotations)
-      for (const shot of project.screenshots) {
+      for (const shot of included) {
         await assertNoLinks(path.join(safePath, shot.annotationFile));
-        const json = await fs
-          .readFile(path.join(safePath, 'annotations', path.basename(shot.annotationFile)), 'utf8')
-          .catch(() => '[]');
-        zip.file(`annotations/${path.basename(shot.annotationFile)}`, json);
+        const json = await fs.readFile(path.join(safePath, shot.annotationFile), 'utf8').catch(() => '[]');
+        zip.file(shot.annotationFile, json);
       }
+    for (const shot of included) {
+      await assertNoLinks(path.join(safePath, shot.notesFile));
+      zip.file(
+        shot.notesFile,
+        await fs
+          .readFile(path.join(safePath, shot.notesFile), 'utf8')
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return '';
+            throw error;
+          }),
+      );
+    }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const zipPath = path.join(exportDir, `${sanitizeFilename(project.name, 'imnota-project')}-package.zip`);
     await atomicWrite(zipPath, zipBuffer);
@@ -610,6 +741,11 @@ function registerIpc(): void {
     if (typeof text !== 'string' || text.length > 2_000_000)
       throw new Error('Context is too large to copy. Export the Markdown file instead.');
     clipboard.writeText(text);
+  });
+  handle('system:copy-image', async (_event, dataUrl: string) => {
+    const image = nativeImage.createFromDataURL(dataUrl);
+    if (image.isEmpty()) throw new Error('The image could not be copied. Export it as PNG instead.');
+    clipboard.writeImage(image);
   });
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -633,6 +769,8 @@ function registerIpc(): void {
     }
     if (app.isPackaged) await autoUpdater.downloadUpdate();
   });
+  handle('update:check', () => checkForUpdates());
+  handle('update:status', () => updateStatus);
   handle('update:install', () => {
     if (process.platform === 'darwin') {
       void shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
@@ -647,8 +785,7 @@ function configureAutoUpdates(): void {
   // Apple Developer signing is needed for Squirrel.Mac updates; ad-hoc builds use a download link.
   autoUpdater.autoDownload = process.platform !== 'darwin';
   autoUpdater.autoInstallOnAppQuit = process.platform !== 'darwin';
-  const send = (status: import('../src/shared/types.js').UpdateStatus) =>
-    mainWindow?.webContents.send('update:status', status);
+  const send = sendUpdate;
   autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
   autoUpdater.on('update-available', (info) => send({ state: 'available', version: info.version }));
   autoUpdater.on('update-not-available', () => send({ state: 'not-available' }));
@@ -656,14 +793,14 @@ function configureAutoUpdates(): void {
     send({ state: 'downloading', percent: progress.percent }),
   );
   autoUpdater.on('update-downloaded', (info) => send({ state: 'downloaded', version: info.version }));
-  autoUpdater.on('error', (error) => send({ state: 'error', message: error.message }));
-  setTimeout(
-    () =>
-      void autoUpdater
-        .checkForUpdates()
-        .catch((error: Error) => send({ state: 'error', message: error.message })),
-    8000,
+  autoUpdater.on('error', () =>
+    send({
+      state: 'error',
+      message:
+        'The update could not be checked or downloaded. Check your connection and try again. Your projects are unchanged.',
+    }),
   );
+  setTimeout(() => void checkForUpdates(), 8000);
 }
 
 async function createWindow(): Promise<void> {
@@ -727,6 +864,9 @@ app.whenReady().then(async () => {
       const result = await mainWindow!.webContents.executeJavaScript(`(async () => {
         if (!window.imnota) throw new Error('Preload bridge is missing');
         const api = window.imnota;
+        await api.checkForUpdates();
+        const update = await api.getUpdateStatus();
+        if (!update.currentVersion || update.state !== 'idle') throw new Error('Manual update check/status bridge failed');
         const snapshot = await api.createProject({ name: 'Smoke', description: '', tags: [] });
         const imported = await api.importImageFiles({ projectPath: snapshot.projectPath, paths: [${JSON.stringify(source)}] });
         const shot = imported.project.screenshots[0];
@@ -739,6 +879,21 @@ app.whenReady().then(async () => {
         if (copied.notes.summary !== 'Persist this note' || copied.annotations.length !== 1) throw new Error('Duplication lost data');
         const secondCopy = await api.duplicateScreenshot({ projectPath: snapshot.projectPath, screenshot: shot });
         if (new Set(secondCopy.project.screenshots.map(s => s.storedFilename)).size !== 3) throw new Error('Duplicate filename collision');
+        const roundCopy = await api.editRound({ projectPath: snapshot.projectPath, action: 'duplicate', roundId: shot.roundId, name: 'Second feedback' });
+        const roundId = roundCopy.project.rounds.at(-1).id;
+        const roundShot = roundCopy.project.screenshots.find(s => s.roundId === roundId);
+        const roundContent = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: roundShot });
+        if (roundContent.notes.summary !== 'Persist this note') throw new Error('Round duplication lost notes');
+        roundContent.notes.summary = 'Independent round';
+        await api.saveScreenshotContent({ projectPath: snapshot.projectPath, screenshot: roundShot, ...roundContent });
+        const originalContent = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot });
+        if (originalContent.notes.summary !== 'Persist this note') throw new Error('Round edits changed the original');
+        const renamed = await api.editRound({ projectPath: snapshot.projectPath, action: 'rename', roundId, name: 'Revision feedback' });
+        if (renamed.project.rounds.at(-1).name !== 'Revision feedback') throw new Error('Round rename failed');
+        const archived = await api.editRound({ projectPath: snapshot.projectPath, action: 'archive', roundId, name: 'Revision feedback' });
+        if (!archived.project.rounds.at(-1).archived) throw new Error('Round archive failed');
+        await api.editRound({ projectPath: snapshot.projectPath, action: 'archive', roundId, name: 'Revision feedback' });
+        await api.copyImage(content.image.dataUrl);
         await api.exportPackage({ projectPath: snapshot.projectPath, markdown: '# Smoke', annotatedImages: [{ filename: 'reference.png', dataUrl: content.image.dataUrl }], includeOriginal: true, includeAnnotations: true });
         let blocked = false;
         try { await api.setSettings({ workspacePath: '/escape' }); } catch { blocked = true; }
@@ -749,10 +904,11 @@ app.whenReady().then(async () => {
         return Boolean(document.getElementById('root')?.childElementCount);
       })()`);
       if (!result) throw new Error('React did not mount');
+      if (clipboard.readImage().isEmpty()) throw new Error('Image clipboard is empty');
       const archive = await JSZip.loadAsync(
         await fs.readFile(path.join(fixture, 'smoke', 'exports', 'Smoke-package.zip')),
       );
-      if (!archive.file('context.md') || !archive.file('annotated/reference.png'))
+      if (!archive.file('context.md') || !archive.file('reference.png'))
         throw new Error('ZIP entries missing');
       const savedProject = await readProject(path.join(fixture, 'smoke'));
       const recoveredNotes = { ...EMPTY_NOTES, summary: 'Recovered after interruption' };
@@ -816,8 +972,9 @@ app.whenReady().then(async () => {
       })`);
       const canvasBounds = await mainWindow!.webContents.executeJavaScript(`(() => {
         document.querySelector('[aria-label="Crop exported image (original preserved)"]').click();
+        const wrap = document.querySelector('.canvas-wrap');
         const bounds = document.querySelector('.konvajs-content').getBoundingClientRect();
-        return { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+        return { x: bounds.x + Number(wrap.dataset.imageX), y: bounds.y + Number(wrap.dataset.imageY), width: 1920 * Number(wrap.dataset.imageScale), height: 1080 * Number(wrap.dataset.imageScale) };
       })()`);
       await new Promise((resolve) => setTimeout(resolve, 100));
       const startPoint = {
@@ -845,6 +1002,8 @@ app.whenReady().then(async () => {
       const exportedPng = path.join(
         fixture,
         'performance',
+        'rounds',
+        performanceProject.screenshots[0].roundId,
         'exports',
         performanceProject.screenshots[0].storedFilename.replace(/\.[^.]+$/, '') + '-annotated.png',
       );
@@ -857,11 +1016,84 @@ app.whenReady().then(async () => {
         'Renderer smoke passed: reopened workspace, crop drawing and cropped PNG export.',
         JSON.stringify(pngSize),
       );
-      if (process.env.IMNOTA_SMOKE_SCREENSHOT)
+      mainWindow!.showInactive();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const delay = () => new Promise(resolve => setTimeout(resolve, 250));
+        const canvas = () => document.querySelector('.canvas-wrap').getBoundingClientRect();
+        const before = canvas().width;
+        if (canvas().height > window.innerHeight || canvas().bottom > window.innerHeight + 1) throw new Error('Screenshot list stretched the canvas beyond the window');
+        document.querySelector('[aria-label="Collapse screenshot list"]').click();
+        await delay();
+        if (canvas().width <= before + 100) throw new Error('Collapsing screenshot list did not expand canvas');
+        const afterRail = canvas().width;
+        document.querySelector('[aria-label="Toggle inspector"]').click();
+        await delay();
+        if (canvas().width <= afterRail + 100) throw new Error('Collapsing inspector did not expand canvas');
+        const afterInspector = canvas().width;
+        document.querySelector('[aria-label="Hide navigation"]').click();
+        await delay();
+        if (canvas().width <= afterInspector + 100) throw new Error('Collapsing navigation did not expand canvas');
+        document.querySelector('[aria-label="Show navigation"]').click();
+        document.querySelector('[aria-label="Toggle inspector"]').click();
+        document.querySelector('[aria-label="Expand screenshot list"]').click();
+        await delay();
+        const wrap = document.querySelector('.canvas-wrap');
+        const target = document.querySelector('.konvajs-content');
+        const originX = Number(wrap.dataset.imageX);
+        target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 40, deltaY: 20 }));
+        await delay();
+        if (Number(wrap.dataset.imageX) !== originX - 40) throw new Error('Trackpad panning failed');
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
+        await delay();
+        document.querySelector('[aria-label="Text"]').click();
+        await delay();
+        const b = target.getBoundingClientRect();
+        const scale = Number(wrap.dataset.imageScale);
+        const x = b.x + Number(wrap.dataset.imageX) + 100 * scale;
+        const y = b.y + Number(wrap.dataset.imageY) + 100 * scale;
+        const pointer = (type, px = x, py = y) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: px, clientY: py, button: 0, buttons: 1 }));
+        pointer('mousedown'); await delay(); pointer('mouseup'); await delay();
+        const editor = document.querySelector('[aria-label="Edit annotation text"]');
+        if (!editor) throw new Error('New text did not open the inline editor');
+        const setText = (input, text) => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); };
+        setText(editor, 'Saved inline feedback'); await delay();
+        editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await delay();
+        const doubleClick = async () => {
+          await new Promise(resolve => setTimeout(resolve, 550));
+          for (let i = 0; i < 2; i++) { pointer('mousedown', x + 24 * scale, y + 16 * scale); pointer('mouseup', x + 24 * scale, y + 16 * scale); await delay(); }
+        };
+        await doubleClick();
+        const reopened = document.querySelector('[aria-label="Edit annotation text"]');
+        if (!reopened || reopened.value !== 'Saved inline feedback') throw new Error('Double-click text editing failed: ' + JSON.stringify({ editor: reopened?.value, fields: [...document.querySelectorAll('textarea')].map(e => e.value), x, y, scale }));
+        setText(reopened, 'Cancelled text'); await delay();
+        reopened.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await delay();
+        await doubleClick();
+        const cancelled = document.querySelector('[aria-label="Edit annotation text"]');
+        if (!cancelled || cancelled.value !== 'Saved inline feedback') throw new Error('Escape did not cancel text editing');
+        cancelled.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 850));
+      })()`);
+      console.log(
+        'Feedback smoke passed: independent round duplication, rename/archive/restore, image clipboard, three panel toggles, bounded canvas, trackpad pan and inline text confirm/cancel.',
+      );
+      const textProject = await readProject(path.join(fixture, 'performance'));
+      const savedAnnotations = JSON.parse(
+        await fs.readFile(
+          path.join(fixture, 'performance', textProject.screenshots[0].annotationFile),
+          'utf8',
+        ),
+      );
+      if (!savedAnnotations.some((a: { text?: string }) => a.text === 'Saved inline feedback'))
+        throw new Error('Inline text was not persisted');
+      if (process.env.IMNOTA_SMOKE_SCREENSHOT) {
+        mainWindow!.showInactive();
+        await new Promise((resolve) => setTimeout(resolve, 500));
         await fs.writeFile(
           process.env.IMNOTA_SMOKE_SCREENSHOT,
           (await mainWindow!.webContents.capturePage()).toPNG(),
         );
+      }
       console.log(
         'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, recovery, 100-image project, ZIP export and traversal rejection.',
       );

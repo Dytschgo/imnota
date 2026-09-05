@@ -20,10 +20,17 @@ const reference = (folder: string) =>
     .string()
     .refine(
       (value) =>
-        value.startsWith(`${folder}/`) && filenameSchema.safeParse(value.slice(folder.length + 1)).success,
+        (value.startsWith(`${folder}/`) &&
+          filenameSchema.safeParse(value.slice(folder.length + 1)).success) ||
+        (value.split('/').length === 4 &&
+          value.split('/')[0] === 'rounds' &&
+          filenameSchema.safeParse(value.split('/')[1]).success &&
+          value.split('/')[2] === folder &&
+          filenameSchema.safeParse(value.split('/')[3]).success),
     );
 
 export const screenshotSchema = z.object({
+  roundId: filenameSchema.default('001-first-feedback'),
   id: z.string(),
   originalFilename: z.string(),
   storedFilename: filenameSchema,
@@ -43,7 +50,18 @@ export const screenshotSchema = z.object({
 });
 
 export const projectSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  rounds: z
+    .array(
+      z.object({
+        id: filenameSchema,
+        name: z.string().min(1).max(120),
+        archived: z.boolean(),
+        createdAt: z.string(),
+      }),
+    )
+    .min(1)
+    .default([{ id: '001-first-feedback', name: 'First feedback', archived: false, createdAt: '' }]),
   id: z.string(),
   name: z.string().min(1),
   description: z.string(),
@@ -79,6 +97,20 @@ export const projectSchema = z.object({
 
 export function validateProject(value: unknown): ProjectData {
   const parsed = projectSchema.parse(value);
+  const ids = new Set(parsed.rounds.map((round) => round.id));
+  if (ids.size !== parsed.rounds.length || parsed.screenshots.some((shot) => !ids.has(shot.roundId)))
+    throw new Error('Project contains invalid feedback round references.');
+  if (new Set(parsed.screenshots.map((shot) => shot.id)).size !== parsed.screenshots.length)
+    throw new Error('Project contains duplicate screenshot IDs.');
+  if (
+    parsed.schemaVersion === 2 &&
+    parsed.screenshots.some(
+      (shot) =>
+        shot.annotationFile !== `rounds/${shot.roundId}/annotations/${shot.storedFilename}.json` ||
+        shot.notesFile !== `rounds/${shot.roundId}/notes/${shot.storedFilename}.md`,
+    )
+  )
+    throw new Error('Screenshot file references do not match its feedback round.');
   return { ...parsed, exportPreferences: parsed.exportPreferences ?? { ...DEFAULT_EXPORT_PREFERENCES } };
 }
 

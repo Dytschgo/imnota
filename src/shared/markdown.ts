@@ -38,6 +38,7 @@ export function generateMarkdown(
         `### Screenshot ${index + 1}: ${shot.title || shot.originalFilename}`,
         '',
         `File: ${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+        `Feedback round: ${project.rounds.find((round) => round.id === shot.roundId)?.name ?? 'First feedback'}`,
         '',
       );
       p.includedFields.forEach((key) => out.push(section(fieldLabels[key], note[key])));

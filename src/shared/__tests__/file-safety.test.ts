@@ -24,7 +24,7 @@ describe('filesystem and IPC boundaries', () => {
     expect(isWithin('/workspace', '/workspace/../secret')).toBe(false);
   });
   it('rejects unsupported schemas and invalid annotation geometry', () => {
-    expect(() => validateProject({ ...emptyProject('Future', ''), schemaVersion: 2 })).toThrow();
+    expect(() => validateProject({ ...emptyProject('Future', ''), schemaVersion: 3 })).toThrow();
     expect(
       annotationSchema.safeParse({ id: 'a', kind: 'rectangle', x: Infinity, y: 0, zIndex: 0 }).success,
     ).toBe(false);
