@@ -25,8 +25,17 @@ try {
     stdio: 'inherit',
     timeout: 120000,
   });
-  if (result.error || result.status !== 0)
-    throw new Error('The smoke executable did not finish successfully.');
+  if (result.error || result.status !== 0) {
+    let detail = '';
+    try {
+      detail = JSON.parse(readFileSync(reportPath, 'utf8')).error ?? '';
+    } catch {
+      /* Process may fail before app startup. */
+    }
+    throw new Error(
+      `The smoke executable failed (exit ${result.status}, signal ${result.signal}): ${detail || result.error?.message || 'no application report'}`,
+    );
+  }
   const report = JSON.parse(readFileSync(reportPath, 'utf8'));
   if (
     report.passed !== true ||

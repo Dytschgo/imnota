@@ -1238,6 +1238,11 @@ app.whenReady().then(async () => {
       app.exit(0);
     } catch (error) {
       console.error(error);
+      if (process.env.IMNOTA_SMOKE_RESULT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_RESULT,
+          JSON.stringify({ passed: false, version: app.getVersion(), error: String(error) }),
+        );
       console.error(
         'Renderer state:',
         await mainWindow!.webContents.executeJavaScript(
