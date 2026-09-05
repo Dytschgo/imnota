@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.0 — Prepared for release (awaiting review)
+## 0.2.1
+
+- Added opt-in Stable and Nightly update channels with channel-specific checks and downloads.
+- Added verified nightly prereleases and stable publication checks for all desktop platforms.
+- Renamed feedback rounds to subfolders and simplified screenshot notes to one problem description.
+- Moved update and sidebar controls into navigation.
+- Added experimental combined text-and-image copying, with explicit attachment fallbacks.
+- Isolated test profiles and corrected cross-platform canvas smoke tests.
+
+## 0.2.0
 
 - Added on-demand update checks in the app toolbar and Settings, with retry and download/install states.
 - Release publishing now tags an already-reviewed main commit instead of pushing version commits around branch protections.
