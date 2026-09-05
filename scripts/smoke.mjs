@@ -1,11 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import electron from 'electron';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const reportDirectory = mkdtempSync(join(tmpdir(), 'imnota-smoke-result-'));
+// macOS exposes its temporary directory through /var -> /private/var.
+// Resolve only our newly created fixture; retain strict no-link checks for user files.
+const reportDirectory = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
 const reportPath = join(reportDirectory, 'result.json');
 const profilePath = join(reportDirectory, 'profile');
 mkdirSync(profilePath);
