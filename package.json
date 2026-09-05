@@ -1,0 +1,103 @@
+{
+  "name": "imnota",
+  "version": "0.1.0",
+  "description": "Turn annotated screenshots into AI-ready context.",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "author": "Dytschgo",
+  "license": "MIT",
+  "homepage": "https://github.com/Dytschgo/imnota",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dytschgo/imnota.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Dytschgo/imnota/issues"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on http://127.0.0.1:5173 dist-electron/electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "tsc -p tsconfig.electron.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package:linux": "corepack pnpm build && electron-builder --linux",
+    "package:win": "corepack pnpm build && electron-builder --win",
+    "package:mac": "corepack pnpm build && electron-builder --mac",
+    "package:all": "corepack pnpm build && electron-builder --linux --win --mac"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "konva": "^10.0.3",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.10",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/jszip": "^3.4.1",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.49",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.19.1",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.dytschgo.imnota",
+    "productName": "Imnota",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-electron/electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.graphics-design"
+    }
+  }
+}

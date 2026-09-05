@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "types": ["node", "electron"]
+  },
+  "include": [
+    "electron/**/*.ts",
+    "src/shared/types.ts",
+    "src/shared/utils.ts",
+    "src/shared/markdown.ts",
+    "src/shared/schema.ts"
+  ]
+}
