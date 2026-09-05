@@ -58,9 +58,22 @@ corepack pnpm build
 
 ## Publishing updates
 
-1. Update the version in `package.json` and commit it.
-2. Create and push a matching tag, for example `git tag v0.2.0` followed by `git push origin v0.2.0`.
-3. The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests.
+When you tell the release agent to release a new version, it can run the guarded release command below. The command requires a clean `main` branch, runs formatting, linting, type checking, tests and a production build, then creates and pushes the matching version tag.
+
+```bash
+corepack pnpm release patch
+corepack pnpm release minor
+corepack pnpm release major
+corepack pnpm release 0.2.0
+```
+
+Use `--dry-run` to validate the repository and release checks without changing files or pushing anything:
+
+```bash
+corepack pnpm release patch --dry-run
+```
+
+The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
 Packaged clients check the repository releases when they launch, download newer versions in the background and offer a restart action. Branch and pull request builds never publish artifacts.
 
