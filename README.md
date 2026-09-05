@@ -26,7 +26,21 @@ Development and packaging targets are Windows, macOS and Linux. Unsigned artifac
 
 ## Installation
 
-Download a release artifact for your platform, or build from source:
+Install Imnota with one command. On macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dytschgo/imnota/main/scripts/install.sh | bash
+```
+
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Dytschgo/imnota/main/scripts/install.ps1 | iex
+```
+
+The installer downloads the latest published desktop build. Users do not need Node.js, pnpm, Electron or any development dependencies. A release must exist before the command can install Imnota.
+
+For manual installation, download a release artifact for your platform, or build from source:
 
 ```bash
 corepack enable

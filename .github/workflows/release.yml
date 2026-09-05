@@ -52,6 +52,13 @@ jobs:
           pattern: release-*
           path: release-assets
           merge-multiple: true
+      - name: Add stable installer names
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$(find release-assets -maxdepth 1 -type f -name 'Imnota Setup *.exe' -print -quit)" release-assets/Imnota-Setup.exe
+          cp "$(find release-assets -maxdepth 1 -type f -name '*-mac.zip' -print -quit)" release-assets/Imnota-mac.zip
+          cp "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' -print -quit)" release-assets/Imnota.AppImage
       - uses: softprops/action-gh-release@v2
         with:
           draft: false
