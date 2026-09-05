@@ -409,6 +409,21 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'The project could not be deleted.');
     }
   }
+  async function toggleFavourite() {
+    if (!store.snapshot) return;
+    const project = {
+      ...store.snapshot.project,
+      favourite: !store.snapshot.project.favourite,
+      updatedAt: nowIso(),
+    };
+    store.updateProject(project);
+    try {
+      await window.imnota.saveProject(store.snapshot.projectPath, project);
+      await refreshProjects();
+    } catch {
+      setError('The favourite state could not be saved.');
+    }
+  }
   async function handleDrop(event: React.DragEvent) {
     event.preventDefault();
     const paths = Array.from(event.dataTransfer.files).map((file) => window.imnota.getDroppedFilePath(file));
@@ -447,6 +462,7 @@ export default function App() {
           onOpenExport={async () => {
             if (store.snapshot) await window.imnota.openPath(`${store.snapshot.projectPath}/exports`);
           }}
+          onToggleFavourite={() => void toggleFavourite()}
         />
         {error && (
           <div className="error-banner" role="alert">
@@ -666,12 +682,14 @@ function Topbar({
   onSearch,
   onCopy,
   onOpenExport,
+  onToggleFavourite,
 }: {
   onNew: () => void;
   onOpen: () => void;
   onSearch: () => void;
   onCopy: () => void;
   onOpenExport: () => void;
+  onToggleFavourite: () => void;
 }) {
   const { snapshot, view, set } = useAppStore();
   return (
@@ -707,10 +725,17 @@ function Topbar({
               <Clipboard size={15} />
               Copy AI context
             </Button>
+            <IconButton
+              label={snapshot.project.favourite ? 'Remove from favourites' : 'Add to favourites'}
+              className="topbar-favourite"
+              onClick={onToggleFavourite}
+            >
+              <Heart size={16} fill={snapshot.project.favourite ? 'currentColor' : 'none'} />
+            </IconButton>
             <button
               className="more-button"
-              aria-label="More project actions"
-              title="More project actions"
+              aria-label="Open export folder"
+              title="Open export folder"
               onClick={onOpenExport}
             >
               <MoreVertical size={17} />
@@ -871,6 +896,25 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
 function Workspace(props: any) {
   const store = useAppStore();
   const shot = store.activeScreenshot();
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  async function reorderScreenshot(targetIndex: number) {
+    if (dragIndex === null || dragIndex === targetIndex || !store.snapshot) return;
+    const screenshots = [...store.snapshot.project.screenshots];
+    const [moved] = screenshots.splice(dragIndex, 1);
+    screenshots.splice(targetIndex, 0, moved);
+    const project = {
+      ...store.snapshot.project,
+      screenshots: screenshots.map((item, position) => ({ ...item, position })),
+      updatedAt: nowIso(),
+    };
+    store.updateProject(project);
+    setDragIndex(null);
+    try {
+      await window.imnota.saveProject(store.snapshot.projectPath, project);
+    } catch {
+      props.onMessage('The new screenshot order could not be saved.');
+    }
+  }
   return (
     <section className="workspace" onDrop={props.onDrop}>
       <div className={`shot-rail ${store.leftPanelOpen ? '' : 'collapsed'}`}>
@@ -892,7 +936,14 @@ function Workspace(props: any) {
               {store.snapshot?.project.screenshots.map((item: ScreenshotRecord, index: number) => (
                 <button
                   key={item.id}
+                  draggable
                   className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''}`}
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.stopPropagation();
+                    void reorderScreenshot(index);
+                  }}
                   onClick={() => props.onSelect(item.id)}
                 >
                   <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
