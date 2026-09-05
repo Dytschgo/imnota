@@ -33,6 +33,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
       - name: Verify release version
         run: node -e "const expected = 'v' + require('./package.json').version; if (process.env.GITHUB_REF_NAME !== expected) { console.error('Release tag ' + process.env.GITHUB_REF_NAME + ' does not match package version ' + expected); process.exit(1); }"
       - run: ${{ matrix.command }}
@@ -41,7 +45,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
-          path: release/
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest*.yml
 
   publish:
     needs: package
@@ -64,4 +75,5 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: release-assets/**
+          files: release-assets/*
+          fail_on_unmatched_files: true

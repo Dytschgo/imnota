@@ -37,8 +37,9 @@ import type {
   ScreenshotRecord,
   UpdateStatus,
 } from '../shared/types';
-import { DEFAULT_TAGS, EMPTY_NOTES, nowIso, sanitizeFilename } from '../shared/utils';
+import { DEFAULT_TAGS, EMPTY_NOTES, nowIso } from '../shared/utils';
 import { generateMarkdown } from '../shared/markdown';
+import { renderAnnotatedImage } from './export-image';
 import { useAppStore } from './store';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { Logo } from './components/Logo';
@@ -71,9 +72,6 @@ export default function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [contentCache, setContentCache] = useState<
-    Record<string, { annotations: Annotation[]; notes: NoteFields; image: any }>
-  >({});
   const [zoom, setZoom] = useState(1);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,20 +89,19 @@ export default function App() {
     const projects = await window.imnota.listProjects();
     store.set({ projects });
   }, [store]);
-  const openSnapshot = useCallback(
-    async (snapshot: ProjectSnapshot) => {
-      store.setProject(snapshot);
-      setContentCache({});
-      setError('');
-      const shot = snapshot.project.screenshots[0];
-      if (shot) await loadContent(snapshot.projectPath, shot);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    },
-    [store],
-  );
+  const openSnapshot = useCallback(async (snapshot: ProjectSnapshot) => {
+    useAppStore.getState().setProject(snapshot);
+    setError('');
+    lastLoadedId.current = null;
+    setImage(null);
+    setAnnotations([]);
+    setNotes(EMPTY_NOTES);
+  }, []);
   const loadContent = useCallback(async (projectPath: string, shot: ScreenshotRecord) => {
     try {
       const loaded = await window.imnota.loadScreenshotContent({ projectPath, screenshot: shot });
+      const current = useAppStore.getState();
+      if (current.snapshot?.projectPath !== projectPath || current.activeScreenshotId !== shot.id) return;
       setImage(loaded.image);
       setAnnotations(loaded.annotations);
       setNotes(loaded.notes);
@@ -112,7 +109,6 @@ export default function App() {
       setRedo([]);
       setSelectedAnnotation(null);
       lastLoadedId.current = shot.id;
-      setContentCache((cache) => ({ ...cache, [shot.id]: loaded }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The screenshot could not be loaded.');
     }
@@ -122,10 +118,10 @@ export default function App() {
     (async () => {
       try {
         const settings = await window.imnota.getSettings();
-        store.set({ settings });
+        useAppStore.getState().set({ settings });
         if (settings.workspacePath) {
           const projects = await window.imnota.listProjects();
-          store.set({ projects });
+          useAppStore.getState().set({ projects });
           if (settings.openRecentOnLaunch && projects[0])
             await openSnapshot(await window.imnota.loadProject(projects[0].projectPath));
         }
@@ -135,7 +131,7 @@ export default function App() {
         setBooting(false);
       }
     })();
-  }, []);
+  }, [openSnapshot]);
   useEffect(() => {
     const theme =
       store.settings.theme === 'system'
@@ -148,23 +144,34 @@ export default function App() {
   useEffect(() => {
     if (!store.snapshot || !activeShot || lastLoadedId.current === activeShot.id) return;
     void loadContent(store.snapshot.projectPath, activeShot);
-  }, [activeShot?.id, store.snapshot?.projectPath]);
+  }, [activeShot, store.snapshot, loadContent]);
   useEffect(() => {
     if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return;
     setSaving('saving');
-    const timer = window.setTimeout(() => {
-      void persistCurrent();
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [
-    annotations,
-    notes,
-    activeShot?.title,
-    activeShot?.description,
-    activeShot?.tags,
-    activeShot?.priority,
-    activeShot?.status,
-  ]);
+    const input = { projectPath: store.snapshot.projectPath, screenshot: activeShot, annotations, notes };
+    let saved = false;
+    const save = () => {
+      if (saved) return;
+      saved = true;
+      void window.imnota
+        .saveScreenshotContent(input)
+        .then(() => setSaving('saved'))
+        .catch(() => {
+          setSaving('error');
+          setError('Your changes could not be saved. Keep Imnota open and check your workspace.');
+        });
+    };
+    const timer = window.setTimeout(save, 650);
+    return () => {
+      window.clearTimeout(timer);
+      const current = useAppStore.getState();
+      if (
+        current.activeScreenshotId !== input.screenshot.id ||
+        current.snapshot?.projectPath !== input.projectPath
+      )
+        save();
+    };
+  }, [annotations, notes, activeShot, store.snapshot]);
   useEffect(() => {
     if (!store.snapshot || store.view === 'context') return;
     const timer = window.setTimeout(() => {
@@ -178,7 +185,7 @@ export default function App() {
         .catch(() => undefined);
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [annotations, notes, store.snapshot?.project.updatedAt]);
+  }, [annotations, notes, store.snapshot, store.view, activeShot?.id]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -223,15 +230,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    annotations,
-    selectedAnnotation,
-    store.snapshot,
-    openSnapshot,
-    pasteImage,
-    copyContext,
-    persistCurrent,
-  ]);
+  });
   useEffect(
     () =>
       window.imnota.onUpdateStatus((status) => {
@@ -243,7 +242,7 @@ export default function App() {
   );
 
   async function persistCurrent() {
-    if (!store.snapshot || !activeShot) return;
+    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return;
     try {
       await window.imnota.saveScreenshotContent({
         projectPath: store.snapshot.projectPath,
@@ -342,6 +341,7 @@ export default function App() {
     if (!markdown) return;
     try {
       await window.imnota.copyText(markdown);
+      await exportPackage();
       showToast(
         `AI context copied · ${selectedShots().length} screenshot${selectedShots().length === 1 ? '' : 's'}`,
       );
@@ -352,12 +352,13 @@ export default function App() {
   function selectedShots() {
     return store.snapshot?.project.screenshots.filter((shot) => shot.includeInExport) ?? [];
   }
-  async function buildMarkdown() {
+  const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
-    const shots = selectedShots();
+    const shots = store.snapshot.project.screenshots.filter((shot) => shot.includeInExport);
     const cache = {
-      ...contentCache,
-      ...(activeShot ? { [activeShot.id]: { image, annotations, notes } } : {}),
+      ...(activeShot && lastLoadedId.current === activeShot.id
+        ? { [activeShot.id]: { image, annotations, notes } }
+        : {}),
     };
     await Promise.all(
       shots
@@ -370,14 +371,13 @@ export default function App() {
           cache[shot.id] = loaded;
         }),
     );
-    setContentCache(cache);
     return generateMarkdown(
       store.snapshot.project,
       shots,
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.notes ?? EMPTY_NOTES])),
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.annotations ?? []])),
     );
-  }
+  }, [store.snapshot, activeShot, image, annotations, notes]);
   async function exportPackage() {
     if (!store.snapshot) return;
     try {
@@ -385,13 +385,16 @@ export default function App() {
       const shots = selectedShots();
       const annotatedImages = await Promise.all(
         shots.map(async (shot) => {
-          const cached = contentCache[shot.id];
+          const content =
+            shot.id === activeShot?.id && lastLoadedId.current === shot.id && image
+              ? { image, annotations, notes }
+              : await window.imnota.loadScreenshotContent({
+                  projectPath: store.snapshot!.projectPath,
+                  screenshot: shot,
+                });
           return {
-            filename: `${sanitizeFilename(shot.title || shot.storedFilename, 'screenshot')}-annotated.png`,
-            dataUrl:
-              shot.id === activeShot?.id && stageRef.current
-                ? stageRef.current.toDataURL({ pixelRatio: 1 })
-                : cached?.image.dataUrl,
+            filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+            dataUrl: await renderAnnotatedImage(content.image, content.annotations),
           };
         }),
       );
@@ -1262,16 +1265,38 @@ function ContextBuilder({
   const [markdown, setMarkdown] = useState('');
   const [busy, setBusy] = useState(false);
   const project = store.snapshot!.project;
-  const updatePrefs = (patch: Partial<ProjectData['exportPreferences']>) =>
-    store.updateProject({ ...project, exportPreferences: { ...project.exportPreferences, ...patch } });
+  const [previewError, setPreviewError] = useState('');
+  const updatePrefs = (patch: Partial<ProjectData['exportPreferences']>) => {
+    const next = { ...project, exportPreferences: { ...project.exportPreferences, ...patch } };
+    store.updateProject(next);
+    void window.imnota
+      .saveProject(store.snapshot!.projectPath, next)
+      .catch(() => setPreviewError('Export preferences could not be saved. Check your workspace.'));
+  };
   useEffect(() => {
+    let cancelled = false;
     setBusy(true);
     void buildMarkdown()
-      .then(setMarkdown)
-      .finally(() => setBusy(false));
-  }, [project.updatedAt, project.exportPreferences, store.snapshot?.project.screenshots]);
+      .then((value) => {
+        if (!cancelled) {
+          setMarkdown(value);
+          setPreviewError('');
+        }
+      })
+      .catch(() => {
+        if (!cancelled)
+          setPreviewError('The brief could not be generated. Check that all screenshots are available.');
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [buildMarkdown]);
   return (
     <section className="context-builder">
+      {previewError && <p role="alert">{previewError}</p>}
       <div className="context-controls">
         <div className="context-intro">
           <span className="eyebrow">ASSEMBLE A BRIEF</span>

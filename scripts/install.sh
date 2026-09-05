@@ -24,17 +24,23 @@ case "$(uname -s)" in
     open "$HOME/Applications/Imnota.app"
     ;;
   Linux)
+    if [ "$(uname -m)" != "x86_64" ]; then
+      echo "The current Linux installer requires an x86_64 computer." >&2
+      exit 1
+    fi
     application_path="${HOME}/.local/bin/imnota"
     echo "Downloading the latest Imnota release for Linux..."
     mkdir -p "$(dirname "$application_path")"
-    curl --fail --location --retry 3 --output "$application_path" "${download_base}/Imnota.AppImage"
-    chmod +x "$application_path"
+    curl --fail --location --retry 3 --output "$temporary_directory/Imnota.AppImage" "${download_base}/Imnota.AppImage"
+    chmod +x "$temporary_directory/Imnota.AppImage"
+    install -m 755 "$temporary_directory/Imnota.AppImage" "${application_path}.new"
+    mv "${application_path}.new" "$application_path"
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/imnota.desktop" <<EOF
 [Desktop Entry]
 Name=Imnota
 Comment=Turn annotated screenshots into AI-ready context.
-Exec=${application_path}
+Exec="${application_path}"
 Terminal=false
 Type=Application
 Categories=Graphics;Utility;

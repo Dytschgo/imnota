@@ -13,6 +13,7 @@
   },
   "include": [
     "electron/**/*.ts",
+    "electron/**/*.cts",
     "src/shared/types.ts",
     "src/shared/utils.ts",
     "src/shared/markdown.ts",

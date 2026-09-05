@@ -29,9 +29,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "release": "node scripts/release.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "package:linux": "corepack pnpm build && electron-builder --linux --publish never",
     "package:win": "corepack pnpm build && electron-builder --win --publish never",
-    "package:mac": "corepack pnpm build && electron-builder --mac --publish never",
+    "package:mac": "corepack pnpm build && electron-builder --mac --universal --publish never",
     "package:all": "corepack pnpm build && electron-builder --linux --win --mac --publish never"
   },
   "dependencies": {
@@ -78,6 +79,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/electron/**/*",
+      "dist-electron/src/shared/**/*",
       "package.json"
     ],
     "directories": {

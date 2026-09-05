@@ -6,7 +6,8 @@ $installerPath = Join-Path $env:TEMP "Imnota-Setup-$([guid]::NewGuid()).exe"
 try {
   Write-Host 'Downloading the latest Imnota release for Windows...'
   Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
-  Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait
+  $installation = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
+  if ($installation.ExitCode -ne 0) { throw "Imnota installation failed with exit code $($installation.ExitCode)." }
   Write-Host 'Imnota installed successfully.'
 }
 finally {

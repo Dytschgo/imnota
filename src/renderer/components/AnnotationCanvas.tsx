@@ -78,7 +78,7 @@ function defaultAnnotation(
       height: 58,
     };
   if (kind === 'blur')
-    return { ...base, fill: '#10131a', stroke: '#ffffff', opacity: 0.96, strokeWidth: 1, blurIntensity: 14 };
+    return { ...base, fill: '#10131a', stroke: '#ffffff', opacity: 1, strokeWidth: 1, blurIntensity: 14 };
   return base;
 }
 
@@ -115,8 +115,14 @@ export function AnnotationCanvas({
       return;
     }
     const next = new window.Image();
-    next.onload = () => setImageObj(next);
+    let cancelled = false;
+    next.onload = () => {
+      if (!cancelled) setImageObj(next);
+    };
     next.src = image.dataUrl;
+    return () => {
+      cancelled = true;
+    };
   }, [image?.dataUrl]);
   useEffect(() => {
     const ro = new ResizeObserver(() => {
@@ -161,11 +167,16 @@ export function AnnotationCanvas({
     const p = point(event);
     if (!p) return;
     if (draft.kind === 'pen')
-      setDraft({ ...draft, points: [...(draft.points ?? [draft.x, draft.y]), p.x, p.y] });
+      setDraft({
+        ...draft,
+        points: [...(draft.points ?? [0, 0]), p.x - draft.x, p.y - draft.y],
+        width: Math.max(4, Math.abs(p.x - draft.x)),
+        height: Math.max(4, Math.abs(p.y - draft.y)),
+      });
     else if (draft.kind === 'arrow' || draft.kind === 'line')
       setDraft({
         ...draft,
-        points: [draft.x, draft.y, p.x, p.y],
+        points: [0, 0, p.x - draft.x, p.y - draft.y],
         width: Math.abs(p.x - draft.x),
         height: Math.abs(p.y - draft.y),
       });
@@ -203,12 +214,15 @@ export function AnnotationCanvas({
       x: a.x * scale,
       y: a.y * scale,
       rotation: a.rotation,
-      opacity: a.opacity,
+      opacity: a.kind === 'blur' ? 1 : a.opacity,
       draggable: tool === 'select',
       onClick: () => onSelect(a.id),
       onTap: () => onSelect(a.id),
       onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) =>
-        update(a.id, { x: event.target.x() / scale, y: event.target.y() / scale }),
+        update(a.id, {
+          x: event.target.x() / scale - (a.kind === 'ellipse' ? (a.width ?? 0) / 2 : 0),
+          y: event.target.y() / scale - (a.kind === 'ellipse' ? (a.height ?? 0) / 2 : 0),
+        }),
     };
     const stroke = a.stroke ?? COLORS.red;
     const sw = (a.strokeWidth ?? 4) * scale;
@@ -350,14 +364,27 @@ export function AnnotationCanvas({
               anchorSize={10}
               onTransformEnd={() => {
                 const node = transformerRef.current?.nodes()[0];
-                if (node && selectedId)
+                if (node && selectedId) {
+                  const selected = annotations.find((a) => a.id === selectedId);
+                  const width = Math.max(2, (node.width() * node.scaleX()) / scale);
+                  const height = Math.max(2, (node.height() * node.scaleY()) / scale);
                   update(selectedId, {
-                    x: node.x() / scale,
-                    y: node.y() / scale,
+                    x: node.x() / scale - (selected?.kind === 'ellipse' ? width / 2 : 0),
+                    y: node.y() / scale - (selected?.kind === 'ellipse' ? height / 2 : 0),
                     rotation: node.rotation(),
-                    width: Math.max(2, (node.width() * node.scaleX()) / scale),
-                    height: Math.max(2, (node.height() * node.scaleY()) / scale),
+                    width,
+                    height,
+                    ...(selected?.points
+                      ? {
+                          points: selected.points.map(
+                            (point, index) => point * (index % 2 === 0 ? node.scaleX() : node.scaleY()),
+                          ),
+                        }
+                      : {}),
                   });
+                  node.scaleX(1);
+                  node.scaleY(1);
+                }
               }}
             />
           </Layer>

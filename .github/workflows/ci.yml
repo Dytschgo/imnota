@@ -26,6 +26,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: bash -n scripts/install.sh
+      - run: xvfb-run --auto-servernum pnpm smoke
 
   package:
     strategy:

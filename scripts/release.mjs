@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packagePath = resolve(repositoryRoot, 'package.json');
 const argumentsList = process.argv.slice(2);
+if (argumentsList.some((argument) => argument.startsWith('--') && argument !== '--dry-run'))
+  throw new Error('Unknown option. Only --dry-run is supported.');
 const dryRun = argumentsList.includes('--dry-run');
 const requestedVersion = argumentsList.find((argument) => !argument.startsWith('--')) ?? 'patch';
 
@@ -14,7 +16,7 @@ function command(commandName, commandArguments, options = {}) {
     cwd: repositoryRoot,
     encoding: 'utf8',
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-    shell: process.platform === 'win32',
+    shell: false,
   });
 
   if (result.error || result.status !== 0) {
@@ -100,19 +102,23 @@ if (
   throw new Error(`Local tag ${tag} already exists`);
 }
 
-if (
-  command('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`], {
-    capture: true,
-    allowFailure: true,
-  }).status === 0
-) {
+command('git', ['fetch', 'origin', 'main']);
+command('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD']);
+const remoteTag = command('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`], {
+  capture: true,
+  allowFailure: true,
+});
+if (remoteTag.status !== 0 && remoteTag.status !== 2)
+  throw new Error('Could not verify remote tags. Check GitHub access.');
+if (remoteTag.status === 0) {
   throw new Error(`Remote tag ${tag} already exists`);
 }
 
 console.log(`Preparing Imnota ${version} from ${packageJson.version}`);
 console.log('Running release checks...');
 for (const script of ['format:check', 'lint', 'typecheck', 'test', 'build']) {
-  command('corepack', ['pnpm', script]);
+  if (!process.env.npm_execpath) throw new Error('Run this command through pnpm release.');
+  command(process.execPath, [process.env.npm_execpath, script]);
 }
 
 if (dryRun) {

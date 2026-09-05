@@ -5,9 +5,9 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { z } from 'zod';
-import { autoUpdater } from 'electron-updater';
+import updater from 'electron-updater';
+const { autoUpdater } = updater;
 import type {
-  Annotation,
   ExportRequest,
   ImagePayload,
   NoteFields,
@@ -25,7 +25,16 @@ import {
   sanitizeFilename,
   slugify,
 } from '../src/shared/utils.js';
-import { validateProject } from '../src/shared/schema.js';
+import {
+  validateProject,
+  projectSchema,
+  screenshotSchema,
+  annotationSchema,
+  notesSchema,
+  settingsPatchSchema,
+  filenameSchema,
+} from '../src/shared/schema.js';
+import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -45,14 +54,6 @@ const projectInput = z.object({
 });
 const pathInput = z.string().min(1).max(2000);
 
-function isWithin(parent: string, target: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return (
-    relative === '' ||
-    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-  );
-}
-
 function workspaceOrThrow(): string {
   if (!settings.workspacePath) throw new Error('Choose a workspace folder before opening a project.');
   return settings.workspacePath;
@@ -62,22 +63,25 @@ async function assertProjectPath(projectPath: string): Promise<string> {
   pathInput.parse(projectPath);
   const workspace = workspaceOrThrow();
   const resolved = path.resolve(projectPath);
+  await assertNoLinks(resolved);
   if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
     throw new Error('Project path is outside the selected workspace.');
   const stat = await fs.stat(resolved).catch(() => null);
   if (!stat?.isDirectory()) throw new Error('The selected project folder is unavailable.');
-  if (!isWithin(resolved, path.join(resolved, 'project.json'))) throw new Error('Invalid project path.');
+  for (const name of [
+    'project.json',
+    'screenshots',
+    'annotations',
+    'notes',
+    'exports',
+    '.imnota-recovery.json',
+  ])
+    await assertNoLinks(path.join(resolved, name));
   return resolved;
 }
 
-async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tempPath, content);
-  await fs.rename(tempPath, filePath);
-}
-
 async function readProject(projectPath: string): Promise<ProjectData> {
+  await assertNoLinks(path.join(projectPath, 'project.json'));
   const raw = await fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
   const parsed = validateProject(JSON.parse(raw));
   if (parsed.schemaVersion > 1)
@@ -124,6 +128,7 @@ async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
   await Promise.all(
     project.screenshots.map(async (shot) => {
       const filePath = path.join(projectPath, 'screenshots', shot.storedFilename);
+      await assertNoLinks(filePath);
       const image = nativeImage.createFromPath(filePath);
       if (!image.isEmpty()) thumbnails[shot.id] = image.resize({ width: 220, quality: 'good' }).toDataURL();
     }),
@@ -200,6 +205,7 @@ async function importOne(
 
 async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Promise<ImagePayload> {
   const filePath = path.join(projectPath, 'screenshots', screenshot.storedFilename);
+  await assertNoLinks(filePath);
   if (!isWithin(projectPath, filePath)) throw new Error('Image path is outside the project.');
   const image = nativeImage.createFromPath(filePath);
   if (image.isEmpty()) throw new Error('The screenshot could not be loaded.');
@@ -213,8 +219,64 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
 }
 
 function registerIpc(): void {
-  ipcMain.handle('settings:get', () => settings);
-  ipcMain.handle('settings:choose-workspace', async () => {
+  // One queue prevents concurrent read/modify/write handlers from losing updates.
+  let pending: Promise<unknown> = Promise.resolve();
+  const screenshotInput = z.object({ projectPath: pathInput, screenshot: screenshotSchema });
+  const png = z
+    .string()
+    .max(100_000_000)
+    .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
+  const imageExport = z.object({ filename: filenameSchema, dataUrl: png });
+  const contracts: Record<string, z.ZodTypeAny> = {
+    'settings:get': z.tuple([]),
+    'settings:choose-workspace': z.tuple([]),
+    'settings:set': z.tuple([settingsPatchSchema]),
+    'projects:list': z.tuple([]),
+    'projects:create': z.tuple([projectInput]),
+    'projects:open-dialog': z.tuple([]),
+    'projects:save': z.tuple([pathInput, projectSchema]),
+    'projects:save-screenshot': z.tuple([
+      screenshotInput.extend({ annotations: z.array(annotationSchema).max(10000), notes: notesSchema }),
+    ]),
+    'screenshots:load-content': z.tuple([screenshotInput]),
+    'screenshots:duplicate': z.tuple([screenshotInput]),
+    'screenshots:import-files': z.tuple([
+      z.object({ projectPath: pathInput, paths: z.array(pathInput).min(1).max(50) }),
+    ]),
+    'exports:annotated-image': z.tuple([imageExport.extend({ projectPath: pathInput })]),
+    'exports:package': z.tuple([
+      z.object({
+        projectPath: pathInput,
+        markdown: z.string().max(2_000_000),
+        annotatedImages: z.array(imageExport).max(1000),
+        includeOriginal: z.boolean(),
+        includeAnnotations: z.boolean(),
+      }),
+    ]),
+    'system:copy-text': z.tuple([z.string().max(2_000_000)]),
+    'recovery:save': z.tuple([
+      z.object({
+        projectPath: pathInput,
+        project: projectSchema,
+        annotations: z.record(z.array(annotationSchema)),
+        notes: z.record(notesSchema),
+      }),
+    ]),
+    'update:download': z.tuple([]),
+    'update:install': z.tuple([]),
+  };
+  const handle: typeof ipcMain.handle = (channel, listener) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+        throw new Error('Untrusted IPC sender.');
+      const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
+      const result = pending.then(() => listener(event, ...validated));
+      pending = result.catch(() => undefined);
+      return result;
+    });
+  };
+  handle('settings:get', () => settings);
+  handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose Imnota workspace',
       properties: ['openDirectory', 'createDirectory'],
@@ -224,12 +286,12 @@ function registerIpc(): void {
     await atomicWrite(settingsFile(), JSON.stringify(settings, null, 2));
     return settings;
   });
-  ipcMain.handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
+  handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
     settings = { ...settings, ...input };
     await atomicWrite(settingsFile(), JSON.stringify(settings, null, 2));
     return settings;
   });
-  ipcMain.handle('projects:list', async () => {
+  handle('projects:list', async () => {
     if (!settings.workspacePath) return [];
     const entries = await fs.readdir(settings.workspacePath, { withFileTypes: true }).catch(() => []);
     const projects: ProjectListItem[] = [];
@@ -245,7 +307,7 @@ function registerIpc(): void {
     }
     return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   });
-  ipcMain.handle('projects:create', async (_event, raw) => {
+  handle('projects:create', async (_event, raw) => {
     const input = projectInput.parse(raw);
     const workspace = workspaceOrThrow();
     await fs.mkdir(workspace, { recursive: true });
@@ -260,7 +322,7 @@ function registerIpc(): void {
     );
     return makeSnapshot(folder);
   });
-  ipcMain.handle('projects:open-dialog', async () => {
+  handle('projects:open-dialog', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Open Imnota project',
       properties: ['openDirectory'],
@@ -269,17 +331,17 @@ function registerIpc(): void {
     const projectPath = await assertProjectPath(result.filePaths[0]);
     return makeSnapshot(projectPath);
   });
-  ipcMain.handle('projects:load', async (_event, projectPath: string) =>
+  handle('projects:load', async (_event, projectPath: string) =>
     makeSnapshot(await assertProjectPath(projectPath)),
   );
-  ipcMain.handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
+  handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
     const safePath = await assertProjectPath(projectPath);
     await atomicWrite(
       path.join(safePath, 'project.json'),
       JSON.stringify({ ...project, schemaVersion: 1, updatedAt: nowIso() }, null, 2),
     );
   });
-  ipcMain.handle('projects:save-screenshot', async (_event, input) => {
+  handle('projects:save-screenshot', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     if (!project.screenshots.some((s) => s.id === input.screenshot.id))
@@ -299,10 +361,16 @@ function registerIpc(): void {
     );
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
   });
-  ipcMain.handle('screenshots:load-content', async (_event, input) => {
+  handle('screenshots:load-content', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
+    const project = await readProject(safePath);
+    const screenshot = project.screenshots.find((shot) => shot.id === input.screenshot.id);
+    if (!screenshot) throw new Error('Screenshot does not belong to this project.');
+    input.screenshot = screenshot;
     const annotationPath = path.join(safePath, 'annotations', path.basename(input.screenshot.annotationFile));
     const notesPath = path.join(safePath, 'notes', path.basename(input.screenshot.notesFile));
+    await assertNoLinks(annotationPath);
+    await assertNoLinks(notesPath);
     const [image, annotationsRaw, notesRaw] = await Promise.all([
       loadImage(safePath, input.screenshot),
       fs.readFile(annotationPath, 'utf8').catch(() => '[]'),
@@ -310,18 +378,18 @@ function registerIpc(): void {
     ]);
     return {
       image,
-      annotations: JSON.parse(annotationsRaw) as Annotation[],
+      annotations: z.array(annotationSchema).parse(JSON.parse(annotationsRaw)),
       notes: parseNotesMarkdown(notesRaw),
     };
   });
-  ipcMain.handle('screenshots:import-files', async (_event, input) => {
+  handle('screenshots:import-files', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     if (!Array.isArray(input.paths) || input.paths.length > 50)
       throw new Error('Choose up to 50 screenshots at a time.');
     for (const source of input.paths) await importOne(safePath, source);
     return makeSnapshot(safePath);
   });
-  ipcMain.handle('screenshots:paste', async (_event, projectPath: string) => {
+  handle('screenshots:paste', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     const image = clipboard.readImage();
     if (image.isEmpty())
@@ -333,13 +401,27 @@ function registerIpc(): void {
     await fs.unlink(temp).catch(() => undefined);
     return makeSnapshot(safePath);
   });
-  ipcMain.handle('screenshots:duplicate', async (_event, input) => {
+  handle('screenshots:duplicate', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
     const source = project.screenshots.find((s) => s.id === input.screenshot.id);
     if (!source) throw new Error('Screenshot not found.');
     const ext = path.extname(source.storedFilename);
-    const name = `${path.basename(source.storedFilename, ext)}-copy${ext}`;
+    const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
+    await assertNoLinks(path.join(safePath, 'screenshots', source.storedFilename));
+    for (const [original, destination, fallback] of [
+      [source.annotationFile, `annotations/${name}.json`, '[]'],
+      [source.notesFile, `notes/${name}.md`, ''],
+    ]) {
+      await assertNoLinks(path.join(safePath, original));
+      const contents = await fs
+        .readFile(path.join(safePath, original), 'utf8')
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return fallback;
+          throw error;
+        });
+      await atomicWrite(path.join(safePath, destination), contents);
+    }
     await fs.copyFile(
       path.join(safePath, 'screenshots', source.storedFilename),
       path.join(safePath, 'screenshots', name),
@@ -361,7 +443,7 @@ function registerIpc(): void {
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     return makeSnapshot(safePath);
   });
-  ipcMain.handle('projects:duplicate', async (_event, projectPath: string) => {
+  handle('projects:duplicate', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     const workspace = workspaceOrThrow();
     const source = await readProject(safePath);
@@ -375,18 +457,27 @@ function registerIpc(): void {
     await atomicWrite(path.join(target, 'project.json'), JSON.stringify(copy, null, 2));
     return makeSnapshot(target);
   });
-  ipcMain.handle('projects:archive', async (_event, projectPath: string) => {
+  handle('projects:archive', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     const p = await readProject(safePath);
     p.status = 'archived';
     p.updatedAt = nowIso();
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(p, null, 2));
   });
-  ipcMain.handle('projects:delete', async (_event, projectPath: string) => {
+  handle('projects:delete', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
+    const answer = await dialog.showMessageBox(mainWindow!, {
+      type: 'warning',
+      buttons: ['Cancel', 'Move to trash'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Delete this project?',
+      detail: `All project files in ${safePath} will be moved to the system trash.`,
+    });
+    if (answer.response !== 1) throw new Error('Project deletion cancelled.');
     await shell.trashItem(safePath);
   });
-  ipcMain.handle('exports:annotated-image', async (_event, input) => {
+  handle('exports:annotated-image', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const folder = path.join(safePath, 'exports');
     const filename = sanitizeFilename(input.filename, 'annotated.png').replace(/\.png$/i, '') + '.png';
@@ -394,7 +485,7 @@ function registerIpc(): void {
     await atomicWrite(target, Buffer.from(input.dataUrl.split(',')[1], 'base64'));
     return target;
   });
-  ipcMain.handle('exports:package', async (_event, input: ExportRequest) => {
+  handle('exports:package', async (_event, input: ExportRequest) => {
     const safePath = await assertProjectPath(input.projectPath);
     const exportDir = path.join(safePath, 'exports');
     await fs.mkdir(exportDir, { recursive: true });
@@ -411,12 +502,14 @@ function registerIpc(): void {
     }
     if (input.includeOriginal) {
       for (const shot of project.screenshots.filter((s) => s.includeInExport)) {
+        await assertNoLinks(path.join(safePath, 'screenshots', shot.storedFilename));
         const buffer = await fs.readFile(path.join(safePath, 'screenshots', shot.storedFilename));
         zip.file(`original/${shot.storedFilename}`, buffer);
       }
     }
     if (input.includeAnnotations)
       for (const shot of project.screenshots) {
+        await assertNoLinks(path.join(safePath, shot.annotationFile));
         const json = await fs
           .readFile(path.join(safePath, 'annotations', path.basename(shot.annotationFile)), 'utf8')
           .catch(() => '[]');
@@ -427,16 +520,20 @@ function registerIpc(): void {
     await atomicWrite(zipPath, zipBuffer);
     return { folderPath: exportDir, zipPath, count: input.annotatedImages.length };
   });
-  ipcMain.handle('system:open-path', async (_event, target: string) => {
+  handle('system:open-path', async (_event, target: string) => {
     pathInput.parse(target);
-    await shell.openPath(target);
+    if (!isWithin(workspaceOrThrow(), target)) throw new Error('Folder is outside the workspace.');
+    await assertNoLinks(target);
+    if (!(await fs.stat(target)).isDirectory()) throw new Error('Only workspace folders can be opened.');
+    const error = await shell.openPath(target);
+    if (error) throw new Error(error);
   });
-  ipcMain.handle('system:copy-text', async (_event, text: string) => {
+  handle('system:copy-text', async (_event, text: string) => {
     if (typeof text !== 'string' || text.length > 2_000_000)
       throw new Error('Context is too large to copy. Export the Markdown file instead.');
     clipboard.writeText(text);
   });
-  ipcMain.handle('recovery:save', async (_event, input) => {
+  handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     await atomicWrite(
       path.join(safePath, '.imnota-recovery.json'),
@@ -447,14 +544,14 @@ function registerIpc(): void {
       ),
     );
   });
-  ipcMain.handle('recovery:clear', async (_event, projectPath: string) => {
+  handle('recovery:clear', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
   });
-  ipcMain.handle('update:download', async () => {
+  handle('update:download', async () => {
     if (app.isPackaged) await autoUpdater.downloadUpdate();
   });
-  ipcMain.handle('update:install', () => {
+  handle('update:install', () => {
     if (app.isPackaged) autoUpdater.quitAndInstall();
   });
 }
@@ -484,6 +581,7 @@ function configureAutoUpdates(): void {
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
+    show: process.env.IMNOTA_SMOKE !== '1',
     width: 1440,
     height: 920,
     minWidth: 1080,
@@ -491,7 +589,7 @@ async function createWindow(): Promise<void> {
     backgroundColor: '#0b0d12',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -500,15 +598,17 @@ async function createWindow(): Promise<void> {
   });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) await mainWindow.loadURL(devUrl);
-  else await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  else await mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 }
 
 app.whenReady().then(async () => {
-  const stored = await fs.readFile(settingsFile(), 'utf8').catch(() => null);
+  const stored =
+    process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
   if (stored)
     try {
       settings = { ...settings, ...JSON.parse(stored) };
@@ -527,6 +627,57 @@ app.whenReady().then(async () => {
   });
   registerIpc();
   await createWindow();
+  if (process.env.IMNOTA_SMOKE === '1') {
+    const fixture = await fs.mkdtemp(path.join(app.getPath('temp'), 'imnota-smoke-'));
+    try {
+      settings.workspacePath = fixture;
+      const source = path.join(fixture, 'fixture.png');
+      await fs.writeFile(
+        source,
+        nativeImage.createFromBitmap(Buffer.from([0, 0, 255, 255]), { width: 1, height: 1 }).toPNG(),
+      );
+      const result = await mainWindow!.webContents.executeJavaScript(`(async () => {
+        if (!window.imnota) throw new Error('Preload bridge is missing');
+        const api = window.imnota;
+        const snapshot = await api.createProject({ name: 'Smoke', description: '', tags: [] });
+        const imported = await api.importImageFiles({ projectPath: snapshot.projectPath, paths: [${JSON.stringify(source)}] });
+        const shot = imported.project.screenshots[0];
+        const content = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot });
+        content.notes.summary = 'Persist this note';
+        content.annotations = [{ id: 'test', kind: 'rectangle', x: 0, y: 0, width: 1, height: 1, zIndex: 0 }];
+        await api.saveScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot, ...content });
+        const duplicate = await api.duplicateScreenshot({ projectPath: snapshot.projectPath, screenshot: shot });
+        const copied = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: duplicate.project.screenshots[1] });
+        if (copied.notes.summary !== 'Persist this note' || copied.annotations.length !== 1) throw new Error('Duplication lost data');
+        const secondCopy = await api.duplicateScreenshot({ projectPath: snapshot.projectPath, screenshot: shot });
+        if (new Set(secondCopy.project.screenshots.map(s => s.storedFilename)).size !== 3) throw new Error('Duplicate filename collision');
+        await api.exportPackage({ projectPath: snapshot.projectPath, markdown: '# Smoke', annotatedImages: [{ filename: 'reference.png', dataUrl: content.image.dataUrl }], includeOriginal: true, includeAnnotations: true });
+        let blocked = false;
+        try { await api.setSettings({ workspacePath: '/escape' }); } catch { blocked = true; }
+        if (!blocked) throw new Error('Settings IPC permitted workspace escape');
+        blocked = false;
+        try { await api.exportPackage({ projectPath: snapshot.projectPath, markdown: '', annotatedImages: [{ filename: '../escape.png', dataUrl: content.image.dataUrl }], includeOriginal: false, includeAnnotations: false }); } catch { blocked = true; }
+        if (!blocked) throw new Error('Export permitted traversal');
+        return Boolean(document.getElementById('root')?.childElementCount);
+      })()`);
+      if (!result) throw new Error('React did not mount');
+      const archive = await JSZip.loadAsync(
+        await fs.readFile(path.join(fixture, 'smoke', 'exports', 'Smoke-package.zip')),
+      );
+      if (!archive.file('context.md') || !archive.file('annotated/reference.png'))
+        throw new Error('ZIP entries missing');
+      console.log(
+        'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, ZIP export and traversal rejection.',
+      );
+      await fs.rm(fixture, { recursive: true, force: true });
+      app.exit(0);
+    } catch (error) {
+      console.error(error);
+      await fs.rm(fixture, { recursive: true, force: true });
+      app.exit(1);
+    }
+    return;
+  }
   configureAutoUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
