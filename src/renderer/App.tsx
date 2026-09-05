@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react';
 import type Konva from 'konva';
 import {
   ArrowDownAZ,
@@ -15,7 +15,9 @@ import {
   Info,
   Keyboard,
   Layers3,
+  Monitor,
   MoreVertical,
+  Moon,
   PanelLeft,
   PanelRight,
   Plus,
@@ -24,6 +26,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Sun,
   Trash2,
   Upload,
   X,
@@ -90,10 +93,17 @@ export default function App() {
   const lastLoadedId = useRef<string | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
+  const projectSearchInputRef = useRef<HTMLInputElement>(null);
+  const projectSearchRequest = useRef(0);
+  const contentRevision = useRef(0);
+  const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
 
   const activeShot = store.activeScreenshot();
   const workspaceSet = Boolean(store.settings.workspacePath);
   const hasProject = Boolean(store.snapshot);
+  useEffect(() => {
+    contentRevision.current++;
+  }, [annotations, notes, activeShot, store.snapshot]);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -155,6 +165,14 @@ export default function App() {
         : store.settings.theme;
     document.documentElement.dataset.theme = theme;
   }, [store.settings.theme]);
+  useEffect(() => {
+    if (!projectSearchFocusRequest || !['projects', 'recent', 'favourites'].includes(store.view)) return;
+    const frame = window.requestAnimationFrame(() => {
+      projectSearchInputRef.current?.focus();
+      projectSearchInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [projectSearchFocusRequest, store.view]);
   useEffect(() => {
     if (!store.snapshot || !activeShot || lastLoadedId.current === activeShot.id) return;
     void loadContent(store.snapshot.projectPath, activeShot);
@@ -222,6 +240,11 @@ export default function App() {
         target.tagName === 'SELECT' ||
         target.isContentEditable;
       const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        void openProjectSearch();
+        return;
+      }
       if (typing && !(modifier && event.key.toLowerCase() === 's')) return;
       if (modifier && event.key.toLowerCase() === 'n') {
         event.preventDefault();
@@ -303,6 +326,56 @@ export default function App() {
     } catch {
       setSaving('error');
       setError('Your changes could not be saved. Check that the workspace is still available.');
+    }
+  }
+  async function openProjectSearch() {
+    if (!workspaceSet) {
+      setError('Choose a workspace before searching projects.');
+      return;
+    }
+    if (['projects', 'recent', 'favourites'].includes(store.view) && !store.snapshot) {
+      setProjectSearchFocusRequest((request) => request + 1);
+      return;
+    }
+    const request = ++projectSearchRequest.current;
+    const sourceSnapshot = store.snapshot;
+    const sourceView = store.view;
+    const sourceRevision = contentRevision.current;
+    const stillCurrent = () => {
+      const current = useAppStore.getState();
+      return (
+        request === projectSearchRequest.current &&
+        current.snapshot === sourceSnapshot &&
+        current.view === sourceView &&
+        contentRevision.current === sourceRevision
+      );
+    };
+    if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id) {
+      setSaving('saving');
+      try {
+        await window.imnota.saveScreenshotContent({
+          projectPath: store.snapshot.projectPath,
+          screenshot: activeShot,
+          annotations,
+          notes,
+        });
+        setSaving('saved');
+      } catch {
+        if (!stillCurrent()) return;
+        setSaving('error');
+        setError('Your changes could not be saved. Search was cancelled so you can keep working.');
+        return;
+      }
+      if (!stillCurrent()) return;
+    }
+    try {
+      await refreshProjects();
+      if (!stillCurrent()) return;
+      store.set({ view: 'projects', snapshot: null, search: '' });
+      setProjectSearchFocusRequest((request) => request + 1);
+    } catch (err) {
+      if (!stillCurrent()) return;
+      setError(err instanceof Error ? err.message : 'Projects could not be refreshed for search.');
     }
   }
   async function chooseWorkspace() {
@@ -511,7 +584,7 @@ export default function App() {
               setError(err instanceof Error ? err.message : 'Project could not be opened.');
             }
           }}
-          onSearch={() => document.getElementById('project-search')?.focus()}
+          onSearch={() => void openProjectSearch()}
           onCopy={copyContext}
           onOpenExport={async () => {
             if (store.snapshot)
@@ -559,6 +632,7 @@ export default function App() {
               const snapshot = await window.imnota.openProjectDialog();
               if (snapshot) await openSnapshot(snapshot);
             }}
+            searchInputRef={projectSearchInputRef}
           />
         ) : store.view === 'context' ? (
           <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
@@ -792,33 +866,8 @@ export default function App() {
       >
         <div className="sidebar-top">
           <Logo compact={!store.navigationOpen} />
-        </div>
-        <div className="sidebar-controls">
           <IconButton
-            label="Check for app updates"
-            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
-            onClick={async () => {
-              try {
-                await window.imnota.checkForUpdates();
-                const status = await window.imnota.getUpdateStatus();
-                showToast(
-                  status.message ??
-                    (status.state === 'not-available'
-                      ? 'You’re on the latest version.'
-                      : status.state === 'available'
-                        ? `Imnota ${status.version} is available. Open Settings for update options.`
-                        : status.state === 'downloaded'
-                          ? 'Update ready. Restart to install.'
-                          : 'Checking app updates…'),
-                );
-              } catch {
-                setError('Could not check for updates. Check your connection and try again.');
-              }
-            }}
-          >
-            <RefreshCw size={16} />
-          </IconButton>
-          <IconButton
+            className="sidebar-toggle"
             label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
             onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
           >
@@ -862,11 +911,37 @@ export default function App() {
               <Keyboard size={16} />
               Shortcuts <kbd>{platformKey} /</kbd>
             </button>
-            <button className="nav-item" onClick={() => setModal('about')}>
-              <Info size={16} />
-              About
-            </button>
           </nav>
+        </div>
+        <div className="sidebar-footer">
+          <button className="nav-item" aria-label="About" title="About" onClick={() => setModal('about')}>
+            <Info size={16} />
+            <span>About</span>
+          </button>
+          <IconButton
+            label="Check for app updates"
+            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
+            onClick={async () => {
+              try {
+                await window.imnota.checkForUpdates();
+                const status = await window.imnota.getUpdateStatus();
+                showToast(
+                  status.message ??
+                    (status.state === 'not-available'
+                      ? 'You’re on the latest version.'
+                      : status.state === 'available'
+                        ? `Imnota ${status.version} is available. Open Settings for update options.`
+                        : status.state === 'downloaded'
+                          ? 'Update ready. Restart to install.'
+                          : 'Checking app updates…'),
+                );
+              } catch {
+                setError('Could not check for updates. Check your connection and try again.');
+              }
+            }}
+          >
+            <RefreshCw size={16} />
+          </IconButton>
         </div>
       </aside>
     );
@@ -888,7 +963,7 @@ function Topbar({
   onOpenExport: () => void;
   onToggleFavourite: () => void;
 }) {
-  const { snapshot, view, set } = useAppStore();
+  const { snapshot, view, set, settings } = useAppStore();
   return (
     <header className="topbar">
       <div className="crumbs">
@@ -903,7 +978,7 @@ function Topbar({
         )}
       </div>
       <div className="topbar-actions">
-        <button className="search-trigger" onClick={onSearch}>
+        <button className="search-trigger" onClick={onSearch} disabled={!settings.workspacePath}>
           <Search size={15} />
           <span>Search projects</span>
           <kbd>{platformKey} F</kbd>
@@ -984,14 +1059,26 @@ function Welcome({ chooseWorkspace }: { chooseWorkspace: () => void }) {
   );
 }
 
-function Library({ onNew, onOpen }: { onNew: () => void; onOpen: () => void }) {
+export function matchesProjectSearch(project: ProjectListItem, search: string) {
+  return (project.searchText ?? `${project.name} ${project.description} ${project.tags.join(' ')}`)
+    .toLowerCase()
+    .includes(search.trim().toLowerCase());
+}
+
+function Library({
+  onNew,
+  onOpen,
+  searchInputRef,
+}: {
+  onNew: () => void;
+  onOpen: () => void;
+  searchInputRef: RefObject<HTMLInputElement>;
+}) {
   const { projects, search, set, view, settings } = useAppStore();
   const filtered = projects.filter(
     (p) =>
       (view === 'favourites' ? p.favourite : view === 'recent' ? true : true) &&
-      (p.searchText ?? `${p.name} ${p.description} ${p.tags.join(' ')}`)
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+      matchesProjectSearch(p, search),
   );
   return (
     <section className="library">
@@ -1019,12 +1106,19 @@ function Library({ onNew, onOpen }: { onNew: () => void; onOpen: () => void }) {
         <Search size={16} />
         <input
           id="project-search"
+          ref={searchInputRef}
           aria-label="Search projects"
           placeholder="Search name, notes, tags or status"
           value={search}
           onChange={(event) => set({ search: event.target.value })}
         />
-        <span>{platformKey} F</span>
+        {search ? (
+          <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
+            Clear search
+          </button>
+        ) : (
+          <span>{platformKey} F</span>
+        )}
       </div>
       {filtered.length ? (
         <div className="project-list">
@@ -1551,7 +1645,7 @@ function Inspector({
   );
 }
 
-function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
+export function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
   const store = useAppStore();
   const project = store.snapshot!.project;
   const current = project.rounds.find((r) => r.id === store.activeRoundId)!;
@@ -1560,7 +1654,7 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function submit() {
-    if (!action || !name.trim()) return;
+    if (busy || !action || !name.trim()) return;
     setBusy(true);
     setError('');
     try {
@@ -1646,11 +1740,43 @@ function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
             if (!busy) setAction(null);
           }}
         >
-          <TextInput label="Subfolder name" value={name} onChange={(event) => setName(event.target.value)} />
-          {error && <p role="alert">{error}</p>}
-          <Button busy={busy} disabled={!name.trim()} onClick={() => void submit()}>
-            Save subfolder
-          </Button>
+          <form
+            className="modal-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <TextInput
+              autoFocus
+              data-autofocus
+              label="Subfolder name"
+              disabled={busy}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {error && (
+              <p className="modal-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="modal-actions">
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setAction(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
+                {action === 'create'
+                  ? 'Create subfolder'
+                  : action === 'rename'
+                    ? 'Rename subfolder'
+                    : action === 'duplicate'
+                      ? 'Duplicate subfolder'
+                      : current.archived
+                        ? 'Restore subfolder'
+                        : 'Archive subfolder'}
+              </Button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>
@@ -1800,41 +1926,62 @@ function ContextBuilder({
   );
 }
 
-function SettingsView() {
+export function SettingsView() {
   const { settings, set } = useAppStore();
+  const [savingPreference, setSavingPreference] = useState(false);
+  const [settingError, setSettingError] = useState('');
+  const saveSetting = async (patch: Partial<typeof settings>) => {
+    if (savingPreference) return;
+    setSavingPreference(true);
+    setSettingError('');
+    try {
+      set({ settings: await window.imnota.setSettings(patch) });
+    } catch {
+      setSettingError('This preference could not be saved. Try again.');
+    } finally {
+      setSavingPreference(false);
+    }
+  };
   return (
     <section className="settings-view">
       <div className="settings-heading">
-        <span className="eyebrow">APPLICATION</span>
         <h1>Settings</h1>
-        <p>Imnota keeps preferences local to this device and never sends project data anywhere.</p>
+        <p>Preferences stay on this device. Project files remain in the workspace you choose.</p>
       </div>
       <div className="settings-grid">
-        <UpdateControl />
         <div className="settings-section">
-          <h2>General</h2>
-          <label className="field">
-            <span className="field-label">Theme</span>
-            <select
-              value={settings.theme}
-              onChange={async (event) => {
-                const next = event.target.value as any;
-                set({ settings: await window.imnota.setSettings({ theme: next }) });
-              }}
-            >
-              <option value="system">System</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
+          <h2>Appearance</h2>
+          <div className="settings-control">
+            <div>
+              <strong>Theme</strong>
+            </div>
+            <div className="theme-options" role="radiogroup" aria-label="Theme">
+              {[
+                { value: 'system', label: 'System', icon: Monitor },
+                { value: 'dark', label: 'Dark', icon: Moon },
+                { value: 'light', label: 'Light', icon: Sun },
+              ].map(({ value, label, icon: Icon }) => (
+                <label key={value} className={settings.theme === value ? 'active' : ''}>
+                  <input
+                    type="radio"
+                    name="theme"
+                    value={value}
+                    checked={settings.theme === value}
+                    disabled={savingPreference}
+                    onChange={() => void saveSetting({ theme: value as typeof settings.theme })}
+                  />
+                  <Icon size={15} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
           <label className="field">
             <span className="field-label">Interface scale</span>
             <select
               value={settings.interfaceScale}
-              onChange={async (event) => {
-                const next = Number(event.target.value);
-                set({ settings: await window.imnota.setSettings({ interfaceScale: next }) });
-              }}
+              disabled={savingPreference}
+              onChange={(event) => void saveSetting({ interfaceScale: Number(event.target.value) })}
             >
               <option value="0.9">90%</option>
               <option value="1">100%</option>
@@ -1842,31 +1989,37 @@ function SettingsView() {
               <option value="1.2">120%</option>
             </select>
           </label>
-          <label className="check-row">
+          <label className="settings-switch">
+            <span>
+              <strong>Open recent project</strong>
+              <small>Resume your latest project when Imnota opens.</small>
+            </span>
             <input
               type="checkbox"
               checked={settings.openRecentOnLaunch}
-              onChange={async (event) =>
-                set({
-                  settings: await window.imnota.setSettings({ openRecentOnLaunch: event.target.checked }),
-                })
-              }
+              disabled={savingPreference}
+              onChange={(event) => void saveSetting({ openRecentOnLaunch: event.target.checked })}
             />
-            <span>Open the most recent project on launch</span>
           </label>
-          <label className="check-row">
+          <label className="settings-switch">
+            <span>
+              <strong>Confirm before deletion</strong>
+              <small>Ask before moving a project to the system trash.</small>
+            </span>
             <input
               type="checkbox"
               checked={settings.confirmBeforeDeletion}
-              onChange={async (event) =>
-                set({
-                  settings: await window.imnota.setSettings({ confirmBeforeDeletion: event.target.checked }),
-                })
-              }
+              disabled={savingPreference}
+              onChange={(event) => void saveSetting({ confirmBeforeDeletion: event.target.checked })}
             />
-            <span>Confirm before deleting projects</span>
           </label>
+          {settingError && (
+            <p className="settings-error" role="alert">
+              {settingError}
+            </p>
+          )}
         </div>
+        <UpdateControl />
         <div className="settings-section">
           <h2>Workspace</h2>
           <div className="workspace-path">
@@ -1890,10 +2043,13 @@ function SettingsView() {
               </Button>
             )}
           </div>
-          <p className="helper">
-            Projects are plain folders with JSON, Markdown and image files. They can be backed up or
-            version-controlled without Imnota.
-          </p>
+          <details className="settings-disclosure">
+            <summary>About workspace files</summary>
+            <p>
+              Projects are plain folders with JSON, Markdown and image files. Back them up or version-control
+              them with your usual tools.
+            </p>
+          </details>
         </div>
         <div className="settings-section">
           <h2>Privacy</h2>
@@ -1901,10 +2057,7 @@ function SettingsView() {
             <ShieldCheck size={18} />
             <div>
               <strong>Local-first by default</strong>
-              <p>
-                No account, cloud storage, telemetry or runtime AI service is required. Project files stay
-                where you choose.
-              </p>
+              <p>No account, cloud storage, telemetry or runtime AI service is required.</p>
             </div>
           </div>
         </div>

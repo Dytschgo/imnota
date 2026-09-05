@@ -88,7 +88,7 @@ export function Modal({
           'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
         ) ?? [],
       );
-    (focusable()[0] ?? dialog)?.focus();
+    (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
