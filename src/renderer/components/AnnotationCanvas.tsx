@@ -1,0 +1,373 @@
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import {
+  Arrow,
+  Ellipse,
+  Group,
+  Image as KonvaImage,
+  Layer,
+  Line,
+  Rect,
+  Stage,
+  Text,
+  Transformer,
+} from 'react-konva';
+import type Konva from 'konva';
+import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
+import { createId } from '../../shared/utils';
+
+const COLORS: Record<string, string> = {
+  red: '#ef4444',
+  blue: '#3ec6e0',
+  green: '#22c55e',
+  amber: '#f59e0b',
+  white: '#ffffff',
+};
+
+function defaultAnnotation(
+  kind: AnnotationKind,
+  x: number,
+  y: number,
+  x2: number,
+  y2: number,
+  count: number,
+): Annotation {
+  const base = {
+    id: createId('ann'),
+    kind,
+    x,
+    y,
+    width: Math.max(2, x2 - x),
+    height: Math.max(2, y2 - y),
+    rotation: 0,
+    stroke: COLORS.red,
+    fill: 'transparent',
+    strokeWidth: 4,
+    opacity: 1,
+    zIndex: count,
+  };
+  if (kind === 'highlight')
+    return { ...base, fill: '#f59e0b', opacity: 0.26, stroke: '#f59e0b', strokeWidth: 2 };
+  if (kind === 'step')
+    return {
+      ...base,
+      width: 48,
+      height: 48,
+      fill: '#6857f5',
+      stroke: '#ffffff',
+      strokeWidth: 2,
+      stepNumber: count + 1,
+    };
+  if (kind === 'text')
+    return {
+      ...base,
+      text: 'Mark what matters',
+      fill: '#ffffff',
+      stroke: '#ffffff',
+      fontSize: 24,
+      width: 260,
+      height: 42,
+    };
+  if (kind === 'callout')
+    return {
+      ...base,
+      text: 'Explain this area',
+      fill: '#6857f5',
+      stroke: '#6857f5',
+      fontSize: 18,
+      width: 240,
+      height: 58,
+    };
+  if (kind === 'blur')
+    return { ...base, fill: '#10131a', stroke: '#ffffff', opacity: 0.96, strokeWidth: 1, blurIntensity: 14 };
+  return base;
+}
+
+export function AnnotationCanvas({
+  image,
+  annotations,
+  selectedId,
+  tool,
+  zoom = 1,
+  onChange,
+  onSelect,
+  onMessage,
+  stageRef,
+}: {
+  image: ImagePayload | null;
+  annotations: Annotation[];
+  selectedId: string | null;
+  tool: AnnotationKind | 'select' | 'eraser';
+  zoom?: number;
+  onChange: (annotations: Annotation[]) => void;
+  onSelect: (id: string | null) => void;
+  onMessage?: (message: string) => void;
+  stageRef: MutableRefObject<Konva.Stage | null>;
+}) {
+  void onMessage;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const transformerRef = useRef<Konva.Transformer>(null);
+  const [size, setSize] = useState({ width: 900, height: 600 });
+  const [draft, setDraft] = useState<Annotation | null>(null);
+  const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!image?.dataUrl) {
+      setImageObj(null);
+      return;
+    }
+    const next = new window.Image();
+    next.onload = () => setImageObj(next);
+    next.src = image.dataUrl;
+  }, [image?.dataUrl]);
+  useEffect(() => {
+    const ro = new ResizeObserver(() => {
+      if (wrapRef.current)
+        setSize({ width: wrapRef.current.clientWidth, height: wrapRef.current.clientHeight });
+    });
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+  const scale = useMemo(
+    () =>
+      image ? Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1) * zoom : 1,
+    [image, size, zoom],
+  );
+  const canvasWidth = image ? image.width * scale : size.width - 64;
+  const canvasHeight = image ? image.height * scale : size.height - 64;
+  useEffect(() => {
+    const node = transformerRef.current;
+    if (!node) return;
+    const selected = node.getStage()?.findOne(`#${selectedId ?? ''}`);
+    node.nodes(selected ? [selected] : []);
+    node.getLayer()?.batchDraw();
+  }, [selectedId, annotations]);
+  function point(event: Konva.KonvaEventObject<MouseEvent>) {
+    const p = event.target.getStage()?.getPointerPosition();
+    return p ? { x: p.x / scale, y: p.y / scale } : null;
+  }
+  function onDown(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (tool === 'select') return;
+    const p = point(event);
+    if (!p) return;
+    if (tool === 'eraser') {
+      const hit = event.target;
+      const id = hit.id();
+      if (id) onChange(annotations.filter((a) => a.id !== id));
+      return;
+    }
+    setDraft(defaultAnnotation(tool, p.x, p.y, p.x + 2, p.y + 2, annotations.length));
+  }
+  function onMove(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (!draft) return;
+    const p = point(event);
+    if (!p) return;
+    if (draft.kind === 'pen')
+      setDraft({ ...draft, points: [...(draft.points ?? [draft.x, draft.y]), p.x, p.y] });
+    else if (draft.kind === 'arrow' || draft.kind === 'line')
+      setDraft({
+        ...draft,
+        points: [draft.x, draft.y, p.x, p.y],
+        width: Math.abs(p.x - draft.x),
+        height: Math.abs(p.y - draft.y),
+      });
+    else setDraft({ ...draft, width: p.x - draft.x, height: p.y - draft.y });
+  }
+  function onUp() {
+    if (!draft) return;
+    if (
+      Math.abs(draft.width ?? 0) < 4 &&
+      Math.abs(draft.height ?? 0) < 4 &&
+      !['text', 'callout', 'step'].includes(draft.kind)
+    ) {
+      setDraft(null);
+      return;
+    }
+    onChange([
+      ...annotations,
+      {
+        ...draft,
+        x: Math.min(draft.x, draft.x + (draft.width ?? 0)),
+        y: Math.min(draft.y, draft.y + (draft.height ?? 0)),
+        width: Math.abs(draft.width ?? 0),
+        height: Math.abs(draft.height ?? 0),
+      },
+    ]);
+    onSelect(draft.id);
+    setDraft(null);
+  }
+  function update(id: string, patch: Partial<Annotation>) {
+    onChange(annotations.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+  function renderAnnotation(a: Annotation) {
+    const common = {
+      id: a.id,
+      x: a.x * scale,
+      y: a.y * scale,
+      rotation: a.rotation,
+      opacity: a.opacity,
+      draggable: tool === 'select',
+      onClick: () => onSelect(a.id),
+      onTap: () => onSelect(a.id),
+      onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) =>
+        update(a.id, { x: event.target.x() / scale, y: event.target.y() / scale }),
+    };
+    const stroke = a.stroke ?? COLORS.red;
+    const sw = (a.strokeWidth ?? 4) * scale;
+    if (a.kind === 'arrow')
+      return (
+        <Arrow
+          {...common}
+          points={(a.points ?? [0, 0, a.width ?? 10, a.height ?? 10]).map((n) => n * scale)}
+          stroke={stroke}
+          strokeWidth={sw}
+          fill={stroke}
+          pointerLength={12 * scale}
+          pointerWidth={10 * scale}
+        />
+      );
+    if (a.kind === 'line' || a.kind === 'pen')
+      return (
+        <Line
+          {...common}
+          points={(a.points ?? [0, 0, a.width ?? 10, a.height ?? 10]).map((n) => n * scale)}
+          stroke={stroke}
+          strokeWidth={sw}
+          lineCap="round"
+          lineJoin="round"
+        />
+      );
+    if (a.kind === 'ellipse')
+      return (
+        <Ellipse
+          {...common}
+          radiusX={Math.abs(((a.width ?? 20) * scale) / 2)}
+          radiusY={Math.abs(((a.height ?? 20) * scale) / 2)}
+          x={(a.x + (a.width ?? 0) / 2) * scale}
+          y={(a.y + (a.height ?? 0) / 2) * scale}
+          stroke={stroke}
+          strokeWidth={sw}
+          fill={a.fill === 'transparent' ? undefined : a.fill}
+        />
+      );
+    if (a.kind === 'text')
+      return (
+        <Text
+          {...common}
+          text={a.text ?? 'Text'}
+          fontSize={(a.fontSize ?? 24) * scale}
+          fontFamily={a.fontFamily ?? 'Arial'}
+          fill={a.fill === 'transparent' ? '#ffffff' : a.fill}
+          width={(a.width ?? 260) * scale}
+          padding={6 * scale}
+        />
+      );
+    if (a.kind === 'callout')
+      return (
+        <Group {...common}>
+          <Rect
+            width={(a.width ?? 240) * scale}
+            height={(a.height ?? 58) * scale}
+            fill={a.fill ?? '#6857f5'}
+            cornerRadius={8 * scale}
+          />
+          <Text
+            text={a.text ?? 'Callout'}
+            fill="#fff"
+            fontSize={(a.fontSize ?? 18) * scale}
+            width={(a.width ?? 240) * scale}
+            height={(a.height ?? 58) * scale}
+            padding={10 * scale}
+            verticalAlign="middle"
+          />
+        </Group>
+      );
+    if (a.kind === 'step')
+      return (
+        <Group {...common}>
+          <Ellipse
+            radiusX={24 * scale}
+            radiusY={24 * scale}
+            fill={a.fill ?? '#6857f5'}
+            stroke={a.stroke ?? '#fff'}
+            strokeWidth={2 * scale}
+            x={24 * scale}
+            y={24 * scale}
+          />
+          <Text
+            text={String(a.stepNumber ?? 1)}
+            fill="#fff"
+            fontSize={22 * scale}
+            fontStyle="bold"
+            width={48 * scale}
+            height={48 * scale}
+            align="center"
+            verticalAlign="middle"
+          />
+        </Group>
+      );
+    return (
+      <Rect
+        {...common}
+        width={Math.abs((a.width ?? 20) * scale)}
+        height={Math.abs((a.height ?? 20) * scale)}
+        stroke={stroke}
+        strokeWidth={sw}
+        fill={a.kind === 'blur' ? '#0b0d12' : a.fill === 'transparent' ? undefined : a.fill}
+        cornerRadius={a.kind === 'rounded-rectangle' ? 8 * scale : 0}
+        dash={a.kind === 'crop' ? [8 * scale, 6 * scale] : undefined}
+      />
+    );
+  }
+  return (
+    <div className="canvas-wrap" ref={wrapRef}>
+      <div className="canvas-meta">
+        <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
+        <span>{tool === 'select' ? 'Select and move' : `Tool: ${tool}`}</span>
+      </div>
+      {imageObj ? (
+        <Stage
+          ref={stageRef}
+          width={canvasWidth}
+          height={canvasHeight}
+          className="konva-stage"
+          onMouseDown={onDown}
+          onMouseMove={onMove}
+          onMouseUp={onUp}
+          onClick={(event) => {
+            if (event.target === event.target.getStage()) onSelect(null);
+          }}
+        >
+          <Layer>
+            <KonvaImage image={imageObj} width={canvasWidth} height={canvasHeight} listening={false} />
+            {annotations.map(renderAnnotation)}
+            {draft && renderAnnotation(draft)}
+            <Transformer
+              ref={transformerRef}
+              rotateEnabled={true}
+              keepRatioEnabled={false}
+              borderStroke="#6857f5"
+              anchorStroke="#6857f5"
+              anchorFill="#fff"
+              anchorSize={10}
+              onTransformEnd={() => {
+                const node = transformerRef.current?.nodes()[0];
+                if (node && selectedId)
+                  update(selectedId, {
+                    x: node.x() / scale,
+                    y: node.y() / scale,
+                    rotation: node.rotation(),
+                    width: Math.max(2, (node.width() * node.scaleX()) / scale),
+                    height: Math.max(2, (node.height() * node.scaleY()) / scale),
+                  });
+              }}
+            />
+          </Layer>
+        </Stage>
+      ) : (
+        <div className="canvas-empty">
+          <span>Import a screenshot to begin marking context.</span>
+        </div>
+      )}
+      <div className="canvas-hint">Drag to draw. Select an annotation to move, resize or delete.</div>
+    </div>
+  );
+}
