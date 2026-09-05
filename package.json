@@ -104,7 +104,9 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.graphics-design"
+      "category": "public.app-category.graphics-design",
+      "identity": "-",
+      "hardenedRuntime": false
     },
     "publish": {
       "provider": "github",

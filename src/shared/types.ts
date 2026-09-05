@@ -13,6 +13,7 @@ export type AnnotationKind =
   | 'callout'
   | 'step'
   | 'blur'
+  | 'pixelate'
   | 'crop';
 
 export interface Annotation {
@@ -33,6 +34,7 @@ export interface Annotation {
   fontSize?: number;
   fontFamily?: string;
   fontStyle?: string;
+  align?: 'left' | 'center' | 'right';
   arrowhead?: boolean;
   blurIntensity?: number;
   zIndex: number;
@@ -99,7 +101,7 @@ export interface ProjectSnapshot {
   recoveryFound: boolean;
 }
 
-export type ProjectListItem = ProjectData & { projectPath: string };
+export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };
 
 export interface WorkspaceSettings {
   workspacePath: string | null;

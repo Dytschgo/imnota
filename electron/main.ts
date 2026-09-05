@@ -122,6 +122,7 @@ function dataUrlFromBuffer(buffer: Uint8Array, mime: string): string {
   return `data:${mime};base64,${Buffer.from(buffer).toString('base64')}`;
 }
 
+const thumbnailCache = new Map<string, { mtime: number; dataUrl: string }>();
 async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
   const project = await readProject(projectPath);
   const thumbnails: Record<string, string> = {};
@@ -129,23 +130,72 @@ async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
     project.screenshots.map(async (shot) => {
       const filePath = path.join(projectPath, 'screenshots', shot.storedFilename);
       await assertNoLinks(filePath);
-      const image = nativeImage.createFromPath(filePath);
-      if (!image.isEmpty()) thumbnails[shot.id] = image.resize({ width: 220, quality: 'good' }).toDataURL();
+      const stat = await fs.stat(filePath);
+      const cached = thumbnailCache.get(filePath);
+      if (cached?.mtime === stat.mtimeMs) thumbnails[shot.id] = cached.dataUrl;
+      else {
+        const image = nativeImage.createFromPath(filePath);
+        if (!image.isEmpty()) {
+          const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
+          thumbnails[shot.id] = dataUrl;
+          if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
+          thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
+        }
+      }
     }),
   );
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
-  const [projectStat, recoveryStat] = await Promise.all([
-    fs.stat(path.join(projectPath, 'project.json')).catch(() => null),
-    fs.stat(recoveryPath).catch(() => null),
-  ]);
+  const recoveryStat = await fs.stat(recoveryPath).catch(() => null);
   return {
     projectPath,
     project,
     thumbnails,
-    recoveryFound: Boolean(
-      recoveryStat && (!projectStat || recoveryStat.mtimeMs > projectStat.mtimeMs + 500),
-    ),
+    recoveryFound: Boolean(recoveryStat),
   };
+}
+
+async function openWithRecovery(projectPath: string): Promise<ProjectSnapshot> {
+  const snapshot = await makeSnapshot(projectPath);
+  const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
+  if (!snapshot.recoveryFound) return snapshot;
+  const recovery = z
+    .object({
+      project: projectSchema,
+      annotations: z.record(z.array(annotationSchema)),
+      notes: z.record(notesSchema),
+    })
+    .parse(JSON.parse(await fs.readFile(recoveryPath, 'utf8')));
+  if (recovery.project.id !== snapshot.project.id)
+    throw new Error('Recovery belongs to a different project. Your files were not changed.');
+  const choice = await dialog.showMessageBox(mainWindow!, {
+    type: 'question',
+    title: 'Recover interrupted work',
+    message: 'An interrupted editing session was found.',
+    detail:
+      'Restore its notes and annotations, or keep the last saved project. Recovery data will be preserved as .imnota-recovery-backup.json.',
+    buttons: ['Restore edits', 'Keep saved project', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  if (choice.response === 2) throw new Error('Opening cancelled. Recovery data is unchanged.');
+  await atomicWrite(
+    path.join(projectPath, '.imnota-recovery-backup.json'),
+    JSON.stringify(recovery, null, 2),
+  );
+  if (choice.response === 0) {
+    // Use trusted current file references, not file references from recovery data.
+    for (const shot of snapshot.project.screenshots) {
+      if (recovery.annotations[shot.id])
+        await atomicWrite(
+          path.join(projectPath, shot.annotationFile),
+          JSON.stringify(recovery.annotations[shot.id], null, 2),
+        );
+      if (recovery.notes[shot.id])
+        await atomicWrite(path.join(projectPath, shot.notesFile), noteToMarkdown(recovery.notes[shot.id]));
+    }
+  }
+  await fs.unlink(recoveryPath);
+  return makeSnapshot(projectPath);
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
@@ -299,8 +349,23 @@ function registerIpc(): void {
       if (!entry.isDirectory()) continue;
       try {
         const projectPath = path.join(settings.workspacePath, entry.name);
-        if (existsSync(path.join(projectPath, 'project.json')))
-          projects.push({ ...(await readProject(projectPath)), projectPath });
+        if (existsSync(path.join(projectPath, 'project.json'))) {
+          const project = await readProject(projectPath);
+          const searchable = [project.name, project.description, project.status, ...project.tags];
+          for (const shot of project.screenshots) {
+            const notePath = path.join(projectPath, shot.notesFile);
+            await assertNoLinks(notePath);
+            searchable.push(
+              shot.title,
+              shot.description,
+              shot.status,
+              shot.priority,
+              ...shot.tags,
+              await fs.readFile(notePath, 'utf8').catch(() => ''),
+            );
+          }
+          projects.push({ ...project, projectPath, searchText: searchable.join(' ').toLowerCase() });
+        }
       } catch {
         /* corrupt projects stay discoverable through open */
       }
@@ -329,10 +394,10 @@ function registerIpc(): void {
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const projectPath = await assertProjectPath(result.filePaths[0]);
-    return makeSnapshot(projectPath);
+    return openWithRecovery(projectPath);
   });
   handle('projects:load', async (_event, projectPath: string) =>
-    makeSnapshot(await assertProjectPath(projectPath)),
+    openWithRecovery(await assertProjectPath(projectPath)),
   );
   handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
     const safePath = await assertProjectPath(projectPath);
@@ -352,6 +417,18 @@ function registerIpc(): void {
       .map((s, position) => ({ ...s, position }));
     project.updatedAt = nowIso();
     await atomicWrite(
+      path.join(safePath, '.imnota-recovery.json'),
+      JSON.stringify(
+        {
+          project,
+          annotations: { [input.screenshot.id]: input.annotations },
+          notes: { [input.screenshot.id]: input.notes },
+        },
+        null,
+        2,
+      ),
+    );
+    await atomicWrite(
       path.join(safePath, 'annotations', input.screenshot.annotationFile.split('/').pop()),
       JSON.stringify(input.annotations, null, 2),
     );
@@ -360,6 +437,7 @@ function registerIpc(): void {
       noteToMarkdown(input.notes),
     );
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
+    await fs.unlink(path.join(safePath, '.imnota-recovery.json'));
   });
   handle('screenshots:load-content', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -549,17 +627,26 @@ function registerIpc(): void {
     await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
   });
   handle('update:download', async () => {
+    if (process.platform === 'darwin') {
+      await shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
+      return;
+    }
     if (app.isPackaged) await autoUpdater.downloadUpdate();
   });
   handle('update:install', () => {
+    if (process.platform === 'darwin') {
+      void shell.openExternal('https://github.com/Dytschgo/imnota/releases/latest');
+      return;
+    }
     if (app.isPackaged) autoUpdater.quitAndInstall();
   });
 }
 
 function configureAutoUpdates(): void {
   if (!app.isPackaged) return;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Apple Developer signing is needed for Squirrel.Mac updates; ad-hoc builds use a download link.
+  autoUpdater.autoDownload = process.platform !== 'darwin';
+  autoUpdater.autoInstallOnAppQuit = process.platform !== 'darwin';
   const send = (status: import('../src/shared/types.js').UpdateStatus) =>
     mainWindow?.webContents.send('update:status', status);
   autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
@@ -593,6 +680,7 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: process.env.IMNOTA_SMOKE !== '1',
       webSecurity: true,
     },
   });
@@ -628,7 +716,7 @@ app.whenReady().then(async () => {
   registerIpc();
   await createWindow();
   if (process.env.IMNOTA_SMOKE === '1') {
-    const fixture = await fs.mkdtemp(path.join(app.getPath('temp'), 'imnota-smoke-'));
+    const fixture = await fs.realpath(await fs.mkdtemp(path.join(app.getPath('temp'), 'imnota-smoke-')));
     try {
       settings.workspacePath = fixture;
       const source = path.join(fixture, 'fixture.png');
@@ -666,13 +754,124 @@ app.whenReady().then(async () => {
       );
       if (!archive.file('context.md') || !archive.file('annotated/reference.png'))
         throw new Error('ZIP entries missing');
+      const savedProject = await readProject(path.join(fixture, 'smoke'));
+      const recoveredNotes = { ...EMPTY_NOTES, summary: 'Recovered after interruption' };
+      await atomicWrite(
+        path.join(fixture, 'smoke', '.imnota-recovery.json'),
+        JSON.stringify({
+          project: savedProject,
+          annotations: {},
+          notes: { [savedProject.screenshots[0].id]: recoveredNotes },
+        }),
+      );
+      const originalDialog = dialog.showMessageBox;
+      try {
+        dialog.showMessageBox = (async () => ({
+          response: 0,
+          checkboxChecked: false,
+        })) as typeof dialog.showMessageBox;
+        await openWithRecovery(path.join(fixture, 'smoke'));
+      } finally {
+        dialog.showMessageBox = originalDialog;
+      }
+      const recovered = await fs.readFile(
+        path.join(fixture, 'smoke', savedProject.screenshots[0].notesFile),
+        'utf8',
+      );
+      if (
+        !recovered.includes(recoveredNotes.summary) ||
+        existsSync(path.join(fixture, 'smoke', '.imnota-recovery.json'))
+      )
+        throw new Error('Recovery did not restore notes and clear the journal');
+      const largeSource = path.join(fixture, 'large.png');
+      await fs.writeFile(
+        largeSource,
+        nativeImage
+          .createFromBitmap(Buffer.alloc(1920 * 1080 * 4, 255), { width: 1920, height: 1080 })
+          .toPNG(),
+      );
+      const metrics = await mainWindow!.webContents.executeJavaScript(`(async () => {
+        const api = window.imnota;
+        const project = await api.createProject({ name: 'Performance', description: '', tags: [] });
+        const started = performance.now();
+        for (let i = 0; i < 2; i++) await api.importImageFiles({ projectPath: project.projectPath, paths: Array(50).fill(${JSON.stringify(largeSource)}) });
+        const importedMs = performance.now() - started;
+        const before = performance.now();
+        const reopened = await api.loadProject(project.projectPath);
+        if (reopened.project.screenshots.length !== 100 || Object.keys(reopened.thumbnails).length !== 100) throw new Error('100-image project lost screenshots or thumbnails');
+        return { syntheticImages: 100, dimensions: '1920x1080', importMs: Math.round(importedMs), warmReopenMs: Math.round(performance.now() - before) };
+      })()`);
+      console.log('Synthetic project benchmark:', JSON.stringify(metrics));
+      // Reopen through the real React boot flow, draw a crop, then use the PNG action.
+      await mainWindow!.loadFile(path.join(__dirname, '../../dist/index.html'));
+      await mainWindow!.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+        let tries = 0;
+        const check = () => {
+          if (document.querySelector('.konvajs-content canvas')) return resolve(true);
+          if (++tries > 200) return reject(new Error('Annotation workspace did not render'));
+          setTimeout(check, 50);
+        }; check();
+      })`);
+      const canvasBounds = await mainWindow!.webContents.executeJavaScript(`(() => {
+        document.querySelector('[aria-label="Crop exported image (original preserved)"]').click();
+        const bounds = document.querySelector('.konvajs-content').getBoundingClientRect();
+        return { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+      })()`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const startPoint = {
+        x: canvasBounds.x + Math.round(canvasBounds.width * 0.2),
+        y: canvasBounds.y + Math.round(canvasBounds.height * 0.2),
+      };
+      const endPoint = {
+        x: canvasBounds.x + Math.round(canvasBounds.width * 0.7),
+        y: canvasBounds.y + Math.round(canvasBounds.height * 0.7),
+      };
+      const dispatchPointer = (type: string, point: { x: number; y: number }) =>
+        mainWindow!.webContents.executeJavaScript(
+          `document.querySelector('.konvajs-content').dispatchEvent(new MouseEvent(${JSON.stringify(type)}, { bubbles: true, clientX: ${point.x}, clientY: ${point.y}, button: 0, buttons: 1 }))`,
+        );
+      await dispatchPointer('mousedown', startPoint);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await dispatchPointer('mousemove', endPoint);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await dispatchPointer('mouseup', endPoint);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await mainWindow!.webContents.executeJavaScript(
+        `document.querySelector('[aria-label="Export selected screenshot as PNG"]').click()`,
+      );
+      const performanceProject = await readProject(path.join(fixture, 'performance'));
+      const exportedPng = path.join(
+        fixture,
+        'performance',
+        'exports',
+        performanceProject.screenshots[0].storedFilename.replace(/\.[^.]+$/, '') + '-annotated.png',
+      );
+      for (let attempt = 0; attempt < 100 && !existsSync(exportedPng); attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      const pngSize = nativeImage.createFromPath(exportedPng).getSize();
+      if (pngSize.width < 900 || pngSize.width > 1020 || pngSize.height < 500 || pngSize.height > 580)
+        throw new Error(`Cropped PNG dimensions are wrong: ${JSON.stringify(pngSize)}`);
       console.log(
-        'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, ZIP export and traversal rejection.',
+        'Renderer smoke passed: reopened workspace, crop drawing and cropped PNG export.',
+        JSON.stringify(pngSize),
+      );
+      if (process.env.IMNOTA_SMOKE_SCREENSHOT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_SCREENSHOT,
+          (await mainWindow!.webContents.capturePage()).toPNG(),
+        );
+      console.log(
+        'Electron smoke passed: startup, IPC, create/import/save/reload/duplicate, recovery, 100-image project, ZIP export and traversal rejection.',
       );
       await fs.rm(fixture, { recursive: true, force: true });
       app.exit(0);
     } catch (error) {
       console.error(error);
+      if (process.env.IMNOTA_SMOKE_SCREENSHOT)
+        await fs.writeFile(
+          process.env.IMNOTA_SMOKE_SCREENSHOT,
+          (await mainWindow!.webContents.capturePage()).toPNG(),
+        );
       await fs.rm(fixture, { recursive: true, force: true });
       app.exit(1);
     }

@@ -106,6 +106,7 @@ export const annotationSchema = z.object({
     'callout',
     'step',
     'blur',
+    'pixelate',
     'crop',
   ]),
   x: z.number().finite(),
@@ -124,6 +125,7 @@ export const annotationSchema = z.object({
   fontSize: z.number().positive().optional(),
   fontFamily: z.string().optional(),
   fontStyle: z.string().optional(),
+  align: z.enum(['left', 'center', 'right']).optional(),
   arrowhead: z.boolean().optional(),
   blurIntensity: z.number().nonnegative().optional(),
 });

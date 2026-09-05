@@ -42,6 +42,18 @@ jobs:
       - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Verify and launch the macOS release archive
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(find release -maxdepth 1 -name '*-mac.zip' -print -quit)"
+          test -n "$archive"
+          destination="$(mktemp -d)"
+          ditto -x -k "$archive" "$destination"
+          codesign --verify --deep --strict "$destination/Imnota.app"
+          lipo -verify_arch arm64 x86_64 "$destination/Imnota.app/Contents/MacOS/Imnota"
+          node scripts/smoke.mjs "$destination/Imnota.app/Contents/MacOS/Imnota"
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
@@ -70,6 +82,8 @@ jobs:
           cp "$(find release-assets -maxdepth 1 -type f -name 'Imnota Setup *.exe' -print -quit)" release-assets/Imnota-Setup.exe
           cp "$(find release-assets -maxdepth 1 -type f -name '*-mac.zip' -print -quit)" release-assets/Imnota-mac.zip
           cp "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' -print -quit)" release-assets/Imnota.AppImage
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           draft: false

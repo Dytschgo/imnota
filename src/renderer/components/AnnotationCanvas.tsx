@@ -14,6 +14,7 @@ import {
 import type Konva from 'konva';
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
 import { createId } from '../../shared/utils';
+import { pixelatedRegion } from '../pixelate';
 
 const COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -139,6 +140,17 @@ export function AnnotationCanvas({
   );
   const canvasWidth = image ? image.width * scale : size.width - 64;
   const canvasHeight = image ? image.height * scale : size.height - 64;
+  const pixelated = useMemo(
+    () =>
+      new Map(
+        imageObj
+          ? [...annotations, ...(draft ? [draft] : [])]
+              .filter((a) => a.kind === 'pixelate')
+              .map((a) => [a.id, pixelatedRegion(imageObj, a)])
+          : [],
+      ),
+    [imageObj, annotations, draft],
+  );
   useEffect(() => {
     const node = transformerRef.current;
     if (!node) return;
@@ -210,6 +222,7 @@ export function AnnotationCanvas({
   }
   function renderAnnotation(a: Annotation) {
     const common = {
+      key: a.id,
       id: a.id,
       x: a.x * scale,
       y: a.y * scale,
@@ -226,6 +239,18 @@ export function AnnotationCanvas({
     };
     const stroke = a.stroke ?? COLORS.red;
     const sw = (a.strokeWidth ?? 4) * scale;
+    if (a.kind === 'pixelate')
+      return (
+        <KonvaImage
+          {...common}
+          image={pixelated.get(a.id)}
+          width={(a.width ?? 20) * scale}
+          height={(a.height ?? 20) * scale}
+          imageSmoothingEnabled={false}
+          opacity={1}
+          rotation={0}
+        />
+      );
     if (a.kind === 'arrow')
       return (
         <Arrow
@@ -236,6 +261,7 @@ export function AnnotationCanvas({
           fill={stroke}
           pointerLength={12 * scale}
           pointerWidth={10 * scale}
+          pointerAtEnding={a.arrowhead !== false}
         />
       );
     if (a.kind === 'line' || a.kind === 'pen')
@@ -269,6 +295,8 @@ export function AnnotationCanvas({
           text={a.text ?? 'Text'}
           fontSize={(a.fontSize ?? 24) * scale}
           fontFamily={a.fontFamily ?? 'Arial'}
+          fontStyle={a.fontStyle}
+          align={a.align}
           fill={a.fill === 'transparent' ? '#ffffff' : a.fill}
           width={(a.width ?? 260) * scale}
           padding={6 * scale}
@@ -287,6 +315,9 @@ export function AnnotationCanvas({
             text={a.text ?? 'Callout'}
             fill="#fff"
             fontSize={(a.fontSize ?? 18) * scale}
+            fontFamily={a.fontFamily ?? 'Arial'}
+            fontStyle={a.fontStyle}
+            align={a.align}
             width={(a.width ?? 240) * scale}
             height={(a.height ?? 58) * scale}
             padding={10 * scale}
@@ -298,21 +329,21 @@ export function AnnotationCanvas({
       return (
         <Group {...common}>
           <Ellipse
-            radiusX={24 * scale}
-            radiusY={24 * scale}
+            radiusX={((a.width ?? 48) / 2) * scale}
+            radiusY={((a.height ?? 48) / 2) * scale}
             fill={a.fill ?? '#6857f5'}
             stroke={a.stroke ?? '#fff'}
             strokeWidth={2 * scale}
-            x={24 * scale}
-            y={24 * scale}
+            x={((a.width ?? 48) / 2) * scale}
+            y={((a.height ?? 48) / 2) * scale}
           />
           <Text
             text={String(a.stepNumber ?? 1)}
             fill="#fff"
-            fontSize={22 * scale}
+            fontSize={Math.min(a.width ?? 48, a.height ?? 48) * 0.46 * scale}
             fontStyle="bold"
-            width={48 * scale}
-            height={48 * scale}
+            width={(a.width ?? 48) * scale}
+            height={(a.height ?? 48) * scale}
             align="center"
             verticalAlign="middle"
           />
@@ -352,11 +383,13 @@ export function AnnotationCanvas({
         >
           <Layer>
             <KonvaImage image={imageObj} width={canvasWidth} height={canvasHeight} listening={false} />
-            {annotations.map(renderAnnotation)}
+            {[...annotations].sort((a, b) => a.zIndex - b.zIndex).map(renderAnnotation)}
             {draft && renderAnnotation(draft)}
             <Transformer
               ref={transformerRef}
-              rotateEnabled={true}
+              rotateEnabled={
+                !['crop', 'pixelate'].includes(annotations.find((a) => a.id === selectedId)?.kind ?? '')
+              }
               keepRatioEnabled={false}
               borderStroke="#6857f5"
               anchorStroke="#6857f5"
@@ -366,8 +399,8 @@ export function AnnotationCanvas({
                 const node = transformerRef.current?.nodes()[0];
                 if (node && selectedId) {
                   const selected = annotations.find((a) => a.id === selectedId);
-                  const width = Math.max(2, (node.width() * node.scaleX()) / scale);
-                  const height = Math.max(2, (node.height() * node.scaleY()) / scale);
+                  const width = Math.max(2, (selected?.width ?? node.width() / scale) * node.scaleX());
+                  const height = Math.max(2, (selected?.height ?? node.height() / scale) * node.scaleY());
                   update(selectedId, {
                     x: node.x() / scale - (selected?.kind === 'ellipse' ? width / 2 : 0),
                     y: node.y() / scale - (selected?.kind === 'ellipse' ? height / 2 : 0),

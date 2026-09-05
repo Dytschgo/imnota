@@ -1,4 +1,6 @@
 import Konva from 'konva';
+import { exportBounds } from '../shared/crop';
+import { pixelatedRegion } from './pixelate';
 import type { Annotation, ImagePayload } from '../shared/types';
 
 /** Render each reference at its original resolution, independent of viewport/selection. */
@@ -13,6 +15,7 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
   try {
     layer.add(new Konva.Image({ image: bitmap }));
     for (const annotation of [...annotations].sort((a, b) => a.zIndex - b.zIndex)) {
+      if (annotation.kind === 'crop') continue;
       const a = { ...annotation, width: annotation.width ?? 20, height: annotation.height ?? 20 };
       const config = {
         ...a,
@@ -28,6 +31,7 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
               points: a.points ?? [0, 0, a.width, a.height],
               pointerLength: 12,
               pointerWidth: 10,
+              pointerAtEnding: a.arrowhead !== false,
               fill: config.stroke,
             }),
           );
@@ -77,6 +81,9 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
               height: a.height,
               fill: '#fff',
               fontSize: a.fontSize ?? 18,
+              fontFamily: a.fontFamily ?? 'Arial',
+              fontStyle: a.fontStyle,
+              align: a.align,
               padding: 10,
               verticalAlign: 'middle',
             }),
@@ -87,10 +94,11 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
         case 'step': {
           const group = new Konva.Group({ x: a.x, y: a.y, rotation: a.rotation, opacity: a.opacity });
           group.add(
-            new Konva.Circle({
-              x: 24,
-              y: 24,
-              radius: 24,
+            new Konva.Ellipse({
+              x: a.width / 2,
+              y: a.height / 2,
+              radiusX: a.width / 2,
+              radiusY: a.height / 2,
               fill: a.fill ?? '#6857f5',
               stroke: '#fff',
               strokeWidth: 2,
@@ -99,9 +107,9 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
           group.add(
             new Konva.Text({
               text: String(a.stepNumber ?? 1),
-              width: 48,
-              height: 48,
-              fontSize: 22,
+              width: a.width,
+              height: a.height,
+              fontSize: Math.min(a.width, a.height) * 0.46,
               fontStyle: 'bold',
               fill: '#fff',
               align: 'center',
@@ -111,6 +119,17 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
           layer.add(group);
           break;
         }
+        case 'pixelate':
+          layer.add(
+            new Konva.Image({
+              ...config,
+              image: pixelatedRegion(bitmap, a),
+              imageSmoothingEnabled: false,
+              opacity: 1,
+              rotation: 0,
+            }),
+          );
+          break;
         case 'blur':
           layer.add(new Konva.Rect({ ...config, fill: '#0b0d12', opacity: 1 }));
           break;
@@ -125,7 +144,7 @@ export async function renderAnnotatedImage(image: ImagePayload, annotations: Ann
       }
     }
     layer.draw();
-    return stage.toDataURL({ pixelRatio: 1 });
+    return stage.toDataURL({ ...exportBounds(image.width, image.height, annotations), pixelRatio: 1 });
   } finally {
     stage.destroy();
   }

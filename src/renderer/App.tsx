@@ -76,6 +76,8 @@ export default function App() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedId = useRef<string | null>(null);
+  const allowClose = useRef(false);
+  const copiedAnnotation = useRef<Annotation | null>(null);
 
   const activeShot = store.activeScreenshot();
   const workspaceSet = Boolean(store.settings.workspacePath);
@@ -173,19 +175,31 @@ export default function App() {
     };
   }, [annotations, notes, activeShot, store.snapshot]);
   useEffect(() => {
-    if (!store.snapshot || store.view === 'context') return;
-    const timer = window.setTimeout(() => {
+    const beforeClose = (event: BeforeUnloadEvent) => {
+      if (allowClose.current || !store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id)
+        return;
+      event.preventDefault();
+      event.returnValue = '';
       void window.imnota
-        .saveRecovery({
-          projectPath: store.snapshot!.projectPath,
-          project: store.snapshot!.project,
-          annotations: { [activeShot?.id ?? '']: annotations },
-          notes: { [activeShot?.id ?? '']: notes },
+        .saveScreenshotContent({
+          projectPath: store.snapshot.projectPath,
+          screenshot: activeShot,
+          annotations,
+          notes,
         })
-        .catch(() => undefined);
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [annotations, notes, store.snapshot, store.view, activeShot?.id]);
+        .then(() => {
+          allowClose.current = true;
+          window.close();
+        })
+        .catch(() =>
+          setError(
+            'Closing was cancelled because your edits could not be saved. Check the workspace and try again.',
+          ),
+        );
+    };
+    window.addEventListener('beforeunload', beforeClose);
+    return () => window.removeEventListener('beforeunload', beforeClose);
+  }, [annotations, notes, store.snapshot, activeShot]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -206,10 +220,26 @@ export default function App() {
         });
       } else if (modifier && event.key.toLowerCase() === 'v' && store.snapshot) {
         event.preventDefault();
-        void pasteImage();
+        if (copiedAnnotation.current) {
+          const copy = {
+            ...copiedAnnotation.current,
+            id: crypto.randomUUID(),
+            x: copiedAnnotation.current.x + 16,
+            y: copiedAnnotation.current.y + 16,
+            zIndex: annotations.length,
+          };
+          changeAnnotations([...annotations, copy]);
+          setSelectedAnnotation(copy.id);
+        } else void pasteImage();
       } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
         event.preventDefault();
         void copyContext();
+      } else if (modifier && event.key.toLowerCase() === 'c' && selectedAnnotation) {
+        event.preventDefault();
+        copiedAnnotation.current = structuredClone(
+          annotations.find((item) => item.id === selectedAnnotation) ?? null,
+        );
+        showToast('Annotation copied inside Imnota. Use Add screenshot to paste an image.');
       } else if (modifier && event.key.toLowerCase() === 's') {
         event.preventDefault();
         void persistCurrent();
@@ -355,49 +385,45 @@ export default function App() {
   const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
     const shots = store.snapshot.project.screenshots.filter((shot) => shot.includeInExport);
-    const cache = {
+    const cache: Record<string, { annotations: Annotation[]; notes: NoteFields }> = {
       ...(activeShot && lastLoadedId.current === activeShot.id
-        ? { [activeShot.id]: { image, annotations, notes } }
+        ? { [activeShot.id]: { annotations, notes } }
         : {}),
     };
-    await Promise.all(
-      shots
-        .filter((shot) => !cache[shot.id])
-        .map(async (shot) => {
-          const loaded = await window.imnota.loadScreenshotContent({
-            projectPath: store.snapshot!.projectPath,
-            screenshot: shot,
-          });
-          cache[shot.id] = loaded;
-        }),
-    );
+    for (const shot of shots.filter((shot) => !cache[shot.id])) {
+      const loaded = await window.imnota.loadScreenshotContent({
+        projectPath: store.snapshot!.projectPath,
+        screenshot: shot,
+      });
+      cache[shot.id] = { notes: loaded.notes, annotations: loaded.annotations };
+    }
     return generateMarkdown(
       store.snapshot.project,
       shots,
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.notes ?? EMPTY_NOTES])),
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.annotations ?? []])),
     );
-  }, [store.snapshot, activeShot, image, annotations, notes]);
+  }, [store.snapshot, activeShot, annotations, notes]);
   async function exportPackage() {
     if (!store.snapshot) return;
     try {
       const markdown = await buildMarkdown();
       const shots = selectedShots();
-      const annotatedImages = await Promise.all(
-        shots.map(async (shot) => {
-          const content =
-            shot.id === activeShot?.id && lastLoadedId.current === shot.id && image
-              ? { image, annotations, notes }
-              : await window.imnota.loadScreenshotContent({
-                  projectPath: store.snapshot!.projectPath,
-                  screenshot: shot,
-                });
-          return {
-            filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-            dataUrl: await renderAnnotatedImage(content.image, content.annotations),
-          };
-        }),
-      );
+      const annotatedImages = [];
+      for (const [index, shot] of shots.entries()) {
+        showToast(`Rendering screenshot ${index + 1} of ${shots.length}…`);
+        const content =
+          shot.id === activeShot?.id && lastLoadedId.current === shot.id && image
+            ? { image, annotations, notes }
+            : await window.imnota.loadScreenshotContent({
+                projectPath: store.snapshot!.projectPath,
+                screenshot: shot,
+              });
+        annotatedImages.push({
+          filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+          dataUrl: await renderAnnotatedImage(content.image, content.annotations),
+        });
+      }
       const result = await window.imnota.exportPackage({
         projectPath: store.snapshot.projectPath,
         markdown,
@@ -487,6 +513,13 @@ export default function App() {
             </IconButton>
           </div>
         )}
+        {updateStatus?.state === 'available' && navigator.platform.toLowerCase().includes('mac') && (
+          <div className="update-banner" role="status">
+            <Download size={16} />
+            <span>Imnota {updateStatus.version} is available. This Mac build requires a manual update.</span>
+            <Button onClick={() => void window.imnota.downloadUpdate()}>Download update</Button>
+          </div>
+        )}
         {updateStatus?.state === 'downloaded' && (
           <div className="update-banner" role="status">
             <Download size={16} />
@@ -512,6 +545,20 @@ export default function App() {
           <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} />
         ) : (
           <Workspace
+            onExportImage={async () => {
+              if (!store.snapshot || !activeShot || !image) return;
+              try {
+                const dataUrl = await renderAnnotatedImage(image, annotations);
+                await window.imnota.exportAnnotatedImage({
+                  projectPath: store.snapshot.projectPath,
+                  filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+                  dataUrl,
+                });
+                showToast('Annotated PNG saved in the project exports folder.');
+              } catch {
+                setError('The PNG could not be exported. Check the workspace and try again.');
+              }
+            }}
             onImport={() => fileInputRef.current?.click()}
             onPaste={pasteImage}
             onSelect={(id: string) => store.set({ activeScreenshotId: id })}
@@ -815,7 +862,9 @@ function Library({ onNew, onOpen }: { onNew: () => void; onOpen: () => void }) {
   const filtered = projects.filter(
     (p) =>
       (view === 'favourites' ? p.favourite : view === 'recent' ? true : true) &&
-      `${p.name} ${p.description} ${p.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase()),
+      (p.searchText ?? `${p.name} ${p.description} ${p.tags.join(' ')}`)
+        .toLowerCase()
+        .includes(search.toLowerCase()),
   );
   return (
     <section className="library">
@@ -1013,6 +1062,13 @@ function Workspace(props: any) {
             onFit={props.onFit}
           />
           <div className="canvas-actions">
+            <IconButton
+              label="Export selected screenshot as PNG"
+              disabled={!shot}
+              onClick={() => void props.onExportImage()}
+            >
+              <Download size={17} />
+            </IconButton>
             <span className="zoom-readout">{Math.round((props.zoom ?? 1) * 100)}%</span>
             <span className={`save-state ${props.saving}`}>
               <span className="save-dot" />
@@ -1227,6 +1283,111 @@ function Inspector({
                 label="Label"
                 value={selectedAnnotation.text ?? ''}
                 onChange={(event) => onChangeAnnotation({ text: event.target.value })}
+              />
+            )}
+            <div className="field-grid">
+              <TextInput
+                label="Fill colour"
+                type="color"
+                value={selectedAnnotation.fill?.startsWith('#') ? selectedAnnotation.fill : '#6857f5'}
+                onChange={(event) => onChangeAnnotation({ fill: event.target.value })}
+              />
+              <TextInput
+                label="Stroke colour"
+                type="color"
+                value={selectedAnnotation.stroke ?? '#ef4444'}
+                onChange={(event) => onChangeAnnotation({ stroke: event.target.value })}
+              />
+              <TextInput
+                label="Layer order"
+                type="number"
+                value={selectedAnnotation.zIndex}
+                onChange={(event) => onChangeAnnotation({ zIndex: Number(event.target.value) })}
+              />
+              <TextInput
+                label="Rotation"
+                type="number"
+                disabled={['crop', 'pixelate'].includes(selectedAnnotation.kind)}
+                value={selectedAnnotation.rotation ?? 0}
+                onChange={(event) => onChangeAnnotation({ rotation: Number(event.target.value) })}
+              />
+            </div>
+            {['text', 'callout'].includes(selectedAnnotation.kind) && (
+              <>
+                <TextInput
+                  label="Font size"
+                  type="number"
+                  min="8"
+                  max="200"
+                  value={selectedAnnotation.fontSize ?? 24}
+                  onChange={(event) =>
+                    onChangeAnnotation({ fontSize: Math.max(8, Math.min(200, Number(event.target.value))) })
+                  }
+                />
+                <TextInput
+                  label="Font family"
+                  value={selectedAnnotation.fontFamily ?? 'Arial'}
+                  onChange={(event) => onChangeAnnotation({ fontFamily: event.target.value })}
+                />
+                <label>
+                  Text alignment
+                  <select
+                    aria-label="Text alignment"
+                    value={selectedAnnotation.align ?? 'left'}
+                    onChange={(event) =>
+                      onChangeAnnotation({ align: event.target.value as Annotation['align'] })
+                    }
+                  >
+                    <option value="left">Left</option>
+                    <option value="center">Centre</option>
+                    <option value="right">Right</option>
+                  </select>
+                </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={selectedAnnotation.fontStyle === 'bold'}
+                    onChange={(event) =>
+                      onChangeAnnotation({ fontStyle: event.target.checked ? 'bold' : 'normal' })
+                    }
+                  />
+                  Bold text
+                </label>
+              </>
+            )}
+            {selectedAnnotation.kind === 'step' && (
+              <TextInput
+                label="Step number"
+                type="number"
+                min="1"
+                value={selectedAnnotation.stepNumber ?? 1}
+                onChange={(event) =>
+                  onChangeAnnotation({ stepNumber: Math.max(1, Number(event.target.value)) })
+                }
+              />
+            )}
+            {selectedAnnotation.kind === 'arrow' && (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={selectedAnnotation.arrowhead !== false}
+                  onChange={(event) => onChangeAnnotation({ arrowhead: event.target.checked })}
+                />
+                Show arrowhead
+              </label>
+            )}
+            {selectedAnnotation.kind === 'pixelate' && (
+              <TextInput
+                label="Pixel block size"
+                type="number"
+                min="4"
+                max="100"
+                value={selectedAnnotation.blurIntensity ?? 14}
+                onChange={(event) =>
+                  onChangeAnnotation({
+                    blurIntensity: Math.max(4, Math.min(100, Number(event.target.value))),
+                  })
+                }
               />
             )}
           </div>

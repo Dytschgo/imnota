@@ -103,6 +103,7 @@ if (
 }
 
 command('git', ['fetch', 'origin', 'main']);
+command(process.execPath, ['scripts/secret-scan.mjs']);
 command('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD']);
 const remoteTag = command('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`], {
   capture: true,

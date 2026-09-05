@@ -38,7 +38,9 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/Dytschgo/imnota/main/scripts/install.ps1 | iex
 ```
 
-The installer downloads the latest published desktop build. Users do not need Node.js, pnpm, Electron or any development dependencies. A release must exist before the command can install Imnota.
+The installer downloads the latest published desktop build. Users do not need Node.js, pnpm, Electron or any development dependencies. The Mac archive supports both Apple Silicon and Intel, verifies its checksum and ad-hoc signature, and installs in `~/Applications`. Existing apps are kept as timestamped backups; project files are not moved.
+
+This first release is **not Apple-notarised**. If macOS blocks opening Imnota, open System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper. You can also [download the Mac ZIP directly](https://github.com/Dytschgo/imnota/releases/latest/download/Imnota-mac.zip), extract it and move Imnota to Applications.
 
 For manual installation, download a release artifact for your platform, or build from source:
 
@@ -89,7 +91,7 @@ corepack pnpm release patch --dry-run
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
-Packaged clients check the repository releases when they launch, download newer versions in the background and offer a restart action. Branch and pull request builds never publish artifacts.
+Packaged clients check the repository releases when they launch. Windows and AppImage clients download updates and offer a restart action. This ad-hoc-signed Mac release shows a download link for newer versions; automatic Mac installation requires Apple Developer signing, which is not configured yet. Branch and pull request builds never publish releases.
 
 ## Project structure
 

@@ -8,6 +8,6 @@ const packagedExecutable = process.argv[2];
 const result = spawnSync(packagedExecutable ?? electron, packagedExecutable ? [] : ['.'], {
   env,
   stdio: 'inherit',
-  timeout: 30000,
+  timeout: 120000,
 });
 process.exit(result.status ?? 1);

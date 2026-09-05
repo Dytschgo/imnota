@@ -25,12 +25,16 @@ const tools: Array<{ id: ToolChoice; label: string; icon: typeof MousePointer2 }
   { id: 'arrow', label: 'Arrow', icon: MoveRight },
   { id: 'line', label: 'Line', icon: RectangleHorizontal },
   { id: 'rectangle', label: 'Rectangle', icon: Square },
+  { id: 'rounded-rectangle', label: 'Rounded rectangle', icon: RectangleHorizontal },
   { id: 'ellipse', label: 'Ellipse', icon: Circle },
   { id: 'highlight', label: 'Highlight area', icon: Highlighter },
   { id: 'pen', label: 'Freehand pen', icon: Pencil },
   { id: 'text', label: 'Text', icon: Type },
+  { id: 'callout', label: 'Text callout', icon: Type },
   { id: 'step', label: 'Numbered step', icon: MoreHorizontal },
   { id: 'blur', label: 'Mask sensitive area', icon: Crop },
+  { id: 'pixelate', label: 'Pixelate area (use a mask for secrets)', icon: Highlighter },
+  { id: 'crop', label: 'Crop exported image (original preserved)', icon: Crop },
   { id: 'eraser', label: 'Delete annotation', icon: Eraser },
 ];
 

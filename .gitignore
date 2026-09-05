@@ -25,6 +25,7 @@ Thumbs.db
 workspace/
 Imnota Workspace/
 **/.imnota-recovery.json
+**/.imnota-recovery-backup.json
 **/exports/*.zip
 **/exports/*.png
 **/screenshots/
