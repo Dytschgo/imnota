@@ -2,14 +2,33 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertReleaseEvidence } from './release-readiness.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packagePath = resolve(repositoryRoot, 'package.json');
 const argumentsList = process.argv.slice(2);
-if (argumentsList.some((argument) => argument.startsWith('--') && argument !== '--dry-run'))
-  throw new Error('Unknown option. Only --dry-run is supported.');
-const dryRun = argumentsList.includes('--dry-run');
-const requestedVersion = argumentsList.find((argument) => !argument.startsWith('--')) ?? 'patch';
+let dryRun = false;
+let evidencePath;
+let requestedVersion;
+for (let index = 0; index < argumentsList.length; index += 1) {
+  const argument = argumentsList[index];
+  if (argument === '--dry-run') {
+    dryRun = true;
+  } else if (argument === '--evidence') {
+    evidencePath = argumentsList[index + 1];
+    index += 1;
+    if (!evidencePath || evidencePath.startsWith('--'))
+      throw new Error('--evidence requires a local JSON file path.');
+  } else if (argument.startsWith('--')) {
+    throw new Error('Unknown option. Use --dry-run and required --evidence <local-json-path>.');
+  } else if (requestedVersion) {
+    throw new Error('Use one version request: patch, minor, major, or an explicit stable version.');
+  } else {
+    requestedVersion = argument;
+  }
+}
+if (!evidencePath) throw new Error('Release readiness evidence is required: --evidence <local-json-path>.');
+requestedVersion ??= 'patch';
 
 function command(commandName, commandArguments, options = {}) {
   const result = spawnSync(commandName, commandArguments, {
@@ -105,6 +124,9 @@ command('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD']);
 if (capture('git', ['rev-parse', 'HEAD']) !== capture('git', ['rev-parse', 'origin/main'])) {
   throw new Error('Release only the exact reviewed origin/main commit. Pull main before releasing.');
 }
+const candidateSha = capture('git', ['rev-parse', 'HEAD']);
+assertReleaseEvidence(resolve(repositoryRoot, evidencePath), { sha: candidateSha, version });
+console.log(`Release readiness evidence accepted for ${version} at ${candidateSha}.`);
 const remoteTag = command('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`], {
   capture: true,
   allowFailure: true,
