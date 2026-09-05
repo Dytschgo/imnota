@@ -310,6 +310,25 @@ button:disabled {
 .error-banner span {
   flex: 1;
 }
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 18px 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(104, 87, 245, 0.38);
+  border-radius: 7px;
+  background: rgba(104, 87, 245, 0.12);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.update-banner svg {
+  color: var(--indigo-light);
+  flex: none;
+}
+.update-banner span {
+  flex: 1;
+}
 
 .btn {
   min-height: 32px;

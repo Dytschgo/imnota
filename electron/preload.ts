@@ -25,6 +25,16 @@ const bridge: ImnotaBridge = {
   saveRecovery: (input) => ipcRenderer.invoke('recovery:save', input),
   clearRecovery: (projectPath) => ipcRenderer.invoke('recovery:clear', projectPath),
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),
+  onUpdateStatus: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      status: import('../src/shared/types.js').UpdateStatus,
+    ) => handler(status);
+    ipcRenderer.on('update:status', listener);
+    return () => ipcRenderer.removeListener('update:status', listener);
+  },
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
 };
 
 contextBridge.exposeInMainWorld('imnota', bridge);

@@ -109,6 +109,14 @@ export interface WorkspaceSettings {
   confirmBeforeDeletion: boolean;
 }
 
+export type UpdateState = 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+export interface UpdateStatus {
+  state: UpdateState;
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+
 export interface ImagePayload {
   filename: string;
   dataUrl: string;
@@ -161,6 +169,9 @@ export interface ImnotaBridge {
   }): Promise<void>;
   clearRecovery(projectPath: string): Promise<void>;
   getDroppedFilePath(file: File): string;
+  onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
+  downloadUpdate(): Promise<void>;
+  installUpdate(): Promise<void>;
 }
 
 declare global {

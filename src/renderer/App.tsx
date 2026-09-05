@@ -35,6 +35,7 @@ import type {
   ProjectListItem,
   ProjectSnapshot,
   ScreenshotRecord,
+  UpdateStatus,
 } from '../shared/types';
 import { DEFAULT_TAGS, EMPTY_NOTES, nowIso, sanitizeFilename } from '../shared/utils';
 import { generateMarkdown } from '../shared/markdown';
@@ -69,6 +70,7 @@ export default function App() {
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [contentCache, setContentCache] = useState<
     Record<string, { annotations: Annotation[]; notes: NoteFields; image: any }>
   >({});
@@ -230,6 +232,15 @@ export default function App() {
     copyContext,
     persistCurrent,
   ]);
+  useEffect(
+    () =>
+      window.imnota.onUpdateStatus((status) => {
+        setUpdateStatus(status);
+        if (status.state === 'downloaded')
+          showToast(`Imnota ${status.version ?? 'update'} is ready. Restart to apply it.`);
+      }),
+    [showToast],
+  );
 
   async function persistCurrent() {
     if (!store.snapshot || !activeShot) return;
@@ -471,6 +482,15 @@ export default function App() {
             <IconButton label="Dismiss" onClick={() => setError('')}>
               <X size={16} />
             </IconButton>
+          </div>
+        )}
+        {updateStatus?.state === 'downloaded' && (
+          <div className="update-banner" role="status">
+            <Download size={16} />
+            <span>Imnota {updateStatus.version ?? 'update'} is ready to install.</span>
+            <Button variant="soft" onClick={() => void window.imnota.installUpdate()}>
+              Restart to update
+            </Button>
           </div>
         )}
         {!workspaceSet ? (

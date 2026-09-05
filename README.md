@@ -56,6 +56,14 @@ corepack pnpm test
 corepack pnpm build
 ```
 
+## Publishing updates
+
+1. Update the version in `package.json` and commit it.
+2. Create and push a matching tag, for example `git tag v0.2.0` followed by `git push origin v0.2.0`.
+3. The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests.
+
+Packaged clients check the repository releases when they launch, download newer versions in the background and offer a restart action. Branch and pull request builds never publish artifacts.
+
 ## Project structure
 
 ```text

@@ -1,4 +1,4 @@
-name: Draft release
+name: Publish release
 
 on:
   push:
@@ -8,8 +8,21 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            command: pnpm package:linux
+          - os: windows-latest
+            platform: windows
+            command: pnpm package:win
+          - os: macos-latest
+            platform: macos
+            command: pnpm package:mac
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,11 +33,26 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm exec electron-builder --linux --publish never
+      - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: release/
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          draft: true
-          files: release/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release-assets/**

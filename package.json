@@ -5,7 +5,10 @@
   "private": true,
   "type": "module",
   "main": "dist-electron/electron/main.js",
-  "author": "Dytschgo",
+  "author": {
+    "name": "Dytschgo",
+    "email": "info@dylanferraro.ch"
+  },
   "license": "MIT",
   "homepage": "https://github.com/Dytschgo/imnota",
   "repository": {
@@ -25,12 +28,13 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package:linux": "corepack pnpm build && electron-builder --linux",
-    "package:win": "corepack pnpm build && electron-builder --win",
-    "package:mac": "corepack pnpm build && electron-builder --mac",
-    "package:all": "corepack pnpm build && electron-builder --linux --win --mac"
+    "package:linux": "corepack pnpm build && electron-builder --linux --publish never",
+    "package:win": "corepack pnpm build && electron-builder --win --publish never",
+    "package:mac": "corepack pnpm build && electron-builder --mac --publish never",
+    "package:all": "corepack pnpm build && electron-builder --linux --win --mac --publish never"
   },
   "dependencies": {
+    "electron-updater": "6.3.9",
     "jszip": "^3.10.1",
     "konva": "^10.0.3",
     "lucide-react": "^0.468.0",
@@ -98,6 +102,12 @@
         "zip"
       ],
       "category": "public.app-category.graphics-design"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Dytschgo",
+      "repo": "imnota",
+      "releaseType": "release"
     }
   }
 }

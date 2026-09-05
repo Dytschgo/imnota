@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { z } from 'zod';
+import { autoUpdater } from 'electron-updater';
 import type {
   Annotation,
   ExportRequest,
@@ -450,6 +451,35 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(projectPath);
     await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
   });
+  ipcMain.handle('update:download', async () => {
+    if (app.isPackaged) await autoUpdater.downloadUpdate();
+  });
+  ipcMain.handle('update:install', () => {
+    if (app.isPackaged) autoUpdater.quitAndInstall();
+  });
+}
+
+function configureAutoUpdates(): void {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  const send = (status: import('../src/shared/types.js').UpdateStatus) =>
+    mainWindow?.webContents.send('update:status', status);
+  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
+  autoUpdater.on('update-available', (info) => send({ state: 'available', version: info.version }));
+  autoUpdater.on('update-not-available', () => send({ state: 'not-available' }));
+  autoUpdater.on('download-progress', (progress) =>
+    send({ state: 'downloading', percent: progress.percent }),
+  );
+  autoUpdater.on('update-downloaded', (info) => send({ state: 'downloaded', version: info.version }));
+  autoUpdater.on('error', (error) => send({ state: 'error', message: error.message }));
+  setTimeout(
+    () =>
+      void autoUpdater
+        .checkForUpdates()
+        .catch((error: Error) => send({ state: 'error', message: error.message })),
+    8000,
+  );
 }
 
 async function createWindow(): Promise<void> {
@@ -497,6 +527,7 @@ app.whenReady().then(async () => {
   });
   registerIpc();
   await createWindow();
+  configureAutoUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });

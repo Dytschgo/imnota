@@ -19,3 +19,7 @@ Clipboard file attachments differ between Windows, macOS, Linux and AI applicati
 ## Packaging is unsigned
 
 Normal development and pull request builds are unsigned. Signing and macOS notarisation are optional release steps and must use repository secrets, never values checked into the repository.
+
+## How updates reach installed clients
+
+Push a semantic version tag such as `v0.2.0`. The Publish release workflow builds Windows, macOS and Linux artifacts, uploads the generated update manifests, and publishes a GitHub Release. Packaged Imnota clients check GitHub Releases on launch, download a newer version in the background, and show a Restart to update action. Pull request and branch validation builds always use `--publish never`.
