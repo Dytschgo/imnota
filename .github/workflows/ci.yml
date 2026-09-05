@@ -62,7 +62,7 @@ jobs:
       - name: Verify packaged Mac application
         if: matrix.os == 'macos-latest'
         run: bash scripts/verify-mac.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: imnota-${{ matrix.os }}
           path: release/
