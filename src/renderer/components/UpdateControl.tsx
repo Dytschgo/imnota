@@ -90,7 +90,7 @@ export function UpdateControl() {
           Nightly builds may contain unfinished changes. Keep a backup of your workspace.
         </p>
       )}
-      <p role="status" aria-live="polite">
+      <p className="update-status" role="status" aria-live="polite">
         {message}
       </p>
       <Button
@@ -116,13 +116,16 @@ export function UpdateControl() {
           Restart to install
         </Button>
       )}
-      <p>Checking contacts GitHub for release information only. Your project files stay local.</p>
-      {navigator.platform.toLowerCase().includes('mac') && (
-        <p>
-          This Mac build opens the download page. Replace the app with the new version; your workspace is kept
-          separately.
-        </p>
-      )}
+      <details className="settings-disclosure update-disclosure">
+        <summary>Update privacy and installation</summary>
+        <p>Checking contacts GitHub for release information only. Your project files stay local.</p>
+        {navigator.platform.toLowerCase().includes('mac') && (
+          <p>
+            This Mac build opens the download page. Replace the app with the new version; your workspace is
+            kept separately.
+          </p>
+        )}
+      </details>
       {confirmNightly && (
         <Modal
           title="Switch to Nightly?"
