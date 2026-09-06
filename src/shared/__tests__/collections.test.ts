@@ -122,6 +122,25 @@ it.each([
       screenshots: [{ ...project.screenshots[0], roundId: 'missing-collection' }],
     }),
   },
+  {
+    name: 'aliased per-collection screenshot filenames',
+    mutate: (project: Awaited<ReturnType<typeof fixture>>['project']) => ({
+      ...project,
+      screenshots: [...project.screenshots, { ...project.screenshots[0], id: 'second-shot', position: 1 }],
+    }),
+  },
+  {
+    name: 'noncanonical v2 sidecar references',
+    mutate: (project: Awaited<ReturnType<typeof fixture>>['project']) => ({
+      ...project,
+      screenshots: [
+        {
+          ...project.screenshots[0],
+          annotationFile: 'rounds/001-first-feedback/annotations/another.png.json',
+        },
+      ],
+    }),
+  },
 ])('rejects $name before replacing legacy metadata', async ({ mutate }) => {
   const { dir, project } = await fixture(2);
   const malformed = mutate(project);

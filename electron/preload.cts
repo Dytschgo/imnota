@@ -2,6 +2,28 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImnotaBridge } from '../src/shared/types.js';
 
 const bridge: ImnotaBridge = {
+  getPreferenceSettings: () => ipcRenderer.invoke('workflow:preferences:get'),
+  setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
+  getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),
+  startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
+  writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),
+  finishPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:finish', input),
+  cancelPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:cancel', input),
+  readPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:read', input),
+  copyPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:copy', input),
+  openPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:open', input),
+  startProjectWatch: (input) => ipcRenderer.invoke('workflow:project-watch:start', input),
+  stopProjectWatch: (input) => ipcRenderer.invoke('workflow:project-watch:stop', input),
+  reloadWatchedProject: (input) => ipcRenderer.invoke('workflow:project-watch:reload', input),
+  saveProjectCompareAndSwap: (input) => ipcRenderer.invoke('workflow:project-watch:cas', input),
+  onProjectWatchEvent: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      watchEvent: import('../src/shared/workflow-bridge.js').ProjectWatchEvent,
+    ) => handler(watchEvent);
+    ipcRenderer.on('workflow:project-watch-event', listener);
+    return () => ipcRenderer.removeListener('workflow:project-watch-event', listener);
+  },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   chooseWorkspace: () => ipcRenderer.invoke('settings:choose-workspace'),
   setSettings: (input) => ipcRenderer.invoke('settings:set', input),

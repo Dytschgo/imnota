@@ -98,6 +98,7 @@ function resolver(events: string[] = []) {
         dataUrl,
         width: picture.width,
         height: picture.height,
+        contentRevision: picture.contentRevision,
         release: () => {
           active--;
           events.push(`source-release:${picture.screenshotId}`);
@@ -181,6 +182,40 @@ describe('prompt bundle composition', () => {
       }),
     ).rejects.toThrow(/dimensions changed/);
     expect(testEnvironment.drawImage).not.toHaveBeenCalled();
+    expect(testEnvironment.events.at(-1)).toBe('destroy');
+  });
+
+  it('rejects a same-sized render from a stale content revision', async () => {
+    const testEnvironment = environment();
+    const stale = resolver();
+    const resolve = async (picture: PromptBundle['pictures'][number]) => ({
+      ...(await stale.resolve(picture)),
+      contentRevision: 'stale-revision',
+    });
+    await expect(
+      composePromptBundle(bundle(1), {
+        environment: testEnvironment.renderEnvironment,
+        resolvePicturePng: resolve,
+      }),
+    ).rejects.toThrow(/content or dimensions changed/);
+    expect(testEnvironment.drawImage).not.toHaveBeenCalled();
+  });
+
+  it('stops before resolving the next picture when cancellation is requested', async () => {
+    const controller = new AbortController();
+    const testEnvironment = environment();
+    testEnvironment.renderEnvironment.yieldControl = async () => controller.abort();
+    const pictureResolver = resolver(testEnvironment.events);
+    await expect(
+      composePromptBundle(bundle(), {
+        environment: testEnvironment.renderEnvironment,
+        resolvePicturePng: pictureResolver.resolve,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(testEnvironment.events.filter((event) => event.startsWith('resolve:'))).toEqual([
+      'resolve:shot-1',
+    ]);
     expect(testEnvironment.events.at(-1)).toBe('destroy');
   });
 

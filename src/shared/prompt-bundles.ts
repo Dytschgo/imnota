@@ -184,8 +184,8 @@ export function mapPromptTextNotes(
   const notes: PromptTextNote[] = [];
   for (const annotation of annotationsInCreationOrder) {
     if (annotation.kind !== 'text' && annotation.kind !== 'callout') continue;
-    const text = annotation.text?.trim();
-    if (!text) continue;
+    const text = annotation.text?.replace(/\r\n?/g, '\n');
+    if (!text?.trim()) continue;
     notes.push({ number: notes.length + 1, text });
   }
   return notes;
@@ -274,9 +274,9 @@ function markdownForBundle(
       '',
     );
   }
-  const context = collection.overallContext.trim();
-  if (context && bundleNumber === 1) lines.push('## Overall context', '', context, '');
-  else if (context) lines.push('Shared collection context is included in Prompt 1.', '');
+  const context = collection.overallContext.replace(/\r\n?/g, '\n');
+  if (context.trim() && bundleNumber === 1) lines.push('## Overall context', '', context, '');
+  else if (context.trim()) lines.push('Shared collection context is included in Prompt 1.', '');
 
   for (const picture of pictures) {
     lines.push(
@@ -285,15 +285,15 @@ function markdownForBundle(
       `Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`,
       '',
     );
-    const description = picture.description.trim();
-    if (description) lines.push(description, '');
+    const description = picture.description.replace(/\r\n?/g, '\n');
+    if (description.trim()) lines.push(description, '');
     for (const note of picture.notes)
       lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
   }
 
   for (const pictureNumber of excludedPictureNumbers)
     lines.push(`Picture ${pictureNumber} was intentionally excluded from this prompt bundle.`, '');
-  return `${lines.join('\n').trim()}\n`;
+  return `${lines.join('\n').replace(/\n+$/g, '')}\n`;
 }
 
 function orderedScreenshots(screenshots: readonly PromptScreenshotInput[]): PromptScreenshotInput[] {

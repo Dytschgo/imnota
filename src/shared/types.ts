@@ -1,3 +1,5 @@
+import type { WorkflowBridge } from './workflow-bridge.js';
+
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';
 export type AnnotationKind =
@@ -103,6 +105,9 @@ export interface ProjectSnapshot {
   project: ProjectData;
   thumbnails: Record<string, string>;
   recoveryFound: boolean;
+  /** Revision of project.json used for compare-and-swap metadata saves. */
+  projectRevision?: string;
+  warnings?: string[];
 }
 
 export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };
@@ -154,6 +159,9 @@ export interface SaveScreenshotResult {
   savedScreenshotId: string;
   conflictCreated: boolean;
   contentRevision: string;
+  /** Fresh project.json revision after this native mutation. */
+  projectRevision?: string;
+  warnings?: string[];
 }
 
 export interface DeleteScreenshotResult {
@@ -161,7 +169,7 @@ export interface DeleteScreenshotResult {
   undoToken: string;
 }
 
-export interface ImnotaBridge {
+export interface ImnotaBridge extends WorkflowBridge {
   getSettings(): Promise<WorkspaceSettings>;
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;

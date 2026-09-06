@@ -151,6 +151,22 @@ describe('prompt bundle planning', () => {
       'Bundle reference: Checkout Collection - 260907-184205 - 01',
     );
   });
+
+  it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
+    const input = collection([
+      screenshot('one', 0, {
+        description: 'Description:\r\n\r\n    code()',
+        annotations: [{ kind: 'text', text: '    noteCode()' }],
+      }),
+    ]);
+    input.overallContext = 'Context:\r\n\r\n    setup()';
+    const result = planPromptBundles(input, [rendered('one')]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain('Context:\n\n    setup()');
+    expect(result.bundles[0].markdown).toContain('Description:\n\n    code()');
+    expect(result.bundles[0].markdown).toContain('### Picture 1 / Note 1\n\n    noteCode()');
+  });
 });
 
 describe('prompt layout', () => {

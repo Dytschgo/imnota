@@ -17,6 +17,14 @@ import type {
   ScreenshotRecord,
   WorkspaceSettings,
 } from '../src/shared/types.js';
+import type { PreferenceSettingsResult } from '../src/shared/preferences.js';
+import {
+  mergePreferenceSettings,
+  preferenceSettingsEnvelope,
+  preferenceSettingsUpdateSchema,
+  resolvePreferenceSettings,
+} from '../src/shared/preference-settings.js';
+import type { PreferenceSettingsUpdate, ProjectWatchEvent } from '../src/shared/workflow-bridge.js';
 import {
   DEFAULT_EXPORT_PREFERENCES,
   emptyProject,
@@ -34,7 +42,7 @@ import {
   settingsPatchSchema,
   filenameSchema,
 } from '../src/shared/schema.js';
-import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
 import { ensureCollection, addEmptyCollection, migrateProject, screenshotPath } from './collections.js';
 import { deleteScreenshotToTrash, undoScreenshotDelete } from './screenshot-trash.js';
 import { normalizeRecoveredProject } from './recovery.js';
@@ -47,6 +55,10 @@ import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { prepareTerminalUpdate } from './terminal-update.js';
+import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { nativePerformanceProfile } from './native-performance.js';
+import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
+import { workflowOutcome } from './workflow-errors.js';
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -60,6 +72,8 @@ if (process.env.IMNOTA_SMOKE === '1') {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let updateController: UpdateController;
+let projectWatchManager: ProjectWatchManager | undefined;
+let promptBundleWorkflow: PromptBundleWorkflow | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -68,8 +82,33 @@ let settings: WorkspaceSettings = {
   confirmBeforeDeletion: true,
   updateChannel: 'stable',
 };
+let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
+
+async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
+  await writeAtomically(filePath, content);
+  projectWatchManager?.recordSelfWrite(filePath, content);
+}
+
+async function copyFile(filePath: string, targetPath: string): Promise<void> {
+  await fs.copyFile(filePath, targetPath);
+  projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
+}
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
+
+async function persistApplicationSettings(
+  nextSettings: WorkspaceSettings,
+  nextPreferences = preferenceSettingsResult.settings,
+): Promise<void> {
+  const persisted = preferenceSettingsEnvelope(
+    nextSettings as unknown as Record<string, unknown>,
+    nextPreferences,
+    preferenceSettingsResult.profile,
+  );
+  await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
+  settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
+  preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+}
 const projectInput = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(3000),
@@ -141,31 +180,41 @@ const thumbnailCache = new Map<string, { mtime: number; dataUrl: string }>();
 async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
   const project = await readProject(projectPath);
   const thumbnails: Record<string, string> = {};
+  const warnings: string[] = [];
   await Promise.all(
     project.screenshots.map(async (shot) => {
-      const filePath = screenshotPath(projectPath, shot);
-      await assertNoLinks(filePath);
-      const stat = await fs.stat(filePath);
-      const cached = thumbnailCache.get(filePath);
-      if (cached?.mtime === stat.mtimeMs) thumbnails[shot.id] = cached.dataUrl;
-      else {
-        const image = nativeImage.createFromPath(filePath);
-        if (!image.isEmpty()) {
-          const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
-          thumbnails[shot.id] = dataUrl;
-          if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
-          thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
+      try {
+        const filePath = screenshotPath(projectPath, shot);
+        await assertNoLinks(filePath);
+        const stat = await fs.stat(filePath);
+        const cached = thumbnailCache.get(filePath);
+        if (cached?.mtime === stat.mtimeMs) thumbnails[shot.id] = cached.dataUrl;
+        else {
+          const image = nativeImage.createFromPath(filePath);
+          if (!image.isEmpty()) {
+            const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
+            thumbnails[shot.id] = dataUrl;
+            if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
+            thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
+          } else warnings.push(`Preview unavailable for ${shot.originalFilename}.`);
         }
+      } catch {
+        warnings.push(`Preview unavailable for ${shot.originalFilename}.`);
       }
     }),
   );
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   const recoveryStat = await fs.stat(recoveryPath).catch(() => null);
+  const projectRevision = projectRevisionForSource(
+    await fs.readFile(path.join(projectPath, 'project.json'), 'utf8'),
+  );
   return {
     projectPath,
     project,
     thumbnails,
     recoveryFound: Boolean(recoveryStat),
+    projectRevision,
+    warnings: warnings.length ? warnings : undefined,
   };
 }
 
@@ -339,6 +388,30 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
   };
 }
 
+function copyTextToClipboard(text: string): void {
+  if (typeof text !== 'string' || text.length > 2_000_000)
+    throw new Error('Context is too large to copy. Export the Markdown file instead.');
+  clipboard.writeText(text);
+}
+
+function clipboardImage(imageDataUrl: string) {
+  const size = clipboardPngDimensions(imageDataUrl);
+  const image = nativeImage.createFromDataURL(imageDataUrl);
+  if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
+    throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
+  return image;
+}
+
+function copyImageToClipboard(imageDataUrl: string): void {
+  clipboard.writeImage(clipboardImage(imageDataUrl));
+}
+
+function copyContextToClipboard(markdown: string, imageDataUrl: string): void {
+  const image = clipboardImage(imageDataUrl);
+  const html = clipboardContextHtml(markdown);
+  clipboard.write({ text: markdown, html, image });
+}
+
 function registerIpc(): void {
   // One queue prevents concurrent read/modify/write handlers from losing updates.
   let pending: Promise<unknown> = Promise.resolve();
@@ -348,6 +421,23 @@ function registerIpc(): void {
     .max(100_000_000)
     .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
   const imageExport = z.object({ filename: filenameSchema, dataUrl: png });
+  const workflowSessionId = z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .max(200);
+  const workflowBundleNumber = z.number().int().min(1).max(999);
+  const workflowManifest = z
+    .array(
+      z
+        .object({
+          bundleNumber: workflowBundleNumber,
+          width: z.number().int().min(1).max(16_384),
+          height: z.number().int().min(1).max(16_384),
+        })
+        .strict(),
+    )
+    .min(1)
+    .max(999);
   const contracts: Record<string, z.ZodTypeAny> = {
     'settings:get': z.tuple([]),
     'settings:choose-workspace': z.tuple([]),
@@ -428,6 +518,58 @@ function registerIpc(): void {
       return result;
     });
   };
+  const handleWorkflow = (
+    channel: string,
+    listener: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown> | unknown,
+    queued = false,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) =>
+      workflowOutcome(async () => {
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+          throw new Error('Untrusted IPC sender.');
+        if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
+        if (!queued) return listener(event, ...args);
+        const result = pending.then(() => listener(event, ...args));
+        pending = result.catch(() => undefined);
+        return result;
+      }),
+    );
+  };
+
+  projectWatchManager = new ProjectWatchManager({
+    loadSnapshot: (projectPath) => makeSnapshot(projectPath),
+    saveProject: async (projectPath, project) => {
+      const current = await readProject(projectPath);
+      if (current.id !== project.id) throw new Error('Project identity does not match its watch grant.');
+      const next = validateProject({ ...project, id: current.id, schemaVersion: 3, updatedAt: nowIso() });
+      await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(next, null, 2));
+      return makeSnapshot(projectPath);
+    },
+    emit: (event: ProjectWatchEvent) => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
+        mainWindow.webContents.send('workflow:project-watch-event', event);
+    },
+  });
+  promptBundleWorkflow = new PromptBundleWorkflow({
+    authorize: async (projectPath, collectionId) => {
+      const safePath = await assertProjectPath(projectPath);
+      const project = await readProject(safePath);
+      const collection = project.collections.find((candidate) => candidate.id === collectionId);
+      if (!collection) throw new Error('Collection does not belong to this project.');
+      return {
+        projectPath: safePath,
+        collectionId: collection.id,
+        collectionName: collection.name,
+      };
+    },
+    copyContext: (markdown, imageDataUrl) => copyContextToClipboard(markdown, imageDataUrl),
+    copyText: (markdown) => copyTextToClipboard(markdown),
+    copyImage: (imageDataUrl) => copyImageToClipboard(imageDataUrl),
+    openPath: async (targetPath) => {
+      const error = await shell.openPath(targetPath);
+      if (error) throw new Error(error);
+    },
+  });
   handle('settings:get', () => settings);
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -436,20 +578,183 @@ function registerIpc(): void {
     });
     if (result.canceled || !result.filePaths[0]) return null;
     settings.workspacePath = result.filePaths[0];
-    await atomicWrite(settingsFile(), JSON.stringify(settings, null, 2));
+    await persistApplicationSettings(settings);
     return settings;
   });
   handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
-    const next = { ...settings, ...input };
+    const nextPreferences = input.theme
+      ? mergePreferenceSettings(preferenceSettingsResult.settings, {
+          appearance: { mode: input.theme },
+        })
+      : preferenceSettingsResult.settings;
+    const next = { ...settings, ...input, theme: nextPreferences.appearance.mode };
     const persist = async () => {
-      await atomicWrite(settingsFile(), JSON.stringify(next, null, 2));
-      settings = next;
+      await persistApplicationSettings(next, nextPreferences);
     };
     if (next.updateChannel !== settings.updateChannel)
       await updateController.switchChannel(next.updateChannel, persist);
     else await persist();
     return settings;
   });
+  handleWorkflow('workflow:preferences:get', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    return preferenceSettingsResult;
+  });
+  handleWorkflow(
+    'workflow:preferences:set',
+    async (_event, ...args) => {
+      const [input] = z.tuple([preferenceSettingsUpdateSchema]).parse(args);
+      const next = mergePreferenceSettings(
+        preferenceSettingsResult.settings,
+        input as PreferenceSettingsUpdate,
+      );
+      await persistApplicationSettings({ ...settings, theme: next.appearance.mode }, next);
+      return preferenceSettingsResult;
+    },
+    true,
+  );
+  handleWorkflow('workflow:performance:get', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    return nativePerformanceProfile();
+  });
+  handleWorkflow(
+    'workflow:prompt-export:start',
+    async (_event, ...args) => {
+      const [input] = z
+        .tuple([
+          z
+            .object({
+              projectPath: pathInput,
+              collectionId: filenameSchema,
+              bundles: workflowManifest,
+            })
+            .strict(),
+        ])
+        .parse(args);
+      return promptBundleWorkflow!.start(input.projectPath, input.collectionId, input.bundles);
+    },
+    true,
+  );
+  handleWorkflow(
+    'workflow:prompt-export:write',
+    async (_event, ...args) => {
+      const [input] = z
+        .tuple([
+          z
+            .object({
+              sessionId: workflowSessionId,
+              bundleNumber: workflowBundleNumber,
+              pngDataUrl: z
+                .string()
+                .max(134_000_000)
+                .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/),
+              markdown: z.string().min(1).max(2_000_000),
+            })
+            .strict(),
+        ])
+        .parse(args);
+      return promptBundleWorkflow!.write(
+        input.sessionId,
+        input.bundleNumber,
+        input.pngDataUrl,
+        input.markdown,
+      );
+    },
+    true,
+  );
+  handleWorkflow(
+    'workflow:prompt-export:finish',
+    async (_event, ...args) => {
+      const [input] = z
+        .tuple([
+          z
+            .object({
+              sessionId: workflowSessionId,
+              masterMarkdown: z.string().max(2_000_000).optional(),
+            })
+            .strict(),
+        ])
+        .parse(args);
+      return promptBundleWorkflow!.finish(input.sessionId, input.masterMarkdown);
+    },
+    true,
+  );
+  handleWorkflow('workflow:prompt-export:cancel', async (_event, ...args) => {
+    const [input] = z.tuple([z.object({ sessionId: workflowSessionId }).strict()]).parse(args);
+    return promptBundleWorkflow!.cancel(input.sessionId);
+  });
+  handleWorkflow('workflow:prompt-export:read', async (_event, ...args) => {
+    const [input] = z
+      .tuple([z.object({ sessionId: workflowSessionId, bundleNumber: workflowBundleNumber }).strict()])
+      .parse(args);
+    return promptBundleWorkflow!.read(input.sessionId, input.bundleNumber);
+  });
+  handleWorkflow('workflow:prompt-export:copy', async (_event, ...args) => {
+    const [input] = z
+      .tuple([
+        z
+          .object({
+            sessionId: workflowSessionId,
+            bundleNumber: workflowBundleNumber,
+            target: z.enum(['context', 'markdown', 'image']),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    await promptBundleWorkflow!.copy(input.sessionId, input.bundleNumber, input.target);
+  });
+  handleWorkflow('workflow:prompt-export:open', async (_event, ...args) => {
+    const [input] = z
+      .tuple([
+        z
+          .object({
+            sessionId: workflowSessionId,
+            bundleNumber: workflowBundleNumber,
+            target: z.enum(['folder', 'png', 'markdown', 'master']),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    await promptBundleWorkflow!.open(input.sessionId, input.bundleNumber, input.target);
+  });
+  handleWorkflow(
+    'workflow:project-watch:start',
+    async (_event, ...args) => {
+      const [input] = z.tuple([z.object({ projectPath: pathInput }).strict()]).parse(args);
+      return projectWatchManager!.start(await assertProjectPath(input.projectPath));
+    },
+    true,
+  );
+  handleWorkflow('workflow:project-watch:stop', (_event, ...args) => {
+    const [input] = z.tuple([z.object({ watchId: workflowSessionId }).strict()]).parse(args);
+    projectWatchManager!.stop(input.watchId);
+  });
+  handleWorkflow('workflow:project-watch:reload', async (_event, ...args) => {
+    const [input] = z.tuple([z.object({ watchId: workflowSessionId }).strict()]).parse(args);
+    return projectWatchManager!.reload(input.watchId);
+  });
+  handleWorkflow(
+    'workflow:project-watch:cas',
+    async (_event, ...args) => {
+      const [input] = z
+        .tuple([
+          z
+            .object({
+              watchId: workflowSessionId,
+              expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+              project: projectSchema,
+            })
+            .strict(),
+        ])
+        .parse(args);
+      return projectWatchManager!.compareAndSwap(
+        input.watchId,
+        input.expectedRevision,
+        validateProject(input.project),
+      );
+    },
+    true,
+  );
   handle('projects:list', async () => {
     if (!settings.workspacePath) return [];
     const entries = await fs.readdir(settings.workspacePath, { withFileTypes: true }).catch(() => []);
@@ -542,12 +847,14 @@ function registerIpc(): void {
       await atomicWrite(path.join(safePath, conflict.descriptionFile), conflict.description);
       project.screenshots.push(conflict);
       project.updatedAt = timestamp;
-      await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
+      const projectSource = JSON.stringify(project, null, 2);
+      await atomicWrite(path.join(safePath, 'project.json'), projectSource);
       return {
         project,
         savedScreenshotId: conflict.id,
         conflictCreated: true,
         contentRevision: contentRevision(conflict.description, conflictAnnotations),
+        projectRevision: projectRevisionForSource(projectSource),
       };
     }
     const timestamp = nowIso();
@@ -577,13 +884,22 @@ function registerIpc(): void {
     );
     await atomicWrite(path.join(safePath, screenshot.annotationFile), annotationsJson);
     await atomicWrite(path.join(safePath, screenshot.descriptionFile), screenshot.description);
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
-    await fs.unlink(path.join(safePath, '.imnota-recovery.json'));
+    const projectSource = JSON.stringify(project, null, 2);
+    await atomicWrite(path.join(safePath, 'project.json'), projectSource);
+    const warnings: string[] = [];
+    await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT')
+        warnings.push(
+          'The screenshot was saved, but its recovery journal could not be removed. It will be reconciled on the next open.',
+        );
+    });
     return {
       project,
       savedScreenshotId: screenshot.id,
       conflictCreated: false,
       contentRevision: contentRevision(screenshot.description, annotationsJson),
+      projectRevision: projectRevisionForSource(projectSource),
+      warnings: warnings.length ? warnings : undefined,
     };
   });
   handle('screenshots:load-content', async (_event, input) => {
@@ -644,7 +960,7 @@ function registerIpc(): void {
         });
       await atomicWrite(path.join(safePath, destination), contents);
     }
-    await fs.copyFile(
+    await copyFile(
       screenshotPath(safePath, source),
       path.join(safePath, 'collections', source.collectionId, 'screenshots', name),
     );
@@ -668,14 +984,30 @@ function registerIpc(): void {
   handle('screenshots:delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    const result = await deleteScreenshotToTrash(safePath, project, input.screenshotId, (target) =>
-      shell.trashItem(target),
-    );
+    const result = await deleteScreenshotToTrash(safePath, project, input.screenshotId, async (target) => {
+      await shell.trashItem(target);
+      projectWatchManager?.recordSelfDelete(target);
+    });
+    const projectFile = path.join(safePath, 'project.json');
+    projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
     return { snapshot: await makeSnapshot(safePath), undoToken: result.undoToken };
   });
   handle('screenshots:undo-delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
-    await undoScreenshotDelete(safePath, await readProject(safePath), input.undoToken);
+    const before = await readProject(safePath);
+    const restoredProject = await undoScreenshotDelete(safePath, before, input.undoToken);
+    const restored = restoredProject.screenshots.find(
+      (candidate) => !before.screenshots.some((existing) => existing.id === candidate.id),
+    );
+    if (restored)
+      for (const target of [
+        screenshotPath(safePath, restored),
+        path.join(safePath, restored.annotationFile),
+        path.join(safePath, restored.descriptionFile),
+      ])
+        projectWatchManager?.recordSelfWrite(target, await fs.readFile(target));
+    const projectFile = path.join(safePath, 'project.json');
+    projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
     return makeSnapshot(safePath);
   });
   handle('collections:edit', async (_event, input) => {
@@ -816,23 +1148,13 @@ function registerIpc(): void {
     if (error) throw new Error(error);
   });
   handle('system:copy-text', async (_event, text: string) => {
-    if (typeof text !== 'string' || text.length > 2_000_000)
-      throw new Error('Context is too large to copy. Export the Markdown file instead.');
-    clipboard.writeText(text);
+    copyTextToClipboard(text);
   });
   handle('system:copy-image', async (_event, dataUrl: string) => {
-    const image = nativeImage.createFromDataURL(dataUrl);
-    if (image.isEmpty()) throw new Error('The image could not be copied. Export it as PNG instead.');
-    clipboard.writeImage(image);
+    copyImageToClipboard(dataUrl);
   });
   handle('system:copy-context', async (_event, input) => {
-    const size = clipboardPngDimensions(input.imageDataUrl);
-    const image = nativeImage.createFromDataURL(input.imageDataUrl);
-    if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
-      throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
-    const html = clipboardContextHtml(input.markdown);
-    // All preparation and validation precede the single clipboard mutation.
-    clipboard.write({ text: input.markdown, html, image });
+    copyContextToClipboard(input.markdown, input.imageDataUrl);
   });
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -942,12 +1264,24 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(async () => {
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
+  const settingsFileExists = stored !== null;
   if (stored)
     try {
-      settings = { ...settings, ...JSON.parse(stored) };
+      const persisted = JSON.parse(stored) as Record<string, unknown>;
+      preferenceSettingsResult = resolvePreferenceSettings(persisted, true);
+      const applicationSettings = { ...persisted };
+      delete applicationSettings.preferences;
+      delete applicationSettings.preferenceProfile;
+      delete applicationSettings.theme;
+      settings = {
+        ...settings,
+        ...applicationSettings,
+        theme: preferenceSettingsResult.settings.appearance.mode,
+      } as WorkspaceSettings;
       settings.updateChannel = settings.updateChannel === 'nightly' ? 'nightly' : 'stable';
     } catch {
-      /* reset corrupt preferences */
+      preferenceSettingsResult = resolvePreferenceSettings({}, settingsFileExists);
+      /* Keep in-memory safe defaults; do not overwrite corrupt preferences before user action. */
     }
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -1342,3 +1676,4 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+app.on('before-quit', () => projectWatchManager?.stopAll());

@@ -56,6 +56,7 @@ export interface ResolvedPromptPicturePng {
   dataUrl: string;
   width: number;
   height: number;
+  contentRevision: string;
   release?(): void;
 }
 
@@ -64,6 +65,7 @@ export interface ComposePromptBundleOptions {
   maxCanvasEdge?: number;
   maxCanvasPixels?: number;
   environment?: PromptBundleRenderEnvironment;
+  signal?: AbortSignal;
   /** Resolve only the current bundle picture. The composer releases it before requesting the next. */
   resolvePicturePng?(picture: PromptBundle['pictures'][number]): Promise<ResolvedPromptPicturePng>;
 }
@@ -72,6 +74,12 @@ const FILE_ONLY_WARNING =
   'This full-resolution prompt exceeds safe clipboard limits. Use the saved PNG and Markdown files instead.';
 const DEFAULT_MAX_CANVAS_EDGE = 16_384;
 const DEFAULT_MAX_CANVAS_PIXELS = 64_000_000;
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException('Prompt bundle composition was cancelled.', 'AbortError');
+}
 
 function browserEnvironment(): PromptBundleRenderEnvironment {
   return {
@@ -146,6 +154,7 @@ export async function composePromptBundle(
   bundle: PromptBundle,
   options: ComposePromptBundleOptions = {},
 ): Promise<PromptBundleComposition> {
+  throwIfAborted(options.signal);
   if (!bundle.pictures.length) throw new Error('A visual prompt bundle needs at least one screenshot.');
   const maxCharacters =
     options.maxClipboardPngCharacters ?? DEFAULT_PROMPT_BUNDLE_LIMITS.maxEstimatedPngCharacters;
@@ -174,8 +183,14 @@ export async function composePromptBundle(
     (async (picture: PromptBundle['pictures'][number]): Promise<ResolvedPromptPicturePng> => {
       if (!picture.dataUrl)
         throw new Error(`Rendered PNG is not available for Picture ${picture.pictureNumber}.`);
-      return { dataUrl: picture.dataUrl, width: picture.width, height: picture.height };
+      return {
+        dataUrl: picture.dataUrl,
+        width: picture.width,
+        height: picture.height,
+        contentRevision: picture.contentRevision,
+      };
     });
+  throwIfAborted(options.signal);
   const surface = environment.createSurface(bundle.layout.width, bundle.layout.height);
   try {
     const context = surface.context;
@@ -186,6 +201,7 @@ export async function composePromptBundle(
     context.textBaseline = 'top';
 
     for (const [index, picture] of bundle.pictures.entries()) {
+      throwIfAborted(options.signal);
       const item = bundle.layout.items[index];
       if (!item || item.screenshotId !== picture.screenshotId)
         throw new Error('Prompt bundle layout does not match its screenshot order.');
@@ -197,16 +213,19 @@ export async function composePromptBundle(
       );
       const resolved = await resolvePicturePng(picture);
       try {
+        throwIfAborted(options.signal);
         if (
           resolved.width !== picture.width ||
           resolved.height !== picture.height ||
+          resolved.contentRevision !== picture.contentRevision ||
           !resolved.dataUrl.startsWith('data:image/png;base64,')
         )
           throw new Error(
-            `Rendered dimensions changed for Picture ${picture.pictureNumber}. Export it again.`,
+            `Rendered content or dimensions changed for Picture ${picture.pictureNumber}. Export it again.`,
           );
         const decoded = await environment.decodePng(resolved.dataUrl);
         try {
+          throwIfAborted(options.signal);
           if (decoded.width !== picture.width || decoded.height !== picture.height)
             throw new Error(
               `Rendered dimensions changed for Picture ${picture.pictureNumber}. Export it again.`,
@@ -218,9 +237,12 @@ export async function composePromptBundle(
       } finally {
         resolved.release?.();
       }
+      throwIfAborted(options.signal);
       await environment.yieldControl();
+      throwIfAborted(options.signal);
     }
 
+    throwIfAborted(options.signal);
     const dataUrl = surface.toPngDataUrl();
     if (!dataUrl.startsWith('data:image/png;base64,'))
       throw new Error('The composed prompt could not be encoded as PNG.');

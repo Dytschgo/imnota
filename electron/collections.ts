@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
-import { validateProject, type LegacyProjectData } from '../src/shared/schema.js';
+import { validateLegacyProject, validateProject, type LegacyProjectData } from '../src/shared/schema.js';
 import { collectionName, DEFAULT_EXPORT_PREFERENCES } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
@@ -91,6 +91,8 @@ export async function migrateProject(
   project: ProjectData | LegacyProjectData,
 ): Promise<ProjectData> {
   if (project.schemaVersion === 3) return project;
+
+  project = validateLegacyProject(project);
 
   const collectionIds = new Set(project.rounds.map((round) => round.id));
   if (collectionIds.size !== project.rounds.length)

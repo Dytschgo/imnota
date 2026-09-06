@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
 const MAX_PNG_BYTES = 100_000_000;
+const MAX_PNG_EDGE = 16_384;
+const MAX_PNG_PIXELS = 64_000_000;
 const MAX_MARKDOWN_CHARACTERS = 2_000_000;
 const MAX_TIMESTAMP_ATTEMPTS = 86_400;
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
@@ -14,6 +16,13 @@ export interface StartPromptBundleSessionInput {
   projectPath: string;
   collectionId: string;
   collectionName: string;
+  bundles: readonly PromptBundleManifestItem[];
+}
+
+export interface PromptBundleManifestItem {
+  bundleNumber: number;
+  width: number;
+  height: number;
 }
 
 export interface PromptBundleSessionInfo {
@@ -68,6 +77,7 @@ interface StoredSession {
   finalDirectory: string;
   reservationPath: string;
   completed: Map<number, StoredPromptBundle>;
+  manifest: Map<number, PromptBundleManifestItem>;
   queue: Promise<void>;
   cancelRequested: boolean;
   finalizing: boolean;
@@ -147,14 +157,97 @@ function bundleSuffix(bundleNumber: number): string {
   return String(bundleNumber).padStart(2, '0');
 }
 
-function validatePng(png: Uint8Array): void {
-  if (!(png instanceof Uint8Array) || png.length < 24 || png.length > MAX_PNG_BYTES)
+const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  return crc >>> 0;
+});
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function chunkType(png: Uint8Array, offset: number): string {
+  return String.fromCharCode(png[offset], png[offset + 1], png[offset + 2], png[offset + 3]);
+}
+
+export function validatePromptBundlePng(
+  png: Uint8Array,
+  expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
+): void {
+  if (!(png instanceof Uint8Array) || png.length < 57 || png.length > MAX_PNG_BYTES)
     throw new Error('Prompt PNG is empty, damaged, or too large to store.');
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82];
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (signature.some((byte, index) => png[index] !== byte))
     throw new Error('Prompt PNG has an invalid header.');
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
-  if (view.getUint32(16) < 1 || view.getUint32(20) < 1) throw new Error('Prompt PNG has invalid dimensions.');
+  let offset = 8;
+  let chunkIndex = 0;
+  let width = 0;
+  let height = 0;
+  let sawData = false;
+  let sawEnd = false;
+  while (offset < png.length) {
+    if (offset + 12 > png.length) throw new Error('Prompt PNG is truncated.');
+    const length = view.getUint32(offset);
+    if (length > png.length - offset - 12) throw new Error('Prompt PNG contains a truncated chunk.');
+    const typeOffset = offset + 4;
+    const type = chunkType(png, typeOffset);
+    const dataOffset = typeOffset + 4;
+    const crcOffset = dataOffset + length;
+    if (view.getUint32(crcOffset) !== crc32(png.subarray(typeOffset, crcOffset)))
+      throw new Error('Prompt PNG failed its integrity check.');
+    if (chunkIndex === 0 && (type !== 'IHDR' || length !== 13))
+      throw new Error('Prompt PNG is missing its required header.');
+    if (type === 'IHDR') {
+      if (chunkIndex !== 0 || width || height) throw new Error('Prompt PNG contains duplicate headers.');
+      width = view.getUint32(dataOffset);
+      height = view.getUint32(dataOffset + 4);
+      if (
+        width < 1 ||
+        height < 1 ||
+        width > MAX_PNG_EDGE ||
+        height > MAX_PNG_EDGE ||
+        width * height > MAX_PNG_PIXELS
+      )
+        throw new Error('Prompt PNG dimensions exceed safe full-resolution storage limits.');
+      if (width !== expected.width || height !== expected.height)
+        throw new Error('Prompt PNG dimensions do not match the reserved bundle manifest.');
+    } else if (type === 'IDAT') sawData = true;
+    else if (type === 'IEND') {
+      if (length !== 0 || !sawData) throw new Error('Prompt PNG has an invalid ending.');
+      sawEnd = true;
+      offset = crcOffset + 4;
+      break;
+    }
+    offset = crcOffset + 4;
+    chunkIndex++;
+  }
+  if (!sawEnd || offset !== png.length) throw new Error('Prompt PNG is incomplete or has trailing data.');
+}
+
+function validateManifest(items: readonly PromptBundleManifestItem[]): Map<number, PromptBundleManifestItem> {
+  if (!Array.isArray(items) || !items.length || items.length > 999)
+    throw new Error('Prompt export manifest must contain between 1 and 999 bundles.');
+  const manifest = new Map<number, PromptBundleManifestItem>();
+  for (const [index, item] of items.entries()) {
+    if (item.bundleNumber !== index + 1)
+      throw new Error('Prompt export manifest bundle numbers must be contiguous from 1.');
+    if (
+      !Number.isSafeInteger(item.width) ||
+      !Number.isSafeInteger(item.height) ||
+      item.width < 1 ||
+      item.height < 1 ||
+      item.width > MAX_PNG_EDGE ||
+      item.height > MAX_PNG_EDGE ||
+      item.width * item.height > MAX_PNG_PIXELS
+    )
+      throw new Error(`Prompt ${item.bundleNumber} dimensions exceed safe storage limits.`);
+    manifest.set(item.bundleNumber, { ...item });
+  }
+  return manifest;
 }
 
 function errorMessage(error: unknown): string {
@@ -176,6 +269,8 @@ async function removeFiles(filePaths: readonly string[]): Promise<string[]> {
 
 export class PromptBundleStore {
   private readonly sessions = new Map<string, StoredSession>();
+  private readonly terminalResults = new Map<string, FinalizedPromptBundleSession>();
+  private readonly finalizations = new Map<string, Promise<FinalizedPromptBundleSession>>();
   private readonly dependencies: PromptBundleStoreDependencies;
 
   constructor(dependencies: Partial<PromptBundleStoreDependencies> = {}) {
@@ -187,6 +282,7 @@ export class PromptBundleStore {
   }
 
   async startSession(input: StartPromptBundleSessionInput): Promise<PromptBundleSessionInfo> {
+    const manifest = validateManifest(input.bundles);
     if (!path.isAbsolute(input.projectPath)) throw new Error('Project path must be absolute.');
     const projectPath = path.resolve(input.projectPath);
     const collectionId = validatePathSegment(input.collectionId, 'Collection ID');
@@ -238,6 +334,12 @@ export class PromptBundleStore {
     try {
       await assertNoLinks(stagingDirectory);
       await fs.mkdir(stagingDirectory, { recursive: false });
+      const [realExports, realStaging] = await Promise.all([
+        fs.realpath(exportsDirectory),
+        fs.realpath(stagingDirectory),
+      ]);
+      if (!isWithin(realExports, realStaging) || realExports === realStaging)
+        throw new Error('Prompt staging directory escaped its collection exports folder.');
     } catch (error) {
       await fs.unlink(reservationPath).catch(() => undefined);
       throw error;
@@ -253,6 +355,7 @@ export class PromptBundleStore {
       finalDirectory,
       reservationPath,
       completed: new Map(),
+      manifest,
       queue: Promise.resolve(),
       cancelRequested: false,
       finalizing: false,
@@ -262,7 +365,9 @@ export class PromptBundleStore {
 
   async commitBundle(input: CommitPromptBundleInput): Promise<StoredPromptBundle> {
     const session = this.session(input.sessionId);
-    validatePng(input.png);
+    const expected = session.manifest.get(input.bundleNumber);
+    if (!expected) throw new Error(`Prompt ${input.bundleNumber} is not in the reserved bundle manifest.`);
+    validatePromptBundlePng(input.png, expected);
     if (
       typeof input.markdown !== 'string' ||
       !input.markdown.trim() ||
@@ -280,6 +385,13 @@ export class PromptBundleStore {
       const markdownFilename = `${base}.md`;
       const pngPath = path.join(session.stagingDirectory, pngFilename);
       const markdownPath = path.join(session.stagingDirectory, markdownFilename);
+      const [realExports, realStaging] = await Promise.all([
+        fs.realpath(session.exportsDirectory),
+        fs.realpath(session.stagingDirectory),
+      ]);
+      if (!isWithin(realExports, realStaging) || realExports === realStaging)
+        throw new Error('Prompt staging directory escaped its collection exports folder.');
+      await assertNoLinks(session.stagingDirectory);
       await assertNoLinks(pngPath);
       await assertNoLinks(markdownPath);
       if ((await fs.stat(pngPath).catch(() => null)) || (await fs.stat(markdownPath).catch(() => null)))
@@ -314,14 +426,36 @@ export class PromptBundleStore {
     sessionId: string,
     options: FinishPromptBundleSessionOptions = {},
   ): Promise<FinalizedPromptBundleSession> {
-    const session = this.session(sessionId);
-    return this.enqueue(session, () => this.finalize(session, 'completed', options));
+    return this.beginFinalization(sessionId, 'completed', options);
   }
 
   cancelSession(sessionId: string): Promise<FinalizedPromptBundleSession> {
+    return this.beginFinalization(sessionId, 'cancelled');
+  }
+
+  private beginFinalization(
+    sessionId: string,
+    status: FinalizedPromptBundleSession['status'],
+    options: FinishPromptBundleSessionOptions = {},
+  ): Promise<FinalizedPromptBundleSession> {
+    const terminal = this.terminalResults.get(sessionId);
+    if (terminal) return Promise.resolve(terminal);
+    const current = this.finalizations.get(sessionId);
+    if (current) return current;
     const session = this.session(sessionId);
-    session.cancelRequested = true;
-    return this.enqueue(session, () => this.finalize(session, 'cancelled'));
+    if (status === 'cancelled') session.cancelRequested = true;
+    const result = this.enqueue(session, () => this.finalize(session, status, options));
+    this.finalizations.set(sessionId, result);
+    void result.then(
+      (value) => {
+        this.finalizations.delete(sessionId);
+        this.terminalResults.set(sessionId, value);
+        if (this.terminalResults.size > 128)
+          this.terminalResults.delete(this.terminalResults.keys().next().value!);
+      },
+      () => this.finalizations.delete(sessionId),
+    );
+    return result;
   }
 
   private session(sessionId: string): StoredSession {
@@ -352,6 +486,14 @@ export class PromptBundleStore {
     const warnings: string[] = [];
     let masterMarkdownFilename: string | undefined;
     try {
+      if (
+        status === 'completed' &&
+        (completed.length !== session.manifest.size ||
+          completed.some((bundle, index) => bundle.bundleNumber !== index + 1))
+      )
+        throw new Error(
+          `Prompt export is incomplete: ${completed.length} of ${session.manifest.size} bundle pairs are stored. Write every reserved bundle before finishing, or cancel to retain the completed subset.`,
+        );
       if (!completed.length) {
         await fs.rm(session.stagingDirectory, { recursive: true, force: true });
         await fs.unlink(session.reservationPath).catch(() => undefined);
@@ -382,10 +524,35 @@ export class PromptBundleStore {
       }
       await assertNoLinks(session.stagingDirectory);
       await assertNoLinks(session.finalDirectory);
-      if (await fs.stat(session.finalDirectory).catch(() => null))
-        throw new Error('The reserved prompt export folder already exists. Nothing was overwritten.');
+      const [realExports, realStaging] = await Promise.all([
+        fs.realpath(session.exportsDirectory),
+        fs.realpath(session.stagingDirectory),
+      ]);
+      if (!isWithin(realExports, realStaging) || realExports === realStaging)
+        throw new Error('Prompt staging directory escaped its collection exports folder.');
+      if (await fs.stat(session.finalDirectory).catch(() => null)) {
+        warnings.push(
+          'The reserved destination appeared before publication. Complete bundle pairs remain in the reported recovery folder; nothing was overwritten.',
+        );
+        await fs.unlink(session.reservationPath).catch((error) => {
+          warnings.push(`Timestamp reservation cleanup failed: ${errorMessage(error)}`);
+        });
+        this.sessions.delete(session.sessionId);
+        return {
+          status,
+          published: false,
+          folderPath: session.stagingDirectory,
+          masterMarkdownPath: masterMarkdownFilename
+            ? path.join(session.stagingDirectory, masterMarkdownFilename)
+            : undefined,
+          bundles: completed,
+          warnings,
+        };
+      }
       await fs.rename(session.stagingDirectory, session.finalDirectory);
-      await fs.unlink(session.reservationPath).catch(() => undefined);
+      await fs.unlink(session.reservationPath).catch((error) => {
+        warnings.push(`Timestamp reservation cleanup failed: ${errorMessage(error)}`);
+      });
       this.sessions.delete(session.sessionId);
       return {
         status,

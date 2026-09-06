@@ -1,5 +1,5 @@
-import type { PreferenceSettings, PreferenceSettingsResult } from './preferences';
-import type { ProjectData, ProjectSnapshot } from './types';
+import type { PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
+import type { ProjectData, ProjectSnapshot } from './types.js';
 
 export type WorkflowErrorCode =
   | 'invalid-input'
@@ -45,6 +45,12 @@ export interface PromptExportSessionInfo {
   setName: string;
 }
 
+export interface PromptExportBundleManifest {
+  bundleNumber: number;
+  width: number;
+  height: number;
+}
+
 export interface PromptExportBundleGrant {
   bundleNumber: number;
   pngFilename: string;
@@ -65,7 +71,7 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
 }
 
 export type PromptExportCopyTarget = 'context' | 'markdown' | 'image';
-export type PromptExportOpenTarget = 'folder' | 'png' | 'markdown';
+export type PromptExportOpenTarget = 'folder' | 'png' | 'markdown' | 'master';
 
 export interface ProjectRevisionSnapshot {
   snapshot: ProjectSnapshot;
@@ -95,6 +101,7 @@ export interface WorkflowBridge {
   startPromptExport(input: {
     projectPath: string;
     collectionId: string;
+    bundles: readonly PromptExportBundleManifest[];
   }): Promise<WorkflowResult<PromptExportSessionInfo>>;
   writePromptExportBundle(input: {
     sessionId: string;

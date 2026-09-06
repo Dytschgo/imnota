@@ -1,4 +1,4 @@
-import type { ShortcutBindings } from './shortcuts';
+import type { ShortcutBindings } from './shortcuts.js';
 
 export type AppearanceMode = 'system' | 'light' | 'dark';
 export type AccentPreset = 'graphite' | 'indigo' | 'emerald' | 'amber';
@@ -29,6 +29,7 @@ export interface PreferenceSettings {
 export interface SettingsProfileProvenance {
   settingsFileExists: boolean;
   migratedFromLegacyProfile: boolean;
+  initializedAsNewProfile?: boolean;
 }
 
 export interface PreferenceSettingsResult {
@@ -62,7 +63,10 @@ export function shouldShowOnboarding(
   currentVersion = ONBOARDING_VERSION,
 ): boolean {
   if (onboarding.completed || onboarding.completedVersion >= currentVersion) return false;
-  return !profile.settingsFileExists && !profile.migratedFromLegacyProfile;
+  return (
+    profile.initializedAsNewProfile === true ||
+    (!profile.settingsFileExists && !profile.migratedFromLegacyProfile)
+  );
 }
 
 export function completedOnboarding(version = ONBOARDING_VERSION): OnboardingPreferences {
