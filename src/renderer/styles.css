@@ -194,6 +194,18 @@ button:disabled {
   padding: 4px 6px;
   font-size: 11px;
 }
+.collection-context {
+  margin-top: 8px;
+}
+.collection-context > summary {
+  padding: 7px 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.collection-context .field {
+  margin: 4px 0 0;
+}
 .sidebar nav {
   display: flex;
   flex-direction: column;
@@ -841,16 +853,15 @@ button:disabled {
 .shot-item {
   width: 100%;
   display: grid;
-  grid-template-columns: 19px 55px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 36px;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   min-height: 64px;
-  padding: 6px 5px;
+  padding: 3px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
   color: inherit;
-  text-align: left;
 }
 .shot-item:hover {
   background: var(--surface-2);
@@ -858,6 +869,30 @@ button:disabled {
 .shot-item.active {
   border-color: rgba(104, 87, 245, 0.35);
   background: rgba(104, 87, 245, 0.12);
+}
+.shot-select {
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 19px 55px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.shot-item.excluded .shot-select {
+  opacity: 0.48;
+}
+.shot-visibility {
+  width: 36px;
+  min-height: 44px;
+  color: var(--ink-3);
+}
+.shot-item.excluded .shot-visibility {
+  color: var(--ink-4);
 }
 .shot-index {
   align-self: start;
@@ -1149,6 +1184,34 @@ button:disabled {
   overflow: auto;
   flex: 1;
   padding: 16px;
+}
+.description-field {
+  margin-bottom: 13px;
+}
+.description-field .field {
+  margin-bottom: 0;
+}
+.field-heading {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.field-heading .btn {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 11px;
+}
+.conflict-notice {
+  margin: 0 0 13px;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--ink-2);
+  font-size: 11px;
 }
 .field {
   display: flex;
@@ -1769,6 +1832,17 @@ kbd {
 }
 .toast svg {
   color: var(--success);
+}
+.toast button {
+  min-height: 30px;
+  margin-left: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--input);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
 }
 @keyframes toast-in {
   from {

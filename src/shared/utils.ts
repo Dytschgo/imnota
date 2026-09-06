@@ -35,10 +35,6 @@ export const DEFAULT_FIELDS: Array<keyof NoteFields> = [
 export const DEFAULT_EXPORT_PREFERENCES = {
   includeOriginalScreenshots: false,
   includeAnnotationMetadata: true,
-  includedFields: DEFAULT_FIELDS,
-  overallInstructions: '',
-  desiredOutcome: '',
-  technicalConstraints: '',
   template: 'default' as const,
 };
 
@@ -69,23 +65,34 @@ export function priorityColor(priority: Priority): string {
     low: '#8f98aa',
     medium: '#3ec6e0',
     high: '#f59e0b',
-    critical: '#ef4444',
   };
   return colors[priority];
 }
 
-export function emptyProject(name: string, description: string, tags: string[] = []): ProjectData {
+export function collectionName(workspaceName: string, number: number): string {
+  return `${workspaceName.trim() || 'Workspace'} / Collection ${String(number).padStart(2, '0')}`;
+}
+
+export function emptyProject(name: string, description: string, workspaceName = 'Workspace'): ProjectData {
   const date = nowIso();
   return {
-    schemaVersion: 2,
-    rounds: [{ id: '001-first-feedback', name: 'Subfolder 1', archived: false, createdAt: date }],
+    schemaVersion: 3,
+    collections: [
+      {
+        id: '001-collection',
+        name: collectionName(workspaceName, 1),
+        archived: false,
+        createdAt: date,
+        updatedAt: date,
+        overallContext: '',
+      },
+    ],
     id: createId('project'),
     name: name.trim() || 'Untitled project',
     description: description.trim(),
     createdAt: date,
     updatedAt: date,
     status: 'active',
-    tags,
     favourite: false,
     screenshots: [],
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES },

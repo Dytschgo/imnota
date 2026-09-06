@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell, ses
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { z } from 'zod';
@@ -18,7 +19,6 @@ import type {
 } from '../src/shared/types.js';
 import {
   DEFAULT_EXPORT_PREFERENCES,
-  EMPTY_NOTES,
   emptyProject,
   nowIso,
   sanitizeFilename,
@@ -26,6 +26,7 @@ import {
 } from '../src/shared/utils.js';
 import {
   validateProject,
+  parseProjectFile,
   projectSchema,
   screenshotSchema,
   annotationSchema,
@@ -34,8 +35,9 @@ import {
   filenameSchema,
 } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
-import { ensureRound, migrateRounds, screenshotPath } from './rounds.js';
-import { noteToMarkdown, parseNotesMarkdown } from '../src/shared/notes.js';
+import { ensureCollection, addEmptyCollection, migrateProject, screenshotPath } from './collections.js';
+import { deleteScreenshotToTrash, undoScreenshotDelete } from './screenshot-trash.js';
+import { normalizeRecoveredProject } from './recovery.js';
 import {
   clipboardContextHtml,
   clipboardPngDimensions,
@@ -71,7 +73,6 @@ const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const projectInput = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(3000),
-  tags: z.array(z.string().max(50)).max(30),
 });
 const pathInput = z.string().min(1).max(2000);
 
@@ -96,6 +97,8 @@ async function assertProjectPath(projectPath: string): Promise<string> {
     'notes',
     'exports',
     'rounds',
+    'collections',
+    '.imnota-undo',
     '.imnota-recovery.json',
   ])
     await assertNoLinks(path.join(resolved, name));
@@ -105,12 +108,23 @@ async function assertProjectPath(projectPath: string): Promise<string> {
 async function readProject(projectPath: string): Promise<ProjectData> {
   await assertNoLinks(path.join(projectPath, 'project.json'));
   const raw = await fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
-  const parsed = await migrateRounds(projectPath, validateProject(JSON.parse(raw)));
+  const parsed = await migrateProject(projectPath, parseProjectFile(JSON.parse(raw)));
+  const screenshots = await Promise.all(
+    parsed.screenshots.map(async (shot) => {
+      const descriptionPath = path.join(projectPath, shot.descriptionFile);
+      await assertNoLinks(descriptionPath);
+      const description = await fs.readFile(descriptionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return shot.description;
+        throw error;
+      });
+      return description === shot.description ? shot : { ...shot, description };
+    }),
+  );
   return {
     ...parsed,
-    schemaVersion: 2,
+    schemaVersion: 3,
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
-    screenshots: [...parsed.screenshots].sort((a, b) => a.position - b.position),
+    screenshots,
   };
 }
 
@@ -159,41 +173,47 @@ async function openWithRecovery(projectPath: string): Promise<ProjectSnapshot> {
   const snapshot = await makeSnapshot(projectPath);
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   if (!snapshot.recoveryFound) return snapshot;
+  await assertNoLinks(recoveryPath);
+  const recoverySource = await fs.readFile(recoveryPath, 'utf8');
   const recovery = z
     .object({
-      project: projectSchema,
+      project: z.unknown(),
       annotations: z.record(z.array(annotationSchema)),
-      notes: z.record(notesSchema),
+      notes: z.record(notesSchema).optional(),
     })
-    .parse(JSON.parse(await fs.readFile(recoveryPath, 'utf8')));
-  if (recovery.project.id !== snapshot.project.id)
+    .parse(JSON.parse(recoverySource));
+  const recoveryProject = parseProjectFile(recovery.project);
+  if (recoveryProject.id !== snapshot.project.id)
     throw new Error('Recovery belongs to a different project. Your files were not changed.');
   const choice = await dialog.showMessageBox(mainWindow!, {
     type: 'question',
     title: 'Recover interrupted work',
     message: 'An interrupted editing session was found.',
     detail:
-      'Restore its notes and annotations, or keep the last saved project. Recovery data will be preserved as .imnota-recovery-backup.json.',
+      'Restore its descriptions and annotations, or keep the last saved project. Recovery data will be preserved as .imnota-recovery-backup.json.',
     buttons: ['Restore edits', 'Keep saved project', 'Cancel'],
     defaultId: 0,
     cancelId: 2,
   });
   if (choice.response === 2) throw new Error('Opening cancelled. Recovery data is unchanged.');
-  await atomicWrite(
-    path.join(projectPath, '.imnota-recovery-backup.json'),
-    JSON.stringify(recovery, null, 2),
-  );
+  const recoveryBackupPath = path.join(projectPath, '.imnota-recovery-backup.json');
+  await assertNoLinks(recoveryBackupPath);
+  await atomicWrite(recoveryBackupPath, recoverySource);
   if (choice.response === 0) {
+    const recoveredProject = validateProject({
+      ...normalizeRecoveredProject(snapshot.project, recoveryProject, recovery.notes),
+      updatedAt: nowIso(),
+    });
     // Use trusted current file references, not file references from recovery data.
-    for (const shot of snapshot.project.screenshots) {
+    for (const shot of recoveredProject.screenshots) {
       if (recovery.annotations[shot.id])
         await atomicWrite(
           path.join(projectPath, shot.annotationFile),
           JSON.stringify(recovery.annotations[shot.id], null, 2),
         );
-      if (recovery.notes[shot.id])
-        await atomicWrite(path.join(projectPath, shot.notesFile), noteToMarkdown(recovery.notes[shot.id]));
+      await atomicWrite(path.join(projectPath, shot.descriptionFile), shot.description);
     }
+    await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(recoveredProject, null, 2));
   }
   await fs.unlink(recoveryPath);
   return makeSnapshot(projectPath);
@@ -210,19 +230,58 @@ async function uniqueProjectFolder(workspace: string, name: string): Promise<str
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
   const base = sanitizeFilename(path.basename(original, ext), 'screenshot');
-  const existing = new Set((await readProject(projectPath)).screenshots.map((s) => s.storedFilename));
+  const project = await readProject(projectPath);
+  const existing = new Set(project.screenshots.map((s) => s.storedFilename));
+  const occupied = (candidate: string) =>
+    existing.has(candidate) ||
+    project.collections.some((collection) =>
+      existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)),
+    );
   let candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`;
   let n = 2;
-  while (existing.has(candidate))
+  while (occupied(candidate))
     candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`;
   return candidate;
+}
+
+function contentRevision(description: string, annotationsJson: string): string {
+  return createHash('sha256').update(description).update('\0').update(annotationsJson).digest('hex');
+}
+
+function nextScreenshotPosition(project: ProjectData, collectionId: string): number {
+  return (
+    Math.max(
+      -1,
+      ...project.screenshots
+        .filter((screenshot) => screenshot.collectionId === collectionId)
+        .map((screenshot) => screenshot.position),
+    ) + 1
+  );
+}
+
+async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRecord) {
+  const annotationPath = path.join(projectPath, screenshot.annotationFile);
+  const descriptionPath = path.join(projectPath, screenshot.descriptionFile);
+  await assertNoLinks(annotationPath);
+  await assertNoLinks(descriptionPath);
+  const [annotationsJson, description] = await Promise.all([
+    fs.readFile(annotationPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return '[]';
+      throw error;
+    }),
+    fs.readFile(descriptionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return screenshot.description;
+      throw error;
+    }),
+  ]);
+  return { annotationsJson, description, revision: contentRevision(description, annotationsJson) };
 }
 
 async function importOne(
   projectPath: string,
   sourcePath: string,
   originalFilename = path.basename(sourcePath),
-  roundId?: string,
+  collectionId?: string,
 ): Promise<void> {
   const ext = path.extname(originalFilename).toLowerCase();
   if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext))
@@ -230,34 +289,37 @@ async function importOne(
   const image = nativeImage.createFromPath(sourcePath);
   if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
   const project = await readProject(projectPath);
-  const round = project.rounds.find((r) => r.id === (roundId ?? project.rounds[0].id));
-  if (!round || round.archived) throw new Error('Choose an active subfolder before importing.');
-  await ensureRound(projectPath, round.id);
+  const collection = project.collections.find(
+    (item) => item.id === (collectionId ?? project.collections.find((candidate) => !candidate.archived)?.id),
+  );
+  if (!collection || collection.archived) throw new Error('Choose a current collection before importing.');
+  await ensureCollection(projectPath, collection.id);
   const storedFilename = await uniqueStoredName(projectPath, originalFilename);
   await atomicWrite(
-    path.join(projectPath, 'rounds', round.id, 'screenshots', storedFilename),
+    path.join(projectPath, 'collections', collection.id, 'screenshots', storedFilename),
     await fs.readFile(sourcePath),
   );
   const timestamp = nowIso();
   project.screenshots.push({
-    roundId: round.id,
+    collectionId: collection.id,
     id: `shot_${crypto.randomUUID()}`,
     originalFilename,
     storedFilename,
-    title: path.basename(originalFilename, ext),
+    title: originalFilename,
     description: '',
-    position: project.screenshots.length,
+    position: nextScreenshotPosition(project, collection.id),
     createdAt: timestamp,
     updatedAt: timestamp,
-    tags: [],
     priority: 'medium',
-    status: 'draft',
-    annotationFile: `rounds/${round.id}/annotations/${storedFilename}.json`,
-    notesFile: `rounds/${round.id}/notes/${storedFilename}.md`,
+    annotationFile: `collections/${collection.id}/annotations/${storedFilename}.json`,
+    descriptionFile: `collections/${collection.id}/descriptions/${storedFilename}.md`,
     originalWidth: image.getSize().width,
     originalHeight: image.getSize().height,
     includeInExport: true,
   });
+  const added = project.screenshots.at(-1)!;
+  await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
+  await atomicWrite(path.join(projectPath, added.descriptionFile), '');
   project.updatedAt = timestamp;
   await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));
 }
@@ -295,7 +357,10 @@ function registerIpc(): void {
     'projects:open-dialog': z.tuple([]),
     'projects:save': z.tuple([pathInput, projectSchema]),
     'projects:save-screenshot': z.tuple([
-      screenshotInput.extend({ annotations: z.array(annotationSchema).max(10000), notes: notesSchema }),
+      screenshotInput.extend({
+        annotations: z.array(annotationSchema).max(10000),
+        contentRevision: z.string().regex(/^[a-f0-9]{64}$/),
+      }),
     ]),
     'screenshots:load-content': z.tuple([screenshotInput]),
     'screenshots:duplicate': z.tuple([screenshotInput]),
@@ -303,20 +368,24 @@ function registerIpc(): void {
       z.object({
         projectPath: pathInput,
         paths: z.array(pathInput).min(1).max(50),
-        roundId: filenameSchema.optional(),
+        collectionId: filenameSchema.optional(),
       }),
     ]),
     'screenshots:paste': z.tuple([pathInput, filenameSchema.optional()]),
-    'rounds:edit': z.tuple([
+    'collections:edit': z.tuple([
       z.object({
         projectPath: pathInput,
-        action: z.enum(['create', 'rename', 'duplicate', 'archive']),
-        roundId: filenameSchema.optional(),
-        name: z.string().trim().min(1).max(120),
+        action: z.enum(['create', 'rename', 'archive', 'restore']),
+        collectionId: filenameSchema.optional(),
+        name: z.string().trim().min(1).max(120).optional(),
       }),
     ]),
+    'screenshots:delete': z.tuple([
+      z.object({ projectPath: pathInput, screenshotId: z.string().min(1).max(200) }),
+    ]),
+    'screenshots:undo-delete': z.tuple([z.object({ projectPath: pathInput, undoToken: filenameSchema })]),
     'exports:annotated-image': z.tuple([
-      imageExport.extend({ projectPath: pathInput, roundId: filenameSchema.optional() }),
+      imageExport.extend({ projectPath: pathInput, collectionId: filenameSchema.optional() }),
     ]),
     'exports:package': z.tuple([
       z.object({
@@ -325,7 +394,7 @@ function registerIpc(): void {
         annotatedImages: z.array(imageExport).max(1000),
         includeOriginal: z.boolean(),
         includeAnnotations: z.boolean(),
-        roundId: filenameSchema.optional(),
+        collectionId: filenameSchema.optional(),
       }),
     ]),
     'system:copy-text': z.tuple([z.string().max(2_000_000)]),
@@ -340,7 +409,6 @@ function registerIpc(): void {
         projectPath: pathInput,
         project: projectSchema,
         annotations: z.record(z.array(annotationSchema)),
-        notes: z.record(notesSchema),
       }),
     ]),
     'update:download': z.tuple([]),
@@ -392,18 +460,9 @@ function registerIpc(): void {
         const projectPath = path.join(settings.workspacePath, entry.name);
         if (existsSync(path.join(projectPath, 'project.json'))) {
           const project = await readProject(projectPath);
-          const searchable = [project.name, project.description, project.status, ...project.tags];
+          const searchable = [project.name, project.description, project.status];
           for (const shot of project.screenshots) {
-            const notePath = path.join(projectPath, shot.notesFile);
-            await assertNoLinks(notePath);
-            searchable.push(
-              shot.title,
-              shot.description,
-              shot.status,
-              shot.priority,
-              ...shot.tags,
-              await fs.readFile(notePath, 'utf8').catch(() => ''),
-            );
+            searchable.push(shot.title, shot.description, shot.priority);
           }
           projects.push({ ...project, projectPath, searchText: searchable.join(' ').toLowerCase() });
         }
@@ -418,14 +477,11 @@ function registerIpc(): void {
     const workspace = workspaceOrThrow();
     await fs.mkdir(workspace, { recursive: true });
     const folder = await uniqueProjectFolder(workspace, input.name);
-    await fs.mkdir(path.join(folder, 'screenshots'), { recursive: true });
-    await fs.mkdir(path.join(folder, 'annotations'), { recursive: true });
-    await fs.mkdir(path.join(folder, 'notes'), { recursive: true });
     await fs.mkdir(path.join(folder, 'exports'), { recursive: true });
-    await ensureRound(folder, '001-first-feedback');
+    await ensureCollection(folder, '001-collection');
     await atomicWrite(
       path.join(folder, 'project.json'),
-      JSON.stringify(emptyProject(input.name, input.description, input.tags), null, 2),
+      JSON.stringify(emptyProject(input.name, input.description, path.basename(workspace)), null, 2),
     );
     return makeSnapshot(folder);
   });
@@ -446,7 +502,7 @@ function registerIpc(): void {
     validateProject(project);
     await atomicWrite(
       path.join(safePath, 'project.json'),
-      JSON.stringify({ ...project, schemaVersion: 2, updatedAt: nowIso() }, null, 2),
+      JSON.stringify({ ...project, schemaVersion: 3, updatedAt: nowIso() }, null, 2),
     );
   });
   handle('projects:save-screenshot', async (_event, input) => {
@@ -454,52 +510,81 @@ function registerIpc(): void {
     const project = await readProject(safePath);
     const trustedShot = project.screenshots.find((s) => s.id === input.screenshot.id);
     if (!trustedShot) throw new Error('Screenshot does not belong to this project.');
-    input.screenshot = {
+    const currentContent = await readScreenshotFiles(safePath, trustedShot);
+    if (currentContent.revision !== input.contentRevision) {
+      const ext = path.extname(trustedShot.storedFilename);
+      const storedFilename = await uniqueStoredName(
+        safePath,
+        `${path.basename(trustedShot.storedFilename, ext)}-copy-conflict${ext}`,
+      );
+      const timestamp = nowIso();
+      const conflict: ScreenshotRecord = {
+        ...input.screenshot,
+        id: `shot_${crypto.randomUUID()}`,
+        collectionId: trustedShot.collectionId,
+        originalFilename: `${trustedShot.originalFilename} Copy conflict`,
+        storedFilename,
+        title: `${input.screenshot.title || trustedShot.title} — Copy conflict`,
+        position: nextScreenshotPosition(project, trustedShot.collectionId),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        annotationFile: `collections/${trustedShot.collectionId}/annotations/${storedFilename}.json`,
+        descriptionFile: `collections/${trustedShot.collectionId}/descriptions/${storedFilename}.md`,
+        includeInExport: false,
+        conflict: true,
+      };
+      await atomicWrite(
+        screenshotPath(safePath, conflict),
+        await fs.readFile(screenshotPath(safePath, trustedShot)),
+      );
+      const conflictAnnotations = JSON.stringify(input.annotations, null, 2);
+      await atomicWrite(path.join(safePath, conflict.annotationFile), conflictAnnotations);
+      await atomicWrite(path.join(safePath, conflict.descriptionFile), conflict.description);
+      project.screenshots.push(conflict);
+      project.updatedAt = timestamp;
+      await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
+      return {
+        project,
+        savedScreenshotId: conflict.id,
+        conflictCreated: true,
+        contentRevision: contentRevision(conflict.description, conflictAnnotations),
+      };
+    }
+    const timestamp = nowIso();
+    const screenshot: ScreenshotRecord = {
       ...input.screenshot,
-      roundId: trustedShot.roundId,
+      id: trustedShot.id,
+      collectionId: trustedShot.collectionId,
       storedFilename: trustedShot.storedFilename,
       annotationFile: trustedShot.annotationFile,
-      notesFile: trustedShot.notesFile,
+      descriptionFile: trustedShot.descriptionFile,
+      createdAt: trustedShot.createdAt,
+      updatedAt: timestamp,
     };
-    project.screenshots = project.screenshots
-      .map((s) => (s.id === input.screenshot.id ? { ...input.screenshot, updatedAt: nowIso() } : s))
-      .sort((a, b) => a.position - b.position)
-      .map((s, position) => ({ ...s, position }));
-    project.updatedAt = nowIso();
-    // Editing the primary description opts it into export. Loading an older
-    // project and autosaving unchanged notes must preserve its exclusions.
-    if (!project.exportPreferences.includedFields.includes('problem')) {
-      await assertNoLinks(path.join(safePath, trustedShot.notesFile));
-      const previousNotes = parseNotesMarkdown(
-        await fs
-          .readFile(path.join(safePath, trustedShot.notesFile), 'utf8')
-          .catch((error: NodeJS.ErrnoException) => {
-            if (error.code === 'ENOENT') return '';
-            throw error;
-          }),
-      );
-      if (previousNotes.problem !== input.notes.problem)
-        project.exportPreferences.includedFields.push('problem');
-    }
+    project.screenshots = project.screenshots.map((shot) => (shot.id === screenshot.id ? screenshot : shot));
+    project.updatedAt = timestamp;
+    const annotationsJson = JSON.stringify(input.annotations, null, 2);
     await atomicWrite(
       path.join(safePath, '.imnota-recovery.json'),
       JSON.stringify(
         {
           project,
-          annotations: { [input.screenshot.id]: input.annotations },
-          notes: { [input.screenshot.id]: input.notes },
+          annotations: { [screenshot.id]: input.annotations },
         },
         null,
         2,
       ),
     );
-    await atomicWrite(
-      path.join(safePath, input.screenshot.annotationFile),
-      JSON.stringify(input.annotations, null, 2),
-    );
-    await atomicWrite(path.join(safePath, input.screenshot.notesFile), noteToMarkdown(input.notes));
+    await atomicWrite(path.join(safePath, screenshot.annotationFile), annotationsJson);
+    await atomicWrite(path.join(safePath, screenshot.descriptionFile), screenshot.description);
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     await fs.unlink(path.join(safePath, '.imnota-recovery.json'));
+    return {
+      project,
+      savedScreenshotId: screenshot.id,
+      conflictCreated: false,
+      contentRevision: contentRevision(screenshot.description, annotationsJson),
+    };
   });
   handle('screenshots:load-content', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -508,28 +593,25 @@ function registerIpc(): void {
     if (!screenshot) throw new Error('Screenshot does not belong to this project.');
     input.screenshot = screenshot;
     const annotationPath = path.join(safePath, input.screenshot.annotationFile);
-    const notesPath = path.join(safePath, input.screenshot.notesFile);
     await assertNoLinks(annotationPath);
-    await assertNoLinks(notesPath);
-    const [image, annotationsRaw, notesRaw] = await Promise.all([
-      loadImage(safePath, input.screenshot),
-      fs.readFile(annotationPath, 'utf8').catch(() => '[]'),
-      fs.readFile(notesPath, 'utf8').catch(() => ''),
-    ]);
+    const content = await readScreenshotFiles(safePath, input.screenshot);
+    const [image] = await Promise.all([loadImage(safePath, input.screenshot)]);
     return {
       image,
-      annotations: z.array(annotationSchema).parse(JSON.parse(annotationsRaw)),
-      notes: parseNotesMarkdown(notesRaw),
+      annotations: z.array(annotationSchema).parse(JSON.parse(content.annotationsJson)),
+      description: content.description,
+      contentRevision: content.revision,
     };
   });
   handle('screenshots:import-files', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     if (!Array.isArray(input.paths) || input.paths.length > 50)
       throw new Error('Choose up to 50 screenshots at a time.');
-    for (const source of input.paths) await importOne(safePath, source, path.basename(source), input.roundId);
+    for (const source of input.paths)
+      await importOne(safePath, source, path.basename(source), input.collectionId);
     return makeSnapshot(safePath);
   });
-  handle('screenshots:paste', async (_event, projectPath: string, roundId?: string) => {
+  handle('screenshots:paste', async (_event, projectPath: string, collectionId?: string) => {
     const safePath = await assertProjectPath(projectPath);
     const image = clipboard.readImage();
     if (image.isEmpty())
@@ -537,7 +619,7 @@ function registerIpc(): void {
     const filename = `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     const temp = path.join(app.getPath('temp'), filename);
     await fs.writeFile(temp, image.toPNG());
-    await importOne(safePath, temp, filename, roundId);
+    await importOne(safePath, temp, filename, collectionId);
     await fs.unlink(temp).catch(() => undefined);
     return makeSnapshot(safePath);
   });
@@ -550,8 +632,8 @@ function registerIpc(): void {
     const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
     await assertNoLinks(screenshotPath(safePath, source));
     for (const [original, destination, fallback] of [
-      [source.annotationFile, `rounds/${source.roundId}/annotations/${name}.json`, '[]'],
-      [source.notesFile, `rounds/${source.roundId}/notes/${name}.md`, ''],
+      [source.annotationFile, `collections/${source.collectionId}/annotations/${name}.json`, '[]'],
+      [source.descriptionFile, `collections/${source.collectionId}/descriptions/${name}.md`, ''],
     ]) {
       await assertNoLinks(path.join(safePath, original));
       const contents = await fs
@@ -564,7 +646,7 @@ function registerIpc(): void {
     }
     await fs.copyFile(
       screenshotPath(safePath, source),
-      path.join(safePath, 'rounds', source.roundId, 'screenshots', name),
+      path.join(safePath, 'collections', source.collectionId, 'screenshots', name),
     );
     const timestamp = nowIso();
     project.screenshots.push({
@@ -573,64 +655,53 @@ function registerIpc(): void {
       originalFilename: `${source.originalFilename} copy`,
       storedFilename: name,
       title: `${source.title} copy`,
-      position: project.screenshots.length,
+      position: nextScreenshotPosition(project, source.collectionId),
       createdAt: timestamp,
       updatedAt: timestamp,
-      annotationFile: `rounds/${source.roundId}/annotations/${name}.json`,
-      notesFile: `rounds/${source.roundId}/notes/${name}.md`,
+      annotationFile: `collections/${source.collectionId}/annotations/${name}.json`,
+      descriptionFile: `collections/${source.collectionId}/descriptions/${name}.md`,
     });
     project.updatedAt = timestamp;
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     return makeSnapshot(safePath);
   });
-  handle('rounds:edit', async (_event, input) => {
+  handle('screenshots:delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    const source = project.rounds.find((r) => r.id === input.roundId);
-    if (input.action !== 'create' && !source) throw new Error('Subfolder not found.');
-    if (input.action === 'rename') source!.name = input.name;
-    else if (input.action === 'archive') source!.archived = !source!.archived;
-    else {
-      const id = `${String(project.rounds.length + 1).padStart(3, '0')}-${slugify(input.name)}-${crypto.randomUUID().slice(0, 8)}`;
-      await ensureRound(safePath, id);
-      project.rounds.push({ id, name: input.name, archived: false, createdAt: nowIso() });
-      if (input.action === 'duplicate') {
-        for (const shot of project.screenshots.filter((s) => s.roundId === source!.id)) {
-          const storedFilename = `${String(project.screenshots.length + 1).padStart(3, '0')}-${sanitizeFilename(shot.originalFilename)}`;
-          const copy: ScreenshotRecord = {
-            ...shot,
-            id: `shot_${crypto.randomUUID()}`,
-            roundId: id,
-            storedFilename,
-            annotationFile: `rounds/${id}/annotations/${storedFilename}.json`,
-            notesFile: `rounds/${id}/notes/${storedFilename}.md`,
-            position: project.screenshots.length,
-            createdAt: nowIso(),
-            updatedAt: nowIso(),
-          };
-          await assertNoLinks(screenshotPath(safePath, shot));
-          await atomicWrite(
-            screenshotPath(safePath, copy),
-            await fs.readFile(screenshotPath(safePath, shot)),
-          );
-          for (const [from, to, fallback] of [
-            [shot.annotationFile, copy.annotationFile, '[]'],
-            [shot.notesFile, copy.notesFile, ''],
-          ]) {
-            await assertNoLinks(path.join(safePath, from));
-            const content = await fs
-              .readFile(path.join(safePath, from), 'utf8')
-              .catch((error: NodeJS.ErrnoException) => {
-                if (error.code === 'ENOENT') return fallback;
-                throw error;
-              });
-            await atomicWrite(path.join(safePath, to), content);
-          }
-          project.screenshots.push(copy);
-        }
-      }
+    const result = await deleteScreenshotToTrash(safePath, project, input.screenshotId, (target) =>
+      shell.trashItem(target),
+    );
+    return { snapshot: await makeSnapshot(safePath), undoToken: result.undoToken };
+  });
+  handle('screenshots:undo-delete', async (_event, input) => {
+    const safePath = await assertProjectPath(input.projectPath);
+    await undoScreenshotDelete(safePath, await readProject(safePath), input.undoToken);
+    return makeSnapshot(safePath);
+  });
+  handle('collections:edit', async (_event, input) => {
+    const safePath = await assertProjectPath(input.projectPath);
+    const project = await readProject(safePath);
+    const source = project.collections.find((collection) => collection.id === input.collectionId);
+    if (input.action !== 'create' && !source) throw new Error('Collection not found.');
+    const timestamp = nowIso();
+    if (input.action === 'rename') {
+      if (!input.name) throw new Error('Enter a collection name.');
+      source!.name = input.name;
+      source!.updatedAt = timestamp;
+    } else if (input.action === 'archive') {
+      source!.archived = true;
+      source!.updatedAt = timestamp;
+    } else if (input.action === 'restore') {
+      source!.archived = false;
+      source!.updatedAt = timestamp;
+    } else {
+      const number = project.collections.length + 1;
+      const workspaceName = path.basename(workspaceOrThrow());
+      const id = `${String(number).padStart(3, '0')}-collection-${crypto.randomUUID().slice(0, 8)}`;
+      await ensureCollection(safePath, id);
+      Object.assign(project, addEmptyCollection(project, workspaceName, id, timestamp));
     }
-    project.updatedAt = nowIso();
+    project.updatedAt = timestamp;
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(validateProject(project), null, 2));
     return makeSnapshot(safePath);
   });
@@ -671,10 +742,10 @@ function registerIpc(): void {
   handle('exports:annotated-image', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    if (input.roundId && !project.rounds.some((round) => round.id === input.roundId))
-      throw new Error('Subfolder not found.');
-    const folder = input.roundId
-      ? path.join(safePath, 'rounds', input.roundId, 'exports')
+    if (input.collectionId && !project.collections.some((item) => item.id === input.collectionId))
+      throw new Error('Collection not found.');
+    const folder = input.collectionId
+      ? path.join(safePath, 'collections', input.collectionId, 'exports')
       : path.join(safePath, 'exports');
     const filename = sanitizeFilename(input.filename, 'annotated.png').replace(/\.png$/i, '') + '.png';
     const target = path.join(folder, filename);
@@ -684,15 +755,15 @@ function registerIpc(): void {
   handle('exports:package', async (_event, input: ExportRequest) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    if (input.roundId && !project.rounds.some((r) => r.id === input.roundId))
-      throw new Error('Subfolder not found.');
-    const exportDir = input.roundId
-      ? path.join(safePath, 'rounds', input.roundId, 'exports')
+    if (input.collectionId && !project.collections.some((item) => item.id === input.collectionId))
+      throw new Error('Collection not found.');
+    const exportDir = input.collectionId
+      ? path.join(safePath, 'collections', input.collectionId, 'exports')
       : path.join(safePath, 'exports');
     await assertNoLinks(exportDir);
     await fs.mkdir(exportDir, { recursive: true });
     const included = project.screenshots.filter(
-      (s) => s.includeInExport && (!input.roundId || s.roundId === input.roundId),
+      (s) => s.includeInExport && (!input.collectionId || s.collectionId === input.collectionId),
     );
     const briefPath = path.join(exportDir, 'context.md');
     await atomicWrite(briefPath, input.markdown);
@@ -704,9 +775,9 @@ function registerIpc(): void {
         {
           ...project,
           screenshots: included,
-          rounds: input.roundId
-            ? project.rounds.filter((round) => round.id === input.roundId)
-            : project.rounds,
+          collections: input.collectionId
+            ? project.collections.filter((collection) => collection.id === input.collectionId)
+            : project.collections,
         },
         null,
         2,
@@ -721,7 +792,7 @@ function registerIpc(): void {
       for (const shot of included) {
         await assertNoLinks(screenshotPath(safePath, shot));
         const buffer = await fs.readFile(screenshotPath(safePath, shot));
-        zip.file(`rounds/${shot.roundId}/screenshots/${shot.storedFilename}`, buffer);
+        zip.file(`collections/${shot.collectionId}/screenshots/${shot.storedFilename}`, buffer);
       }
     }
     if (input.includeAnnotations)
@@ -730,18 +801,7 @@ function registerIpc(): void {
         const json = await fs.readFile(path.join(safePath, shot.annotationFile), 'utf8').catch(() => '[]');
         zip.file(shot.annotationFile, json);
       }
-    for (const shot of included) {
-      await assertNoLinks(path.join(safePath, shot.notesFile));
-      zip.file(
-        shot.notesFile,
-        await fs
-          .readFile(path.join(safePath, shot.notesFile), 'utf8')
-          .catch((error: NodeJS.ErrnoException) => {
-            if (error.code === 'ENOENT') return '';
-            throw error;
-          }),
-      );
-    }
+    for (const shot of included) zip.file(shot.descriptionFile, shot.description);
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const zipPath = path.join(exportDir, `${sanitizeFilename(project.name, 'imnota-project')}-package.zip`);
     await atomicWrite(zipPath, zipBuffer);
@@ -778,11 +838,7 @@ function registerIpc(): void {
     const safePath = await assertProjectPath(input.projectPath);
     await atomicWrite(
       path.join(safePath, '.imnota-recovery.json'),
-      JSON.stringify(
-        { savedAt: nowIso(), project: input.project, annotations: input.annotations, notes: input.notes },
-        null,
-        2,
-      ),
+      JSON.stringify({ savedAt: nowIso(), project: input.project, annotations: input.annotations }, null, 2),
     );
   });
   handle('recovery:clear', async (_event, projectPath: string) => {
@@ -923,32 +979,27 @@ app.whenReady().then(async () => {
         await api.checkForUpdates();
         const update = await api.getUpdateStatus();
         if (!update.currentVersion || update.state !== 'idle') throw new Error('Manual update check/status bridge failed');
-        const snapshot = await api.createProject({ name: 'Smoke', description: '', tags: [] });
+        const snapshot = await api.createProject({ name: 'Smoke', description: '' });
         const imported = await api.importImageFiles({ projectPath: snapshot.projectPath, paths: [${JSON.stringify(source)}] });
         const shot = imported.project.screenshots[0];
         const content = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot });
-        content.notes.summary = 'Persist this note';
+        shot.description = 'Persist this description';
         content.annotations = [{ id: 'test', kind: 'rectangle', x: 0, y: 0, width: 1, height: 1, zIndex: 0 }];
-        await api.saveScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot, ...content });
+        await api.saveScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot, annotations: content.annotations, contentRevision: content.contentRevision });
         const duplicate = await api.duplicateScreenshot({ projectPath: snapshot.projectPath, screenshot: shot });
         const copied = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: duplicate.project.screenshots[1] });
-        if (copied.notes.summary !== 'Persist this note' || copied.annotations.length !== 1) throw new Error('Duplication lost data');
+        if (duplicate.project.screenshots[1].description !== 'Persist this description' || copied.annotations.length !== 1) throw new Error('Duplication lost data');
         const secondCopy = await api.duplicateScreenshot({ projectPath: snapshot.projectPath, screenshot: shot });
         if (new Set(secondCopy.project.screenshots.map(s => s.storedFilename)).size !== 3) throw new Error('Duplicate filename collision');
-        const roundCopy = await api.editRound({ projectPath: snapshot.projectPath, action: 'duplicate', roundId: shot.roundId, name: 'Second feedback' });
-        const roundId = roundCopy.project.rounds.at(-1).id;
-        const roundShot = roundCopy.project.screenshots.find(s => s.roundId === roundId);
-        const roundContent = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: roundShot });
-        if (roundContent.notes.summary !== 'Persist this note') throw new Error('Round duplication lost notes');
-        roundContent.notes.summary = 'Independent round';
-        await api.saveScreenshotContent({ projectPath: snapshot.projectPath, screenshot: roundShot, ...roundContent });
-        const originalContent = await api.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: shot });
-        if (originalContent.notes.summary !== 'Persist this note') throw new Error('Round edits changed the original');
-        const renamed = await api.editRound({ projectPath: snapshot.projectPath, action: 'rename', roundId, name: 'Revision feedback' });
-        if (renamed.project.rounds.at(-1).name !== 'Revision feedback') throw new Error('Round rename failed');
-        const archived = await api.editRound({ projectPath: snapshot.projectPath, action: 'archive', roundId, name: 'Revision feedback' });
-        if (!archived.project.rounds.at(-1).archived) throw new Error('Round archive failed');
-        await api.editRound({ projectPath: snapshot.projectPath, action: 'archive', roundId, name: 'Revision feedback' });
+        const collectionCopy = await api.editCollection({ projectPath: snapshot.projectPath, action: 'create', collectionId: shot.collectionId });
+        const collectionId = collectionCopy.project.collections.at(-1).id;
+        if (!collectionCopy.project.collections[0].archived || collectionCopy.project.screenshots.some(s => s.collectionId === collectionId)) throw new Error('New collection was not empty or previous collection was not archived');
+        const renamed = await api.editCollection({ projectPath: snapshot.projectPath, action: 'rename', collectionId, name: 'Revision feedback' });
+        if (renamed.project.collections.at(-1).name !== 'Revision feedback') throw new Error('Collection rename failed');
+        const archived = await api.editCollection({ projectPath: snapshot.projectPath, action: 'archive', collectionId });
+        if (!archived.project.collections.at(-1).archived) throw new Error('Collection archive failed');
+        const restored = await api.editCollection({ projectPath: snapshot.projectPath, action: 'restore', collectionId });
+        if (restored.project.collections.at(-1).archived) throw new Error('Collection restore failed');
         await api.copyImage(content.image.dataUrl);
         await api.exportPackage({ projectPath: snapshot.projectPath, markdown: '# Smoke', annotatedImages: [{ filename: 'reference.png', dataUrl: content.image.dataUrl }], includeOriginal: true, includeAnnotations: true });
         let blocked = false;
@@ -967,13 +1018,13 @@ app.whenReady().then(async () => {
       if (!archive.file('context.md') || !archive.file('reference.png'))
         throw new Error('ZIP entries missing');
       const savedProject = await readProject(path.join(fixture, 'smoke'));
-      const recoveredNotes = { ...EMPTY_NOTES, summary: 'Recovered after interruption' };
+      const recoveredProject = structuredClone(savedProject);
+      recoveredProject.screenshots[0].description = 'Recovered after interruption';
       await atomicWrite(
         path.join(fixture, 'smoke', '.imnota-recovery.json'),
         JSON.stringify({
-          project: savedProject,
+          project: recoveredProject,
           annotations: {},
-          notes: { [savedProject.screenshots[0].id]: recoveredNotes },
         }),
       );
       const originalDialog = dialog.showMessageBox;
@@ -987,14 +1038,14 @@ app.whenReady().then(async () => {
         dialog.showMessageBox = originalDialog;
       }
       const recovered = await fs.readFile(
-        path.join(fixture, 'smoke', savedProject.screenshots[0].notesFile),
+        path.join(fixture, 'smoke', savedProject.screenshots[0].descriptionFile),
         'utf8',
       );
       if (
-        !recovered.includes(recoveredNotes.summary) ||
+        !recovered.includes('Recovered after interruption') ||
         existsSync(path.join(fixture, 'smoke', '.imnota-recovery.json'))
       )
-        throw new Error('Recovery did not restore notes and clear the journal');
+        throw new Error('Recovery did not restore description and clear the journal');
       const largeSource = path.join(fixture, 'large.png');
       await fs.writeFile(
         largeSource,
@@ -1004,14 +1055,13 @@ app.whenReady().then(async () => {
       );
       const metrics = await mainWindow!.webContents.executeJavaScript(`(async () => {
         const api = window.imnota;
-        const project = await api.createProject({ name: 'Performance', description: '', tags: [] });
+        const project = await api.createProject({ name: 'Performance', description: '' });
         const started = performance.now();
         for (let i = 0; i < 2; i++) await api.importImageFiles({ projectPath: project.projectPath, paths: Array(50).fill(${JSON.stringify(largeSource)}) });
         const importedMs = performance.now() - started;
         const before = performance.now();
         const reopened = await api.loadProject(project.projectPath);
         if (reopened.project.screenshots.length !== 100 || Object.keys(reopened.thumbnails).length !== 100) throw new Error('100-image project lost screenshots or thumbnails');
-        reopened.project.exportPreferences.includedFields = ['summary'];
         reopened.project.screenshots.forEach((shot, index) => { shot.includeInExport = index < 2; });
         await api.saveProject(project.projectPath, reopened.project);
         return { syntheticImages: 100, dimensions: '1920x1080', importMs: Math.round(importedMs), warmReopenMs: Math.round(performance.now() - before) };
@@ -1061,8 +1111,8 @@ app.whenReady().then(async () => {
       const exportedPng = path.join(
         fixture,
         'performance',
-        'rounds',
-        performanceProject.screenshots[0].roundId,
+        'collections',
+        performanceProject.screenshots[0].collectionId,
         'exports',
         performanceProject.screenshots[0].storedFilename.replace(/\.[^.]+$/, '') + '-annotated.png',
       );
@@ -1075,12 +1125,6 @@ app.whenReady().then(async () => {
         'Renderer smoke passed: reopened workspace, crop drawing and cropped PNG export.',
         JSON.stringify(pngSize),
       );
-      if (
-        (await readProject(path.join(fixture, 'performance'))).exportPreferences.includedFields.includes(
-          'problem',
-        )
-      )
-        throw new Error('Unchanged autosave modified legacy export exclusions');
       mainWindow!.showInactive();
       await new Promise((resolve) => setTimeout(resolve, 500));
       await mainWindow!.webContents.executeJavaScript(`(async () => {
@@ -1113,7 +1157,7 @@ app.whenReady().then(async () => {
         const wrap = document.querySelector('.canvas-wrap');
         const problemField = document.querySelector('.inspector textarea');
         if (!problemField || document.querySelectorAll('.inspector textarea').length !== 1) throw new Error('Inspector must have one problem description editor');
-        if (!document.querySelector('[aria-label="Subfolder"]')) throw new Error('Subfolder selector missing');
+        if (!document.querySelector('[aria-label="Collection"]')) throw new Error('Collection selector missing');
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(problemField, 'A single clear problem description');
         problemField.dispatchEvent(new Event('input', { bubbles: true }));
         await new Promise(resolve => setTimeout(resolve, 900));
@@ -1160,13 +1204,12 @@ app.whenReady().then(async () => {
         'Feedback smoke passed: independent round duplication, rename/archive/restore, image clipboard, three panel toggles, bounded canvas, trackpad pan and inline text confirm/cancel.',
       );
       const textProject = await readProject(path.join(fixture, 'performance'));
-      const persistedNotes = parseNotesMarkdown(
-        await fs.readFile(path.join(fixture, 'performance', textProject.screenshots[0].notesFile), 'utf8'),
+      const persistedDescription = await fs.readFile(
+        path.join(fixture, 'performance', textProject.screenshots[0].descriptionFile),
+        'utf8',
       );
-      if (persistedNotes.problem !== 'A single clear problem description')
-        throw new Error('Problem description was not persisted');
-      if (!textProject.exportPreferences.includedFields.includes('problem'))
-        throw new Error('Edited problem description was not included after reopen');
+      if (persistedDescription !== 'A single clear problem description')
+        throw new Error('Description was not persisted');
       const savedAnnotations = JSON.parse(
         await fs.readFile(
           path.join(fixture, 'performance', textProject.screenshots[0].annotationFile),
@@ -1182,7 +1225,7 @@ app.whenReady().then(async () => {
         const projectPath = ${JSON.stringify(path.join(fixture, 'performance'))};
         const content = await window.imnota.loadScreenshotContent({ projectPath, screenshot });
         content.annotations.push({ id: 'clipboard-mask', kind: 'blur', x: 20, y: 20, width: 80, height: 80, opacity: 0.1, zIndex: 100 });
-        await window.imnota.saveScreenshotContent({ projectPath, screenshot, notes: content.notes, annotations: content.annotations });
+        await window.imnota.saveScreenshotContent({ projectPath, screenshot, annotations: content.annotations, contentRevision: content.contentRevision });
       })()`);
       // Exercise the same context action from the builder, then the experimental
       // combined-copy button. Only the two included references should be copied.

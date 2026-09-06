@@ -1,76 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { generateMarkdown } from '../markdown.js';
+import { generateMarkdown, numberCollectionScreenshots } from '../markdown.js';
 import { emptyProject } from '../utils.js';
-import type { Annotation, NoteFields } from '../types.js';
+import type { Annotation, ScreenshotRecord } from '../types.js';
 
-const note: NoteFields = {
-  summary: 'The form is hard to scan.',
-  observation: '',
-  problem: 'The error is below the fold.',
-  expectedBehaviour: '',
-  requestedChange: '',
-  technicalDetails: '',
-  aiInstruction: '',
-  additionalNotes: '',
-};
-const annotation: Annotation = {
-  id: 'a1',
-  kind: 'step',
-  x: 10,
-  y: 20,
-  width: 48,
-  height: 48,
-  stepNumber: 1,
-  zIndex: 0,
-};
+function screenshot(id: string, position: number, includeInExport = true): ScreenshotRecord {
+  return {
+    collectionId: '001-collection',
+    id,
+    originalFilename: `${id}.png`,
+    storedFilename: `${id}.png`,
+    title: `${id}.png`,
+    description: id === 'third' ? 'Keep the primary action visible.' : '',
+    position,
+    createdAt: `2026-01-0${position + 1}`,
+    updatedAt: '',
+    priority: id === 'third' ? 'high' : 'medium',
+    annotationFile: `collections/001-collection/annotations/${id}.png.json`,
+    descriptionFile: `collections/001-collection/descriptions/${id}.png.md`,
+    originalWidth: 100,
+    originalHeight: 100,
+    includeInExport,
+  };
+}
 
-describe('Markdown context generation', () => {
-  it('keeps useful sections and removes empty fields', () => {
-    const project = emptyProject('Checkout review', 'A local UI review');
-    project.exportPreferences.desiredOutcome = 'Make the error impossible to miss.';
-    project.screenshots = [
-      {
-        roundId: '001-first-feedback',
-        id: 'shot1',
-        originalFilename: 'screen.png',
-        storedFilename: '001-screen.png',
-        title: 'Error state',
-        description: '',
-        position: 0,
-        createdAt: '',
-        updatedAt: '',
-        tags: [],
-        priority: 'high',
-        status: 'ready',
-        annotationFile: 'annotations/001-screen.png.json',
-        notesFile: 'notes/001-screen.png.md',
-        originalWidth: 100,
-        originalHeight: 100,
-        includeInExport: true,
-      },
-    ];
-    const markdown = generateMarkdown(project, project.screenshots, { shot1: note }, { shot1: [annotation] });
-    expect(markdown).toContain('# Checkout review');
-    expect(markdown).toContain('Summary:');
-    expect(markdown).toContain('- Step 1');
-    expect(markdown).not.toContain('Observation:');
-    expect(markdown).not.toContain('## Instructions for the AI Agent');
-    expect(markdown).toContain('Subfolder: Subfolder 1');
-    expect(markdown).not.toContain('Feedback round:');
-    expect(markdown.match(/Problem description:/g)).toHaveLength(1);
+describe('collection Markdown generation', () => {
+  it('numbers sort order before filtering and keeps exclusions explicit', () => {
+    const project = emptyProject('Checkout review', '');
+    project.collections[0].overallContext = 'Review the checkout flow as a whole.';
+    project.screenshots = [screenshot('third', 2), screenshot('first', 0), screenshot('second', 1, false)];
+    expect(
+      numberCollectionScreenshots(project, '001-collection').map(({ screenshot }) => screenshot.id),
+    ).toEqual(['first', 'second', 'third']);
+    const annotations: Record<string, Annotation[]> = {
+      third: [
+        { id: 'visual', kind: 'rectangle', x: 0, y: 0, zIndex: 0 },
+        { id: 'text-1', kind: 'text', text: 'Move this action.', x: 0, y: 0, zIndex: 1 },
+        { id: 'text-2', kind: 'callout', text: 'Keep this label.', x: 0, y: 0, zIndex: 2 },
+      ],
+    };
+    const markdown = generateMarkdown(project, '001-collection', annotations);
+    expect(markdown).toContain('## Overall context');
+    expect(markdown).toContain('Picture 2 was intentionally excluded');
+    expect(markdown).toContain('## Picture 3 — third.png');
+    expect(markdown).toContain('Priority for agent: High');
+    expect(markdown).toContain('Keep the primary action visible.');
+    expect(markdown).toContain('### Picture 3 / Note 1');
+    expect(markdown).toContain('### Picture 3 / Note 2');
+    expect(markdown).not.toContain('rectangle');
+  });
 
-    // Existing exclusions stay intact until a user edits the primary description.
-    project.exportPreferences.includedFields = ['summary'];
-    project.screenshots[0].description = 'Legacy screenshot description';
-    project.rounds[0].name = 'Feedback 2';
-    const legacyBrief = generateMarkdown(project, project.screenshots, { shot1: note }, {});
-    expect(legacyBrief).toContain('Subfolder: Feedback 2');
-    expect(legacyBrief).toContain('Description:\nLegacy screenshot description');
-    expect(legacyBrief).not.toContain('Problem description:');
-    expect(legacyBrief).toContain('Summary:\nThe form is hard to scan.');
-    project.exportPreferences.includedFields.push('problem');
-    expect(generateMarkdown(project, project.screenshots, { shot1: note }, {})).toContain(
-      'Problem description:\nThe error is below the fold.',
+  it('retains a minimal reference without description or text annotations', () => {
+    const project = emptyProject('Review', '');
+    project.screenshots = [screenshot('first', 0)];
+    expect(generateMarkdown(project, '001-collection', {})).toContain(
+      '## Picture 1 — first.png\n\nPriority for agent: Medium',
     );
   });
 });

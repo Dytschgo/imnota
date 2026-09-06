@@ -7,6 +7,8 @@ import {
   Clipboard,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   FileImage,
   FolderOpen,
   FolderPlus,
@@ -28,20 +30,20 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  Undo2,
   Upload,
   X,
 } from 'lucide-react';
 import type {
   Annotation,
   AnnotationKind,
-  NoteFields,
   ProjectData,
   ProjectListItem,
   ProjectSnapshot,
   ScreenshotRecord,
   UpdateStatus,
 } from '../shared/types';
-import { DEFAULT_TAGS, EMPTY_NOTES, nowIso } from '../shared/utils';
+import { nowIso } from '../shared/utils';
 import { generateMarkdown } from '../shared/markdown';
 import { renderAnnotatedImage } from './export-image';
 import { prepareContext } from './prepare-context';
@@ -51,7 +53,6 @@ import { Logo } from './components/Logo';
 import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
 import { Toolbar } from './components/Toolbar';
 import { UpdateControl } from './components/UpdateControl';
-import { ProblemDescriptionEditor } from './components/ProblemDescriptionEditor';
 import { CombinedContextCopy } from './components/CombinedContextCopy';
 import { version as appVersion } from '../../package.json';
 
@@ -69,17 +70,18 @@ export default function App() {
   const store = useAppStore();
   const [booting, setBooting] = useState(true);
   const [modal, setModal] = useState<'new' | 'shortcuts' | 'about' | 'delete' | null>(null);
-  const [newProject, setNewProject] = useState({ name: '', description: '', tags: [] as string[] });
+  const [newProject, setNewProject] = useState({ name: '', description: '' });
   const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
   const [image, setImage] = useState<any>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [notes, setNotes] = useState<NoteFields>(EMPTY_NOTES);
   const [history, setHistory] = useState<Annotation[][]>([]);
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [error, setError] = useState('');
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(
+    null,
+  );
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const preparingContext = useRef(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -105,6 +107,8 @@ export default function App() {
   const projectSearchInputRef = useRef<HTMLInputElement>(null);
   const projectSearchRequest = useRef(0);
   const contentRevision = useRef(0);
+  const diskContentRevision = useRef('');
+  const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
 
   const activeShot = store.activeScreenshot();
@@ -112,26 +116,27 @@ export default function App() {
   const hasProject = Boolean(store.snapshot);
   useEffect(() => {
     editRevision.current++;
-  }, [annotations, notes, activeShot?.id, store.snapshot?.projectPath]);
+  }, [annotations, activeShot?.description, activeShot?.id, store.snapshot?.projectPath]);
   useEffect(() => {
     contentRevision.current++;
-  }, [annotations, notes, activeShot, store.snapshot]);
+  }, [annotations, activeShot, store.snapshot]);
 
   const showToast = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(''), 3000);
+    setToast({ message });
+    window.setTimeout(() => setToast(null), 3000);
   }, []);
   const refreshProjects = useCallback(async () => {
     const projects = await window.imnota.listProjects();
     store.set({ projects });
   }, [store]);
-  const openSnapshot = useCallback(async (snapshot: ProjectSnapshot) => {
+  const openSnapshot = useCallback(async (snapshot: ProjectSnapshot, selectScreenshotId?: string) => {
     useAppStore.getState().setProject(snapshot);
+    if (selectScreenshotId) useAppStore.getState().set({ activeScreenshotId: selectScreenshotId });
     setError('');
     lastLoadedId.current = null;
     setImage(null);
     setAnnotations([]);
-    setNotes(EMPTY_NOTES);
+    diskContentRevision.current = '';
   }, []);
   const loadContent = useCallback(async (projectPath: string, shot: ScreenshotRecord) => {
     try {
@@ -140,7 +145,15 @@ export default function App() {
       if (current.snapshot?.projectPath !== projectPath || current.activeScreenshotId !== shot.id) return;
       setImage(loaded.image);
       setAnnotations(loaded.annotations);
-      setNotes(loaded.notes);
+      diskContentRevision.current = loaded.contentRevision;
+      if (loaded.description !== shot.description) {
+        current.updateProject({
+          ...current.snapshot.project,
+          screenshots: current.snapshot.project.screenshots.map((item) =>
+            item.id === shot.id ? { ...item, description: loaded.description } : item,
+          ),
+        });
+      }
       setHistory([]);
       setRedo([]);
       setSelectedAnnotation(null);
@@ -149,6 +162,35 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'The screenshot could not be loaded.');
     }
   }, []);
+  const applyScreenshotSave = useCallback(
+    (
+      result: Awaited<ReturnType<typeof window.imnota.saveScreenshotContent>>,
+      projectPath: string,
+      sourceScreenshotId: string,
+    ) => {
+      const current = useAppStore.getState();
+      if (current.snapshot?.projectPath !== projectPath) return;
+      const sourceThumb = current.snapshot.thumbnails[sourceScreenshotId];
+      current.updateProject(result.project);
+      if (result.conflictCreated && current.activeScreenshotId === sourceScreenshotId) {
+        current.set({
+          activeScreenshotId: result.savedScreenshotId,
+          snapshot: {
+            ...current.snapshot,
+            project: result.project,
+            thumbnails: sourceThumb
+              ? { ...current.snapshot.thumbnails, [result.savedScreenshotId]: sourceThumb }
+              : current.snapshot.thumbnails,
+          },
+        });
+        lastLoadedId.current = result.savedScreenshotId;
+        setToast({ message: 'External edits preserved. Your version is an excluded Copy conflict.' });
+      }
+      if (useAppStore.getState().activeScreenshotId === result.savedScreenshotId)
+        diskContentRevision.current = result.contentRevision;
+    },
+    [],
+  );
 
   useEffect(() => {
     (async () => {
@@ -190,19 +232,42 @@ export default function App() {
     void loadContent(store.snapshot.projectPath, activeShot);
   }, [activeShot, store.snapshot, loadContent]);
   useEffect(() => {
-    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return;
+    const current = useAppStore.getState();
+    const projectPath = current.snapshot?.projectPath;
+    const screenshot = current.snapshot?.project.screenshots.find(
+      (item) => item.id === current.activeScreenshotId,
+    );
+    if (!projectPath || !screenshot || lastLoadedId.current !== screenshot.id) return;
+    if (!diskContentRevision.current) return;
     setSaving('saving');
-    const input = { projectPath: store.snapshot.projectPath, screenshot: activeShot, annotations, notes };
+    const input = {
+      projectPath,
+      screenshot,
+      annotations,
+      contentRevision: diskContentRevision.current,
+    };
+    const revision = editRevision.current;
     let saved = false;
     const save = () => {
       if (saved) return;
       saved = true;
       void window.imnota
         .saveScreenshotContent(input)
-        .then(() => setSaving('saved'))
+        .then((result) => {
+          if (revision === editRevision.current)
+            applyScreenshotSave(result, input.projectPath, input.screenshot.id);
+          else if (
+            !result.conflictCreated &&
+            useAppStore.getState().activeScreenshotId === input.screenshot.id
+          )
+            diskContentRevision.current = result.contentRevision;
+          setSaving('saved');
+        })
         .catch(() => {
           setSaving('error');
-          setError('Your changes could not be saved. Keep Imnota open and check your workspace.');
+          setError(
+            `Could not save ${input.screenshot.title || input.screenshot.originalFilename} (${input.screenshot.originalFilename}). Keep Imnota open and check your workspace.`,
+          );
         });
     };
     const timer = window.setTimeout(save, 650);
@@ -215,7 +280,17 @@ export default function App() {
       )
         save();
     };
-  }, [annotations, notes, activeShot, store.snapshot]);
+  }, [
+    annotations,
+    activeShot?.id,
+    activeShot?.title,
+    activeShot?.description,
+    activeShot?.priority,
+    activeShot?.includeInExport,
+    activeShot?.position,
+    store.snapshot?.projectPath,
+    applyScreenshotSave,
+  ]);
   useEffect(() => {
     const beforeClose = (event: BeforeUnloadEvent) => {
       if (allowClose.current || !store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id)
@@ -227,9 +302,10 @@ export default function App() {
           projectPath: store.snapshot.projectPath,
           screenshot: activeShot,
           annotations,
-          notes,
+          contentRevision: diskContentRevision.current,
         })
-        .then(() => {
+        .then((result) => {
+          applyScreenshotSave(result, store.snapshot!.projectPath, activeShot.id);
           allowClose.current = true;
           window.close();
         })
@@ -241,7 +317,7 @@ export default function App() {
     };
     window.addEventListener('beforeunload', beforeClose);
     return () => window.removeEventListener('beforeunload', beforeClose);
-  }, [annotations, notes, store.snapshot, activeShot]);
+  }, [annotations, store.snapshot, activeShot, applyScreenshotSave]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -339,20 +415,17 @@ export default function App() {
   async function persistCurrent(): Promise<boolean> {
     if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return true;
     try {
-      await window.imnota.saveScreenshotContent({
+      const revision = editRevision.current;
+      const result = await window.imnota.saveScreenshotContent({
         projectPath: store.snapshot.projectPath,
-        screenshot: { ...activeShot, updatedAt: nowIso() },
+        screenshot: activeShot,
         annotations,
-        notes,
+        contentRevision: diskContentRevision.current,
       });
-      const project = {
-        ...store.snapshot.project,
-        screenshots: store.snapshot.project.screenshots.map((s) =>
-          s.id === activeShot.id ? { ...activeShot, updatedAt: nowIso() } : s,
-        ),
-        updatedAt: nowIso(),
-      };
-      if (useAppStore.getState().snapshot === store.snapshot) store.updateProject(project);
+      if (revision === editRevision.current)
+        applyScreenshotSave(result, store.snapshot.projectPath, activeShot.id);
+      else if (!result.conflictCreated && useAppStore.getState().activeScreenshotId === activeShot.id)
+        diskContentRevision.current = result.contentRevision;
       setSaving('saved');
       return true;
     } catch {
@@ -416,12 +489,20 @@ export default function App() {
     if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id) {
       setSaving('saving');
       try {
-        await window.imnota.saveScreenshotContent({
+        const result = await window.imnota.saveScreenshotContent({
           projectPath: store.snapshot.projectPath,
           screenshot: activeShot,
           annotations,
-          notes,
+          contentRevision: diskContentRevision.current,
         });
+        if (result.conflictCreated) {
+          applyScreenshotSave(result, store.snapshot.projectPath, activeShot.id);
+          setError(
+            'External edits were preserved. Review the excluded Copy conflict before leaving the project.',
+          );
+          return;
+        }
+        diskContentRevision.current = result.contentRevision;
         setSaving('saved');
       } catch {
         if (!stillCurrent()) return;
@@ -457,7 +538,7 @@ export default function App() {
     try {
       const snapshot = await window.imnota.createProject(newProject);
       setModal(null);
-      setNewProject({ name: '', description: '', tags: [] });
+      setNewProject({ name: '', description: '' });
       await refreshProjects();
       await openSnapshot(snapshot);
       showToast('Project created');
@@ -468,12 +549,17 @@ export default function App() {
   async function importPaths(paths: string[]) {
     if (!store.snapshot || !paths.length) return;
     try {
+      const existingIds = new Set(store.snapshot.project.screenshots.map((shot) => shot.id));
       const snapshot = await window.imnota.importImageFiles({
         projectPath: store.snapshot.projectPath,
-        roundId: store.activeRoundId,
+        collectionId: store.activeCollectionId,
         paths,
       });
-      await openSnapshot(snapshot);
+      const newest = snapshot.project.screenshots
+        .filter((shot) => shot.collectionId === store.activeCollectionId && !existingIds.has(shot.id))
+        .sort((a, b) => a.position - b.position)
+        .at(-1);
+      await openSnapshot(snapshot, newest?.id);
       await refreshProjects();
       showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
     } catch (err) {
@@ -488,7 +574,10 @@ export default function App() {
   async function pasteImage() {
     if (!store.snapshot) return;
     try {
-      await openSnapshot(await window.imnota.pasteImage(store.snapshot.projectPath, store.activeRoundId));
+      const existingIds = new Set(store.snapshot.project.screenshots.map((shot) => shot.id));
+      const snapshot = await window.imnota.pasteImage(store.snapshot.projectPath, store.activeCollectionId);
+      const newest = snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id));
+      await openSnapshot(snapshot, newest?.id);
       await refreshProjects();
       showToast('Screenshot pasted');
     } catch (err) {
@@ -514,6 +603,32 @@ export default function App() {
     setAnnotations(next);
     setRedo((items) => items.slice(0, -1));
   }
+  function changeDescription(value: string) {
+    if (!store.snapshot || !activeShot || value === activeShot.description) return;
+    setDescriptionHistory((items) => ({
+      ...items,
+      [activeShot.id]: [...(items[activeShot.id] ?? []), activeShot.description],
+    }));
+    store.updateProject({
+      ...store.snapshot.project,
+      screenshots: store.snapshot.project.screenshots.map((shot) =>
+        shot.id === activeShot.id ? { ...shot, description: value } : shot,
+      ),
+    });
+  }
+  function undoDescription() {
+    if (!store.snapshot || !activeShot) return;
+    const values = descriptionHistory[activeShot.id] ?? [];
+    const previous = values.at(-1);
+    if (previous === undefined) return;
+    store.updateProject({
+      ...store.snapshot.project,
+      screenshots: store.snapshot.project.screenshots.map((shot) =>
+        shot.id === activeShot.id ? { ...shot, description: previous } : shot,
+      ),
+    });
+    setDescriptionHistory((items) => ({ ...items, [activeShot.id]: values.slice(0, -1) }));
+  }
   async function copyContext() {
     if (preparingContext.current) return;
     preparingContext.current = true;
@@ -534,27 +649,24 @@ export default function App() {
   const buildMarkdown = useCallback(async () => {
     if (!store.snapshot) return '';
     const shots = store.snapshot.project.screenshots.filter(
-      (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
+      (shot) => shot.includeInExport && shot.collectionId === store.activeCollectionId,
     );
-    const cache: Record<string, { annotations: Annotation[]; notes: NoteFields }> = {
-      ...(activeShot && lastLoadedId.current === activeShot.id
-        ? { [activeShot.id]: { annotations, notes } }
-        : {}),
+    const cache: Record<string, { annotations: Annotation[] }> = {
+      ...(activeShot && lastLoadedId.current === activeShot.id ? { [activeShot.id]: { annotations } } : {}),
     };
     for (const shot of shots.filter((shot) => !cache[shot.id])) {
       const loaded = await window.imnota.loadScreenshotContent({
         projectPath: store.snapshot!.projectPath,
         screenshot: shot,
       });
-      cache[shot.id] = { notes: loaded.notes, annotations: loaded.annotations };
+      cache[shot.id] = { annotations: loaded.annotations };
     }
     return generateMarkdown(
       store.snapshot.project,
-      shots,
-      Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.notes ?? EMPTY_NOTES])),
+      store.activeCollectionId,
       Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.annotations ?? []])),
     );
-  }, [store.snapshot, store.activeRoundId, store.exportAllRounds, activeShot, annotations, notes]);
+  }, [store.snapshot, store.activeCollectionId, activeShot, annotations]);
   async function exportPackage(openFolder = true) {
     if (!store.snapshot) return;
     try {
@@ -562,10 +674,18 @@ export default function App() {
         {
           project: store.snapshot.project,
           projectPath: store.snapshot.projectPath,
-          roundId: store.exportAllRounds ? undefined : store.activeRoundId,
+          collectionId: store.activeCollectionId,
           active:
             activeShot && lastLoadedId.current === activeShot.id && image
-              ? { id: activeShot.id, content: { image, annotations, notes } }
+              ? {
+                  id: activeShot.id,
+                  content: {
+                    image,
+                    annotations,
+                    description: activeShot.description,
+                    contentRevision: diskContentRevision.current,
+                  },
+                }
               : undefined,
         },
         window.imnota.loadScreenshotContent,
@@ -574,7 +694,7 @@ export default function App() {
       );
       const result = await window.imnota.exportPackage({
         projectPath: prepared.projectPath,
-        roundId: prepared.roundId,
+        collectionId: prepared.collectionId,
         markdown: prepared.markdown,
         annotatedImages: prepared.images,
         includeOriginal: prepared.preferences.includeOriginalScreenshots,
@@ -597,6 +717,34 @@ export default function App() {
       showToast('Project moved to the system trash');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The project could not be deleted.');
+    }
+  }
+  async function deleteActiveScreenshot() {
+    if (!store.snapshot || !activeShot) return;
+    if (!(await persistCurrent())) return;
+    const projectPath = store.snapshot.projectPath;
+    const screenshotId = activeShot.id;
+    try {
+      const result = await window.imnota.deleteScreenshot({ projectPath, screenshotId });
+      await openSnapshot(result.snapshot);
+      setToast({
+        message: 'Screenshot moved to trash.',
+        action: {
+          label: 'Undo',
+          run: () => {
+            void window.imnota
+              .undoDeleteScreenshot({ projectPath, undoToken: result.undoToken })
+              .then((snapshot) => openSnapshot(snapshot, screenshotId))
+              .then(() => showToast('Screenshot restored. A safety copy may remain in system trash.'))
+              .catch((err) =>
+                setError(err instanceof Error ? err.message : 'The screenshot could not be restored.'),
+              );
+          },
+        },
+      });
+      window.setTimeout(() => setToast(null), 8000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The screenshot could not be moved to trash.');
     }
   }
   async function toggleFavourite() {
@@ -654,9 +802,7 @@ export default function App() {
             onOpenExport={async () => {
               if (store.snapshot)
                 await window.imnota.openPath(
-                  store.exportAllRounds
-                    ? `${store.snapshot.projectPath}/exports`
-                    : `${store.snapshot.projectPath}/rounds/${store.activeRoundId}/exports`,
+                  `${store.snapshot.projectPath}/collections/${store.activeCollectionId}/exports`,
                 );
             }}
             onToggleFavourite={() => void toggleFavourite()}
@@ -758,13 +904,7 @@ export default function App() {
           ) : (
             <Workspace
               onFlush={async () => {
-                if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id)
-                  await window.imnota.saveScreenshotContent({
-                    projectPath: store.snapshot.projectPath,
-                    screenshot: activeShot,
-                    annotations,
-                    notes,
-                  });
+                await persistCurrent();
               }}
               onExportImage={async () => {
                 if (!store.snapshot || !activeShot || !image) return;
@@ -772,11 +912,11 @@ export default function App() {
                   const dataUrl = await renderAnnotatedImage(image, annotations);
                   await window.imnota.exportAnnotatedImage({
                     projectPath: store.snapshot.projectPath,
-                    roundId: activeShot.roundId,
+                    collectionId: activeShot.collectionId,
                     filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
                     dataUrl,
                   });
-                  showToast('Annotated PNG saved in this subfolder’s exports folder.');
+                  showToast('Annotated PNG saved in this collection’s exports folder.');
                 } catch (err) {
                   setError(
                     `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
@@ -806,17 +946,23 @@ export default function App() {
                 window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
               }}
               saving={saving}
-              notes={notes}
-              setNotes={setNotes}
+              onDescriptionChange={changeDescription}
+              onUndoDescription={undoDescription}
+              canUndoDescription={Boolean(activeShot && descriptionHistory[activeShot.id]?.length)}
               onDuplicate={async () => {
-                if (activeShot && store.snapshot)
+                if (activeShot && store.snapshot) {
+                  const existingIds = new Set(store.snapshot.project.screenshots.map((shot) => shot.id));
+                  const snapshot = await window.imnota.duplicateScreenshot({
+                    projectPath: store.snapshot.projectPath,
+                    screenshot: activeShot,
+                  });
                   await openSnapshot(
-                    await window.imnota.duplicateScreenshot({
-                      projectPath: store.snapshot.projectPath,
-                      screenshot: activeShot,
-                    }),
+                    snapshot,
+                    snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id))?.id,
                   );
+                }
               }}
+              onDeleteScreenshot={deleteActiveScreenshot}
               onDeleteProject={() => setModal('delete')}
             />
           )}
@@ -832,7 +978,12 @@ export default function App() {
         {toast && (
           <div className="toast" role="status">
             <Check size={16} />
-            {toast}
+            <span>{toast.message}</span>
+            {toast.action && (
+              <button type="button" onClick={toast.action.run}>
+                {toast.action.label}
+              </button>
+            )}
           </div>
         )}
         {attachments && (
@@ -955,7 +1106,7 @@ export default function App() {
         {modal === 'delete' && (
           <Modal
             title="Delete this project?"
-            description="This moves the project folder to the operating system trash, including screenshots, annotations, notes and exports."
+            description="This moves the project folder to the operating system trash, including screenshots, annotations, descriptions and exports."
             onClose={() => setModal(null)}
           >
             <div className="modal-actions">
@@ -1202,7 +1353,7 @@ function Welcome({ chooseWorkspace }: { chooseWorkspace: () => void }) {
 }
 
 export function matchesProjectSearch(project: ProjectListItem, search: string) {
-  return (project.searchText ?? `${project.name} ${project.description} ${project.tags.join(' ')}`)
+  return (project.searchText ?? `${project.name} ${project.description}`)
     .toLowerCase()
     .includes(search.trim().toLowerCase());
 }
@@ -1250,7 +1401,7 @@ function Library({
           id="project-search"
           ref={searchInputRef}
           aria-label="Search projects"
-          placeholder="Search name, notes, tags or status"
+          placeholder="Search projects and screenshot descriptions"
           value={search}
           onChange={(event) => set({ search: event.target.value })}
         />
@@ -1274,7 +1425,7 @@ function Library({
           title={search ? 'No matching projects' : 'Your project library is empty'}
           description={
             search
-              ? 'Try another name, tag or status.'
+              ? 'Try another project name or description.'
               : 'Create a local project, then add the screenshots that explain the work.'
           }
           action={
@@ -1315,14 +1466,7 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
           {new Date(project.updatedAt).toLocaleDateString()}
         </small>
       </div>
-      <div className="project-row-meta">
-        {project.tags.slice(0, 2).map((tag) => (
-          <span key={tag} className="tag">
-            {tag}
-          </span>
-        ))}
-        {project.favourite && <Heart size={15} fill="currentColor" />}
-      </div>
+      <div className="project-row-meta">{project.favourite && <Heart size={15} fill="currentColor" />}</div>
       <ArrowDownAZ size={16} className="row-chevron" />
     </button>
   );
@@ -1334,16 +1478,22 @@ function Workspace(props: any) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   async function reorderScreenshot(targetIndex: number) {
     if (dragIndex === null || dragIndex === targetIndex || !store.snapshot) return;
-    const ordered = store.snapshot.project.screenshots.filter((shot) => shot.roundId === store.activeRoundId);
+    const ordered = store.snapshot.project.screenshots
+      .filter((shot) => shot.collectionId === store.activeCollectionId)
+      .sort((a, b) => a.position - b.position);
     const [moved] = ordered.splice(dragIndex, 1);
     ordered.splice(targetIndex, 0, moved);
     let cursor = 0;
     const screenshots = store.snapshot.project.screenshots.map((shot) =>
-      shot.roundId === store.activeRoundId ? ordered[cursor++] : shot,
+      shot.collectionId === store.activeCollectionId ? ordered[cursor++] : shot,
     );
+    const positions = new Map(ordered.map((item, position) => [item.id, position]));
     const project = {
       ...store.snapshot.project,
-      screenshots: screenshots.map((item, position) => ({ ...item, position })),
+      screenshots: screenshots.map((item) => ({
+        ...item,
+        position: positions.get(item.id) ?? item.position,
+      })),
       updatedAt: nowIso(),
     };
     store.updateProject(project);
@@ -1352,6 +1502,22 @@ function Workspace(props: any) {
       await window.imnota.saveProject(store.snapshot.projectPath, project);
     } catch {
       props.onMessage('The new screenshot order could not be saved.');
+    }
+  }
+  async function toggleVisibility(screenshot: ScreenshotRecord) {
+    if (!store.snapshot) return;
+    const project = {
+      ...store.snapshot.project,
+      updatedAt: nowIso(),
+      screenshots: store.snapshot.project.screenshots.map((item) =>
+        item.id === screenshot.id ? { ...item, includeInExport: !item.includeInExport } : item,
+      ),
+    };
+    store.updateProject(project);
+    try {
+      await window.imnota.saveProject(store.snapshot.projectPath, project);
+    } catch {
+      props.onMessage('The screenshot export visibility could not be saved.');
     }
   }
   return (
@@ -1377,47 +1543,74 @@ function Workspace(props: any) {
         </div>
         {store.leftPanelOpen && (
           <>
-            <RoundControls onFlush={props.onFlush} />
+            <CollectionControls onFlush={props.onFlush} />
             <div className="shot-list">
               {store.snapshot?.project.screenshots
-                .filter((item) => item.roundId === store.activeRoundId)
+                .filter((item) => item.collectionId === store.activeCollectionId)
+                .sort((a, b) => a.position - b.position)
                 .map((item: ScreenshotRecord, index: number) => (
-                  <button
+                  <div
                     key={item.id}
                     draggable
-                    className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''}`}
+                    className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''} ${item.includeInExport ? '' : 'excluded'}`}
                     onDragStart={() => setDragIndex(index)}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.stopPropagation();
                       void reorderScreenshot(index);
                     }}
-                    onClick={() => props.onSelect(item.id)}
                   >
-                    <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
-                    <div className="thumb">
-                      {store.snapshot?.thumbnails[item.id] ? (
-                        <img src={store.snapshot.thumbnails[item.id]} alt="" />
-                      ) : (
-                        <FileImage size={18} />
-                      )}
-                    </div>
-                    <span className="shot-copy">
-                      <strong>{item.title || item.originalFilename}</strong>
-                      <small>
-                        <span className={`status-dot status-${item.status}`} />
-                        {item.status.replace('-', ' ')} · {item.priority}
-                      </small>
-                    </span>
-                  </button>
+                    <button className="shot-select" onClick={() => props.onSelect(item.id)}>
+                      <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
+                      <div className="thumb">
+                        {store.snapshot?.thumbnails[item.id] ? (
+                          <img src={store.snapshot.thumbnails[item.id]} alt="" />
+                        ) : (
+                          <FileImage size={18} />
+                        )}
+                      </div>
+                      <span className="shot-copy">
+                        <strong>{item.title || item.originalFilename}</strong>
+                        <small>
+                          {item.conflict ? 'Copy conflict · ' : ''}
+                          {item.priority} priority
+                        </small>
+                      </span>
+                    </button>
+                    <IconButton
+                      className="shot-visibility"
+                      label={
+                        item.includeInExport
+                          ? `Exclude ${item.title} from export`
+                          : `Include ${item.title} in export`
+                      }
+                      onClick={() => void toggleVisibility(item)}
+                    >
+                      {item.includeInExport ? <Eye size={16} /> : <EyeOff size={16} />}
+                    </IconButton>
+                  </div>
                 ))}
             </div>
             <div className="rail-actions">
-              <Button variant="soft" onClick={props.onImport}>
+              <Button
+                variant="soft"
+                disabled={
+                  store.snapshot?.project.collections.find((item) => item.id === store.activeCollectionId)
+                    ?.archived
+                }
+                onClick={props.onImport}
+              >
                 <Upload size={15} />
                 Add screenshots
               </Button>
-              <Button variant="ghost" onClick={props.onPaste}>
+              <Button
+                variant="ghost"
+                disabled={
+                  store.snapshot?.project.collections.find((item) => item.id === store.activeCollectionId)
+                    ?.archived
+                }
+                onClick={props.onPaste}
+              >
                 <Clipboard size={15} />
                 Paste from clipboard
               </Button>
@@ -1486,8 +1679,9 @@ function Workspace(props: any) {
       {store.rightPanelOpen && (
         <Inspector
           shot={shot}
-          notes={props.notes}
-          setNotes={props.setNotes}
+          onDescriptionChange={props.onDescriptionChange}
+          onUndoDescription={props.onUndoDescription}
+          canUndoDescription={props.canUndoDescription}
           selectedAnnotation={
             props.selectedAnnotation
               ? props.annotations.find((a: Annotation) => a.id === props.selectedAnnotation)
@@ -1501,6 +1695,7 @@ function Workspace(props: any) {
             )
           }
           onDuplicate={props.onDuplicate}
+          onDeleteScreenshot={props.onDeleteScreenshot}
           onDeleteProject={props.onDeleteProject}
         />
       )}
@@ -1510,11 +1705,13 @@ function Workspace(props: any) {
 
 function Inspector({
   shot,
-  notes,
-  setNotes,
   selectedAnnotation,
   onChangeAnnotation,
+  onDescriptionChange,
+  onUndoDescription,
+  canUndoDescription,
   onDuplicate,
+  onDeleteScreenshot,
   onDeleteProject,
 }: any) {
   const store = useAppStore();
@@ -1524,7 +1721,7 @@ function Inspector({
         <EmptyState
           icon={<PanelRight size={20} />}
           title="Inspector"
-          description="Select a screenshot to edit its notes and export details."
+          description="Select a screenshot to edit its description and export details."
         />
       </aside>
     );
@@ -1549,79 +1746,40 @@ function Inspector({
           value={shot.title}
           onChange={(event) => updateShot({ title: event.target.value })}
         />
-        <ProblemDescriptionEditor
-          notes={notes}
-          description={shot.description}
-          onChange={(next) => {
-            setNotes(next);
-            const project = store.snapshot!.project;
-            if (
-              next.problem !== notes.problem &&
-              !project.exportPreferences.includedFields.includes('problem')
-            )
-              store.updateProject({
-                ...project,
-                exportPreferences: {
-                  ...project.exportPreferences,
-                  includedFields: [...project.exportPreferences.includedFields, 'problem'],
-                },
-              });
-          }}
-        />
-        <details className="screenshot-details">
-          <summary>Screenshot details</summary>
-          <div className="field-grid">
-            <label className="field">
-              <span className="field-label">Status</span>
-              <select
-                value={shot.status}
-                onChange={(event) => updateShot({ status: event.target.value as any })}
-              >
-                <option value="draft">Draft</option>
-                <option value="ready">Ready</option>
-                <option value="needs-review">Needs review</option>
-                <option value="completed">Completed</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">Priority</span>
-              <select
-                value={shot.priority}
-                onChange={(event) => updateShot({ priority: event.target.value as any })}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </label>
+        <div className="description-field">
+          <div className="field-heading">
+            <span className="field-label">Description</span>
+            <Button
+              variant="ghost"
+              aria-label="Undo description"
+              disabled={!canUndoDescription}
+              onClick={onUndoDescription}
+            >
+              <Undo2 size={14} />
+              Undo
+            </Button>
           </div>
-          <div className="field">
-            <span className="field-label">Tags</span>
-            <div className="tag-editor">
-              {shot.tags.map((tag: string) => (
-                <button
-                  key={tag}
-                  className="tag"
-                  onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
-                >
-                  {tag}
-                  <X size={11} />
-                </button>
-              ))}
-              <button
-                className="tag-add"
-                onClick={() => {
-                  const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
-                  if (next) updateShot({ tags: [...shot.tags, next] });
-                }}
-              >
-                <Plus size={12} />
-                Add tag
-              </button>
-            </div>
-          </div>
-        </details>
+          <TextArea
+            aria-label="Description"
+            rows={6}
+            placeholder="Describe what the agent should understand. Markdown is supported."
+            value={shot.description}
+            onChange={(event) => onDescriptionChange(event.target.value)}
+          />
+        </div>
+        <label className="field">
+          <span className="field-label">Priority for agent</span>
+          <select
+            aria-label="Priority for agent"
+            value={shot.priority}
+            onChange={(event) => updateShot({ priority: event.target.value as ScreenshotRecord['priority'] })}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        {shot.conflict && <p className="conflict-notice">Copy conflict · excluded from export</p>}
         {selectedAnnotation && (
           <div className="annotation-properties">
             <span className="section-label">Selected annotation</span>
@@ -1777,6 +1935,10 @@ function Inspector({
             <Copy size={15} />
             Duplicate screenshot
           </Button>
+          <Button variant="danger" onClick={() => void onDeleteScreenshot()}>
+            <Trash2 size={15} />
+            Delete screenshot
+          </Button>
           <Button variant="danger" onClick={onDeleteProject}>
             <Trash2 size={15} />
             Delete project
@@ -1787,135 +1949,137 @@ function Inspector({
   );
 }
 
-export function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
+export function CollectionControls({ onFlush }: { onFlush: () => Promise<void> }) {
   const store = useAppStore();
   const project = store.snapshot!.project;
-  const current = project.rounds.find((r) => r.id === store.activeRoundId)!;
-  const [action, setAction] = useState<'create' | 'rename' | 'duplicate' | 'archive' | null>(null);
-  const [name, setName] = useState('');
+  const current = project.collections.find((collection) => collection.id === store.activeCollectionId)!;
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(current.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  async function submit() {
-    if (busy || !action || !name.trim()) return;
+
+  async function apply(action: 'create' | 'rename' | 'archive' | 'restore') {
+    if (busy || (action === 'rename' && !name.trim())) return;
     setBusy(true);
     setError('');
     try {
       await onFlush();
-      const snapshot = await window.imnota.editRound({
+      const snapshot = await window.imnota.editCollection({
         projectPath: store.snapshot!.projectPath,
-        roundId: current.id,
+        collectionId: current.id,
         action,
-        name,
+        name: action === 'rename' ? name : undefined,
       });
       store.setProject(snapshot);
-      if (action === 'create' || action === 'duplicate') {
-        const roundId = snapshot.project.rounds.at(-1)!.id;
-        store.set({
-          activeRoundId: roundId,
-          activeScreenshotId:
-            snapshot.project.screenshots.find((shot) => shot.roundId === roundId)?.id ?? null,
-        });
-      }
-      setAction(null);
+      if (action === 'create') store.setActiveCollection(snapshot.project.collections.at(-1)!.id);
+      setRenaming(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The subfolder could not be saved.');
+      setError(err instanceof Error ? err.message : 'The collection could not be saved.');
     } finally {
       setBusy(false);
     }
   }
+
+  function updateOverallContext(value: string) {
+    store.updateProject({
+      ...project,
+      collections: project.collections.map((collection) =>
+        collection.id === current.id
+          ? { ...collection, overallContext: value, updatedAt: nowIso() }
+          : collection,
+      ),
+    });
+  }
+
   return (
     <div className="round-controls">
       <label className="field">
-        <span className="field-label">Subfolder</span>
+        <span className="field-label">Collection</span>
         <select
-          aria-label="Subfolder"
-          value={store.activeRoundId}
-          onChange={(event) =>
-            store.set({
-              activeRoundId: event.target.value,
-              activeScreenshotId:
-                project.screenshots.find((shot) => shot.roundId === event.target.value)?.id ?? null,
-            })
-          }
+          aria-label="Collection"
+          value={store.activeCollectionId}
+          onChange={(event) => store.setActiveCollection(event.target.value)}
         >
-          {project.rounds.map((round) => (
-            <option key={round.id} value={round.id}>
-              {round.name}
-              {round.archived ? ' (archived)' : ''}
+          {project.collections.map((collection) => (
+            <option key={collection.id} value={collection.id}>
+              {collection.name}
+              {collection.archived ? ' (Archived)' : ''}
             </option>
           ))}
         </select>
       </label>
       <div className="round-actions">
-        {(['create', 'rename', 'duplicate', 'archive'] as const).map((item) => (
-          <Button
-            key={item}
-            variant="ghost"
-            onClick={() => {
-              setAction(item);
-              setName(
-                item === 'create'
-                  ? `Subfolder ${project.rounds.length + 1}`
-                  : item === 'duplicate'
-                    ? `${current.name} copy`
-                    : current.name,
-              );
-            }}
-          >
-            {item === 'create'
-              ? 'New subfolder'
-              : item === 'archive' && current.archived
-                ? 'Restore'
-                : item[0].toUpperCase() + item.slice(1)}
-          </Button>
-        ))}
+        <Button variant="ghost" busy={busy} onClick={() => void apply('create')}>
+          New collection
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setName(current.name);
+            setRenaming(true);
+          }}
+        >
+          Rename
+        </Button>
+        <Button
+          variant="ghost"
+          busy={busy}
+          onClick={() => void apply(current.archived ? 'restore' : 'archive')}
+        >
+          {current.archived ? 'Restore' : 'Archive'}
+        </Button>
       </div>
-      {action && (
+      <details className="collection-context">
+        <summary>Overall context{current.overallContext.trim() ? ' · Added' : ''}</summary>
+        <TextArea
+          aria-label="Overall context"
+          rows={4}
+          placeholder="Context shared by every screenshot in this collection"
+          value={current.overallContext}
+          onChange={(event) => updateOverallContext(event.target.value)}
+          onBlur={() => {
+            const latest = useAppStore.getState().snapshot;
+            if (latest)
+              void window.imnota
+                .saveProject(latest.projectPath, latest.project)
+                .catch(() => setError('Overall context could not be saved.'));
+          }}
+        />
+      </details>
+      {error && (
+        <p className="modal-error" role="alert">
+          {error}
+        </p>
+      )}
+      {renaming && (
         <Modal
-          title={`${action === 'archive' && current.archived ? 'Restore' : action === 'create' ? 'New' : action[0].toUpperCase() + action.slice(1)} subfolder`}
-          description={
-            action === 'archive'
-              ? 'Archiving keeps the screenshots and notes. Archived subfolders remain available in the selector.'
-              : 'Each subfolder keeps its own screenshots, annotations and notes.'
-          }
+          title="Rename collection"
+          description="The internal collection ID and screenshot files stay unchanged."
           onClose={() => {
-            if (!busy) setAction(null);
+            if (!busy) setRenaming(false);
           }}
         >
           <form
             className="modal-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void submit();
+              void apply('rename');
             }}
           >
             <TextInput
               autoFocus
               data-autofocus
-              label="Subfolder name"
+              label="Collection name"
               disabled={busy}
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            {error && (
-              <p className="modal-error" role="alert">
-                {error}
-              </p>
-            )}
             <div className="modal-actions">
-              <Button type="button" variant="ghost" disabled={busy} onClick={() => setAction(null)}>
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setRenaming(false)}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
-                {action === 'create'
-                  ? 'Create subfolder'
-                  : action === 'rename'
-                    ? 'Rename subfolder'
-                    : action === 'duplicate'
-                      ? 'Duplicate subfolder'
-                      : current.archived
-                        ? 'Restore subfolder'
-                        : 'Archive subfolder'}
+                Rename collection
               </Button>
             </div>
           </form>
@@ -1974,39 +2138,10 @@ function ContextBuilder({
         <div className="context-intro">
           <span className="eyebrow">ASSEMBLE A BRIEF</span>
           <h1>Context Builder</h1>
-          <p>Subfolder: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
+          <p>Collection: {project.collections.find((item) => item.id === store.activeCollectionId)?.name}</p>
           <p>Choose the evidence an AI agent should see, then copy or export a clean Markdown brief.</p>
         </div>
-        <TextArea
-          label="Desired outcome / definition of done"
-          rows={3}
-          placeholder="What should be true when the work is complete?"
-          value={project.exportPreferences.desiredOutcome}
-          onChange={(event) => updatePrefs({ desiredOutcome: event.target.value })}
-        />
-        <TextArea
-          label="Instructions for the AI agent"
-          rows={3}
-          placeholder="For example: preserve anything not explicitly marked for change."
-          value={project.exportPreferences.overallInstructions}
-          onChange={(event) => updatePrefs({ overallInstructions: event.target.value })}
-        />
-        <TextArea
-          label="Technical constraints"
-          rows={3}
-          placeholder="Stack, browser support, performance or accessibility constraints"
-          value={project.exportPreferences.technicalConstraints}
-          onChange={(event) => updatePrefs({ technicalConstraints: event.target.value })}
-        />
         <div className="context-settings">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={store.exportAllRounds}
-              onChange={(event) => store.set({ exportAllRounds: event.target.checked })}
-            />
-            Export all subfolders
-          </label>
           <span className="section-label">Package contents</span>
           <label className="check-row">
             <input
@@ -2037,7 +2172,10 @@ function ContextBuilder({
           <Button
             variant="ghost"
             onClick={async () => {
-              if (store.snapshot) await window.imnota.openPath(`${store.snapshot.projectPath}/exports`);
+              if (store.snapshot)
+                await window.imnota.openPath(
+                  `${store.snapshot.projectPath}/collections/${store.activeCollectionId}/exports`,
+                );
             }}
           >
             <FolderOpen size={16} />
@@ -2054,14 +2192,14 @@ function ContextBuilder({
           <span className="preview-count">
             {
               project.screenshots.filter(
-                (s) => s.includeInExport && (store.exportAllRounds || s.roundId === store.activeRoundId),
+                (s) => s.includeInExport && s.collectionId === store.activeCollectionId,
               ).length
             }{' '}
             references
           </span>
         </div>
         <pre className="markdown-preview">
-          {markdown || 'Add a desired outcome or screenshot notes to see the brief take shape.'}
+          {markdown || 'Add overall context or screenshot descriptions to see the brief take shape.'}
         </pre>
       </div>
     </section>

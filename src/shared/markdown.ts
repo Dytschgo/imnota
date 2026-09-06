@@ -1,63 +1,57 @@
-import type { Annotation, NoteFields, ProjectData, ScreenshotRecord } from './types.js';
-import { annotationLabel } from './utils.js';
+import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
 
-const fieldLabels: Record<keyof NoteFields, string> = {
-  summary: 'Summary',
-  observation: 'Observation',
-  problem: 'Problem description',
-  expectedBehaviour: 'Expected Behaviour',
-  requestedChange: 'Requested Change',
-  technicalDetails: 'Technical Details',
-  aiInstruction: 'AI Instruction',
-  additionalNotes: 'Additional Notes',
-};
+export interface NumberedScreenshot {
+  pictureNumber: number;
+  screenshot: ScreenshotRecord;
+}
 
-function section(label: string, value: string | undefined): string {
-  return value?.trim() ? `${label}:\n${value.trim()}\n` : '';
+/** Assign Picture numbers from collection sort order before export filtering. */
+export function numberCollectionScreenshots(
+  project: ProjectData,
+  collectionId: string,
+): NumberedScreenshot[] {
+  return project.screenshots
+    .filter((shot) => shot.collectionId === collectionId)
+    .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt))
+    .map((screenshot, index) => ({ pictureNumber: index + 1, screenshot }));
+}
+
+function priorityLabel(priority: ScreenshotRecord['priority']): string {
+  return priority[0].toUpperCase() + priority.slice(1);
 }
 
 export function generateMarkdown(
   project: ProjectData,
-  selected: ScreenshotRecord[],
-  notes: Record<string, NoteFields>,
+  collectionId: string,
   annotations: Record<string, Annotation[]>,
 ): string {
-  const p = project.exportPreferences;
-  const out = [`# ${project.name}`, ''];
-  if (p.desiredOutcome.trim()) out.push('## Objective', '', p.desiredOutcome.trim(), '');
-  if (project.description.trim()) out.push('## Context', '', project.description.trim(), '');
-  if (p.overallInstructions.trim())
-    out.push('## Instructions for the AI Agent', '', p.overallInstructions.trim(), '');
-  if (p.technicalConstraints.trim())
-    out.push('## Technical Constraints', '', p.technicalConstraints.trim(), '');
-  if (selected.length) {
-    out.push('## Visual References', '');
-    selected.forEach((shot, index) => {
-      const note = notes[shot.id] ?? ({} as NoteFields);
-      out.push(
-        `### Screenshot ${index + 1}: ${shot.title || shot.originalFilename}`,
-        '',
-        `File: ${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-        `Subfolder: ${project.rounds.find((round) => round.id === shot.roundId)?.name ?? 'Subfolder 1'}`,
-        '',
-      );
-      out.push(section('Description', shot.description));
-      p.includedFields.forEach((key) => out.push(section(fieldLabels[key], note[key])));
-      const anns = [...(annotations[shot.id] ?? [])].sort((a, b) => a.zIndex - b.zIndex);
-      if (anns.length) out.push('Annotations:', ...anns.map((a) => `- ${annotationLabel(a)}`), '');
+  const collection = project.collections.find((item) => item.id === collectionId);
+  if (!collection) throw new Error('Collection not found.');
+  const out = [`# ${collection.name}`, ''];
+  if (collection.overallContext.trim())
+    out.push('## Overall context', '', collection.overallContext.trim(), '');
+
+  for (const { screenshot: shot, pictureNumber } of numberCollectionScreenshots(project, collectionId)) {
+    if (!shot.includeInExport) {
+      out.push(`Picture ${pictureNumber} was intentionally excluded from this prompt bundle.`, '');
+      continue;
+    }
+    out.push(
+      `## Picture ${pictureNumber} — ${shot.title || shot.originalFilename}`,
+      '',
+      `Priority for agent: ${priorityLabel(shot.priority)}`,
+      '',
+    );
+    if (shot.description.trim()) out.push(shot.description.trim(), '');
+    const textAnnotations = [...(annotations[shot.id] ?? [])]
+      .sort((a, b) => a.zIndex - b.zIndex)
+      .filter((annotation) => ['text', 'callout'].includes(annotation.kind) && annotation.text?.trim());
+    textAnnotations.forEach((annotation, noteIndex) => {
+      out.push(`### Picture ${pictureNumber} / Note ${noteIndex + 1}`, '', annotation.text!.trim(), '');
     });
   }
-  if (p.desiredOutcome.trim()) out.push('## Definition of Done', '', p.desiredOutcome.trim(), '');
-  out.push(
-    '## Final Instruction',
-    '',
-    'Use the screenshots and notes as authoritative visual context. Preserve parts of the interface that are not explicitly marked for change. If a requirement is ambiguous, state the assumption before implementing it.',
-    '',
-  );
-  return (
-    out
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim() + '\n'
-  );
+  return `${out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()}\n`;
 }
