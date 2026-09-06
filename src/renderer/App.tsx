@@ -689,7 +689,7 @@ export default function App() {
             <div className="update-banner" role="status">
               <Download size={16} />
               <span>
-                Imnota {updateStatus.version ?? 'update'} is available.
+                {updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is available.`}
                 {updateStatus.terminalCommand
                   ? ' Run the verified update in Terminal.'
                   : updateStatus.manualDownload

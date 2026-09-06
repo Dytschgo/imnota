@@ -1,5 +1,5 @@
 import type { UpdateChannel } from '../src/shared/types.js';
-import type { ReleaseCandidate } from './releases.js';
+import { parseReleaseVersion, type ReleaseCandidate } from './releases.js';
 
 interface NativeUpdater {
   channel: string | null;
@@ -24,10 +24,14 @@ export async function prepareNativeUpdate(
   release: ReleaseCandidate,
   channel: UpdateChannel,
 ) {
+  const inferredChannel = parseReleaseVersion(release.version)[3] === undefined ? 'stable' : 'nightly';
+  const sourceChannel = release.sourceChannel ?? (channel === inferredChannel ? channel : inferredChannel);
+  if (sourceChannel !== inferredChannel)
+    throw new Error('The update source channel does not match the selected release.');
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
-  updater.channel = channel === 'stable' ? 'latest' : 'nightly';
-  updater.allowPrerelease = channel === 'nightly';
+  updater.channel = sourceChannel === 'stable' ? 'latest' : 'nightly';
+  updater.allowPrerelease = sourceChannel === 'nightly';
   // The channel setter itself enables downgrades; reset after setting it.
   updater.allowDowngrade = false;
   updater.setFeedURL({ provider: 'generic', url: release.feedUrl, channel: updater.channel });

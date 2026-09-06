@@ -148,11 +148,13 @@ describe('feedback controls', () => {
       getUpdateStatus: async () => ({
         state: 'available',
         version: '0.3.0',
-        terminalCommand: 'curl -fsSL https://updates.example/imnota | sh',
+        terminalCommand: '/bin/bash /tmp/imnota-update/Update.command',
+        message: 'Stable 0.3.0 is available. Nightly remains selected for future checks.',
       }),
       downloadUpdate,
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Run update in Terminal' }));
+    expect(screen.getByText(/Stable 0.3.0 is available. Nightly remains selected/)).toBeInTheDocument();
     await waitFor(() => expect(downloadUpdate).toHaveBeenCalledOnce());
   });
 

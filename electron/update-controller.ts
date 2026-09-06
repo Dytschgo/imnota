@@ -84,6 +84,8 @@ export class UpdateController {
       return;
     }
     const comparison = compareReleaseVersions(candidate.version, this.ops.currentVersion);
+    const sourceChannel = candidate.sourceChannel ?? this.channel;
+    const stableFallback = this.channel === 'nightly' && sourceChannel === 'stable';
     if (comparison <= 0) {
       this.candidate = candidate;
       this.send({
@@ -93,12 +95,14 @@ export class UpdateController {
         manualDownload: comparison < 0,
         message:
           comparison < 0
-            ? `Installed version is newer than ${this.channel} ${candidate.version}. Automatic downgrades are disabled. Back up your workspace before manually replacing the app.`
-            : `You’re on the latest ${this.channel} version.`,
+            ? `Installed version is newer than ${sourceChannel} ${candidate.version}. Automatic downgrades are disabled. Back up your workspace before manually replacing the app.${stableFallback ? ' Nightly remains selected for future checks.' : ''}`
+            : stableFallback
+              ? `You’re on stable ${candidate.version}, the newest build currently available. Nightly remains selected for future checks.`
+              : `You’re on the latest ${this.channel} version.`,
       });
       return;
     }
-    if (!this.ops.manual) await this.ops.prepare(candidate, this.channel);
+    if (!this.ops.manual) await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
     if (this.ops.manual && this.ops.prepareTerminal)
       this.terminalUpdate = await this.ops.prepareTerminal(candidate);
     this.candidate = candidate;
@@ -108,6 +112,9 @@ export class UpdateController {
       releaseUrl: candidate.url,
       manualDownload: this.ops.manual,
       terminalCommand: this.terminalUpdate?.command,
+      message: stableFallback
+        ? `Stable ${candidate.version} is newer than the latest nightly. Nightly remains selected for future checks.`
+        : undefined,
     });
   }
   progress(percent: number) {
@@ -131,10 +138,10 @@ export class UpdateController {
       return;
     }
     if (this.status.state !== 'available') throw new Error('No update is ready to download.');
-    this.send({ ...this.status, state: 'downloading', percent: 0 });
+    this.send({ ...this.status, state: 'downloading', percent: 0, message: undefined });
     try {
       await this.ops.download();
-      this.send({ ...this.status, state: 'downloaded', percent: 100 });
+      this.send({ ...this.status, state: 'downloaded', percent: 100, message: undefined });
     } catch {
       this.candidate = null;
       this.send({
