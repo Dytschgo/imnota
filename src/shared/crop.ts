@@ -48,6 +48,22 @@ function boundsFromPoints(points: Array<{ x: number; y: number }>): ImageBounds 
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
+function rotatedPathPoints(annotation: Annotation, points: number[]): Array<{ x: number; y: number }> {
+  const radians = ((annotation.rotation ?? 0) * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const absolute = [];
+  for (let index = 0; index < points.length; index += 2) {
+    const x = points[index];
+    const y = points[index + 1] ?? 0;
+    absolute.push({
+      x: annotation.x + x * cosine - y * sine,
+      y: annotation.y + x * sine + y * cosine,
+    });
+  }
+  return absolute;
+}
+
 function rotatedRectangle(x: number, y: number, width: number, height: number, degrees = 0): ImageBounds {
   if (!degrees) return { x, y, width, height };
   const radians = (degrees * Math.PI) / 180;
@@ -91,11 +107,8 @@ export function annotationExportBounds(
   const strokePadding = Math.max(1, (annotation.strokeWidth ?? 4) / 2);
   if (annotation.kind === 'arrow' || annotation.kind === 'line' || annotation.kind === 'pen') {
     const points = annotation.points ?? [0, 0, annotation.width ?? 10, annotation.height ?? 10];
-    const absolute = [];
-    for (let index = 0; index < points.length; index += 2)
-      absolute.push({ x: annotation.x + points[index], y: annotation.y + (points[index + 1] ?? 0) });
     return padded(
-      boundsFromPoints(absolute),
+      boundsFromPoints(rotatedPathPoints(annotation, points)),
       annotation.kind === 'arrow' ? Math.max(12, strokePadding) : strokePadding,
     );
   }

@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import {
+  committedTextAnnotationSize,
   edgePanVelocity,
   exportContrastColor,
   liveTextColor,
+  sourceSizeFromEditorResize,
   textAnnotationLayout,
+  textEditorPresentationSize,
 } from './annotation-layout';
 
 describe('annotation canvas helpers', () => {
@@ -68,5 +71,42 @@ describe('annotation canvas helpers', () => {
     expect(exportContrastColor('#ffffff')).not.toBe('#ffffff');
     expect(exportContrastColor('#22c55e')).not.toBe('#22c55e');
     expect(exportContrastColor('#111827')).toBe('#111827');
+  });
+
+  test('keeps source text geometry identical at 25%, 100%, and 200% zoom', () => {
+    const annotation = {
+      id: 'zoom-stable',
+      kind: 'text' as const,
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 42,
+      fontSize: 20,
+      text: 'Same note text',
+      zIndex: 0,
+    };
+    const measure = (text: string) => text.length * 10;
+    const layout = textAnnotationLayout(annotation, measure);
+    const presentations = [0.25, 1, 2].map((scale) => textEditorPresentationSize(layout, scale));
+    const committed = [0.25, 1, 2].map(() =>
+      committedTextAnnotationSize(annotation, annotation.text, measure),
+    );
+
+    expect(presentations).toEqual([
+      { width: 160, height: 60 },
+      { width: 160, height: 62 },
+      { width: 240, height: 124 },
+    ]);
+    expect(new Set(committed.map((size) => `${size.width}x${size.height}`))).toHaveLength(1);
+    expect(committed[0]).toEqual({ width: 120, height: 62 });
+  });
+
+  test('converts only an explicit visual resize back to source geometry', () => {
+    expect(sourceSizeFromEditorResize({ width: 160, height: 60 }, { width: 200, height: 60 }, 0.25)).toEqual({
+      width: 800,
+    });
+    expect(sourceSizeFromEditorResize({ width: 160, height: 60 }, { width: 160, height: 100 }, 2)).toEqual({
+      height: 50,
+    });
   });
 });

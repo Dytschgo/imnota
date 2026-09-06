@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   Arrow,
   Ellipse,
@@ -22,12 +30,22 @@ import {
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
 import { createId } from '../../shared/utils';
 import {
+  committedTextAnnotationSize,
   createBrowserTextMeasurer,
   edgePanVelocity,
   liveTextColor,
   semanticAnnotationColor,
+  sourceSizeFromEditorResize,
+  textEditorPresentationSize,
+  type AnnotationEditorResize,
   type CanvasTheme,
 } from '../canvas/annotation-layout';
+import {
+  captureStagePointer,
+  finalizeAnnotationDrag,
+  releaseStagePointer,
+  type ActiveAnnotationDrag,
+} from '../canvas/pointer-interaction';
 import { pixelatedRegion } from '../pixelate';
 import { zoomAt } from '../viewport';
 import type { ToolChoice } from './Toolbar';
@@ -39,12 +57,6 @@ interface EditingText {
   id: string;
   text: string;
   isNew: boolean;
-}
-
-interface DraggingAnnotation {
-  id: string;
-  kind: AnnotationKind;
-  node: Konva.Node;
 }
 
 export interface AnnotationCanvasProps {
@@ -187,9 +199,12 @@ export function AnnotationCanvas({
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
   const pointerPosition = useRef<{ x: number; y: number } | null>(null);
-  const dragging = useRef<DraggingAnnotation | null>(null);
+  const dragging = useRef<ActiveAnnotationDrag | null>(null);
   const edgePanFrame = useRef<number | null>(null);
   const edgePanTime = useRef<number | null>(null);
+  const finalizePointerInteractionRef = useRef<(event?: Event) => void>(() => undefined);
+  const explicitEditorResize = useRef<{ id: string; size: AnnotationEditorResize } | null>(null);
+  const editorResizeListenerCleanup = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -240,6 +255,12 @@ export function AnnotationCanvas({
   }, [runEdgePan]);
 
   useEffect(() => stopEdgePan, [stopEdgePan]);
+  useEffect(
+    () => () => {
+      editorResizeListenerCleanup.current?.();
+    },
+    [],
+  );
 
   const editingId = editing?.id;
   useEffect(() => {
@@ -286,21 +307,26 @@ export function AnnotationCanvas({
         });
       }
     };
-    const up = () => {
+    const up = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return;
       setSpaceHeld(false);
       pan.current = null;
-      dragging.current = null;
-      stopEdgePan();
+    };
+    const blur = (event: FocusEvent) => {
+      setSpaceHeld(false);
+      pan.current = null;
+      setDraft(null);
+      finalizePointerInteractionRef.current(event);
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    window.addEventListener('blur', up);
+    window.addEventListener('blur', blur);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
-      window.removeEventListener('blur', up);
+      window.removeEventListener('blur', blur);
     };
-  }, [image, onSelect, size, stopEdgePan]);
+  }, [image, onSelect, size]);
 
   useEffect(() => {
     if (!image?.dataUrl) {
@@ -385,29 +411,31 @@ export function AnnotationCanvas({
   }
 
   function capturePointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    const container = event.target.getStage()?.container();
-    if (!container) return;
+    const stage = event.target.getStage();
+    if (!stage) return;
     try {
-      container.setPointerCapture(event.evt.pointerId);
-      capturedPointer.current = event.evt.pointerId;
+      capturedPointer.current = captureStagePointer(stage, event.evt.pointerId) ? event.evt.pointerId : null;
     } catch {
       capturedPointer.current = null;
     }
   }
 
-  function releasePointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    const container = event.target.getStage()?.container();
+  function releasePointer() {
     const pointerId = capturedPointer.current;
-    if (!container || pointerId === null) return;
+    if (pointerId === null) return;
+    capturedPointer.current = null;
+    const stage = stageRef.current;
+    if (!stage) return;
     try {
-      if (container.hasPointerCapture(pointerId)) container.releasePointerCapture(pointerId);
+      releaseStagePointer(stage, pointerId);
     } catch {
       // Capture may already have been released by the browser after cancellation.
     }
-    capturedPointer.current = null;
   }
 
   function beginTextEditing(annotation: Annotation, isNew: boolean) {
+    editorResizeListenerCleanup.current?.();
+    explicitEditorResize.current = null;
     onSelect(annotation.id);
     onTool?.('text');
     setEditing({
@@ -437,10 +465,29 @@ export function AnnotationCanvas({
     onChange(annotations.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
+  function finalizePointerInteraction(event?: Event) {
+    const active = dragging.current;
+    if (active) finalizeAnnotationDrag(active, (id, position) => update(id, position), event);
+    dragging.current = null;
+    pointerPosition.current = null;
+    stopEdgePan();
+    releasePointer();
+  }
+
+  function abortPointerInteraction(event?: Event) {
+    finalizePointerInteraction(event);
+    pan.current = null;
+    setDraft(null);
+  }
+
+  finalizePointerInteractionRef.current = abortPointerInteraction;
+
   function finishEditing(commit: boolean) {
     if (!editing) return;
+    editorResizeListenerCleanup.current?.();
     const annotation = annotations.find((item) => item.id === editing.id);
     if (!annotation) {
+      explicitEditorResize.current = null;
       setEditing(null);
       onTool?.('select');
       return;
@@ -450,6 +497,7 @@ export function AnnotationCanvas({
         onChange(annotations.filter((item) => item.id !== editing.id));
         onSelect(null);
       }
+      explicitEditorResize.current = null;
       setEditing(null);
       onTool?.('select');
       return;
@@ -459,22 +507,51 @@ export function AnnotationCanvas({
       onChange(annotations.filter((item) => item.id !== editing.id));
       onSelect(null);
     } else {
-      const layout = textAnnotationLayout({ ...annotation, text: nextText }, measureText);
-      const editorWidth = editorRef.current?.offsetWidth
-        ? editorRef.current.offsetWidth / viewportRef.current.scale
-        : layout.width;
-      const editorHeight = editorRef.current?.scrollHeight
-        ? editorRef.current.scrollHeight / viewportRef.current.scale
-        : layout.height;
+      const resized =
+        explicitEditorResize.current?.id === annotation.id ? explicitEditorResize.current.size : undefined;
+      const committedSize = committedTextAnnotationSize(annotation, nextText, measureText, resized);
       update(annotation.id, {
         text: nextText,
-        width: Math.max(72, editorWidth),
-        height: Math.max(layout.height, editorHeight),
+        width: committedSize.width,
+        height: committedSize.height,
       });
       onMessage?.(editing.isNew ? 'Text note added' : 'Text note updated');
     }
+    explicitEditorResize.current = null;
     setEditing(null);
     onTool?.('select');
+  }
+
+  function observeExplicitEditorResize(event: ReactPointerEvent<HTMLTextAreaElement>) {
+    if (!editing) return;
+    const editor = event.currentTarget;
+    const activeEditingId = editing.id;
+    const pointerId = event.pointerId;
+    const initial = { width: editor.offsetWidth, height: editor.offsetHeight };
+    const scale = viewportRef.current.scale;
+    editorResizeListenerCleanup.current?.();
+    const cleanup = () => {
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      editorResizeListenerCleanup.current = null;
+    };
+    const finish = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId) return;
+      const size = sourceSizeFromEditorResize(
+        initial,
+        { width: editor.offsetWidth, height: editor.offsetHeight },
+        scale,
+      );
+      if (size.width !== undefined || size.height !== undefined) {
+        const previous =
+          explicitEditorResize.current?.id === activeEditingId ? explicitEditorResize.current.size : {};
+        explicitEditorResize.current = { id: activeEditingId, size: { ...previous, ...size } };
+      }
+      cleanup();
+    };
+    editorResizeListenerCleanup.current = cleanup;
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
   }
 
   function beginPointer(event: Konva.KonvaEventObject<PointerEvent>) {
@@ -550,7 +627,9 @@ export function AnnotationCanvas({
   }
 
   function endPointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    releasePointer(event);
+    const wasDragging = dragging.current !== null;
+    finalizePointerInteraction(event.evt);
+    if (wasDragging) return;
     if (pan.current) {
       pan.current = null;
       return;
@@ -579,16 +658,7 @@ export function AnnotationCanvas({
   }
 
   function cancelPointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    releasePointer(event);
-    pan.current = null;
-    const active = dragging.current;
-    if (active)
-      update(active.id, {
-        x: active.node.x() - (active.kind === 'ellipse' ? active.node.width() / 2 : 0),
-        y: active.node.y() - (active.kind === 'ellipse' ? active.node.height() / 2 : 0),
-      });
-    dragging.current = null;
-    stopEdgePan();
+    abortPointerInteraction(event.evt);
   }
 
   function dragPointer(event: Konva.KonvaEventObject<DragEvent>) {
@@ -597,18 +667,20 @@ export function AnnotationCanvas({
   }
 
   function startAnnotationDrag(annotation: Annotation, event: Konva.KonvaEventObject<DragEvent>) {
-    dragging.current = { id: annotation.id, kind: annotation.kind, node: event.target };
+    dragging.current = {
+      id: annotation.id,
+      kind: annotation.kind,
+      width: Math.abs(annotation.width ?? 0),
+      height: Math.abs(annotation.height ?? 0),
+      node: event.target,
+      finalized: false,
+    };
     dragPointer(event);
     startEdgePan();
   }
 
-  function endAnnotationDrag(annotation: Annotation, event: Konva.KonvaEventObject<DragEvent>) {
-    stopEdgePan();
-    dragging.current = null;
-    update(annotation.id, {
-      x: event.target.x() - (annotation.kind === 'ellipse' ? (annotation.width ?? 0) / 2 : 0),
-      y: event.target.y() - (annotation.kind === 'ellipse' ? (annotation.height ?? 0) / 2 : 0),
-    });
+  function endAnnotationDrag(event: Konva.KonvaEventObject<DragEvent>) {
+    finalizePointerInteraction(event.evt);
   }
 
   function commonProps(annotation: Annotation) {
@@ -631,7 +703,7 @@ export function AnnotationCanvas({
       onTap: () => onSelect(annotation.id),
       onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => startAnnotationDrag(annotation, event),
       onDragMove: dragPointer,
-      onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => endAnnotationDrag(annotation, event),
+      onDragEnd: endAnnotationDrag,
     };
   }
 
@@ -830,10 +902,24 @@ export function AnnotationCanvas({
     );
   }
 
+  useEffect(() => {
+    if (!imageObj) return;
+    const content = stageRef.current?.content;
+    if (!content) return;
+    const lostPointerCapture = (event: PointerEvent) => {
+      queueMicrotask(() => {
+        if (capturedPointer.current === event.pointerId) finalizePointerInteractionRef.current(event);
+      });
+    };
+    content.addEventListener('lostpointercapture', lostPointerCapture);
+    return () => content.removeEventListener('lostpointercapture', lostPointerCapture);
+  }, [imageObj, stageRef]);
+
   const editedAnnotation = editing ? annotations.find((annotation) => annotation.id === editing.id) : null;
   const editedLayout = editedAnnotation
     ? textAnnotationLayout({ ...editedAnnotation, text: editing?.text ?? editedAnnotation.text }, measureText)
     : null;
+  const editorPresentation = editedLayout ? textEditorPresentationSize(editedLayout, viewport.scale) : null;
 
   return (
     <div
@@ -931,7 +1017,7 @@ export function AnnotationCanvas({
           <span>Import a screenshot to begin marking context.</span>
         </div>
       )}
-      {editing && editedAnnotation && editedLayout && (
+      {editing && editedAnnotation && editedLayout && editorPresentation && (
         <textarea
           ref={editorRef}
           aria-label="Edit annotation text"
@@ -941,8 +1027,8 @@ export function AnnotationCanvas({
           style={{
             left: viewport.x + editedAnnotation.x * viewport.scale,
             top: viewport.y + editedAnnotation.y * viewport.scale,
-            width: Math.max(160, editedLayout.width * viewport.scale),
-            minHeight: Math.max(60, editedLayout.height * viewport.scale),
+            width: editorPresentation.width,
+            minHeight: editorPresentation.height,
             fontSize: Math.max(12, editedLayout.fontSize * viewport.scale),
             color: liveTextColor(
               editedAnnotation.fill === 'transparent'
@@ -952,6 +1038,7 @@ export function AnnotationCanvas({
             ),
             transform: `rotate(${editedAnnotation.rotation ?? 0}deg)`,
           }}
+          onPointerDown={observeExplicitEditorResize}
           onChange={(event) => setEditing({ ...editing, text: event.target.value })}
           onKeyDown={(event) => {
             event.stopPropagation();

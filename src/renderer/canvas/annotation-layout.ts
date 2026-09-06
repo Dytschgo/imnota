@@ -1,6 +1,7 @@
-import type { AnnotationKind } from '../../shared/types';
+import type { Annotation, AnnotationKind } from '../../shared/types';
 import {
   conservativeTextWidth,
+  textAnnotationLayout,
   type TextMeasureStyle,
   type TextWidthMeasurer,
 } from '../../shared/annotation-geometry';
@@ -29,6 +30,60 @@ export const ANNOTATION_COLORS = [
   '#111827',
   '#ffffff',
 ] as const;
+
+export interface AnnotationEditorSize {
+  width: number;
+  height: number;
+}
+
+export interface AnnotationEditorResize {
+  width?: number;
+  height?: number;
+}
+
+export function textEditorPresentationSize(
+  layout: { width: number; height: number },
+  viewportScale: number,
+): AnnotationEditorSize {
+  return {
+    width: Math.max(160, layout.width * viewportScale),
+    height: Math.max(60, layout.height * viewportScale),
+  };
+}
+
+export function sourceSizeFromEditorResize(
+  initial: AnnotationEditorSize,
+  resized: AnnotationEditorSize,
+  viewportScale: number,
+): AnnotationEditorResize {
+  const safeScale = Math.max(0.0001, viewportScale);
+  return {
+    ...(Math.abs(resized.width - initial.width) > 1
+      ? { width: Math.max(72, resized.width / safeScale) }
+      : {}),
+    ...(Math.abs(resized.height - initial.height) > 1
+      ? { height: Math.max(1, resized.height / safeScale) }
+      : {}),
+  };
+}
+
+export function committedTextAnnotationSize(
+  annotation: Annotation,
+  text: string,
+  measureWidth: TextWidthMeasurer,
+  explicitResize?: AnnotationEditorResize,
+): AnnotationEditorSize {
+  const layout = textAnnotationLayout(
+    {
+      ...annotation,
+      text,
+      width: explicitResize?.width ?? annotation.width,
+      height: explicitResize?.height ?? annotation.height,
+    },
+    measureWidth,
+  );
+  return { width: layout.width, height: layout.height };
+}
 
 /** Real browser glyph measurement shared by live layout and export preflight. */
 export function createBrowserTextMeasurer(): TextWidthMeasurer {
