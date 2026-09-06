@@ -1,0 +1,55 @@
+.annotation-canvas.canvas-wrap {
+  isolation: isolate;
+  user-select: none;
+}
+
+.annotation-canvas .konva-stage {
+  touch-action: none;
+}
+
+.annotation-canvas .annotation-text-editor {
+  box-sizing: border-box;
+  margin: 0;
+  overflow: hidden auto;
+  resize: both;
+  border: 2px solid var(--indigo-light, #8e83ff);
+  border-radius: 6px;
+  outline: 0;
+  padding: 6px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-family: Arial, sans-serif;
+  line-height: 1.25;
+  transform-origin: top left;
+  user-select: text;
+  caret-color: var(--indigo-light, #8e83ff);
+}
+
+.annotation-canvas .annotation-text-editor:focus {
+  border-color: var(--indigo-light, #8e83ff);
+  box-shadow:
+    0 0 0 3px rgba(104, 87, 245, 0.18),
+    0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.annotation-canvas .annotation-text-editor::placeholder {
+  color: var(--ink-3);
+}
+
+.annotation-canvas .annotation-text-editor::selection {
+  color: #ffffff;
+  background: #6857f5;
+}
+
+.annotation-canvas .canvas-hint {
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .annotation-canvas .annotation-text-editor,
+  .annotation-canvas .canvas-hint {
+    background: var(--surface);
+  }
+}
