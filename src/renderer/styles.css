@@ -404,6 +404,22 @@ button:disabled {
 .update-banner span {
   flex: 1;
 }
+.update-progress {
+  width: min(180px, 28vw);
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--indigo-light);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 180ms ease-out;
+}
 
 .btn {
   min-height: 32px;
@@ -1651,6 +1667,9 @@ button:disabled {
 .update-settings > .field {
   width: 100%;
   margin: 0;
+}
+.update-settings .update-progress {
+  width: 100%;
 }
 .modal-actions {
   display: flex;

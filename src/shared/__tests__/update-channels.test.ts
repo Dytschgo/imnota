@@ -177,8 +177,29 @@ it('blocks switching during download and after download, and ignores late progre
   expect(instance.getStatus().state).toBe('downloaded');
   expect(instance.getStatus().percent).toBe(100);
   await expect(instance.switchChannel('stable', async () => undefined)).rejects.toThrow();
-  instance.install();
+  await instance.install();
   expect(ops.install).toHaveBeenCalledOnce();
+});
+it('retains a downloaded update after asynchronous install failure and allows retry', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  await instance.download();
+  await instance.install();
+  expect(instance.getStatus().installing).toBe(true);
+  await expect(instance.install()).rejects.toThrow();
+  expect(ops.install).toHaveBeenCalledOnce();
+  instance.installationFailed();
+  expect(instance.getStatus()).toMatchObject({ state: 'downloaded', installing: false });
+  await instance.install();
+  expect(ops.install).toHaveBeenCalledTimes(2);
+});
+it('recovers from a rejected install without losing the downloaded update', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  await instance.download();
+  ops.install.mockRejectedValueOnce(new Error('installer unavailable'));
+  await expect(instance.install()).rejects.toThrow('could not be installed');
+  expect(instance.getStatus()).toMatchObject({ state: 'downloaded', installing: false });
 });
 it('uses exact manual Mac release links and never prepares or downloads a native update', async () => {
   const { instance, ops, candidate } = controller(true);
@@ -209,7 +230,7 @@ it('retries after check failure and invalidates failed downloads', async () => {
   ops.download.mockRejectedValueOnce(new Error('network'));
   await instance.download();
   expect(instance.getStatus().state).toBe('error');
-  expect(() => instance.install()).toThrow();
+  await expect(instance.install()).rejects.toThrow();
   await expect(instance.download()).rejects.toThrow(/Check/);
 });
 it('sets native channel before resetting downgrades and rejects a mismatched manifest', async () => {

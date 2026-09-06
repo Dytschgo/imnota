@@ -71,7 +71,7 @@ describe('feedback controls', () => {
     return render(<App />);
   }
 
-  async function renderEditingProject() {
+  async function renderEditingProject(overrides: Partial<ImnotaBridge> = {}) {
     const editingSnapshot: ProjectSnapshot = {
       ...snapshot,
       project: {
@@ -108,6 +108,7 @@ describe('feedback controls', () => {
         annotations: [],
         notes: { ...EMPTY_NOTES, problem: 'Original note' },
       }),
+      ...overrides,
     });
     await screen.findByRole('textbox', { name: 'Search projects' });
     act(() => useAppStore.getState().setProject(editingSnapshot));
@@ -139,6 +140,50 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
     expect(note).toHaveValue('Unsaved note');
     expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
+  });
+
+  it('does not restart for an update when the current editor state cannot be saved', async () => {
+    let emitUpdate: (status: { state: 'downloaded'; version: string }) => void = () => {};
+    const installUpdate = vi.fn(async () => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+    fireEvent.change(note, { target: { value: 'Unsaved note' } });
+    save.mockRejectedValueOnce(new Error('Workspace unavailable'));
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be saved');
+    expect(installUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps newer edits open when an update save is still in flight', async () => {
+    let emitUpdate: (status: { state: 'downloaded'; version: string }) => void = () => {};
+    const installUpdate = vi.fn(async () => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+    let finishSave!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    fireEvent.change(note, { target: { value: 'Typed while saving' } });
+    await act(async () => finishSave());
+    expect(installUpdate).not.toHaveBeenCalled();
+    expect(note).toHaveValue('Typed while saving');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Choose restart again');
   });
 
   it('does not override newer navigation when a search save completes', async () => {

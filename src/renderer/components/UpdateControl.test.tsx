@@ -85,3 +85,21 @@ it('shows actionable failure and allows retry', async () => {
   expect(await screen.findByText(/The update action failed/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
 });
+
+it('moves from available through download progress to a ready-to-install action', async () => {
+  const api = setup();
+  render(<UpdateControl />);
+  await act(async () => api.emit({ state: 'available', version: '0.3.0' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download update' }));
+  await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
+
+  await act(async () => api.emit({ state: 'downloading', percent: 47 }));
+  expect(screen.getByRole('progressbar', { name: 'Update download progress' })).toHaveAttribute(
+    'aria-valuenow',
+    '47',
+  );
+
+  await act(async () => api.emit({ state: 'downloaded', version: '0.3.0' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Restart to install' }));
+  await waitFor(() => expect(window.imnota.installUpdate).toHaveBeenCalledOnce());
+});

@@ -8,7 +8,7 @@ interface Operations {
   discover: (channel: UpdateChannel) => Promise<ReleaseCandidate | null>;
   prepare: (release: ReleaseCandidate, channel: UpdateChannel) => Promise<void>;
   download: () => Promise<unknown>;
-  install: () => void;
+  install: () => void | Promise<void>;
   open: (url: string) => Promise<unknown>;
   emit: (status: UpdateStatus) => void;
 }
@@ -126,9 +126,23 @@ export class UpdateController {
       });
     }
   }
-  install() {
-    if (this.status.state !== 'downloaded' || this.ops.manual)
+  async install() {
+    if (this.status.state !== 'downloaded' || this.ops.manual || this.status.installing)
       throw new Error('Download an update before installing.');
-    this.ops.install();
+    this.send({ ...this.status, installing: true, message: 'Preparing to restart…' });
+    try {
+      await this.ops.install();
+    } catch {
+      this.installationFailed();
+      throw new Error('The update could not be installed. Your current app is still available.');
+    }
+  }
+  installationFailed() {
+    if (!this.status.installing) return;
+    this.send({
+      ...this.status,
+      installing: false,
+      message: 'Installation could not start. Your current app is unchanged. Try restarting to update again.',
+    });
   }
 }

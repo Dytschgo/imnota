@@ -83,6 +83,15 @@ export default function App() {
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const preparingContext = useRef(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const updateStatusRevision = useRef(0);
+  const restarting = useRef(false);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [installHandoff, setInstallHandoff] = useState(false);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (appShellRef.current) appShellRef.current.inert = installHandoff;
+  }, [installHandoff]);
+  const editRevision = useRef(0);
   const [attachments, setAttachments] = useState<{
     folderPath: string;
     markdown: string;
@@ -101,6 +110,9 @@ export default function App() {
   const activeShot = store.activeScreenshot();
   const workspaceSet = Boolean(store.settings.workspacePath);
   const hasProject = Boolean(store.snapshot);
+  useEffect(() => {
+    editRevision.current++;
+  }, [annotations, notes, activeShot?.id, store.snapshot?.projectPath]);
   useEffect(() => {
     contentRevision.current++;
   }, [annotations, notes, activeShot, store.snapshot]);
@@ -295,18 +307,37 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   });
-  useEffect(
-    () =>
-      window.imnota.onUpdateStatus((status) => {
+  useEffect(() => {
+    let active = true;
+    const revisionAtMount = updateStatusRevision.current;
+    const unsubscribe = window.imnota.onUpdateStatus((status) => {
+      updateStatusRevision.current++;
+      if (active) {
+        if (status.state === 'downloaded' && status.installing === false) {
+          allowClose.current = false;
+          setInstallHandoff(false);
+        }
         setUpdateStatus(status);
-        if (status.state === 'downloaded')
+        if (status.state === 'downloaded' && !status.installing && !status.message)
           showToast(`Imnota ${status.version ?? 'update'} is ready. Restart to apply it.`);
-      }),
-    [showToast],
-  );
+      }
+    });
+    void window.imnota
+      .getUpdateStatus()
+      .then((status) => {
+        if (active && updateStatusRevision.current === revisionAtMount) setUpdateStatus(status);
+      })
+      .catch(() => {
+        // Settings offers an explicit retry if initial status cannot be read.
+      });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [showToast]);
 
-  async function persistCurrent() {
-    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return;
+  async function persistCurrent(): Promise<boolean> {
+    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return true;
     try {
       await window.imnota.saveScreenshotContent({
         projectPath: store.snapshot.projectPath,
@@ -321,11 +352,43 @@ export default function App() {
         ),
         updatedAt: nowIso(),
       };
-      store.updateProject(project);
+      if (useAppStore.getState().snapshot === store.snapshot) store.updateProject(project);
       setSaving('saved');
+      return true;
     } catch {
       setSaving('error');
       setError('Your changes could not be saved. Check that the workspace is still available.');
+      return false;
+    }
+  }
+  async function restartToUpdate() {
+    if (restarting.current || updateStatus?.installing) return;
+    restarting.current = true;
+    setRestartBusy(true);
+    const revision = editRevision.current;
+    try {
+      if (!(await persistCurrent())) return;
+      if (revision !== editRevision.current) {
+        setError('Your changes were updated while saving. Choose restart again to save them first.');
+        return;
+      }
+      allowClose.current = true;
+      setInstallHandoff(true);
+      await window.imnota.installUpdate();
+    } catch {
+      allowClose.current = false;
+      setInstallHandoff(false);
+      setError('The update could not be installed. Try restarting Imnota again.');
+    } finally {
+      restarting.current = false;
+      setRestartBusy(false);
+    }
+  }
+  async function downloadUpdate() {
+    try {
+      await window.imnota.downloadUpdate();
+    } catch {
+      setError('The update could not be downloaded. Check your connection and try again.');
     }
   }
   async function openProjectSearch() {
@@ -565,292 +628,363 @@ export default function App() {
       </div>
     );
   return (
-    <div
-      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        if (hasProject) void handleDrop(event);
-      }}
-    >
-      {renderSidebar()}
-      <main className="main-shell">
-        <Topbar
-          onNew={() => setModal('new')}
-          onOpen={async () => {
-            try {
-              const snapshot = await window.imnota.openProjectDialog();
-              if (snapshot) await openSnapshot(snapshot);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : 'Project could not be opened.');
-            }
-          }}
-          onSearch={() => void openProjectSearch()}
-          onCopy={copyContext}
-          onOpenExport={async () => {
-            if (store.snapshot)
-              await window.imnota.openPath(
-                store.exportAllRounds
-                  ? `${store.snapshot.projectPath}/exports`
-                  : `${store.snapshot.projectPath}/rounds/${store.activeRoundId}/exports`,
-              );
-          }}
-          onToggleFavourite={() => void toggleFavourite()}
-        />
-        {error && (
-          <div className="error-banner" role="alert">
-            <ShieldCheck size={16} />
-            <span>{error}</span>
-            <IconButton label="Dismiss" onClick={() => setError('')}>
-              <X size={16} />
-            </IconButton>
-          </div>
-        )}
-        {updateStatus?.state === 'available' && navigator.platform.toLowerCase().includes('mac') && (
-          <div className="update-banner" role="status">
-            <Download size={16} />
-            <span>Imnota {updateStatus.version} is available. This Mac build requires a manual update.</span>
-            <Button onClick={() => void window.imnota.downloadUpdate()}>Download update</Button>
-          </div>
-        )}
-        {updateStatus?.state === 'downloaded' && (
-          <div className="update-banner" role="status">
-            <Download size={16} />
-            <span>Imnota {updateStatus.version ?? 'update'} is ready to install.</span>
-            <Button variant="soft" onClick={() => void window.imnota.installUpdate()}>
-              Restart to update
-            </Button>
-          </div>
-        )}
-        {!workspaceSet ? (
-          <Welcome chooseWorkspace={chooseWorkspace} />
-        ) : store.view === 'settings' ? (
-          <SettingsView />
-        ) : !hasProject ? (
-          <Library
+    <>
+      <div
+        ref={appShellRef}
+        className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          if (hasProject) void handleDrop(event);
+        }}
+      >
+        {renderSidebar()}
+        <main className="main-shell">
+          <Topbar
             onNew={() => setModal('new')}
             onOpen={async () => {
-              const snapshot = await window.imnota.openProjectDialog();
-              if (snapshot) await openSnapshot(snapshot);
-            }}
-            searchInputRef={projectSearchInputRef}
-          />
-        ) : store.view === 'context' ? (
-          <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
-        ) : (
-          <Workspace
-            onFlush={async () => {
-              if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id)
-                await window.imnota.saveScreenshotContent({
-                  projectPath: store.snapshot.projectPath,
-                  screenshot: activeShot,
-                  annotations,
-                  notes,
-                });
-            }}
-            onExportImage={async () => {
-              if (!store.snapshot || !activeShot || !image) return;
               try {
-                const dataUrl = await renderAnnotatedImage(image, annotations);
-                await window.imnota.exportAnnotatedImage({
-                  projectPath: store.snapshot.projectPath,
-                  roundId: activeShot.roundId,
-                  filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-                  dataUrl,
-                });
-                showToast('Annotated PNG saved in this subfolder’s exports folder.');
+                const snapshot = await window.imnota.openProjectDialog();
+                if (snapshot) await openSnapshot(snapshot);
               } catch (err) {
-                setError(
-                  `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
-                );
+                setError(err instanceof Error ? err.message : 'Project could not be opened.');
               }
             }}
-            onImport={() => fileInputRef.current?.click()}
-            onPaste={pasteImage}
-            onSelect={(id: string) => store.set({ activeScreenshotId: id })}
-            onChangeAnnotations={changeAnnotations}
-            onSelectAnnotation={setSelectedAnnotation}
-            onMessage={showToast}
-            onTool={setTool}
-            tool={tool}
-            image={activeShot?.id === lastLoadedId.current ? image : null}
-            annotations={annotations}
-            selectedAnnotation={selectedAnnotation}
-            stageRef={stageRef}
-            onUndo={undo}
-            onRedo={redoAction}
-            canUndo={history.length > 0}
-            canRedo={redo.length > 0}
-            onZoom={(delta: number) =>
-              window.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? '+' : '-' }))
-            }
-            onFit={() => {
-              window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
-            }}
-            saving={saving}
-            notes={notes}
-            setNotes={setNotes}
-            onDuplicate={async () => {
-              if (activeShot && store.snapshot)
-                await openSnapshot(
-                  await window.imnota.duplicateScreenshot({
-                    projectPath: store.snapshot.projectPath,
-                    screenshot: activeShot,
-                  }),
+            onSearch={() => void openProjectSearch()}
+            onCopy={copyContext}
+            onOpenExport={async () => {
+              if (store.snapshot)
+                await window.imnota.openPath(
+                  store.exportAllRounds
+                    ? `${store.snapshot.projectPath}/exports`
+                    : `${store.snapshot.projectPath}/rounds/${store.activeRoundId}/exports`,
                 );
             }}
-            onDeleteProject={() => setModal('delete')}
+            onToggleFavourite={() => void toggleFavourite()}
           />
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          multiple
-          hidden
-          onChange={onFileInput}
-        />
-      </main>
-      {toast && (
-        <div className="toast" role="status">
-          <Check size={16} />
-          {toast}
-        </div>
-      )}
-      {attachments && (
-        <Modal
-          title="Share context and images"
-          description="Markdown is copied. Try combined copy below, or paste the text and attach the exported PNGs. Individual image copying replaces clipboard text."
-          onClose={() => {
-            if (!clipboardBusy) setAttachments(null);
-          }}
-        >
-          <div className="modal-form sharing-content">
-            <CombinedContextCopy
-              markdown={attachments.markdown}
-              images={attachments.images}
-              onBusyChange={setClipboardBusy}
+          {error && (
+            <div className="error-banner" role="alert">
+              <ShieldCheck size={16} />
+              <span>{error}</span>
+              <IconButton label="Dismiss" onClick={() => setError('')}>
+                <X size={16} />
+              </IconButton>
+            </div>
+          )}
+          {updateStatus?.state === 'error' && (
+            <div className="update-banner" role="alert">
+              <Download size={16} />
+              <span>{updateStatus.message ?? 'The update failed. Try checking again.'}</span>
+              <Button
+                onClick={() =>
+                  void window.imnota
+                    .checkForUpdates()
+                    .catch(() => setError('Could not check for updates. Try again.'))
+                }
+              >
+                Retry update check
+              </Button>
+            </div>
+          )}
+          {updateStatus?.state === 'available' && (
+            <div className="update-banner" role="status">
+              <Download size={16} />
+              <span>
+                Imnota {updateStatus.version ?? 'update'} is available.
+                {updateStatus.manualDownload ? ' Download it for the selected channel.' : ''}
+              </span>
+              <Button onClick={() => void downloadUpdate()}>
+                {updateStatus.manualDownload ? 'Open download' : 'Download update'}
+              </Button>
+            </div>
+          )}
+          {updateStatus?.state === 'downloading' && (
+            <div className="update-banner" role="status">
+              <Download size={16} />
+              <span>Downloading update… {Math.round(updateStatus.percent ?? 0)}%</span>
+              <div
+                className="update-progress"
+                role="progressbar"
+                aria-label="Update download progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(updateStatus.percent ?? 0)}
+              >
+                <span
+                  style={{
+                    transform: `scaleX(${Math.max(0, Math.min(100, updateStatus.percent ?? 0)) / 100})`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          {updateStatus?.state === 'downloaded' && (
+            <div className="update-banner" role="status">
+              <Download size={16} />
+              <span>
+                {updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is ready to install.`}
+              </span>
+              <Button
+                variant="soft"
+                disabled={restartBusy || updateStatus.installing}
+                onClick={() => void restartToUpdate()}
+              >
+                {restartBusy || updateStatus.installing ? 'Preparing restart…' : 'Restart to update'}
+              </Button>
+            </div>
+          )}
+          {!workspaceSet ? (
+            <Welcome chooseWorkspace={chooseWorkspace} />
+          ) : store.view === 'settings' ? (
+            <SettingsView onInstall={restartToUpdate} />
+          ) : !hasProject ? (
+            <Library
+              onNew={() => setModal('new')}
+              onOpen={async () => {
+                const snapshot = await window.imnota.openProjectDialog();
+                if (snapshot) await openSnapshot(snapshot);
+              }}
+              searchInputRef={projectSearchInputRef}
             />
-            <p className="helper sharing-folder">
-              {attachments.images.length} annotated images · {attachments.folderPath}
-            </p>
-            {attachments.images.map((item) => (
-              <div className="sharing-file" key={item.filename}>
-                <label>
-                  <input type="checkbox" /> Attached {item.filename}
-                </label>
+          ) : store.view === 'context' ? (
+            <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
+          ) : (
+            <Workspace
+              onFlush={async () => {
+                if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id)
+                  await window.imnota.saveScreenshotContent({
+                    projectPath: store.snapshot.projectPath,
+                    screenshot: activeShot,
+                    annotations,
+                    notes,
+                  });
+              }}
+              onExportImage={async () => {
+                if (!store.snapshot || !activeShot || !image) return;
+                try {
+                  const dataUrl = await renderAnnotatedImage(image, annotations);
+                  await window.imnota.exportAnnotatedImage({
+                    projectPath: store.snapshot.projectPath,
+                    roundId: activeShot.roundId,
+                    filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+                    dataUrl,
+                  });
+                  showToast('Annotated PNG saved in this subfolder’s exports folder.');
+                } catch (err) {
+                  setError(
+                    `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
+                  );
+                }
+              }}
+              onImport={() => fileInputRef.current?.click()}
+              onPaste={pasteImage}
+              onSelect={(id: string) => store.set({ activeScreenshotId: id })}
+              onChangeAnnotations={changeAnnotations}
+              onSelectAnnotation={setSelectedAnnotation}
+              onMessage={showToast}
+              onTool={setTool}
+              tool={tool}
+              image={activeShot?.id === lastLoadedId.current ? image : null}
+              annotations={annotations}
+              selectedAnnotation={selectedAnnotation}
+              stageRef={stageRef}
+              onUndo={undo}
+              onRedo={redoAction}
+              canUndo={history.length > 0}
+              canRedo={redo.length > 0}
+              onZoom={(delta: number) =>
+                window.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? '+' : '-' }))
+              }
+              onFit={() => {
+                window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
+              }}
+              saving={saving}
+              notes={notes}
+              setNotes={setNotes}
+              onDuplicate={async () => {
+                if (activeShot && store.snapshot)
+                  await openSnapshot(
+                    await window.imnota.duplicateScreenshot({
+                      projectPath: store.snapshot.projectPath,
+                      screenshot: activeShot,
+                    }),
+                  );
+              }}
+              onDeleteProject={() => setModal('delete')}
+            />
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            hidden
+            onChange={onFileInput}
+          />
+        </main>
+        {toast && (
+          <div className="toast" role="status">
+            <Check size={16} />
+            {toast}
+          </div>
+        )}
+        {attachments && (
+          <Modal
+            title="Share context and images"
+            description="Markdown is copied. Try combined copy below, or paste the text and attach the exported PNGs. Individual image copying replaces clipboard text."
+            onClose={() => {
+              if (!clipboardBusy) setAttachments(null);
+            }}
+          >
+            <div className="modal-form sharing-content">
+              <CombinedContextCopy
+                markdown={attachments.markdown}
+                images={attachments.images}
+                onBusyChange={setClipboardBusy}
+              />
+              <p className="helper sharing-folder">
+                {attachments.images.length} annotated images · {attachments.folderPath}
+              </p>
+              {attachments.images.map((item) => (
+                <div className="sharing-file" key={item.filename}>
+                  <label>
+                    <input type="checkbox" /> Attached {item.filename}
+                  </label>
+                  <Button
+                    disabled={clipboardBusy}
+                    onClick={async () => {
+                      try {
+                        await window.imnota.copyImage(item.dataUrl);
+                        showToast('Image copied. Paste it into your AI assistant.');
+                      } catch {
+                        setError('Image could not be copied. Attach the exported PNG instead.');
+                      }
+                    }}
+                  >
+                    Copy image
+                  </Button>
+                </div>
+              ))}
+              <div className="sharing-actions">
                 <Button
                   disabled={clipboardBusy}
                   onClick={async () => {
                     try {
-                      await window.imnota.copyImage(item.dataUrl);
-                      showToast('Image copied. Paste it into your AI assistant.');
+                      await window.imnota.copyText(attachments.markdown);
+                      showToast('Markdown copied.');
                     } catch {
-                      setError('Image could not be copied. Attach the exported PNG instead.');
+                      setError('Markdown could not be copied. Open the exported context.md file instead.');
                     }
                   }}
                 >
-                  Copy image
+                  Copy Markdown again
+                </Button>
+                <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>
+                  Open export folder
                 </Button>
               </div>
-            ))}
-            <div className="sharing-actions">
-              <Button
-                disabled={clipboardBusy}
-                onClick={async () => {
-                  try {
-                    await window.imnota.copyText(attachments.markdown);
-                    showToast('Markdown copied.');
-                  } catch {
-                    setError('Markdown could not be copied. Open the exported context.md file instead.');
-                  }
-                }}
-              >
-                Copy Markdown again
-              </Button>
-              <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>
-                Open export folder
-              </Button>
             </div>
-          </div>
-        </Modal>
-      )}
-      {modal === 'new' && (
-        <Modal
-          title="New project"
-          description="Keep the brief and its screenshots together in one local folder."
-          onClose={() => setModal(null)}
-        >
-          <div className="modal-form">
-            <TextInput
-              autoFocus
-              label="Project name"
-              placeholder="e.g. Checkout flow review"
-              value={newProject.name}
-              onChange={(event) => setNewProject({ ...newProject, name: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void createProject();
-              }}
-            />
-            <TextArea
-              label="Description"
-              placeholder="What are you trying to explain?"
-              rows={3}
-              value={newProject.description}
-              onChange={(event) => setNewProject({ ...newProject, description: event.target.value })}
-            />
+          </Modal>
+        )}
+        {modal === 'new' && (
+          <Modal
+            title="New project"
+            description="Keep the brief and its screenshots together in one local folder."
+            onClose={() => setModal(null)}
+          >
+            <div className="modal-form">
+              <TextInput
+                autoFocus
+                label="Project name"
+                placeholder="e.g. Checkout flow review"
+                value={newProject.name}
+                onChange={(event) => setNewProject({ ...newProject, name: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void createProject();
+                }}
+              />
+              <TextArea
+                label="Description"
+                placeholder="What are you trying to explain?"
+                rows={3}
+                value={newProject.description}
+                onChange={(event) => setNewProject({ ...newProject, description: event.target.value })}
+              />
+              <div className="modal-actions">
+                <Button variant="ghost" onClick={() => setModal(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => void createProject()}
+                  disabled={!newProject.name.trim()}
+                >
+                  <Plus size={16} />
+                  Create project
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
+        {modal === 'about' && (
+          <Modal
+            title="About Imnota"
+            description="Screenshots that AI understands."
+            onClose={() => setModal(null)}
+          >
+            <div className="about-copy">
+              <Logo />
+              <p>
+                Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
+                telemetry by default.
+              </p>
+              <span className="muted">
+                Version {updateStatus?.currentVersion ?? appVersion} · MIT License · Built by Dytschgo
+              </span>
+            </div>
+          </Modal>
+        )}
+        {modal === 'delete' && (
+          <Modal
+            title="Delete this project?"
+            description="This moves the project folder to the operating system trash, including screenshots, annotations, notes and exports."
+            onClose={() => setModal(null)}
+          >
             <div className="modal-actions">
               <Button variant="ghost" onClick={() => setModal(null)}>
-                Cancel
+                Keep project
               </Button>
-              <Button
-                variant="primary"
-                onClick={() => void createProject()}
-                disabled={!newProject.name.trim()}
-              >
-                <Plus size={16} />
-                Create project
+              <Button variant="danger" onClick={() => void deleteActiveProject()}>
+                <Trash2 size={16} />
+                Move to trash
               </Button>
             </div>
-          </div>
-        </Modal>
+          </Modal>
+        )}
+      </div>
+      {installHandoff && (
+        <div className="modal-backdrop">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Restarting to update"
+            tabIndex={-1}
+            ref={(element) => element?.focus()}
+            onKeyDown={(event) => {
+              if (event.key === 'Tab') event.preventDefault();
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>Restarting to update</h2>
+                <p>Your changes are saved. Imnota will reopen after installation.</p>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
-      {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
-      {modal === 'about' && (
-        <Modal
-          title="About Imnota"
-          description="Screenshots that AI understands."
-          onClose={() => setModal(null)}
-        >
-          <div className="about-copy">
-            <Logo />
-            <p>
-              Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
-              telemetry by default.
-            </p>
-            <span className="muted">
-              Version {updateStatus?.currentVersion ?? appVersion} · MIT License · Built by Dytschgo
-            </span>
-          </div>
-        </Modal>
-      )}
-      {modal === 'delete' && (
-        <Modal
-          title="Delete this project?"
-          description="This moves the project folder to the operating system trash, including screenshots, annotations, notes and exports."
-          onClose={() => setModal(null)}
-        >
-          <div className="modal-actions">
-            <Button variant="ghost" onClick={() => setModal(null)}>
-              Keep project
-            </Button>
-            <Button variant="danger" onClick={() => void deleteActiveProject()}>
-              <Trash2 size={16} />
-              Move to trash
-            </Button>
-          </div>
-        </Modal>
-      )}
-    </div>
+    </>
   );
 
   function renderSidebar() {
@@ -1926,7 +2060,7 @@ function ContextBuilder({
   );
 }
 
-export function SettingsView() {
+export function SettingsView({ onInstall }: { onInstall?: () => Promise<void> }) {
   const { settings, set } = useAppStore();
   const [savingPreference, setSavingPreference] = useState(false);
   const [settingError, setSettingError] = useState('');
@@ -2019,7 +2153,7 @@ export function SettingsView() {
             </p>
           )}
         </div>
-        <UpdateControl />
+        <UpdateControl onInstall={onInstall} />
         <div className="settings-section">
           <h2>Workspace</h2>
           <div className="workspace-path">
