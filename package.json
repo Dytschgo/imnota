@@ -1,6 +1,6 @@
 {
   "name": "imnota",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Turn annotated screenshots into AI-ready context.",
   "private": true,
   "type": "module",
@@ -26,7 +26,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run && node --test scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs",
+    "test": "vitest run && node --test scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs scripts/update-macos.test.mjs",
     "test:watch": "vitest",
     "release": "node scripts/release.mjs",
     "smoke": "node scripts/smoke.mjs",
@@ -79,6 +79,7 @@
     "productName": "Imnota",
     "asar": true,
     "files": [
+      "scripts/update-macos.sh",
       "dist/**/*",
       "dist-electron/electron/**/*",
       "dist-electron/src/shared/**/*",

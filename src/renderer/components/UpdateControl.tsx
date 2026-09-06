@@ -4,7 +4,7 @@ import type { UpdateChannel, UpdateStatus } from '../../shared/types';
 import { Button, Modal } from './ui';
 import { useAppStore } from '../store';
 
-export function UpdateControl() {
+export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }) {
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' });
   const [busy, setBusy] = useState(false);
   const [confirmNightly, setConfirmNightly] = useState(false);
@@ -13,16 +13,15 @@ export function UpdateControl() {
   const locked = busy || ['checking', 'downloading', 'downloaded'].includes(status.state);
   useEffect(() => {
     let active = true;
-    let receivedEvent = false;
+    const revisionAtMount = statusRevision.current;
     const unsubscribe = window.imnota.onUpdateStatus((next) => {
       statusRevision.current++;
-      receivedEvent = true;
       if (active) setStatus(next);
     });
     void window.imnota
       .getUpdateStatus()
       .then((next) => {
-        if (active && !receivedEvent) setStatus(next);
+        if (active && statusRevision.current === revisionAtMount) setStatus(next);
       })
       .catch(() => {
         if (active)
@@ -103,8 +102,41 @@ export function UpdateControl() {
       </Button>
       {status.state === 'available' && (
         <Button disabled={locked} onClick={() => void run(() => window.imnota.downloadUpdate())}>
-          {status.manualDownload ? 'Open release download' : 'Download update'}
+          {status.terminalCommand
+            ? 'Run update in Terminal'
+            : status.manualDownload
+              ? 'Open selected channel download'
+              : 'Download update'}
         </Button>
+      )}
+      {status.state === 'available' && status.terminalCommand && (
+        <div className="terminal-update-command">
+          <p>
+            Terminal downloads and verifies the update, then closes, replaces and reopens Imnota. A backup is
+            retained.
+          </p>
+          <div>
+            <code>{status.terminalCommand}</code>
+            <Button
+              variant="soft"
+              onClick={() => void run(() => window.imnota.copyText(status.terminalCommand!))}
+            >
+              Copy command
+            </Button>
+          </div>
+        </div>
+      )}
+      {status.state === 'downloading' && (
+        <div
+          className="update-progress"
+          role="progressbar"
+          aria-label="Update download progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(status.percent ?? 0)}
+        >
+          <span style={{ transform: `scaleX(${Math.max(0, Math.min(100, status.percent ?? 0)) / 100})` }} />
+        </div>
       )}
       {status.state === 'not-available' && status.manualDownload && (
         <Button disabled={locked} onClick={() => void run(() => window.imnota.downloadUpdate())}>
@@ -112,19 +144,23 @@ export function UpdateControl() {
         </Button>
       )}
       {status.state === 'downloaded' && (
-        <Button disabled={busy} onClick={() => void run(() => window.imnota.installUpdate())}>
-          Restart to install
+        <Button
+          disabled={busy || status.installing}
+          onClick={() => void run(onInstall ?? (() => window.imnota.installUpdate()))}
+        >
+          {status.installing ? 'Preparing restart…' : 'Restart to install'}
         </Button>
       )}
       <details className="settings-disclosure update-disclosure">
         <summary>Update privacy and installation</summary>
         <p>Checking contacts GitHub for release information only. Your project files stay local.</p>
-        {navigator.platform.toLowerCase().includes('mac') && (
-          <p>
-            This Mac build opens the download page. Replace the app with the new version; your workspace is
-            kept separately.
-          </p>
-        )}
+        <p>
+          {status.terminalCommand
+            ? 'Terminal downloads and verifies the update, then closes, replaces and reopens Imnota. A backup is retained.'
+            : status.manualDownload
+              ? 'This build opens the release download page. Replace the app after downloading; your workspace is kept separately.'
+              : 'Updates download only when you choose them. Imnota restarts only when you choose to install.'}
+        </p>
       </details>
       {confirmNightly && (
         <Modal

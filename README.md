@@ -90,7 +90,11 @@ corepack pnpm release 0.3.0 --evidence .git/release-evidence.json --dry-run
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.
 
-Packaged clients check the selected release channel when they launch. Use the refresh icon in the sidebar or Settings → App updates → Check for updates to check again. Choose **Stable (recommended)** or opt into **Nightly (preview)** in the same Settings section. Checks do not automatically download, install or downgrade. Windows and AppImage clients offer download and restart actions; the ad-hoc-signed Mac build opens the exact selected release page for manual replacement. Branch and pull request builds never publish releases. Nightly publication uses a manual, gated workflow on reviewed main commits; see [nightly build instructions](docs/nightly-builds.md).
+Packaged clients check the selected release channel when they launch. Use the refresh icon in the sidebar or Settings → App updates → Check for updates to check again. Choose **Stable (recommended)** or opt into **Nightly (preview)** in the same Settings section. Checks do not automatically download, install or downgrade. Installed Windows and AppImage clients offer download and restart actions. Portable Windows and Linux deb builds link to the selected release.
+
+On macOS, **Run update in Terminal** starts the bundled installer for the selected version. Settings also shows the command with a copy button. The installer verifies the archive checksum and app signature before replacing the installed app, retains a backup, and reopens Imnota. Run the app from a writable Applications folder, rather than a mounted DMG. Terminal reports failures; the installer does not use `sudo` or remove macOS quarantine. Older builds need one manual installation to gain this update action.
+
+Branch and pull request builds never publish releases. Nightly publication uses a manual, gated workflow on reviewed main commits; see [nightly build instructions](docs/nightly-builds.md).
 
 ## Project structure
 

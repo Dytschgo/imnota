@@ -70,17 +70,21 @@ it('orders stable and nightly versions without lexical comparisons or automatic 
 it('paginates nightly discovery and pins the exact release URL', async () => {
   const request = vi
     .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response('', { status: 404 }))
     .mockResolvedValueOnce(new Response(JSON.stringify(Array(100).fill(release()))))
     .mockResolvedValueOnce(new Response(JSON.stringify([release(nightlyVersion, true)])));
   const result = await discoverRelease('nightly', 'darwin', request);
-  expect(request).toHaveBeenCalledTimes(2);
+  expect(request).toHaveBeenCalledTimes(3);
+  expect(request.mock.calls[0][0]).toBe('https://api.github.com/repos/Dytschgo/imnota/releases/latest');
   expect(result?.url).toBe(`https://github.com/Dytschgo/imnota/releases/tag/v${nightlyVersion}`);
-  expect(request.mock.calls[1][0]).toContain('page=2');
+  expect(result?.sourceChannel).toBe('nightly');
+  expect(request.mock.calls[2][0]).toContain('page=2');
 });
 it('does not fall back to older nightlies with an incomplete new release', async () => {
   const request = vi
     .fn<typeof fetch>()
-    .mockResolvedValue(
+    .mockResolvedValueOnce(new Response(JSON.stringify(release('0.2.0'))))
+    .mockResolvedValueOnce(
       new Response(
         JSON.stringify([
           { ...release(nightlyVersion, true), assets: [] },
@@ -89,6 +93,76 @@ it('does not fall back to older nightlies with an incomplete new release', async
       ),
     );
   await expect(discoverRelease('nightly', 'darwin', request)).rejects.toThrow(/incomplete/);
+});
+it('uses a newer stable on the nightly preference and returns to nightly when it advances', async () => {
+  const stableVersion = '0.2.2';
+  const olderNightly = '0.2.2-nightly.20260905.10';
+  const stableRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(release(stableVersion))))
+    .mockResolvedValueOnce(new Response(JSON.stringify([release(olderNightly, true)])));
+  const fallback = await discoverRelease('nightly', 'darwin', stableRequest);
+  expect(fallback).toMatchObject({ version: stableVersion, sourceChannel: 'stable' });
+  expect(fallback?.feedUrl).toBe('https://github.com/Dytschgo/imnota/releases/download/v0.2.2/');
+
+  const nextNightly = '0.2.3-nightly.20260907.1';
+  const nightlyRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(release(stableVersion))))
+    .mockResolvedValueOnce(new Response(JSON.stringify([release(nextNightly, true)])));
+  const candidate = await discoverRelease('nightly', 'darwin', nightlyRequest);
+  expect(candidate).toMatchObject({ version: nextNightly, sourceChannel: 'nightly' });
+});
+it('handles a missing channel candidate and does not hide incomplete or failed discovery', async () => {
+  const onlyNightlyRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response('', { status: 404 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([release(nightlyVersion, true)])));
+  await expect(discoverRelease('nightly', 'darwin', onlyNightlyRequest)).resolves.toMatchObject({
+    version: nightlyVersion,
+    sourceChannel: 'nightly',
+  });
+
+  const onlyStableRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(release('0.2.2'))))
+    .mockResolvedValueOnce(new Response(JSON.stringify([])));
+  await expect(discoverRelease('nightly', 'darwin', onlyStableRequest)).resolves.toMatchObject({
+    version: '0.2.2',
+    sourceChannel: 'stable',
+  });
+
+  const absentRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response('', { status: 404 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([])));
+  await expect(discoverRelease('nightly', 'darwin', absentRequest)).resolves.toBeNull();
+
+  const incompleteStable = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...release('0.2.2'), assets: [] })));
+  await expect(discoverRelease('nightly', 'darwin', incompleteStable)).rejects.toThrow(
+    /stable release is incomplete/,
+  );
+});
+it('offers newer stable despite an older incomplete nightly but rejects a newer incomplete nightly', async () => {
+  const stable = release('0.2.2');
+  const olderIncomplete = { ...release('0.2.1-nightly.20260905.2', true), assets: [] };
+  const olderRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(stable)))
+    .mockResolvedValueOnce(new Response(JSON.stringify([olderIncomplete])));
+  await expect(discoverRelease('nightly', 'darwin', olderRequest)).resolves.toMatchObject({
+    version: '0.2.2',
+    sourceChannel: 'stable',
+  });
+
+  const newerIncomplete = { ...release('0.2.3-nightly.20260905.2', true), assets: [] };
+  const newerRequest = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify(stable)))
+    .mockResolvedValueOnce(new Response(JSON.stringify([newerIncomplete])));
+  await expect(discoverRelease('nightly', 'darwin', newerRequest)).rejects.toThrow(/nightly is incomplete/);
 });
 it('handles absent releases, offline responses and malformed JSON', async () => {
   expect(
@@ -177,8 +251,29 @@ it('blocks switching during download and after download, and ignores late progre
   expect(instance.getStatus().state).toBe('downloaded');
   expect(instance.getStatus().percent).toBe(100);
   await expect(instance.switchChannel('stable', async () => undefined)).rejects.toThrow();
-  instance.install();
+  await instance.install();
   expect(ops.install).toHaveBeenCalledOnce();
+});
+it('retains a downloaded update after asynchronous install failure and allows retry', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  await instance.download();
+  await instance.install();
+  expect(instance.getStatus().installing).toBe(true);
+  await expect(instance.install()).rejects.toThrow();
+  expect(ops.install).toHaveBeenCalledOnce();
+  instance.installationFailed();
+  expect(instance.getStatus()).toMatchObject({ state: 'downloaded', installing: false });
+  await instance.install();
+  expect(ops.install).toHaveBeenCalledTimes(2);
+});
+it('recovers from a rejected install without losing the downloaded update', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  await instance.download();
+  ops.install.mockRejectedValueOnce(new Error('installer unavailable'));
+  await expect(instance.install()).rejects.toThrow('could not be installed');
+  expect(instance.getStatus()).toMatchObject({ state: 'downloaded', installing: false });
 });
 it('uses exact manual Mac release links and never prepares or downloads a native update', async () => {
   const { instance, ops, candidate } = controller(true);
@@ -187,6 +282,28 @@ it('uses exact manual Mac release links and never prepares or downloads a native
   expect(ops.open).toHaveBeenCalledWith(candidate.url);
   expect(ops.prepare).not.toHaveBeenCalled();
   expect(ops.download).not.toHaveBeenCalled();
+});
+it('runs the prepared terminal updater for a Mac upgrade without opening GitHub', async () => {
+  const { ops, candidate } = controller(true);
+  const run = vi.fn(async () => {});
+  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run }));
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+  await instance.check();
+  expect(prepareTerminal).toHaveBeenCalledWith(candidate);
+  expect(instance.getStatus().terminalCommand).toBe('/bin/bash local-update.command');
+  await instance.download();
+  expect(run).toHaveBeenCalledOnce();
+  expect(ops.open).not.toHaveBeenCalled();
+  expect(ops.prepare).not.toHaveBeenCalled();
+});
+it('does not prepare a terminal command for a downgrade', async () => {
+  const { ops } = controller(true);
+  ops.currentVersion = '1.0.0';
+  const prepareTerminal = vi.fn();
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+  await instance.check();
+  expect(prepareTerminal).not.toHaveBeenCalled();
+  expect(instance.getStatus().terminalCommand).toBeUndefined();
 });
 it('offers a manual stable fallback for a newer installed nightly, never a downgrade', async () => {
   const { ops } = controller();
@@ -199,6 +316,36 @@ it('offers a manual stable fallback for a newer installed nightly, never a downg
   expect(ops.prepare).not.toHaveBeenCalled();
   expect(ops.download).not.toHaveBeenCalled();
 });
+it('offers a newer stable while keeping Nightly selected for future checks', async () => {
+  const { ops } = controller();
+  const stable = selectRelease(release('0.2.2'), 'stable', 'darwin')!;
+  ops.discover.mockResolvedValue(stable);
+  const instance = new UpdateController('nightly', ops);
+  await instance.check();
+  expect(ops.prepare).toHaveBeenCalledWith(stable, 'stable');
+  expect(instance.getStatus()).toMatchObject({
+    state: 'available',
+    channel: 'nightly',
+    version: '0.2.2',
+  });
+  expect(instance.getStatus().message).toContain('Stable 0.2.2 is newer');
+  expect(instance.getStatus().message).toContain('Nightly remains selected');
+  await instance.download();
+  expect(instance.getStatus()).toMatchObject({
+    state: 'downloaded',
+    channel: 'nightly',
+    version: '0.2.2',
+    percent: 100,
+  });
+  expect(instance.getStatus().message).toBeUndefined();
+
+  ops.currentVersion = '0.2.2';
+  const currentInstance = new UpdateController('nightly', ops);
+  await currentInstance.check();
+  expect(currentInstance.getStatus()).toMatchObject({ state: 'not-available', channel: 'nightly' });
+  expect(currentInstance.getStatus().message).toContain('newest build currently available');
+  expect(currentInstance.getStatus().message).toContain('Nightly remains selected');
+});
 it('retries after check failure and invalidates failed downloads', async () => {
   const { instance, ops } = controller();
   ops.discover.mockRejectedValueOnce(new Error('offline'));
@@ -209,7 +356,7 @@ it('retries after check failure and invalidates failed downloads', async () => {
   ops.download.mockRejectedValueOnce(new Error('network'));
   await instance.download();
   expect(instance.getStatus().state).toBe('error');
-  expect(() => instance.install()).toThrow();
+  await expect(instance.install()).rejects.toThrow();
   await expect(instance.download()).rejects.toThrow(/Check/);
 });
 it('sets native channel before resetting downgrades and rejects a mismatched manifest', async () => {
@@ -269,6 +416,34 @@ it('sets native channel before resetting downgrades and rejects a mismatched man
     });
     await expect(prepareNativeUpdate(native, candidate, 'nightly')).rejects.toThrow(/installer/);
   }
+});
+
+it('uses the stable manifest when Nightly discovery selects a stable fallback', async () => {
+  const stable = selectRelease(release('0.2.2'), 'stable', 'darwin')!;
+  const native = {
+    channel: 'nightly' as string | null,
+    allowPrerelease: true,
+    allowDowngrade: true,
+    autoDownload: true,
+    autoInstallOnAppQuit: true,
+    setFeedURL: vi.fn(),
+    checkForUpdates: vi.fn(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: {
+        version: stable.version,
+        files: [{ url: stable.assetUrls[0], sha512: 'a'.repeat(86) + '==' }],
+      },
+    })),
+  };
+  await prepareNativeUpdate(native, stable, 'nightly');
+  expect(native.channel).toBe('latest');
+  expect(native.allowPrerelease).toBe(false);
+  expect(native.allowDowngrade).toBe(false);
+  expect(native.setFeedURL).toHaveBeenCalledWith({
+    provider: 'generic',
+    url: stable.feedUrl,
+    channel: 'latest',
+  });
 });
 
 it('does not expose download after a new-channel native prepare is rejected', async () => {

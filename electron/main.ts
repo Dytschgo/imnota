@@ -44,6 +44,7 @@ import {
 import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
+import { prepareTerminalUpdate } from './terminal-update.js';
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -353,6 +354,7 @@ function registerIpc(): void {
         throw new Error('Untrusted IPC sender.');
       const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
       if (channel.startsWith('update:')) return listener(event, ...validated);
+      if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
       const result = pending.then(() => listener(event, ...validated));
       pending = result.catch(() => undefined);
       return result;
@@ -791,29 +793,56 @@ function registerIpc(): void {
   handle('update:download', () => updateController.download());
   handle('update:check', () => updateController.check());
   handle('update:status', () => updateController.getStatus());
-  handle('update:install', () => updateController.install());
+  handle('update:install', async () => {
+    if (updateInstallPending) throw new Error('An update installation is already starting.');
+    updateInstallPending = true;
+    try {
+      // Close admission before draining all file work accepted before restart.
+      await pending;
+      await updateController.install();
+    } catch (error) {
+      updateInstallPending = false;
+      throw error;
+    }
+  });
 }
 
+let updateInstallPending = false;
 function configureAutoUpdates(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   updateController = new UpdateController(settings.updateChannel, {
     currentVersion: app.getVersion(),
     enabled: app.isPackaged && process.env.IMNOTA_SMOKE !== '1',
-    manual: process.platform === 'darwin',
+    manual:
+      process.platform === 'darwin' ||
+      Boolean(process.env.PORTABLE_EXECUTABLE_FILE) ||
+      (process.platform === 'linux' && !process.env.APPIMAGE),
     discover: (channel) => discoverRelease(channel, process.platform),
     prepare: (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+    prepareTerminal:
+      process.platform === 'darwin'
+        ? (release) =>
+            prepareTerminalUpdate(
+              release,
+              path.resolve(app.getPath('exe'), '../../..'),
+              path.join(app.getAppPath(), 'scripts/update-macos.sh'),
+              app.getPath('temp'),
+              app.getVersion(),
+            )
+        : undefined,
     download: () => autoUpdater.downloadUpdate(),
     install: () => autoUpdater.quitAndInstall(),
     open: (url) => shell.openExternal(url),
     emit: (status) => {
+      if (status.state === 'downloaded' && status.installing === false) updateInstallPending = false;
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('update:status', status);
     },
   });
   autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
-  // Promise handlers own errors so late native events cannot change channels.
-  autoUpdater.on('error', () => undefined);
+  // Check/download promises own their errors; installation also reports asynchronous native failures.
+  autoUpdater.on('error', () => updateController.installationFailed());
   if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1')
     setTimeout(() => void updateController.check(), 8000);
 }

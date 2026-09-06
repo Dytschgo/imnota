@@ -46,6 +46,8 @@ export interface ReleaseCandidate {
   url: string;
   feedUrl: string;
   assetUrls: string[];
+  checksumUrl?: string;
+  sourceChannel?: UpdateChannel;
 }
 export function selectRelease(
   value: unknown,
@@ -95,7 +97,14 @@ export function selectRelease(
             : asset.name.endsWith('.AppImage') || asset.name.endsWith('.deb')),
     )
     .map((asset) => asset.browser_download_url);
-  return { version, url: `${repository}/releases/tag/${release.tag_name}`, feedUrl, assetUrls };
+  return {
+    version,
+    url: `${repository}/releases/tag/${release.tag_name}`,
+    feedUrl,
+    assetUrls,
+    checksumUrl: hasAsset((name) => name === 'SHA256SUMS.txt') ? `${feedUrl}SHA256SUMS.txt` : undefined,
+    sourceChannel: channel,
+  };
 }
 
 export async function discoverRelease(
@@ -103,12 +112,12 @@ export async function discoverRelease(
   platform: string,
   request = fetch,
 ): Promise<ReleaseCandidate | null> {
-  async function read(url: string) {
+  async function read(url: string, allowNotFound = false) {
     const response = await request(url, {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Imnota' },
       signal: AbortSignal.timeout(10_000),
     });
-    if (response.status === 404 && channel === 'stable') return null;
+    if (response.status === 404 && allowNotFound) return null;
     if (!response.ok) throw new Error('GitHub release information is unavailable. Try again later.');
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Release information is empty.');
@@ -136,32 +145,59 @@ export async function discoverRelease(
     }
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   }
-  if (channel === 'stable') {
-    const value = await read(`${api}/latest`);
+  async function discoverStable() {
+    const value = await read(`${api}/latest`, true);
     if (value === null) return null;
-    const candidate = selectRelease(value, channel, platform);
+    const candidate = selectRelease(value, 'stable', platform);
     if (!candidate) throw new Error('The stable release is incomplete for this platform. Try again later.');
     return candidate;
   }
+
+  if (channel === 'stable') return discoverStable();
+
+  const stable = await discoverStable();
+  let nightly: ReleaseCandidate | null = null;
+  let reachedEnd = false;
   // Bound pagination, and fail rather than reporting a false up-to-date result.
   for (let page = 1; page <= 10; page++) {
     const value = await read(`${api}?per_page=100&page=${page}`);
     if (!Array.isArray(value) || value.length > 100) throw new Error('Invalid release listing.');
     for (const item of value) {
-      const candidate = selectRelease(item, channel, platform);
-      if (candidate) return candidate;
+      const candidate = selectRelease(item, 'nightly', platform);
+      if (candidate) {
+        nightly = candidate;
+        break;
+      }
       const release = releaseSchema.safeParse(item);
       if (
         release.success &&
         !release.data.draft &&
         release.data.prerelease &&
         /^v\d+\.\d+\.\d+-nightly\./.test(release.data.tag_name)
-      )
+      ) {
+        const incompleteVersion = release.data.tag_name.slice(1);
+        if (stable) {
+          try {
+            if (compareReleaseVersions(stable.version, incompleteVersion) > 0) return stable;
+          } catch {
+            // The recognizable nightly tag is malformed, so fail closed below.
+          }
+        }
         throw new Error('The newest nightly is incomplete for this platform. Try again later.');
+      }
     }
-    if (value.length < 100) return null;
+    if (nightly) break;
+    if (value.length < 100) {
+      reachedEnd = true;
+      break;
+    }
   }
-  throw new Error(
-    'No compatible nightly was found in recent releases. Open GitHub releases or try again later.',
-  );
+  if (!nightly && !reachedEnd)
+    throw new Error(
+      'No compatible nightly was found in recent releases. Open GitHub releases or try again later.',
+    );
+  if (!nightly && !stable) return null;
+  if (!nightly) return stable;
+  if (!stable) return nightly;
+  return compareReleaseVersions(stable.version, nightly.version) >= 0 ? stable : nightly;
 }

@@ -6,9 +6,9 @@ Imnota has two update channels in the same public GitHub repository. Stable is t
 
 Open **Settings → App updates → Update channel**. Selecting **Nightly (preview)** asks you to confirm and back up your workspace. **Keep Stable** cancels without changing preferences. The selected channel is saved locally and used by both Settings and the sidebar refresh button.
 
-Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS uses **Open release download** because the current app is ad-hoc signed, not Apple-notarised. It opens the exact release page selected for that channel; replace the application and retain your workspace.
+Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit, replaces the app and retains a backup. It does not require Developer ID signing, administrator privileges or removal of quarantine.
 
-Channel switching is disabled while checking, downloading or awaiting installation. This avoids mixing a checked installer from one channel with another channel's UI. Failed checks/downloads allow retry. No available nightly is reported honestly rather than falling back to stable.
+Channel switching is disabled while checking, downloading or awaiting native installation. Failed checks/downloads allow retry. Nightly checks compare the latest nightly with the latest stable release and offer the newer version. For example, stable `0.2.2` supersedes `0.2.2-nightly.20260905.1234`; a later `0.2.3-nightly` becomes eligible again. The preference remains Nightly throughout, and an already newer installed version is never downgraded.
 
 Switching back to Stable never automatically downgrades. If the installed nightly is newer, Imnota explains that and offers the selected stable release page. Back up before manually replacing a newer app; an older version may not understand a future project's schema.
 
@@ -40,8 +40,8 @@ Stable tags must point to a commit in main's history. Assets are validated befor
 ## Update implementation
 
 - Shared IPC accepts only `stable` or `nightly`; older/missing channel preferences default to Stable.
-- Stable discovery reads GitHub's latest stable release; nightly discovery uses bounded pagination of public releases, excluding drafts and other prerelease formats. Network responses are time- and size-bounded.
-- Windows/Linux native checks use a generic feed pinned to the exact selected GitHub release directory, not an unqualified channel feed. A missing nightly manifest cannot fall back to stable.
+- Stable discovery reads GitHub's latest stable release; Nightly also compares it with the latest eligible nightly found through bounded pagination. Drafts and other prerelease formats are excluded. Network responses are time- and size-bounded.
+- Windows/Linux native checks use the chosen release's own channel manifest and exact GitHub release directory. Selecting a newer stable candidate uses its stable manifest; an invalid manifest is never replaced with an unrelated feed.
 - Native checks must report that the exact version is available. Every installer URL must match an API-listed platform asset under that release. Automatic download, install-on-quit and downgrade are disabled.
 - Update actions run outside the filesystem IPC queue, keeping workspace actions responsive during network checks. In-flight operations lock channel changes, and late native progress cannot replace a completed result.
 - No account, token, telemetry or project upload is required. Update discovery contacts GitHub only for release information.

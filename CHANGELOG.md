@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Added a macOS Terminal update button and copyable command with verified downloads, graceful shutdown, rollback and retained app backups.
+- Nightly subscribers receive a newer stable release when it is ahead of the latest nightly, while keeping Nightly selected for future previews.
+- Added update progress, save-before-restart protection and retryable installation errors.
+- Refreshed Settings and subfolder creation, fixed project search, and repositioned the sidebar toggle and update control.
+- Kept portable Windows and Linux deb updates on their supported manual installation paths.
+
 ## 0.2.1
 
 - Added opt-in Stable and Nightly update channels with channel-specific checks and downloads.

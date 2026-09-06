@@ -8,8 +8,9 @@ interface Operations {
   discover: (channel: UpdateChannel) => Promise<ReleaseCandidate | null>;
   prepare: (release: ReleaseCandidate, channel: UpdateChannel) => Promise<void>;
   download: () => Promise<unknown>;
-  install: () => void;
+  install: () => void | Promise<void>;
   open: (url: string) => Promise<unknown>;
+  prepareTerminal?: (release: ReleaseCandidate) => Promise<{ command: string; run: () => Promise<void> }>;
   emit: (status: UpdateStatus) => void;
 }
 
@@ -19,6 +20,8 @@ export class UpdateController {
   private candidate: ReleaseCandidate | null = null;
   private pending: Promise<void> | null = null;
   private switching = false;
+  private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
+  private launchingTerminal = false;
   constructor(
     private channel: UpdateChannel,
     private readonly ops: Operations,
@@ -58,6 +61,7 @@ export class UpdateController {
       return Promise.resolve();
     }
     this.candidate = null;
+    this.terminalUpdate = null;
     this.send({ state: 'checking' });
     this.pending = this.performCheck()
       .catch(() => {
@@ -80,6 +84,8 @@ export class UpdateController {
       return;
     }
     const comparison = compareReleaseVersions(candidate.version, this.ops.currentVersion);
+    const sourceChannel = candidate.sourceChannel ?? this.channel;
+    const stableFallback = this.channel === 'nightly' && sourceChannel === 'stable';
     if (comparison <= 0) {
       this.candidate = candidate;
       this.send({
@@ -89,18 +95,26 @@ export class UpdateController {
         manualDownload: comparison < 0,
         message:
           comparison < 0
-            ? `Installed version is newer than ${this.channel} ${candidate.version}. Automatic downgrades are disabled. Back up your workspace before manually replacing the app.`
-            : `You’re on the latest ${this.channel} version.`,
+            ? `Installed version is newer than ${sourceChannel} ${candidate.version}. Automatic downgrades are disabled. Back up your workspace before manually replacing the app.${stableFallback ? ' Nightly remains selected for future checks.' : ''}`
+            : stableFallback
+              ? `You’re on stable ${candidate.version}, the newest build currently available. Nightly remains selected for future checks.`
+              : `You’re on the latest ${this.channel} version.`,
       });
       return;
     }
-    if (!this.ops.manual) await this.ops.prepare(candidate, this.channel);
+    if (!this.ops.manual) await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
+    if (this.ops.manual && this.ops.prepareTerminal)
+      this.terminalUpdate = await this.ops.prepareTerminal(candidate);
     this.candidate = candidate;
     this.send({
       state: 'available',
       version: candidate.version,
       releaseUrl: candidate.url,
       manualDownload: this.ops.manual,
+      terminalCommand: this.terminalUpdate?.command,
+      message: stableFallback
+        ? `Stable ${candidate.version} is newer than the latest nightly. Nightly remains selected for future checks.`
+        : undefined,
     });
   }
   progress(percent: number) {
@@ -110,14 +124,24 @@ export class UpdateController {
   async download() {
     if (!this.candidate || this.switching || this.pending) throw new Error('Check for an update first.');
     if (this.status.manualDownload) {
+      if (this.terminalUpdate && this.status.state === 'available') {
+        if (this.launchingTerminal) return;
+        this.launchingTerminal = true;
+        try {
+          await this.terminalUpdate.run();
+        } finally {
+          this.launchingTerminal = false;
+        }
+        return;
+      }
       await this.ops.open(this.candidate.url);
       return;
     }
     if (this.status.state !== 'available') throw new Error('No update is ready to download.');
-    this.send({ ...this.status, state: 'downloading', percent: 0 });
+    this.send({ ...this.status, state: 'downloading', percent: 0, message: undefined });
     try {
       await this.ops.download();
-      this.send({ ...this.status, state: 'downloaded', percent: 100 });
+      this.send({ ...this.status, state: 'downloaded', percent: 100, message: undefined });
     } catch {
       this.candidate = null;
       this.send({
@@ -126,9 +150,23 @@ export class UpdateController {
       });
     }
   }
-  install() {
-    if (this.status.state !== 'downloaded' || this.ops.manual)
+  async install() {
+    if (this.status.state !== 'downloaded' || this.ops.manual || this.status.installing)
       throw new Error('Download an update before installing.');
-    this.ops.install();
+    this.send({ ...this.status, installing: true, message: 'Preparing to restart…' });
+    try {
+      await this.ops.install();
+    } catch {
+      this.installationFailed();
+      throw new Error('The update could not be installed. Your current app is still available.');
+    }
+  }
+  installationFailed() {
+    if (!this.status.installing) return;
+    this.send({
+      ...this.status,
+      installing: false,
+      message: 'Installation could not start. Your current app is unchanged. Try restarting to update again.',
+    });
   }
 }

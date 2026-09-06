@@ -69,7 +69,11 @@ jobs:
       - name: Verify and launch the macOS release archive
         if: matrix.platform == 'macos'
         shell: bash
-        run: bash scripts/verify-mac.sh
+        env:
+          IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
+        run: |
+          node --test scripts/update-macos.test.mjs
+          bash scripts/verify-mac.sh
       - name: Smoke packaged Windows application
         if: matrix.platform == 'windows'
         run: node scripts/verify-packaged.mjs windows
