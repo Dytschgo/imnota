@@ -46,6 +46,7 @@ export interface ReleaseCandidate {
   url: string;
   feedUrl: string;
   assetUrls: string[];
+  checksumUrl?: string;
 }
 export function selectRelease(
   value: unknown,
@@ -95,7 +96,13 @@ export function selectRelease(
             : asset.name.endsWith('.AppImage') || asset.name.endsWith('.deb')),
     )
     .map((asset) => asset.browser_download_url);
-  return { version, url: `${repository}/releases/tag/${release.tag_name}`, feedUrl, assetUrls };
+  return {
+    version,
+    url: `${repository}/releases/tag/${release.tag_name}`,
+    feedUrl,
+    assetUrls,
+    checksumUrl: hasAsset((name) => name === 'SHA256SUMS.txt') ? `${feedUrl}SHA256SUMS.txt` : undefined,
+  };
 }
 
 export async function discoverRelease(

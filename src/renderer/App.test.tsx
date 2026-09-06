@@ -142,6 +142,20 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
   });
 
+  it('runs an available Terminal update from the app banner', async () => {
+    const downloadUpdate = vi.fn(async () => {});
+    renderApp({
+      getUpdateStatus: async () => ({
+        state: 'available',
+        version: '0.3.0',
+        terminalCommand: 'curl -fsSL https://updates.example/imnota | sh',
+      }),
+      downloadUpdate,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Run update in Terminal' }));
+    await waitFor(() => expect(downloadUpdate).toHaveBeenCalledOnce());
+  });
+
   it('does not restart for an update when the current editor state cannot be saved', async () => {
     let emitUpdate: (status: { state: 'downloaded'; version: string }) => void = () => {};
     const installUpdate = vi.fn(async () => {});

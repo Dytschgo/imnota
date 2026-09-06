@@ -125,6 +125,7 @@ export type UpdateChannel = 'stable' | 'nightly';
 export type UpdateState =
   'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
 export interface UpdateStatus {
+  terminalCommand?: string;
   installing?: boolean;
   channel?: UpdateChannel;
   releaseUrl?: string;

@@ -209,6 +209,28 @@ it('uses exact manual Mac release links and never prepares or downloads a native
   expect(ops.prepare).not.toHaveBeenCalled();
   expect(ops.download).not.toHaveBeenCalled();
 });
+it('runs the prepared terminal updater for a Mac upgrade without opening GitHub', async () => {
+  const { ops, candidate } = controller(true);
+  const run = vi.fn(async () => {});
+  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run }));
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+  await instance.check();
+  expect(prepareTerminal).toHaveBeenCalledWith(candidate);
+  expect(instance.getStatus().terminalCommand).toBe('/bin/bash local-update.command');
+  await instance.download();
+  expect(run).toHaveBeenCalledOnce();
+  expect(ops.open).not.toHaveBeenCalled();
+  expect(ops.prepare).not.toHaveBeenCalled();
+});
+it('does not prepare a terminal command for a downgrade', async () => {
+  const { ops } = controller(true);
+  ops.currentVersion = '1.0.0';
+  const prepareTerminal = vi.fn();
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+  await instance.check();
+  expect(prepareTerminal).not.toHaveBeenCalled();
+  expect(instance.getStatus().terminalCommand).toBeUndefined();
+});
 it('offers a manual stable fallback for a newer installed nightly, never a downgrade', async () => {
   const { ops } = controller();
   ops.currentVersion = nightlyVersion;

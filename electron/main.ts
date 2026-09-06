@@ -44,6 +44,7 @@ import {
 import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
+import { prepareTerminalUpdate } from './terminal-update.js';
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -819,6 +820,17 @@ function configureAutoUpdates(): void {
       (process.platform === 'linux' && !process.env.APPIMAGE),
     discover: (channel) => discoverRelease(channel, process.platform),
     prepare: (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+    prepareTerminal:
+      process.platform === 'darwin'
+        ? (release) =>
+            prepareTerminalUpdate(
+              release,
+              path.resolve(app.getPath('exe'), '../../..'),
+              path.join(app.getAppPath(), 'scripts/update-macos.sh'),
+              app.getPath('temp'),
+              app.getVersion(),
+            )
+        : undefined,
     download: () => autoUpdater.downloadUpdate(),
     install: () => autoUpdater.quitAndInstall(),
     open: (url) => shell.openExternal(url),

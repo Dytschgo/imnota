@@ -690,10 +690,18 @@ export default function App() {
               <Download size={16} />
               <span>
                 Imnota {updateStatus.version ?? 'update'} is available.
-                {updateStatus.manualDownload ? ' Download it for the selected channel.' : ''}
+                {updateStatus.terminalCommand
+                  ? ' Run the verified update in Terminal.'
+                  : updateStatus.manualDownload
+                    ? ' Download it for the selected channel.'
+                    : ''}
               </span>
               <Button onClick={() => void downloadUpdate()}>
-                {updateStatus.manualDownload ? 'Open download' : 'Download update'}
+                {updateStatus.terminalCommand
+                  ? 'Run update in Terminal'
+                  : updateStatus.manualDownload
+                    ? 'Open download'
+                    : 'Download update'}
               </Button>
             </div>
           )}

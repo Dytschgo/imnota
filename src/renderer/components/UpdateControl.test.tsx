@@ -25,6 +25,7 @@ function setup() {
     setSettings,
     downloadUpdate: vi.fn(async () => {}),
     installUpdate: vi.fn(async () => {}),
+    copyText: vi.fn(async () => {}),
   } as unknown as ImnotaBridge;
   return { check, setSettings, emit: (status: UpdateStatus) => listener(status) };
 }
@@ -102,4 +103,21 @@ it('moves from available through download progress to a ready-to-install action'
   await act(async () => api.emit({ state: 'downloaded', version: '0.3.0' }));
   fireEvent.click(screen.getByRole('button', { name: 'Restart to install' }));
   await waitFor(() => expect(window.imnota.installUpdate).toHaveBeenCalledOnce());
+});
+
+it('copies and runs the supplied Terminal command for an available upgrade', async () => {
+  const api = setup();
+  const command = 'curl -fsSL https://updates.example/imnota | sh';
+  render(<UpdateControl />);
+  await act(async () =>
+    api.emit({ state: 'available', version: '0.3.0', terminalCommand: command, manualDownload: true }),
+  );
+
+  expect(screen.getByText(command)).toBeInTheDocument();
+  expect(screen.getAllByText(/Terminal downloads and verifies the update/)).toHaveLength(2);
+  expect(screen.queryByText(/This build opens the release download page/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
+  await waitFor(() => expect(window.imnota.copyText).toHaveBeenCalledWith(command));
+  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
 });

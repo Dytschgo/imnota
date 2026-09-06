@@ -10,6 +10,7 @@ interface Operations {
   download: () => Promise<unknown>;
   install: () => void | Promise<void>;
   open: (url: string) => Promise<unknown>;
+  prepareTerminal?: (release: ReleaseCandidate) => Promise<{ command: string; run: () => Promise<void> }>;
   emit: (status: UpdateStatus) => void;
 }
 
@@ -19,6 +20,8 @@ export class UpdateController {
   private candidate: ReleaseCandidate | null = null;
   private pending: Promise<void> | null = null;
   private switching = false;
+  private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
+  private launchingTerminal = false;
   constructor(
     private channel: UpdateChannel,
     private readonly ops: Operations,
@@ -58,6 +61,7 @@ export class UpdateController {
       return Promise.resolve();
     }
     this.candidate = null;
+    this.terminalUpdate = null;
     this.send({ state: 'checking' });
     this.pending = this.performCheck()
       .catch(() => {
@@ -95,12 +99,15 @@ export class UpdateController {
       return;
     }
     if (!this.ops.manual) await this.ops.prepare(candidate, this.channel);
+    if (this.ops.manual && this.ops.prepareTerminal)
+      this.terminalUpdate = await this.ops.prepareTerminal(candidate);
     this.candidate = candidate;
     this.send({
       state: 'available',
       version: candidate.version,
       releaseUrl: candidate.url,
       manualDownload: this.ops.manual,
+      terminalCommand: this.terminalUpdate?.command,
     });
   }
   progress(percent: number) {
@@ -110,6 +117,16 @@ export class UpdateController {
   async download() {
     if (!this.candidate || this.switching || this.pending) throw new Error('Check for an update first.');
     if (this.status.manualDownload) {
+      if (this.terminalUpdate && this.status.state === 'available') {
+        if (this.launchingTerminal) return;
+        this.launchingTerminal = true;
+        try {
+          await this.terminalUpdate.run();
+        } finally {
+          this.launchingTerminal = false;
+        }
+        return;
+      }
       await this.ops.open(this.candidate.url);
       return;
     }

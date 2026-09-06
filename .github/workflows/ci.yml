@@ -61,7 +61,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - name: Verify packaged Mac application
         if: matrix.os == 'macos-latest'
-        run: bash scripts/verify-mac.sh
+        env:
+          IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
+        run: |
+          node --test scripts/update-macos.test.mjs
+          bash scripts/verify-mac.sh
       - name: Smoke packaged Windows application
         if: matrix.os == 'windows-latest'
         run: node scripts/verify-packaged.mjs windows

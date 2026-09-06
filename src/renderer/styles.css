@@ -1671,6 +1671,30 @@ button:disabled {
 .update-settings .update-progress {
   width: 100%;
 }
+.terminal-update-command {
+  width: 100%;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.terminal-update-command > p {
+  margin: 0 0 7px;
+}
+.terminal-update-command > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.terminal-update-command code {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

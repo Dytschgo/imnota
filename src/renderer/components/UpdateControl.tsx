@@ -102,8 +102,29 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
       </Button>
       {status.state === 'available' && (
         <Button disabled={locked} onClick={() => void run(() => window.imnota.downloadUpdate())}>
-          {status.manualDownload ? 'Open selected channel download' : 'Download update'}
+          {status.terminalCommand
+            ? 'Run update in Terminal'
+            : status.manualDownload
+              ? 'Open selected channel download'
+              : 'Download update'}
         </Button>
+      )}
+      {status.state === 'available' && status.terminalCommand && (
+        <div className="terminal-update-command">
+          <p>
+            Terminal downloads and verifies the update, then closes, replaces and reopens Imnota. A backup is
+            retained.
+          </p>
+          <div>
+            <code>{status.terminalCommand}</code>
+            <Button
+              variant="soft"
+              onClick={() => void run(() => window.imnota.copyText(status.terminalCommand!))}
+            >
+              Copy command
+            </Button>
+          </div>
+        </div>
       )}
       {status.state === 'downloading' && (
         <div
@@ -134,9 +155,11 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
         <summary>Update privacy and installation</summary>
         <p>Checking contacts GitHub for release information only. Your project files stay local.</p>
         <p>
-          {status.manualDownload
-            ? 'This build opens the release download page. Replace the app after downloading; your workspace is kept separately.'
-            : 'Updates download only when you choose them. Imnota restarts only when you choose to install.'}
+          {status.terminalCommand
+            ? 'Terminal downloads and verifies the update, then closes, replaces and reopens Imnota. A backup is retained.'
+            : status.manualDownload
+              ? 'This build opens the release download page. Replace the app after downloading; your workspace is kept separately.'
+              : 'Updates download only when you choose them. Imnota restarts only when you choose to install.'}
         </p>
       </details>
       {confirmNightly && (
