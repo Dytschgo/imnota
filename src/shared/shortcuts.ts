@@ -108,7 +108,7 @@ const DEFAULT_COMMON: ResolvedShortcutBindings = {
 };
 
 const RESERVED_BY_PLATFORM: Record<ShortcutPlatform, ReadonlySet<string>> = {
-  mac: new Set(['Meta+Q', 'Meta+W', 'Meta+H', 'Meta+M', 'Meta+Space', 'Meta+Tab', 'Alt+Meta+Escape']),
+  mac: new Set(['Meta+Q', 'Meta+W', 'Meta+H', 'Meta+M', 'Meta+Space', 'Meta+Tab', 'Meta+Alt+Escape']),
   windows: new Set(['Alt+F4', 'Ctrl+Alt+Delete', 'Ctrl+Shift+Escape', 'Meta+D', 'Meta+L', 'Meta+Tab']),
   linux: new Set(['Alt+F4', 'Ctrl+Alt+Delete', 'Ctrl+Alt+F1', 'Meta+D', 'Meta+L', 'Meta+Tab']),
 };
@@ -159,12 +159,18 @@ export function normalizeShortcut(input: string, platform: ShortcutPlatform): st
   return [...MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier)), key].join('+');
 }
 
+type ShortcutKeyboardEvent = Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'> &
+  Partial<Pick<KeyboardEvent, 'code'>>;
+
 export function keyboardEventToShortcut(
-  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
+  event: ShortcutKeyboardEvent,
   platform: ShortcutPlatform,
 ): string | null {
   if (['Alt', 'Control', 'Meta', 'Shift'].includes(event.key)) return null;
-  const key = event.key === ' ' ? 'Space' : event.key;
+  // Shift changes top-row digit `key` values to symbols on common layouts. The physical Digit code keeps
+  // configured digit shortcuts stable, while letters intentionally continue to follow layout-aware `key`.
+  const digitFromCode = event.code?.match(/^Digit([0-9])$/)?.[1];
+  const key = digitFromCode ?? (event.key === ' ' ? 'Space' : event.key);
   const parts = [
     event.metaKey ? 'Meta' : '',
     event.ctrlKey ? 'Ctrl' : '',
@@ -253,7 +259,7 @@ export function formatShortcut(binding: string | null, platform: ShortcutPlatfor
 }
 
 export function shortcutMatchesEvent(
-  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
+  event: ShortcutKeyboardEvent,
   binding: string | null,
   platform: ShortcutPlatform,
 ): boolean {

@@ -58,6 +58,15 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ bindings: {} }));
   });
 
+  it('records shifted top-row digits from their Digit code', async () => {
+    const onChange = vi.fn(async () => {});
+    render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
+    const recorder = screen.getByRole('button', { name: 'Shortcut for Text' });
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ bindings: { 'tool.text': 'Ctrl+Shift+3' } }));
+  });
+
   it('offers replay without mutating completion state itself', () => {
     const onReplay = vi.fn();
     render(<OnboardingSettings value={{ completed: true, completedVersion: 1 }} onReplay={onReplay} />);

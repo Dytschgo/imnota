@@ -39,6 +39,7 @@ describe('shortcut normalization', () => {
     ]);
     expect(validateShortcut('tool.arrow', 'T', bindings, 'windows')).toMatchObject({ kind: 'conflict' });
     expect(isReservedShortcut('Alt+F4', 'windows')).toBe(true);
+    expect(isReservedShortcut('option+cmd+escape', 'mac')).toBe(true);
     expect(validateShortcut('tool.arrow', 'Alt+F4', bindings, 'windows')).toMatchObject({ kind: 'reserved' });
   });
 
@@ -53,6 +54,31 @@ describe('shortcut runtime matching', () => {
     const event = { key: 'c', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true };
     expect(keyboardEventToShortcut(event, 'windows')).toBe('Ctrl+Shift+C');
     expect(shortcutMatchesEvent(event, 'Ctrl+Shift+C', 'windows')).toBe(true);
+  });
+
+  it('uses Digit codes for shifted top-row numbers from real keyboard events', () => {
+    const collections = new KeyboardEvent('keydown', {
+      key: '!',
+      code: 'Digit1',
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    const inspector = new KeyboardEvent('keydown', {
+      key: '@',
+      code: 'Digit2',
+      metaKey: true,
+      shiftKey: true,
+    });
+
+    expect(keyboardEventToShortcut(collections, 'windows')).toBe('Ctrl+Shift+1');
+    expect(shortcutMatchesEvent(collections, 'Ctrl+Shift+1', 'windows')).toBe(true);
+    expect(keyboardEventToShortcut(inspector, 'mac')).toBe('Meta+Shift+2');
+    expect(shortcutMatchesEvent(inspector, 'Meta+Shift+2', 'mac')).toBe(true);
+  });
+
+  it('continues to use layout-aware key values for letters', () => {
+    const letter = new KeyboardEvent('keydown', { key: 'z', code: 'KeyY', ctrlKey: true });
+    expect(keyboardEventToShortcut(letter, 'windows')).toBe('Ctrl+Z');
   });
 
   it('ignores typing, dialogs, composition, repeats, and reserved bindings', () => {
