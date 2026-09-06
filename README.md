@@ -2,7 +2,11 @@
 
 Screenshots that AI understands.
 
-Imnota is a local-first desktop tool for turning annotated screenshots into structured context for AI assistants and coding agents. Add a screenshot, mark what matters, write the surrounding context, and export a brief that an agent can actually use.
+Imnota is a local-first desktop tool for turning annotated screenshots into prompt bundles for AI assistants and coding agents. Add screenshots to a collection, mark what matters, add an optional description, and copy the generated Markdown and high-resolution prompt image into the tool you already use.
+
+```text
+Paste or import screenshots → Annotate → Describe → Copy prompt bundle
+```
 
 ## Why local-first
 
@@ -13,11 +17,15 @@ Projects are plain folders containing JSON, Markdown and image files. There is n
 - Electron, React and TypeScript desktop application
 - Screenshot import, paste and drag-and-drop for PNG, JPEG and WebP
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
-- Structured screenshot notes with status, priority and tags
+- Collections with archive/restore controls and a single optional overall context
+- One optional Markdown description and Low, Medium or High agent priority per screenshot
+- Direct include/exclude controls without deleting screenshots
 - Undo and redo for annotation edits
-- AI-ready Markdown context builder
-- Annotated PNG and complete ZIP package exports
-- Light, dark and system themes
+- Timestamped Markdown + PNG prompt bundles for the current collection
+- Automatic splitting for readable, clipboard-safe exports on a white background
+- Screenshot deletion through the operating-system trash with Undo where supported
+- Light, dark, system and curated appearance settings
+- First-run onboarding that can be replayed from Settings
 - Secure Electron preload bridge with context isolation and no renderer Node.js access
 
 ## Supported platforms
@@ -61,6 +69,8 @@ corepack enable
 corepack pnpm install
 corepack pnpm dev
 ```
+
+The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
 Quality checks:
 
@@ -109,31 +119,31 @@ examples/example-project/ Example metadata-only project
 
 ## User data format
 
-An Imnota workspace is a folder selected by the user. Each project contains:
+An Imnota workspace is a folder selected by the user. Each project contains local, portable collection data:
 
 ```text
 My Project/
   project.json
-  rounds/
-    001-first-feedback/
+  collections/
+    001-collection/
       screenshots/
       annotations/
-      notes/
       exports/
-  exports/
 ```
 
-`project.json` is versioned with `schemaVersion`. Annotations are JSON, notes are Markdown, and the original screenshots are never overwritten by the annotation layer. See [docs/data-format.md](docs/data-format.md).
+`project.json` is versioned with `schemaVersion`. Screenshot identity and order are stored separately from the editable title, description, priority and export visibility. Annotations remain JSON and source screenshots are never overwritten. See [the data format](docs/data-format.md).
 
-Feedback rounds keep iterations separate inside a project. Create, rename, duplicate, archive or restore them from the screenshot panel. Copy/export uses the current round unless “Export all feedback rounds” is enabled in Context Builder. Existing version-1 projects retain their original files and a metadata backup when migrated.
+Collections keep related screenshots together. New collections start empty, the newest collection remains active after export, and older collections can be archived and restored. Copy and export always use the current collection; there is no all-collection export mode.
 
 Pan with Select on the image, Space-drag, middle-drag or trackpad scrolling. Pinch or Ctrl/Command-wheel zooms at the cursor. Use `0` to fit and `1` for actual size. Double-click text to edit; Enter saves, Shift+Enter adds a line, Escape cancels.
 
-“Copy AI context” copies Markdown and opens a sharing dialog with annotated PNGs. **Copy text + image (experimental)** places text and one annotated image on the clipboard together; multiple references become one labelled image at full resolution. The receiving app may paste only one format. The dialog retains individual image-copy actions and the export folder as a fallback. For that fallback, paste text first, then paste or attach images: copying an individual image replaces clipboard text. Oversized combined images are refused instead of made unreadably small.
+“Copy prompt bundle” creates a fresh timestamped PNG + Markdown set for the current collection. Imnota may split a large collection automatically; users do not choose split points. Excluded screenshots stay in the collection and are called out in Markdown, but do not appear in prompt PNGs or cause the remaining Picture numbers to change.
+
+Combined clipboard copy offers the matching Markdown and PNG together, but the receiving editor decides which clipboard formats it accepts. Imnota cannot promise that both will arrive in one paste. Use **Copy Markdown only**, **Copy image only**, or open the generated files/folder when a target accepts only one format. See the [user guide](docs/user-guide.md).
 
 ## Privacy and security
 
-Imnota does not require internet access for its core workflow. Imported project files are treated as untrusted data. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

@@ -1,17 +1,20 @@
-# Subfolders and simple screenshot context
+# Collections and simple screenshot context
 
-This update applies the explicit feedback from the second set of screenshots:
+This filename is retained for existing inbound links. The user-facing term is now **Collection**, not Subfolder or feedback round.
 
-- Rename the feedback-round controls and exported label to Subfolder.
-- Use Subfolder 1 for new projects and Subfolder N for new subfolders.
-- Keep existing names and disk paths unchanged. No workspace migration is required.
-- Replace the separate description and eight note editors with one Problem description editor.
-- Preserve populated older fields under collapsed, read-only Previous notes. Existing export exclusions remain intact until the primary problem description is edited; editing opts that field into export. Existing screenshot descriptions are also included in the brief.
-- Collapse status, priority and tags under Screenshot details.
-- Give the Line tool a line icon instead of a rectangle icon.
+The primary workflow uses:
 
-Placement clarified: the refresh and sidebar-collapse controls sit in the side navigation beneath the logo. Collapsing leaves a narrow rail so refresh and expand remain accessible. The annotation toolbar stays above the canvas. The macOS traffic-light safe area remains unchanged.
+- Empty new collections with stable internal IDs, editable names and archive/restore actions.
+- One optional Overall context per collection.
+- One optional Description per screenshot.
+- Low, Medium or High agent priority.
+- Direct eye/crossed-eye prompt visibility.
+- Current-collection-only Markdown + PNG prompt bundles.
 
-Validation covers a single editor, preserved older fields, plain-text rendering, export labels and old export preferences, plus the Electron save/reopen workflow. This is a source update, not a new published release.
+Legacy descriptions and populated structured notes are merged into the single Description during schema migration. Legacy project instructions, desired outcomes and technical constraints are merged into Overall context. Existing files and a versioned metadata backup are retained until the migration commits successfully.
 
-Local verification: 27 tests, formatting, lint, both TypeScript configurations, production build and Electron smoke pass. Smoke checks include unchanged legacy exclusions, description editing and export inclusion after reopening. The dark desktop layout was inspected from an actual Electron screenshot. Native Mac packaging has not been rerun for this update.
+Priority appears in Markdown but never sorts screenshots. Export-time Picture numbers follow the user's current order and remain stable across automatically split bundles. An excluded screenshot remains editable, is omitted from PNGs and appears as a textual exclusion in Markdown.
+
+Deleting is a separate action: the screenshot image, annotations and description move to the operating-system trash, and Imnota offers immediate Undo where restoration is supported.
+
+See the [user guide](user-guide.md) and [data format](data-format.md) for the current behavior.

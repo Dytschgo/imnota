@@ -1,22 +1,46 @@
 # Data format
 
-The on-disk format is intentionally transparent.
+The on-disk format is local, portable and versioned. Schema 3 uses collections and one description per screenshot.
 
 ```text
 project.json
-rounds/001-first-feedback/screenshots/001-login-screen.png
-rounds/001-first-feedback/annotations/001-login-screen.png.json
-rounds/001-first-feedback/notes/001-login-screen.png.md
-rounds/001-first-feedback/exports/context.md
-exports/context.md  # all-round export
+collections/001-collection/screenshots/001-login-screen.png
+collections/001-collection/annotations/001-login-screen.png.json
+collections/001-collection/descriptions/001-login-screen.png.md
+collections/001-collection/exports/Collection 01 - 260907-184205 - 01.png
+collections/001-collection/exports/Collection 01 - 260907-184205 - 01.md
+.imnota-recovery.json       # present only when recovery is needed
+.imnota-undo/               # bounded immediate-delete recovery data
 ```
 
-`project.json` has `schemaVersion: 2`, a project identity, timestamps, status, tags, favourite state, feedback rounds, ordered screenshot records and export preferences. Each round has a stable folder ID, editable name, creation date and archived flag. Each screenshot has a `roundId`, original and stored filenames, dimensions and references to annotation and notes files. Renaming a round does not rename its folder or break references. Duplicating a round copies images, notes and annotations to independent files.
+`project.json` contains project identity and timestamps, ordered collections, ordered screenshot records and local export preferences. A collection has an immutable ID, editable name, creation/update timestamps, archived state and optional Overall context. A new collection starts empty. Renaming it never changes its folder ID.
 
-Annotation JSON is an array of editable records. Coordinates are stored in original-image pixels, so the same data remains meaningful at different canvas zoom levels. Notes Markdown uses one `## fieldName` heading per structured note field. Empty fields are not written.
+Each screenshot record contains:
 
-Version-1 projects are migrated on opening or discovery. Imnota copies their files into the first feedback round and commits the new metadata only after the copies succeed. The original folders and `project.v1.backup.json` remain untouched for rollback. If a copy fails, the version-1 metadata remains active; the next open can retry. Do not open a migrated project in an older Imnota version. For rollback, make a separate copy of the project, restore `project.v1.backup.json` as `project.json`, and use its retained original folders. New version-2 edits are not reflected in that old backup.
+- Immutable ID and collection ID.
+- Editable title and immutable original filename.
+- One Markdown description, also persisted in its description sidecar.
+- Low, Medium or High priority; Medium is the default.
+- `includeInExport` and a manually sortable `position`.
+- Creation/update timestamps, stored filename, dimensions and relative annotation/description paths.
+- An optional conflict marker for externally conflicting copies.
 
-Round exports live in the round's `exports` folder. All-round exports live in the project-level `exports` folder. ZIP briefs place annotated PNGs alongside `context.md`, matching the brief's filenames. Notes and optional original screenshots/annotation metadata retain their round-relative paths. A brief ZIP without originals is not a complete editable project backup; copy the whole project folder to back up all data, recovery files and excluded screenshots.
+The record's `position` orders screenshots within its collection. Picture numbers are not stored identities: export derives them from the current order. Excluding or reordering a screenshot therefore never changes internal IDs.
 
-Future schema versions are rejected rather than silently rewritten. Notes retain multiline Markdown; headings matching reserved note field names separate fields.
+Annotation JSON contains editable records in original-image coordinates. Canvas zoom does not alter them. Description sidecars preserve Markdown and line breaks. Missing descriptions are valid.
+
+## Prompt exports
+
+Exports live only under the active collection. Every copy/export action creates a new local timestamped set and does not overwrite older sets. The sanitized collection name, local `YYMMDD-HHmmss` timestamp and final two-digit bundle number form each matching PNG/Markdown filename.
+
+Automatic splitting may produce several pairs. Original Picture numbers continue across pairs. Excluded screenshots stay in project data, do not appear in PNGs and are explicitly recorded in generated Markdown. Prompt outputs are sharing artifacts, not editable project backups; back up the full project folder to retain sources, annotations, descriptions, recovery data and exclusions.
+
+## Migration and compatibility
+
+Opening schema 1 or 2 data migrates feedback rounds/subfolders to collections. Existing screenshot descriptions and populated legacy note fields are merged into the single Description. Project-level desired outcome, AI instructions and technical constraints are merged into collection Overall context. Legacy `critical` priority becomes High; tags and screenshot statuses do not enter the schema 3 primary model.
+
+Migration copies source content into `collections/` before committing schema 3 metadata. It preserves `project.v1.backup.json` or `project.v2.backup.json` and the legacy source files for manual recovery. A failed copy leaves the old metadata active so migration can be retried.
+
+Do not open a migrated project in an older Imnota version. To attempt rollback, first copy the whole project, then restore the matching versioned backup as `project.json` and use the retained legacy files. Schema 3 edits are not written back into legacy backups.
+
+Unknown future schema versions are rejected rather than silently rewritten.
