@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
+import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
 import App, { CollectionControls, matchesProjectSearch, SettingsView } from './App';
 
@@ -226,6 +227,36 @@ describe('feedback controls', () => {
     await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(context).toHaveValue('C'));
     expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe('C');
+  });
+
+  it('routes a remapped fit shortcut to the canvas without redispatching keydown', async () => {
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            shortcuts: { bindings: { 'canvas.fit': 'Ctrl+9' } },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    const canvasProps = annotationCanvasSpy.mock.calls.at(-1)?.[0] as {
+      stageRef: { current: { container(): HTMLElement } | null };
+    };
+    const container = document.createElement('div');
+    canvasProps.stageRef.current = { container: () => container };
+    const commands: CanvasCommand[] = [];
+    container.addEventListener(CANVAS_COMMAND_EVENT, (event) => {
+      commands.push((event as CustomEvent<CanvasCommand>).detail);
+    });
+    const keydowns = vi.fn();
+    window.addEventListener('keydown', keydowns);
+    fireEvent.keyDown(window, { key: '9', code: 'Digit9', ctrlKey: true });
+    window.removeEventListener('keydown', keydowns);
+    expect(commands).toEqual(['fit']);
+    expect(keydowns).toHaveBeenCalledOnce();
   });
 
   it('runs an available Terminal update from the app banner', async () => {

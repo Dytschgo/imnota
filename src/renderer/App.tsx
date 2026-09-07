@@ -24,6 +24,7 @@ import { usePreferences } from './app/usePreferences';
 import { useProjectPersistence } from './app/useProjectPersistence';
 import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
+import { dispatchCanvasCommand } from './canvas/commands';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, EmptyState, IconButton } from './components/ui';
@@ -596,8 +597,8 @@ export default function App() {
     'prompt.copy': () => void handlePromptAction(promptBundles.copyFresh(1)),
     'panel.toggleCollections': () => store.set({ leftPanelOpen: !store.leftPanelOpen }),
     'panel.toggleInspector': () => store.set({ rightPanelOpen: !store.rightPanelOpen }),
-    'canvas.fit': () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' })),
-    'canvas.actualSize': () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' })),
+    'canvas.fit': () => dispatchCanvasCommand(stageRef.current, 'fit'),
+    'canvas.actualSize': () => dispatchCanvasCommand(stageRef.current, 'actual-size'),
     'collection.new': () =>
       document.querySelector<HTMLButtonElement>('[data-testid="new-collection"]')?.click(),
     'collection.overallContext': () => {
@@ -846,11 +847,9 @@ export default function App() {
             onSelectAnnotation={setSelectedAnnotationId}
             onUndo={undoAnnotations}
             onRedo={redoAnnotations}
-            onFit={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }))}
-            onActualSize={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }))}
-            onZoom={(delta) =>
-              window.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? '+' : '-' }))
-            }
+            onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
+            onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
+            onZoom={(delta) => dispatchCanvasCommand(stageRef.current, delta > 0 ? 'zoom-in' : 'zoom-out')}
             onFlush={flushAll}
             onSaveProject={persistence.saveProjectMetadata}
             onUpdateProject={(project) => queueProjectSave(project)}
