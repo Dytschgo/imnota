@@ -194,13 +194,21 @@ export default function App() {
   }, [store.settings.interfaceScale]);
 
   useEffect(() => {
-    const unsubscribe = window.imnota.onUpdateStatus((status) => setUpdateStatus(status));
+    const unsubscribe = window.imnota.onUpdateStatus((status) => {
+      if (status.state !== 'downloaded' || status.installing !== true) allowClose.current = false;
+      setUpdateStatus(status);
+    });
     void window.imnota
       .getUpdateStatus()
       .then(setUpdateStatus)
       .catch(() => undefined);
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (persistence.hasUnsavedChanges || contentPersistence.hasUnsavedChanges)
+      allowClose.current = false;
+  }, [persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
 
   useEffect(() => {
     setHistory([]);
@@ -227,6 +235,18 @@ export default function App() {
     if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
     return true;
   }, [persistence, contentPersistence]);
+
+  const installUpdate = useCallback(async (): Promise<void> => {
+    if (!(await flushAll())) return;
+    allowClose.current = true;
+    try {
+      await window.imnota.installUpdate();
+    } catch (reason) {
+      // A rejected native handoff leaves the app open, so future closes must flush again.
+      allowClose.current = false;
+      throw reason;
+    }
+  }, [flushAll]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -987,12 +1007,11 @@ export default function App() {
             <span>{updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is ready.`}</span>
             <Button
               variant="soft"
-              onClick={async () => {
-                if (await flushAll()) {
-                  allowClose.current = true;
-                  await window.imnota.installUpdate();
-                }
-              }}
+              onClick={() =>
+                void installUpdate().catch((reason) =>
+                  setError(reason instanceof Error ? reason.message : 'The update could not be installed.'),
+                )
+              }
             >
               Restart to update
             </Button>
@@ -1009,12 +1028,7 @@ export default function App() {
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
             onReplayOnboarding={() => setShowOnboarding(true)}
-            onInstall={async () => {
-              if (await flushAll()) {
-                allowClose.current = true;
-                await window.imnota.installUpdate();
-              }
-            }}
+            onInstall={installUpdate}
             onWorkspaceChanged={refreshProjects}
           />
         ) : !store.snapshot ? (
