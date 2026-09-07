@@ -11,7 +11,16 @@ import MarkdownIt from 'markdown-it';
 import sanitizeHtml from 'sanitize-html';
 import { loadConfig } from './config.js';
 import { openDatabase } from './database.js';
-import { deriveToken, escapeHtml, inspectPng, isSafePngFilename, randomToken, safeHashEqual, tokenHash } from './security.js';
+import { directorySize } from './maintenance.js';
+import {
+  deriveToken,
+  escapeHtml,
+  isSafePngFilename,
+  normalizePng,
+  randomToken,
+  safeHashEqual,
+  tokenHash,
+} from './security.js';
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(sourceDir, '../public');
@@ -28,14 +37,50 @@ const asyncRoute = (handler) => (request, response, next) => {
   Promise.resolve(handler(request, response, next)).catch(next);
 };
 
+function concurrencyGate(limit) {
+  let active = 0;
+  return (request, response, next) => {
+    if (active >= limit) {
+      return response.status(503).json({
+        error: { code: 'server_busy', message: 'Too many uploads are in progress. Try again later.' },
+      });
+    }
+    active += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      active -= 1;
+    };
+    response.once('finish', release);
+    response.once('close', release);
+    next();
+  };
+}
+
+async function waitForCommittedShare(db, uploadTokenHash, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const record = db.prepare('SELECT * FROM shares WHERE upload_token_hash = ?').get(uploadTokenHash);
+    if (record) return record;
+    const staging = db
+      .prepare('SELECT 1 FROM staging_uploads WHERE upload_token_hash = ?')
+      .get(uploadTokenHash);
+    if (!staging) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return undefined;
+}
+
 function jsonLimiter(settings) {
   return rateLimit({
     ...settings,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    handler: (_request, response) => response.status(429).json({
-      error: { code: 'rate_limited', message: 'Too many requests. Try again later.' },
-    }),
+    handler: (_request, response) =>
+      response.status(429).json({
+        error: { code: 'rate_limited', message: 'Too many requests. Try again later.' },
+      }),
   });
 }
 
@@ -59,9 +104,14 @@ function validateUpload(body, config) {
     throw new ApiError(413, 'payload_too_large', 'Markdown exceeds the size limit.');
   }
   if (!Array.isArray(body.images) || body.images.length > config.maxImages) {
-    throw new ApiError(400, 'invalid_request', `Images must be an array with at most ${config.maxImages} entries.`);
+    throw new ApiError(
+      400,
+      'invalid_request',
+      `Images must be an array with at most ${config.maxImages} entries.`,
+    );
   }
   const filenames = new Set();
+  let uploadedBytes = markdown.length;
   const images = body.images.map((image) => {
     if (!image || typeof image !== 'object' || !isSafePngFilename(image.filename)) {
       throw new ApiError(400, 'invalid_request', 'Each image needs a safe .png filename without a path.');
@@ -71,36 +121,65 @@ function validateUpload(body, config) {
       throw new ApiError(400, 'invalid_request', 'Image filenames must be unique.');
     }
     filenames.add(foldedName);
-    if (typeof image.dataBase64 !== 'string'
-      || image.dataBase64.length > Math.ceil(config.maxImageBytes / 3) * 4 + 4
-      || image.dataBase64.length % 4 !== 0
-      || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(image.dataBase64)) {
+    if (
+      typeof image.dataBase64 !== 'string' ||
+      image.dataBase64.length > Math.ceil(config.maxImageBytes / 3) * 4 + 4 ||
+      image.dataBase64.length % 4 !== 0 ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(image.dataBase64)
+    ) {
       throw new ApiError(400, 'invalid_request', `Image ${image.filename} has invalid base64 data.`);
     }
-    const data = Buffer.from(image.dataBase64, 'base64');
-    if (data.length > config.maxImageBytes) {
+    const uploadedData = Buffer.from(image.dataBase64, 'base64');
+    if (uploadedData.length > config.maxImageBytes) {
       throw new ApiError(413, 'payload_too_large', `Image ${image.filename} exceeds the size limit.`);
     }
-    let dimensions;
+    uploadedBytes += uploadedData.length;
+    if (uploadedBytes > config.maxBundleBytes) {
+      throw new ApiError(413, 'payload_too_large', 'The decoded upload bundle exceeds the size limit.');
+    }
+    let normalized;
     try {
-      dimensions = inspectPng(data, config.maxImageDimension);
+      normalized = normalizePng(uploadedData, {
+        maxDimension: config.maxImageDimension,
+        maxPixels: config.maxImagePixels,
+        maxInflatedBytes: config.maxInflatedPngBytes,
+      });
     } catch (error) {
       throw new ApiError(400, 'invalid_request', `${image.filename}: ${error.message}`);
     }
-    return { filename: image.filename, data, ...dimensions };
+    if (normalized.data.length > config.maxImageBytes) {
+      throw new ApiError(
+        413,
+        'payload_too_large',
+        `Normalized image ${image.filename} exceeds the size limit.`,
+      );
+    }
+    return { filename: image.filename, ...normalized };
   });
   const decodedBytes = markdown.length + images.reduce((sum, image) => sum + image.data.length, 0);
   if (decodedBytes > config.maxBundleBytes) {
-    throw new ApiError(413, 'payload_too_large', 'The decoded bundle exceeds the size limit.');
+    throw new ApiError(413, 'payload_too_large', 'The normalized bundle exceeds the size limit.');
   }
   const expiresInDays = body.expiresInDays ?? config.defaultExpiryDays;
   if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > config.maxExpiryDays) {
-    throw new ApiError(400, 'invalid_request', `expiresInDays must be between 1 and ${config.maxExpiryDays}.`);
+    throw new ApiError(
+      400,
+      'invalid_request',
+      `expiresInDays must be between 1 and ${config.maxExpiryDays}.`,
+    );
   }
   if (body.includeArchive !== undefined && typeof body.includeArchive !== 'boolean') {
     throw new ApiError(400, 'invalid_request', 'includeArchive must be a boolean.');
   }
-  return { requestId, title, markdown, images, decodedBytes, expiresInDays, includeArchive: body.includeArchive === true };
+  return {
+    requestId,
+    title,
+    markdown,
+    images,
+    decodedBytes,
+    expiresInDays,
+    includeArchive: body.includeArchive === true,
+  };
 }
 
 function uploadFingerprint(upload) {
@@ -115,7 +194,9 @@ function uploadFingerprint(upload) {
   append(upload.markdown);
   append(upload.includeArchive ? '1' : '0');
   append(upload.expiresInDays);
-  const sortedImages = [...upload.images].sort((left, right) => left.filename.localeCompare(right.filename, 'en'));
+  const sortedImages = [...upload.images].sort((left, right) =>
+    left.filename.localeCompare(right.filename, 'en'),
+  );
   for (const image of sortedImages) {
     append(image.filename);
     append(image.data);
@@ -124,8 +205,8 @@ function uploadFingerprint(upload) {
 }
 
 function shareReceipt(record, uploadToken, config, assets, recovered = false) {
-  const publicToken = deriveToken(uploadToken, record.request_id, 'public');
-  const managementToken = deriveToken(uploadToken, record.request_id, 'management');
+  const publicToken = deriveToken(config.receiptSecret, uploadToken, record.request_id, 'public');
+  const managementToken = deriveToken(config.receiptSecret, uploadToken, record.request_id, 'management');
   const url = `${config.publicOrigin}/s/${publicToken}`;
   return {
     id: record.id,
@@ -162,19 +243,47 @@ async function writeArchive(directory, images) {
 
 function markdownRenderer() {
   const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false });
-  const originalLinkOpen = renderer.renderer.rules.link_open
-    ?? ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));
+  const originalLinkOpen =
+    renderer.renderer.rules.link_open ??
+    ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));
   renderer.renderer.rules.link_open = (tokens, index, options, environment, self) => {
     tokens[index].attrSet('rel', 'nofollow noreferrer noopener');
     tokens[index].attrSet('target', '_blank');
     return originalLinkOpen(tokens, index, options, environment, self);
   };
-  return (markdown) => sanitizeHtml(renderer.render(markdown), {
-    allowedTags: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'strong', 'em', 's', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
-    allowedAttributes: { a: ['href', 'rel', 'target'] },
-    allowedSchemes: ['http', 'https', 'mailto'],
-    allowProtocolRelative: false,
-  });
+  return (markdown) =>
+    sanitizeHtml(renderer.render(markdown), {
+      allowedTags: [
+        'p',
+        'br',
+        'hr',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'blockquote',
+        'pre',
+        'code',
+        'ul',
+        'ol',
+        'li',
+        'strong',
+        'em',
+        's',
+        'a',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+      ],
+      allowedAttributes: { a: ['href', 'rel', 'target'] },
+      allowedSchemes: ['http', 'https', 'mailto'],
+      allowProtocolRelative: false,
+    });
 }
 
 function unavailablePage() {
@@ -182,10 +291,15 @@ function unavailablePage() {
 }
 
 function sharePage(record, markdownHtml, assets, publicToken, publicOrigin) {
-  const imageHtml = assets.length === 0 ? '' : `<section><h2>Images</h2><div class="images">${assets.map((asset) => {
-    const encoded = encodeURIComponent(asset.filename);
-    return `<figure><a href="/s/${publicToken}/assets/${encoded}" download><img src="/s/${publicToken}/assets/${encoded}" alt="${escapeHtml(asset.filename)}" loading="lazy"></a><figcaption>${escapeHtml(asset.filename)} · ${asset.width} × ${asset.height}</figcaption></figure>`;
-  }).join('')}</div></section>`;
+  const imageHtml =
+    assets.length === 0
+      ? ''
+      : `<section><h2>Images</h2><div class="images">${assets
+          .map((asset) => {
+            const encoded = encodeURIComponent(asset.filename);
+            return `<figure><a href="/s/${publicToken}/assets/${encoded}" download><img src="/s/${publicToken}/assets/${encoded}" alt="${escapeHtml(asset.filename)}" loading="lazy"></a><figcaption>${escapeHtml(asset.filename)} · ${asset.width} × ${asset.height}</figcaption></figure>`;
+          })
+          .join('')}</div></section>`;
   const archive = record.has_archive
     ? `<a class="button" href="/s/${publicToken}/archive.zip">Download ZIP</a>`
     : '';
@@ -200,40 +314,51 @@ export function createService(overrides = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'"],
-        imgSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        baseUri: ["'none'"],
-        frameAncestors: ["'none'"],
-        formAction: ["'self'"],
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'none'"],
+          frameAncestors: ["'none'"],
+          formAction: ["'self'"],
+        },
       },
-    },
-    referrerPolicy: { policy: 'no-referrer' },
-  }));
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
   app.use('/static', express.static(staticDir, { fallthrough: false, etag: true, maxAge: '1h' }));
-  app.use(express.json({ limit: config.jsonLimit, strict: true }));
-
   const pairingLimiter = jsonLimiter(config.rateLimits.pairing);
   const uploadLimiter = jsonLimiter(config.rateLimits.upload);
   const publicLimiter = jsonLimiter(config.rateLimits.publicRead);
+  const uploadConcurrency = concurrencyGate(config.maxConcurrentUploads);
+  const pairingJsonParser = express.json({ limit: '1kb', strict: true });
+  const uploadJsonParser = express.json({ limit: config.jsonLimit, strict: true });
 
-  app.get('/health', (_request, response) => {
-    db.prepare('SELECT 1').get();
-    const storage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get();
-    response.json({ status: 'ok', storageBytes: storage.bytes });
-  });
+  app.get(
+    '/health',
+    publicLimiter,
+    asyncRoute(async (_request, response) => {
+      db.prepare('SELECT 1').get();
+      const recorded = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+      const reserved = db
+        .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
+        .get().bytes;
+      const storageBytes = await directorySize(config.uploadsDir);
+      response.json({ status: 'ok', storageBytes, recordedBytes: recorded, reservedBytes: reserved });
+    }),
+  );
 
-  app.get('/new', (_request, response) => {
+  app.get('/new', publicLimiter, (_request, response) => {
     response.set('X-Robots-Tag', 'noindex, nofollow');
     response.sendFile(path.join(staticDir, 'new.html'));
   });
 
-  app.post('/api/pairing', pairingLimiter, (request, response, next) => {
+  app.post('/api/pairing', pairingLimiter, pairingJsonParser, (request, response, next) => {
     try {
       if (!config.allowedPairingOrigins.includes(request.get('origin'))) {
         throw new ApiError(403, 'origin_denied', 'Pairing must be started from the Imnota sharing page.');
@@ -242,93 +367,264 @@ export function createService(overrides = {}) {
       const pairingId = randomUUID();
       const createdAt = now();
       const expiresAt = createdAt + config.pairingTtlMs;
-      db.prepare('INSERT INTO pairings (id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)')
-        .run(pairingId, tokenHash(uploadToken), createdAt, expiresAt);
+      db.prepare('INSERT INTO pairings (id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
+        pairingId,
+        tokenHash(uploadToken),
+        createdAt,
+        expiresAt,
+      );
       response.status(201).json({ pairingId, uploadToken, expiresAt: new Date(expiresAt).toISOString() });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post('/api/shares', uploadLimiter, asyncRoute(async (request, response) => {
-    const bearer = readBearer(request);
-    if (!bearer) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
-    const uploadTokenHash = tokenHash(bearer);
-    const pairing = db.prepare('SELECT * FROM pairings WHERE token_hash = ?').get(uploadTokenHash);
-    const existing = db.prepare('SELECT * FROM shares WHERE upload_token_hash = ?').get(uploadTokenHash);
-    if (!pairing && !existing) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
-    const upload = validateUpload(request.body, config);
-    const payloadHash = uploadFingerprint(upload);
-    if (existing) {
-      if (existing.request_id !== upload.requestId || !safeHashEqual(existing.payload_hash, payloadHash)) {
-        throw new ApiError(409, 'idempotency_conflict', 'This upload token is already bound to a different request.');
+  app.post(
+    '/api/shares',
+    uploadLimiter,
+    uploadConcurrency,
+    uploadJsonParser,
+    asyncRoute(async (request, response) => {
+      const bearer = readBearer(request);
+      if (!bearer) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
+      const uploadTokenHash = tokenHash(bearer);
+      const pairing = db.prepare('SELECT * FROM pairings WHERE token_hash = ?').get(uploadTokenHash);
+      const existing = db.prepare('SELECT * FROM shares WHERE upload_token_hash = ?').get(uploadTokenHash);
+      if (!pairing && !existing) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
+      const upload = validateUpload(request.body, config);
+      const payloadHash = uploadFingerprint(upload);
+      if (existing) {
+        if (existing.request_id !== upload.requestId || !safeHashEqual(existing.payload_hash, payloadHash)) {
+          throw new ApiError(
+            409,
+            'idempotency_conflict',
+            'This upload token is already bound to a different request.',
+          );
+        }
+        if (existing.recovery_until <= now()) {
+          throw new ApiError(410, 'recovery_expired', 'The upload receipt recovery window expired.');
+        }
+        const existingAssets = db
+          .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+          .all(existing.id);
+        return response.status(200).json(shareReceipt(existing, bearer, config, existingAssets, true));
       }
-      if (existing.recovery_until <= now()) {
-        throw new ApiError(410, 'recovery_expired', 'The upload receipt recovery window expired.');
-      }
-      const existingAssets = db.prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename').all(existing.id);
-      return response.status(200).json(shareReceipt(existing, bearer, config, existingAssets, true));
-    }
-    if (pairing.used_at !== null) throw new ApiError(409, 'pairing_used', 'The upload token was already used.');
-    if (pairing.expires_at <= now()) throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
+      if (pairing.used_at !== null)
+        throw new ApiError(409, 'pairing_used', 'The upload token was already used.');
+      if (pairing.expires_at <= now())
+        throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
 
-    const usage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
-    const estimatedSize = upload.includeArchive ? upload.decodedBytes * 2 + 4096 : upload.decodedBytes;
-    if (usage + estimatedSize > config.maxStorageBytes) {
-      throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
-    }
+      const staging = db
+        .prepare('SELECT * FROM staging_uploads WHERE upload_token_hash = ?')
+        .get(uploadTokenHash);
+      if (staging) {
+        if (staging.request_id !== upload.requestId || !safeHashEqual(staging.payload_hash, payloadHash)) {
+          throw new ApiError(
+            409,
+            'idempotency_conflict',
+            'This upload token is already bound to a different request.',
+          );
+        }
+        const committed = await waitForCommittedShare(db, uploadTokenHash);
+        if (!committed)
+          throw new ApiError(
+            409,
+            'upload_interrupted',
+            'The matching upload did not complete. Retry the request.',
+          );
+        const committedAssets = db
+          .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+          .all(committed.id);
+        return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+      }
+      const committedAfterStaging = db
+        .prepare('SELECT * FROM shares WHERE upload_token_hash = ?')
+        .get(uploadTokenHash);
+      if (committedAfterStaging) {
+        if (
+          committedAfterStaging.request_id !== upload.requestId ||
+          !safeHashEqual(committedAfterStaging.payload_hash, payloadHash)
+        ) {
+          throw new ApiError(
+            409,
+            'idempotency_conflict',
+            'This upload token is already bound to a different request.',
+          );
+        }
+        const committedAssets = db
+          .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+          .all(committedAfterStaging.id);
+        return response
+          .status(200)
+          .json(shareReceipt(committedAfterStaging, bearer, config, committedAssets, true));
+      }
 
-    const id = randomUUID();
-    const publicToken = deriveToken(bearer, upload.requestId, 'public');
-    const managementToken = deriveToken(bearer, upload.requestId, 'management');
-    const shareDirectory = path.join(config.uploadsDir, id);
-    await fsp.mkdir(shareDirectory, { recursive: false, mode: 0o700 });
-    let byteSize = upload.decodedBytes;
-    try {
-      await fsp.writeFile(path.join(shareDirectory, 'prompt.md'), upload.markdown, { mode: 0o600, flag: 'wx' });
-      for (const image of upload.images) {
-        await fsp.writeFile(path.join(shareDirectory, image.filename), image.data, { mode: 0o600, flag: 'wx' });
-      }
-      if (upload.includeArchive) byteSize += await writeArchive(shareDirectory, upload.images);
-      if (usage + byteSize > config.maxStorageBytes) {
-        throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
-      }
-      const createdAt = now();
-      const expiresAt = createdAt + upload.expiresInDays * 24 * 60 * 60 * 1000;
-      const recoveryUntil = createdAt + config.receiptRecoveryMs;
+      const estimatedSize = upload.includeArchive ? upload.decodedBytes * 2 + 4096 : upload.decodedBytes;
+      const filesystemUsage = await directorySize(config.uploadsDir);
+      const id = randomUUID();
+      const stagedAt = now();
       db.exec('BEGIN IMMEDIATE');
       try {
-        const committedUsage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
-        if (committedUsage + byteSize > config.maxStorageBytes) {
+        const usage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+        const reserved = db
+          .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
+          .get().bytes;
+        if (Math.max(filesystemUsage, usage) + reserved + estimatedSize > config.maxStorageBytes) {
           throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
         }
-        const consumed = db.prepare('UPDATE pairings SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?')
-          .run(createdAt, pairing.id, createdAt);
-        if (consumed.changes !== 1) {
-          const current = db.prepare('SELECT used_at, expires_at FROM pairings WHERE id = ?').get(pairing.id);
-          if (current?.used_at !== null) throw new ApiError(409, 'pairing_used', 'The upload token was already used.');
-          throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
-        }
-        db.prepare('INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, created_at, expires_at, recovery_until, byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(id, tokenHash(publicToken), tokenHash(managementToken), uploadTokenHash, upload.requestId, payloadHash, upload.title, createdAt, expiresAt, recoveryUntil, byteSize, upload.includeArchive ? 1 : 0);
-        const insertAsset = db.prepare('INSERT INTO assets (share_id, filename, byte_size, width, height) VALUES (?, ?, ?, ?, ?)');
-        for (const image of upload.images) insertAsset.run(id, image.filename, image.data.length, image.width, image.height);
+        db.prepare(
+          'INSERT INTO staging_uploads (id, upload_token_hash, request_id, payload_hash, created_at, reserved_bytes) VALUES (?, ?, ?, ?, ?, ?)',
+        ).run(id, uploadTokenHash, upload.requestId, payloadHash, stagedAt, estimatedSize);
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
+        const concurrent = db
+          .prepare('SELECT * FROM staging_uploads WHERE upload_token_hash = ?')
+          .get(uploadTokenHash);
+        if (concurrent) {
+          if (
+            concurrent.request_id !== upload.requestId ||
+            !safeHashEqual(concurrent.payload_hash, payloadHash)
+          ) {
+            throw new ApiError(
+              409,
+              'idempotency_conflict',
+              'This upload token is already bound to a different request.',
+            );
+          }
+          const committed = await waitForCommittedShare(db, uploadTokenHash);
+          if (!committed)
+            throw new ApiError(
+              409,
+              'upload_interrupted',
+              'The matching upload did not complete. Retry the request.',
+            );
+          const committedAssets = db
+            .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+            .all(committed.id);
+          return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+        }
         throw error;
       }
-      response.status(201).json(shareReceipt({
-        id,
-        request_id: upload.requestId,
-        expires_at: expiresAt,
-        has_archive: upload.includeArchive ? 1 : 0,
-      }, bearer, config, upload.images, false));
-    } catch (error) {
-      await fsp.rm(shareDirectory, { recursive: true, force: true });
-      throw error;
-    }
-  }));
+
+      const publicToken = deriveToken(config.receiptSecret, bearer, upload.requestId, 'public');
+      const managementToken = deriveToken(config.receiptSecret, bearer, upload.requestId, 'management');
+      const stagingDirectory = path.join(config.uploadsDir, `.staging-${id}`);
+      const shareDirectory = path.join(config.uploadsDir, id);
+      let byteSize = upload.decodedBytes;
+      try {
+        await fsp.mkdir(stagingDirectory, { recursive: false, mode: 0o700 });
+        await fsp.writeFile(path.join(stagingDirectory, 'prompt.md'), upload.markdown, {
+          mode: 0o600,
+          flag: 'wx',
+        });
+        for (const image of upload.images) {
+          await fsp.writeFile(path.join(stagingDirectory, image.filename), image.data, {
+            mode: 0o600,
+            flag: 'wx',
+          });
+        }
+        if (upload.includeArchive) byteSize += await writeArchive(stagingDirectory, upload.images);
+        await fsp.rename(stagingDirectory, shareDirectory);
+        const finalFilesystemUsage = await directorySize(config.uploadsDir);
+        const createdAt = now();
+        const expiresAt = createdAt + upload.expiresInDays * 24 * 60 * 60 * 1000;
+        const recoveryUntil = createdAt + config.receiptRecoveryMs;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const committedUsage = db
+            .prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares')
+            .get().bytes;
+          const otherReservations = db
+            .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads WHERE id != ?')
+            .get(id).bytes;
+          if (
+            Math.max(finalFilesystemUsage, committedUsage + byteSize) + otherReservations >
+            config.maxStorageBytes
+          ) {
+            throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
+          }
+          const consumed = db
+            .prepare('UPDATE pairings SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?')
+            .run(createdAt, pairing.id, createdAt);
+          if (consumed.changes !== 1) {
+            const current = db
+              .prepare('SELECT used_at, expires_at FROM pairings WHERE id = ?')
+              .get(pairing.id);
+            if (current?.used_at !== null)
+              throw new ApiError(409, 'pairing_used', 'The upload token was already used.');
+            throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
+          }
+          db.prepare(
+            'INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, created_at, expires_at, recovery_until, byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          ).run(
+            id,
+            tokenHash(publicToken),
+            tokenHash(managementToken),
+            uploadTokenHash,
+            upload.requestId,
+            payloadHash,
+            upload.title,
+            createdAt,
+            expiresAt,
+            recoveryUntil,
+            byteSize,
+            upload.includeArchive ? 1 : 0,
+          );
+          const insertAsset = db.prepare(
+            'INSERT INTO assets (share_id, filename, byte_size, width, height) VALUES (?, ?, ?, ?, ?)',
+          );
+          for (const image of upload.images)
+            insertAsset.run(id, image.filename, image.data.length, image.width, image.height);
+          db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
+          db.exec('COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          const committed = db
+            .prepare('SELECT * FROM shares WHERE upload_token_hash = ?')
+            .get(uploadTokenHash);
+          if (committed) {
+            if (
+              committed.request_id !== upload.requestId ||
+              !safeHashEqual(committed.payload_hash, payloadHash)
+            ) {
+              throw new ApiError(
+                409,
+                'idempotency_conflict',
+                'This upload token is already bound to a different request.',
+              );
+            }
+            await fsp.rm(shareDirectory, { recursive: true, force: true });
+            db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
+            const committedAssets = db
+              .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+              .all(committed.id);
+            return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+          }
+          throw error;
+        }
+        response.status(201).json(
+          shareReceipt(
+            {
+              id,
+              request_id: upload.requestId,
+              expires_at: expiresAt,
+              has_archive: upload.includeArchive ? 1 : 0,
+            },
+            bearer,
+            config,
+            upload.images,
+            false,
+          ),
+        );
+      } catch (error) {
+        await fsp.rm(stagingDirectory, { recursive: true, force: true });
+        await fsp.rm(shareDirectory, { recursive: true, force: true });
+        db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
+        throw error;
+      }
+    }),
+  );
 
   app.get('/api/shares/receipt/:requestId', uploadLimiter, (request, response, next) => {
     try {
@@ -345,26 +641,38 @@ export function createService(overrides = {}) {
         if (!pairing) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
         throw new ApiError(404, 'receipt_not_found', 'No committed upload receipt was found.');
       }
-      if (record.request_id !== requestId) throw new ApiError(404, 'receipt_not_found', 'No committed upload receipt was found.');
-      if (record.recovery_until <= now()) throw new ApiError(410, 'recovery_expired', 'The upload receipt recovery window expired.');
-      const assets = db.prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename').all(record.id);
+      if (record.request_id !== requestId)
+        throw new ApiError(404, 'receipt_not_found', 'No committed upload receipt was found.');
+      if (record.recovery_until <= now())
+        throw new ApiError(410, 'recovery_expired', 'The upload receipt recovery window expired.');
+      const assets = db
+        .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+        .all(record.id);
       response.json(shareReceipt(record, bearer, config, assets, true));
-    } catch (error) { next(error); }
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get('/api/shares', uploadLimiter, (request, response, next) => {
     try {
       const record = managementRecord(request, db);
-      response.json({ shares: [{
-        id: record.id,
-        url: null,
-        title: record.title,
-        createdAt: new Date(record.created_at).toISOString(),
-        expiresAt: new Date(record.expires_at).toISOString(),
-        revokedAt: record.revoked_at === null ? null : new Date(record.revoked_at).toISOString(),
-        byteSize: record.byte_size,
-      }] });
-    } catch (error) { next(error); }
+      response.json({
+        shares: [
+          {
+            id: record.id,
+            url: null,
+            title: record.title,
+            createdAt: new Date(record.created_at).toISOString(),
+            expiresAt: new Date(record.expires_at).toISOString(),
+            revokedAt: record.revoked_at === null ? null : new Date(record.revoked_at).toISOString(),
+            byteSize: record.byte_size,
+          },
+        ],
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/shares/:id/revoke', uploadLimiter, (request, response, next) => {
@@ -372,9 +680,12 @@ export function createService(overrides = {}) {
       const record = managementRecord(request, db);
       if (record.id !== request.params.id) throw new ApiError(404, 'not_found', 'Share not found.');
       const revokedAt = record.revoked_at ?? now();
-      if (record.revoked_at === null) db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ?').run(revokedAt, record.id);
+      if (record.revoked_at === null)
+        db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ?').run(revokedAt, record.id);
       response.json({ id: record.id, revokedAt: new Date(revokedAt).toISOString() });
-    } catch (error) { next(error); }
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.use('/s', publicLimiter, (request, response, next) => {
@@ -385,59 +696,86 @@ export function createService(overrides = {}) {
     next();
   });
 
-  app.get('/s/:token/markdown', asyncRoute(async (request, response) => {
-    const record = publicRecord(request.params.token, db, now());
-    if (!record) return response.status(404).type('html').send(unavailablePage());
-    response.set({
-      'Content-Type': 'text/markdown; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="prompt.md"',
-    });
-    return response.sendFile(path.join(config.uploadsDir, record.id, 'prompt.md'));
-  }));
+  app.get(
+    '/s/:token/markdown',
+    asyncRoute(async (request, response) => {
+      const record = publicRecord(request.params.token, db, now());
+      if (!record) return response.status(404).type('html').send(unavailablePage());
+      response.set({
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="prompt.md"',
+      });
+      return response.sendFile(path.join(config.uploadsDir, record.id, 'prompt.md'));
+    }),
+  );
 
-  app.get('/s/:token/assets/:filename', asyncRoute(async (request, response) => {
-    const record = publicRecord(request.params.token, db, now());
-    if (!record || !isSafePngFilename(request.params.filename)) return response.status(404).type('html').send(unavailablePage());
-    const asset = db.prepare('SELECT filename FROM assets WHERE share_id = ? AND filename = ?').get(record.id, request.params.filename);
-    if (!asset) return response.status(404).type('html').send(unavailablePage());
-    response.set({
-      'Content-Type': 'image/png',
-      'Content-Disposition': `inline; filename="${asset.filename}"`,
-    });
-    return response.sendFile(path.join(config.uploadsDir, record.id, asset.filename));
-  }));
+  app.get(
+    '/s/:token/assets/:filename',
+    asyncRoute(async (request, response) => {
+      const record = publicRecord(request.params.token, db, now());
+      if (!record || !isSafePngFilename(request.params.filename))
+        return response.status(404).type('html').send(unavailablePage());
+      const asset = db
+        .prepare('SELECT filename FROM assets WHERE share_id = ? AND filename = ?')
+        .get(record.id, request.params.filename);
+      if (!asset) return response.status(404).type('html').send(unavailablePage());
+      response.set({
+        'Content-Type': 'image/png',
+        'Content-Disposition': `inline; filename="${asset.filename}"`,
+      });
+      return response.sendFile(path.join(config.uploadsDir, record.id, asset.filename));
+    }),
+  );
 
-  app.get('/s/:token/archive.zip', asyncRoute(async (request, response) => {
-    const record = publicRecord(request.params.token, db, now());
-    if (!record || !record.has_archive) return response.status(404).type('html').send(unavailablePage());
-    response.set({
-      'Content-Type': 'application/zip',
-      'Content-Disposition': 'attachment; filename="imnota-prompt.zip"',
-    });
-    return response.sendFile(path.join(config.uploadsDir, record.id, 'archive.zip'));
-  }));
+  app.get(
+    '/s/:token/archive.zip',
+    asyncRoute(async (request, response) => {
+      const record = publicRecord(request.params.token, db, now());
+      if (!record || !record.has_archive) return response.status(404).type('html').send(unavailablePage());
+      response.set({
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="imnota-prompt.zip"',
+      });
+      return response.sendFile(path.join(config.uploadsDir, record.id, 'archive.zip'));
+    }),
+  );
 
-  app.get('/s/:token', asyncRoute(async (request, response) => {
-    const record = publicRecord(request.params.token, db, now());
-    if (!record) return response.status(404).type('html').send(unavailablePage());
-    const markdown = await fsp.readFile(path.join(config.uploadsDir, record.id, 'prompt.md'), 'utf8');
-    const assets = db.prepare('SELECT filename, width, height FROM assets WHERE share_id = ? ORDER BY filename').all(record.id);
-    return response.type('html').send(sharePage(record, renderMarkdown(markdown), assets, request.params.token, config.publicOrigin));
-  }));
+  app.get(
+    '/s/:token',
+    asyncRoute(async (request, response) => {
+      const record = publicRecord(request.params.token, db, now());
+      if (!record) return response.status(404).type('html').send(unavailablePage());
+      const markdown = await fsp.readFile(path.join(config.uploadsDir, record.id, 'prompt.md'), 'utf8');
+      const assets = db
+        .prepare('SELECT filename, width, height FROM assets WHERE share_id = ? ORDER BY filename')
+        .all(record.id);
+      return response
+        .type('html')
+        .send(sharePage(record, renderMarkdown(markdown), assets, request.params.token, config.publicOrigin));
+    }),
+  );
 
-  app.use('/api', (_request, response) => response.status(404).json({ error: { code: 'not_found', message: 'Endpoint not found.' } }));
+  app.use('/api', (_request, response) =>
+    response.status(404).json({ error: { code: 'not_found', message: 'Endpoint not found.' } }),
+  );
   app.use((error, _request, response, _next) => {
     if (error?.type === 'entity.too.large') {
-      return response.status(413).json({ error: { code: 'payload_too_large', message: 'Request body exceeds the size limit.' } });
+      return response
+        .status(413)
+        .json({ error: { code: 'payload_too_large', message: 'Request body exceeds the size limit.' } });
     }
     if (error instanceof SyntaxError && 'body' in error) {
-      return response.status(400).json({ error: { code: 'invalid_request', message: 'Request body is not valid JSON.' } });
+      return response
+        .status(400)
+        .json({ error: { code: 'invalid_request', message: 'Request body is not valid JSON.' } });
     }
     if (error instanceof ApiError) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
     console.error(error);
-    return response.status(500).json({ error: { code: 'internal_error', message: 'The sharing service could not complete the request.' } });
+    return response.status(500).json({
+      error: { code: 'internal_error', message: 'The sharing service could not complete the request.' },
+    });
   });
 
   return { app, config, db, close: () => db.close() };
@@ -459,6 +797,7 @@ function managementRecord(request, db) {
 
 function publicRecord(token, db, timestamp) {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) return undefined;
-  return db.prepare('SELECT * FROM shares WHERE public_token_hash = ? AND revoked_at IS NULL AND expires_at > ?')
+  return db
+    .prepare('SELECT * FROM shares WHERE public_token_hash = ? AND revoked_at IS NULL AND expires_at > ?')
     .get(tokenHash(token), timestamp);
 }
