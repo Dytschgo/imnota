@@ -385,16 +385,17 @@ export function AppearanceSettings({
               })
             }
           >
-            Desktop glass
+            Desktop glass (Beta)
           </button>
         </div>
         {value.desktopGlass && (
           <p className="imnota-background-hint" role="status">
             {effectiveAppearance?.desktopGlassStatus === 'active'
-              ? 'Desktop glass is active. '
+              ? 'Desktop glass (Beta) is active. '
               : 'Solid fallback is active on this configuration. '}
-            Uses native desktop material on macOS and supported Windows 11 systems. Other systems, reduced
-            transparency, and constrained-performance mode use solid surfaces.
+            Beta: scrolling or transparency may show rendering glitches. Choose No image or Solid surfaces if
+            this happens. Uses native desktop material on macOS and supported Windows 11 systems. Other
+            systems, reduced transparency, and constrained-performance mode use solid surfaces.
           </p>
         )}
         <label className="imnota-range-row">
