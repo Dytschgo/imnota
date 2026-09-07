@@ -25,9 +25,18 @@ export async function exerciseMixedContent(
   await driver.click({ text: 'Preview', exact: true });
   await driver.waitFor({ selector: '.markdown-preview h1', text: 'System overview' });
   await driver.click({ text: 'Prompt bundles', exact: true });
-  await driver.waitFor({ selector: '[data-testid="copy-prompt-1"]' });
+  await driver.waitFor(
+    {
+      selector:
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-prompt-1"]:not(:disabled)',
+    },
+    { timeoutMs: 30_000 },
+  );
   await driver.click({ selector: '[data-testid="copy-prompt-1"]' });
-  await driver.waitFor({ selector: '.prompt-bundle-state-success' }, { timeoutMs: 30_000 });
+  await driver.waitFor(
+    { selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] .prompt-bundle-state-success' },
+    { timeoutMs: 30_000 },
+  );
   if (!clipboard.readText().includes('# System overview') || !clipboard.readImage().isEmpty())
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
@@ -99,9 +108,18 @@ export async function exerciseMixedContent(
   if (!markdown.includes('# System overview'))
     throw new Error('Text Markdown did not autosave before navigation.');
   await driver.click({ text: 'Prompt bundles', exact: true });
-  await driver.waitFor({ selector: '[data-testid="copy-prompt-1"]' });
+  await driver.waitFor(
+    {
+      selector:
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-prompt-1"]:not(:disabled)',
+    },
+    { timeoutMs: 30_000 },
+  );
   await driver.click({ selector: '[data-testid="copy-prompt-1"]' });
-  await driver.waitFor({ selector: '.prompt-bundle-state-success' }, { timeoutMs: 30_000 });
+  await driver.waitFor(
+    { selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] .prompt-bundle-state-success' },
+    { timeoutMs: 30_000 },
+  );
   const mixedMarkdown = clipboard.readText();
   if (
     !mixedMarkdown.includes('# System overview') ||
