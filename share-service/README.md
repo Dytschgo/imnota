@@ -41,9 +41,7 @@ The upload token contains 256 random bits, expires after 10 minutes by default, 
   "requestId": "3e750250-9f46-4d12-96bb-c265c9a93c99",
   "title": "Checkout prompt",
   "markdown": "# Implement checkout\n\nUse the attached reference.",
-  "images": [
-    { "filename": "prompt-001.png", "dataBase64": "iVBORw0KGgo..." }
-  ],
+  "images": [{ "filename": "prompt-001.png", "dataBase64": "iVBORw0KGgo..." }],
   "includeArchive": true,
   "expiresInDays": 30
 }

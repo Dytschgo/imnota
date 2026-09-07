@@ -25,10 +25,12 @@ export function safeHashEqual(left, right) {
 }
 
 export function isSafePngFilename(filename) {
-  return typeof filename === 'string'
-    && filename.length <= 100
-    && path.basename(filename) === filename
-    && pngFilenamePattern.test(filename);
+  return (
+    typeof filename === 'string' &&
+    filename.length <= 100 &&
+    path.basename(filename) === filename &&
+    pngFilenamePattern.test(filename)
+  );
 }
 
 export function inspectPng(buffer, maxDimension) {

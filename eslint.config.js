@@ -32,6 +32,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ['share-service/public/**/*.js'],
+    languageOptions: { globals: { document: 'readonly', navigator: 'readonly' } },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks },
     rules: { ...reactHooks.configs.recommended.rules, '@typescript-eslint/no-explicit-any': 'off' },

@@ -3,11 +3,15 @@ import path from 'node:path';
 
 export async function cleanupExpired({ db, config, now = Date.now() }) {
   const cutoff = now - config.cleanupGraceMs;
-  const records = db.prepare(`
+  const records = db
+    .prepare(
+      `
     SELECT id FROM shares
     WHERE (expires_at <= ? AND expires_at <= ?)
        OR (revoked_at IS NOT NULL AND revoked_at <= ?)
-  `).all(now, cutoff, cutoff);
+  `,
+    )
+    .all(now, cutoff, cutoff);
   let deletedShares = 0;
   let failedShares = 0;
   for (const record of records) {

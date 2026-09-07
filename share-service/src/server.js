@@ -7,9 +7,12 @@ const server = service.app.listen(service.config.port, () => {
 });
 
 const cleanupTimer = setInterval(() => {
-  cleanupExpired({ db: service.db, config: service.config }).then((result) => {
-    if (result.deletedShares || result.failedShares || result.deletedPairings) console.log('Cleanup:', result);
-  }).catch((error) => console.error('Scheduled cleanup failed:', error));
+  cleanupExpired({ db: service.db, config: service.config })
+    .then((result) => {
+      if (result.deletedShares || result.failedShares || result.deletedPairings)
+        console.log('Cleanup:', result);
+    })
+    .catch((error) => console.error('Scheduled cleanup failed:', error));
 }, service.config.cleanupIntervalMs);
 cleanupTimer.unref();
 
