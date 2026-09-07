@@ -27,7 +27,7 @@ Each screenshot has:
 
 Drag screenshot rows to change their order. Internal IDs remain stable; `Picture 1`, `Picture 2` and so on are assigned from the current order only when exporting.
 
-Deleting a screenshot moves its source image, annotations and description to the operating-system trash. The screenshot disappears from the active collection and an Undo action restores it where the operating system supports recovery. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
 
 ## Annotate
 

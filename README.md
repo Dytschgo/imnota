@@ -23,7 +23,7 @@ Projects are plain folders containing JSON, Markdown and image files. There is n
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection
 - Automatic splitting for readable, clipboard-safe exports on a white background
-- Screenshot deletion through the operating-system trash with Undo where supported
+- Screenshot deletion through the operating-system trash with Imnota-managed Undo recovery
 - Light, dark, system and curated appearance settings
 - First-run onboarding that can be replayed from Settings
 - Secure Electron preload bridge with context isolation and no renderer Node.js access
@@ -71,6 +71,8 @@ corepack pnpm dev
 ```
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
+
+The collection/prompt workflow on this branch is under verification and has not been published by this implementation task. See the [implementation verification record](docs/implementation-verification.md) for completed checks and remaining acceptance work.
 
 Quality checks:
 
