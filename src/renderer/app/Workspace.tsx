@@ -75,6 +75,7 @@ export function Workspace(props: WorkspaceProps) {
   const store = useAppStore();
   const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const inspectorDrawerRef = useRef<HTMLDivElement>(null);
+  const inspectorReturnFocus = useRef<HTMLElement | null>(null);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
@@ -83,10 +84,19 @@ export function Workspace(props: WorkspaceProps) {
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
   const closeInspector = useCallback(() => useAppStore.getState().set({ rightPanelOpen: false }), []);
+  const restoreInspectorFocus = useCallback(() => {
+    const previous = inspectorReturnFocus.current;
+    const target =
+      previous?.isConnected && !previous.hasAttribute('data-drawer-autofocus')
+        ? previous
+        : (inspectorTriggerRef.current ??
+          document.querySelector<HTMLButtonElement>('[data-testid="inspector-toggle"]'));
+    target?.focus();
+  }, []);
   const dismissInspector = useCallback(() => {
     closeInspector();
-    inspectorTriggerRef.current?.focus();
-  }, [closeInspector]);
+    restoreInspectorFocus();
+  }, [closeInspector, restoreInspectorFocus]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 950px)');
@@ -98,6 +108,10 @@ export function Workspace(props: WorkspaceProps) {
   useEffect(() => {
     if (!store.rightPanelOpen || !narrowViewport) return;
     const drawer = inspectorDrawerRef.current;
+    inspectorReturnFocus.current =
+      document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     const focusTarget = drawer?.querySelector<HTMLElement>('[data-drawer-autofocus]') ?? drawer;
     focusTarget?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -124,8 +138,11 @@ export function Workspace(props: WorkspaceProps) {
       }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [dismissInspector, narrowViewport, store.rightPanelOpen]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      restoreInspectorFocus();
+    };
+  }, [dismissInspector, narrowViewport, restoreInspectorFocus, store.rightPanelOpen]);
   return (
     <section
       className="workspace"
@@ -181,6 +198,7 @@ export function Workspace(props: WorkspaceProps) {
               </Button>
             )}
             <IconButton
+              data-testid="inspector-toggle"
               label={store.rightPanelOpen ? 'Collapse inspector' : 'Expand inspector'}
               onClick={(event) => {
                 inspectorTriggerRef.current = event.currentTarget;
@@ -256,10 +274,10 @@ export function Workspace(props: WorkspaceProps) {
           <div
             ref={inspectorDrawerRef}
             className="inspector-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Inspector"
-            tabIndex={-1}
+            role={narrowViewport ? 'dialog' : undefined}
+            aria-modal={narrowViewport ? true : undefined}
+            aria-label={narrowViewport ? 'Inspector' : undefined}
+            tabIndex={narrowViewport ? -1 : undefined}
           >
             <IconButton
               data-drawer-autofocus

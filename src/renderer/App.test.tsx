@@ -62,6 +62,7 @@ const snapshot: ProjectSnapshot = {
 };
 
 describe('feedback controls', () => {
+  let changeViewport: (narrow: boolean) => void;
   function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}, narrowViewport = false) {
     window.imnota = {
       getSettings: async () => ({
@@ -108,7 +109,25 @@ describe('feedback controls', () => {
       reloadWatchedProject: async () => ({ ok: true, value: { snapshot, projectRevision: 'project-2' } }),
       ...overrides,
     } as unknown as ImnotaBridge;
-    window.matchMedia = vi.fn(() => ({ matches: narrowViewport })) as unknown as typeof window.matchMedia;
+    const viewportListeners = new Set<() => void>();
+    const viewport = {
+      matches: narrowViewport,
+      addEventListener: (_event: string, callback: () => void) => viewportListeners.add(callback),
+      removeEventListener: (_event: string, callback: () => void) => viewportListeners.delete(callback),
+    };
+    changeViewport = (narrow) => {
+      viewport.matches = narrow;
+      viewportListeners.forEach((callback) => callback());
+    };
+    window.matchMedia = vi.fn((query) =>
+      query === '(max-width: 950px)'
+        ? viewport
+        : {
+            matches: false,
+            addEventListener() {},
+            removeEventListener() {},
+          },
+    ) as unknown as typeof window.matchMedia;
     return render(<App />);
   }
 
@@ -371,6 +390,28 @@ describe('feedback controls', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
     );
+    expect(trigger).toHaveFocus();
+  });
+
+  it('keeps the desktop inspector modeless', async () => {
+    await renderEditingProject();
+    expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBeInTheDocument();
+  });
+
+  it('restores focus when an already-open inspector enters and leaves drawer mode', async () => {
+    await renderEditingProject();
+    const trigger = screen.getByTestId('inspector-toggle');
+    trigger.focus();
+    act(() => changeViewport(true));
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus();
+    act(() => changeViewport(false));
+    expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    act(() => changeViewport(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
     expect(trigger).toHaveFocus();
   });
 

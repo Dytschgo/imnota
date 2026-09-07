@@ -647,6 +647,14 @@ export default function App() {
     const nativeMutationToken = await beginCurrentProjectMutation();
     if (nativeMutationToken === null) return;
     try {
+      const latest = useAppStore.getState();
+      if (
+        latest.snapshot?.projectPath !== pending.projectPath ||
+        !latest.snapshot.project.screenshots.some((item) => item.id === pending.itemId)
+      ) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        return;
+      }
       const result = await window.imnota.deleteScreenshot({
         projectPath: current.snapshot.projectPath,
         screenshotId: shot.id,
