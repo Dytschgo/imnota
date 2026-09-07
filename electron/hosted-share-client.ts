@@ -434,7 +434,8 @@ export class HostedShareClient {
     } catch (error) {
       if (timedOut) throw new NativeWorkflowError('network-failure', timeoutMessage, true);
       if (error instanceof NativeWorkflowError) {
-        if (response && isDefinitiveNonCommitStatus(response.status)) throw withCommitState(error, false);
+        if (response && response.status !== 404 && isDefinitiveNonCommitStatus(response.status))
+          throw withCommitState(error, false);
         throw error;
       }
       throw new NativeWorkflowError(
@@ -494,14 +495,16 @@ export class HostedShareClient {
           errors.push('A previous share upload could not be recovered because its receipt expired.');
           continue;
         }
+        if (response.status === 404) {
+          errors.push('A previous share receipt is not ready yet. Recovery will retry later.');
+          continue;
+        }
         if (!response.ok) {
           const responseError = errorFor(
             response.status,
             isObject(body.error) ? body.error.code : undefined,
             isObject(body.error) ? body.error.message : undefined,
-            response.status === 404
-              ? 'A previous share upload has no recoverable receipt.'
-              : 'A previous share upload could not be recovered.',
+            'A previous share upload could not be recovered.',
           );
           if (isDefinitiveNonCommitStatus(response.status)) {
             await this.clearPending(pending.requestId);

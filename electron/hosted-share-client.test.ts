@@ -406,23 +406,58 @@ describe('HostedShareClient persistence and recovery', () => {
     expect(JSON.parse(await fs.readFile(pendingFile, 'utf8'))).toEqual({});
   });
 
-  it('clears definitive receipt failures while retaining an ambiguous in-progress request', async () => {
-    const thirdRequest = '123e4567-e89b-42d3-a456-426614174003';
+  it('retains a receipt 404 and later recovers it with the original request and bearer', async () => {
+    const { root, client } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(
+      pendingFile,
+      JSON.stringify({
+        [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) },
+      }),
+    );
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(json({ error: { code: 'receipt_not_found', message: 'Not ready.' } }, 404))
+      .mockResolvedValueOnce(json({ ...receipt(), recovered: true }));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(client.list()).resolves.toMatchObject({
+      records: [],
+      recoveryErrors: ['A previous share receipt is not ready yet. Recovery will retry later.'],
+    });
+    const retained = JSON.parse(await fs.readFile(pendingFile, 'utf8'));
+    expect(Object.keys(retained)).toEqual([firstRequest]);
+    expect(retained[firstRequest].pairingToken).toBe('a'.repeat(43));
+
+    await expect(client.list()).resolves.toMatchObject({
+      records: [{ id: firstShare }],
+      recoveryErrors: [],
+    });
+    expect(JSON.parse(await fs.readFile(pendingFile, 'utf8'))).toEqual({});
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      `https://app.imnota.xyz/api/shares/receipt/${firstRequest}`,
+      `https://app.imnota.xyz/api/shares/receipt/${firstRequest}`,
+    ]);
+    expect(fetch.mock.calls.map((call) => (call[1] as RequestInit).headers)).toEqual([
+      { Authorization: `Bearer ${'a'.repeat(43)}`, Accept: 'application/json' },
+      { Authorization: `Bearer ${'a'.repeat(43)}`, Accept: 'application/json' },
+    ]);
+  });
+
+  it('clears a definitive receipt rejection while retaining an in-progress request', async () => {
     const { root, client } = await fixture();
     await fs.writeFile(
       path.join(root, 'hosted-share-pending.json'),
       JSON.stringify({
         [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) },
         [secondRequest]: { requestId: secondRequest, pairingToken: 'b'.repeat(43) },
-        [thirdRequest]: { requestId: thirdRequest, pairingToken: 'c'.repeat(43) },
       }),
     );
     vi.stubGlobal(
       'fetch',
       vi.fn(async (target: string) => {
         if (target.includes(firstRequest))
-          return json({ error: { code: 'receipt_not_found', message: 'No receipt exists.' } }, 404);
-        if (target.includes(secondRequest))
           return json({ error: { code: 'invalid_pairing', message: 'Pairing rejected.' } }, 401);
         return json({ error: { code: 'upload_in_progress', message: 'Upload still running.' } }, 409);
       }),
@@ -431,14 +466,12 @@ describe('HostedShareClient persistence and recovery', () => {
     const result = await client.list();
 
     expect(result.recoveryErrors).toEqual([
-      'No receipt exists. Its local recovery capability was cleared.',
       'This pairing code expired or was already used. Create a new code in your browser. Its local recovery capability was cleared.',
       'Upload still running.',
     ]);
     const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
     expect(pending).not.toHaveProperty(firstRequest);
-    expect(pending).not.toHaveProperty(secondRequest);
-    expect(pending).toHaveProperty(thirdRequest);
+    expect(pending).toHaveProperty(secondRequest);
   });
 
   it('preserves corrupt local files and reports actionable history and recovery errors', async () => {
