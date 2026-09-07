@@ -26,7 +26,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run && node --test scripts/dev-electron.test.mjs scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs scripts/update-macos.test.mjs",
+    "test": "vitest run && node --test scripts/dev-electron.test.mjs scripts/smoke-process.node.test.mjs scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs scripts/update-macos.test.mjs",
     "test:watch": "vitest",
     "release": "node scripts/release.mjs",
     "smoke": "node scripts/smoke.mjs",

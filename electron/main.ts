@@ -1580,12 +1580,37 @@ app.whenReady().then(async () => {
       );
     } catch (error) {
       exitCode = 1;
+      let rendererState: unknown;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        rendererState = await mainWindow.webContents
+          .executeJavaScript(
+            `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000) })`,
+          )
+          .catch(() => undefined);
+        if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
+          try {
+            const artifactDirectory = await validateCreatedSmokeDirectory(
+              process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+              'artifact',
+            );
+            await fs.writeFile(
+              path.join(artifactDirectory, 'failure.png'),
+              (await mainWindow.webContents.capturePage()).toPNG(),
+              { flag: 'wx' },
+            );
+          } catch (captureError) {
+            console.error('Failure capture unavailable:', captureError);
+          }
+        }
+      }
       result = {
         passed: false,
         version: app.getVersion(),
         error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        rendererState,
       };
       console.error(error);
+      console.error('Renderer state:', rendererState);
     }
     try {
       if (process.env.IMNOTA_SMOKE_RESULT)
