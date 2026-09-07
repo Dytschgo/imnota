@@ -446,6 +446,77 @@ describe('feedback controls', () => {
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('import-1'));
   });
 
+  it('defers context autosave during a slow import and rebases it onto the import revision', async () => {
+    let resolveImport!: (value: ProjectSnapshot) => void;
+    const importedRef: { current?: ProjectSnapshot } = {};
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveImport = resolve;
+        }),
+    );
+    const saveMetadata = vi.fn(async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+      ok: true as const,
+      value: {
+        snapshot: { ...importedRef.current!, project, projectRevision: 'project-context-3' },
+        projectRevision: 'project-context-3',
+      },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      getDroppedFilePath: (file) => file.name,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: importedRef.current!, projectRevision: 'project-import-2' },
+      }),
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    const file = new File(['slow'], 'slow.png', { type: 'image/png' });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+      target: { value: 'Typed during slow import' },
+    });
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 800)));
+    expect(saveMetadata).not.toHaveBeenCalled();
+
+    const original = editingSnapshot.project.screenshots[0]!;
+    importedRef.current = {
+      ...editingSnapshot,
+      projectRevision: 'project-import-2',
+      project: {
+        ...editingSnapshot.project,
+        screenshots: [
+          original,
+          {
+            ...original,
+            id: 'slow-import',
+            originalFilename: 'slow.png',
+            storedFilename: '002-slow.png',
+            title: 'slow.png',
+            position: 1,
+          },
+        ],
+      },
+    };
+    await act(async () => resolveImport(importedRef.current!));
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+    expect(saveMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'project-import-2',
+        project: expect.objectContaining({
+          collections: [expect.objectContaining({ overallContext: 'Typed during slow import' })],
+          screenshots: expect.arrayContaining([expect.objectContaining({ id: 'slow-import' })]),
+        }),
+      }),
+    );
+    await waitFor(() =>
+      expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe(
+        'Typed during slow import',
+      ),
+    );
+  });
+
   it('focuses the existing library search without clearing its query', async () => {
     renderApp();
     const search = await screen.findByRole('textbox', { name: 'Search projects' });

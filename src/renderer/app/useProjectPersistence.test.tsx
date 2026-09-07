@@ -592,6 +592,86 @@ describe('useProjectPersistence', () => {
     expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   });
 
+  it('exports a recovered same-path snapshot after explicit authoritative adoption', async () => {
+    const source = snapshot();
+    const recoveredProject = {
+      ...source.project,
+      description: 'Recovered S2',
+      updatedAt: '2026-01-02',
+    };
+    const recovered = {
+      ...source,
+      project: recoveredProject,
+      recoveryFound: true,
+      projectRevision: 'project-recovered-S2',
+    };
+    const mock = bridge();
+    window.imnota = mock.value as never;
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    await act(async () => {
+      expect(await result.current.adoptAuthoritativeSnapshot(recovered)).toBe(true);
+    });
+    const exported = await result.current.getSavedContext('collection');
+    expect(exported.snapshot.project.description).toBe('Recovered S2');
+    expect(exported.snapshot.projectRevision).toBe('project-recovered-S2');
+    expect(onSnapshot).toHaveBeenLastCalledWith(recovered);
+  });
+
+  it('holds debounced metadata behind a native mutation and saves it against the new revision', async () => {
+    const source = snapshot();
+    const imported = snapshot([shot('one'), shot('two')]);
+    const saveMetadata = vi.fn(async ({ project: next }: { project: ProjectData }) =>
+      ok({ snapshot: { ...imported, project: next }, projectRevision: 'project-after-context' }),
+    );
+    const mock = bridge({
+      reloadWatchedProject: vi.fn(async () =>
+        ok({ snapshot: imported, projectRevision: 'project-after-import' }),
+      ),
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    window.imnota = mock.value as never;
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    const token = result.current.beginNativeMutation();
+    const typed = structuredClone(source.project);
+    typed.collections[0]!.overallContext = 'Typed during slow import';
+    act(() => result.current.queueProjectMetadata(typed));
+    const deferredSave = result.current.flushProjectMetadata();
+    await Promise.resolve();
+    expect(saveMetadata).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.acceptMutationSnapshot(imported, 'two', token);
+    });
+    await expect(deferredSave).resolves.toBe(true);
+    expect(saveMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'project-after-import',
+        project: expect.objectContaining({
+          collections: [expect.objectContaining({ overallContext: 'Typed during slow import' })],
+          screenshots: expect.arrayContaining([expect.objectContaining({ id: 'two' })]),
+        }),
+      }),
+    );
+  });
+
   it('waits for a delayed watcher before accepting a native mutation baseline', async () => {
     let resolveWatch!: (value: unknown) => void;
     const mock = bridge({

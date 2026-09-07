@@ -304,15 +304,21 @@ export default function App() {
             setError(`${failure} was cancelled because newer edits could not be saved.`);
             return;
           }
-          adoptSnapshot(next);
+          if (!(await persistence.adoptAuthoritativeSnapshot(next)))
+            setError(`${failure} could not safely adopt the latest project state.`);
         }
       } catch (reason) {
         if (identity === navigationIdentity.current)
           setError(reason instanceof Error ? reason.message : failure);
       }
     },
-    [adoptSnapshot, flushAll],
+    [flushAll, persistence],
   );
+
+  async function beginCurrentProjectMutation(): Promise<number | null> {
+    if (!(await flushAll())) return null;
+    return persistence.beginNativeMutation();
+  }
 
   async function navigate(view: AppView) {
     const identity = ++navigationIdentity.current;
@@ -382,7 +388,9 @@ export default function App() {
 
   async function importPaths(paths: string[]) {
     const current = useAppStore.getState();
-    if (!current.snapshot || !paths.length || !(await flushAll())) return;
+    if (!current.snapshot || !paths.length) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
       const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
       const snapshot = await window.imnota.importImageFiles({
@@ -394,16 +402,19 @@ export default function App() {
         .filter((shot) => shot.collectionId === current.activeCollectionId && !existingIds.has(shot.id))
         .sort((left, right) => left.position - right.position)
         .at(-1);
-      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id))) return;
+      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id, nativeMutationToken))) return;
       await refreshProjects();
       showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
     } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
       setError(reason instanceof Error ? reason.message : 'The screenshots could not be imported.');
     }
   }
   async function pasteImage() {
     const current = useAppStore.getState();
-    if (!current.snapshot || !(await flushAll())) return;
+    if (!current.snapshot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
       const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
       const snapshot = await window.imnota.pasteImage(
@@ -414,12 +425,14 @@ export default function App() {
         !(await persistence.acceptMutationSnapshot(
           snapshot,
           snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id))?.id,
+          nativeMutationToken,
         ))
       )
         return;
       await refreshProjects();
       showToast('Screenshot pasted');
     } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
       setError(reason instanceof Error ? reason.message : 'The clipboard does not contain an image.');
     }
   }
@@ -433,45 +446,62 @@ export default function App() {
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
     const shot = current.activeScreenshot();
-    if (!current.snapshot || !shot || !(await flushAll())) return;
-    const existing = new Set(current.snapshot.project.screenshots.map((item) => item.id));
-    const snapshot = await window.imnota.duplicateScreenshot({
-      projectPath: current.snapshot.projectPath,
-      screenshot: shot,
-    });
-    if (
-      !(await persistence.acceptMutationSnapshot(
-        snapshot,
-        snapshot.project.screenshots.find((item) => !existing.has(item.id))?.id,
-      ))
-    )
-      return;
+    if (!current.snapshot || !shot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
+    try {
+      const existing = new Set(current.snapshot.project.screenshots.map((item) => item.id));
+      const snapshot = await window.imnota.duplicateScreenshot({
+        projectPath: current.snapshot.projectPath,
+        screenshot: shot,
+      });
+      if (
+        !(await persistence.acceptMutationSnapshot(
+          snapshot,
+          snapshot.project.screenshots.find((item) => !existing.has(item.id))?.id,
+          nativeMutationToken,
+        ))
+      )
+        return;
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshot could not be duplicated.');
+    }
   }
   async function deleteScreenshot() {
     const current = useAppStore.getState();
     const shot = current.activeScreenshot();
-    if (!current.snapshot || !shot || !(await flushAll())) return;
+    if (!current.snapshot || !shot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
       const result = await window.imnota.deleteScreenshot({
         projectPath: current.snapshot.projectPath,
         screenshotId: shot.id,
       });
-      if (!(await persistence.acceptMutationSnapshot(result.snapshot))) return;
+      if (!(await persistence.acceptMutationSnapshot(result.snapshot, undefined, nativeMutationToken)))
+        return;
       setToast({
         message: 'Screenshot moved to trash.',
         action: {
           label: 'Undo',
-          run: () =>
-            void window.imnota
-              .undoDeleteScreenshot({
-                projectPath: current.snapshot!.projectPath,
-                undoToken: result.undoToken,
-              })
-              .then((restored) => persistence.acceptMutationSnapshot(restored, shot.id)),
+          run: () => void undoDeletedScreenshot(current.snapshot!.projectPath, result.undoToken, shot.id),
         },
       });
     } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be moved to trash.');
+    }
+  }
+  async function undoDeletedScreenshot(projectPath: string, undoToken: string, screenshotId: string) {
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
+    try {
+      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
+      await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken);
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
     }
   }
   async function deleteProject() {
@@ -491,13 +521,15 @@ export default function App() {
   }
   async function restoreRecoveredDelete(undoToken: string, screenshotId: string) {
     const current = useAppStore.getState().snapshot;
-    if (!current || !(await flushAll())) return;
+    if (!current) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
       const restored = await window.imnota.undoDeleteScreenshot({
         projectPath: current.projectPath,
         undoToken,
       });
-      if (!(await persistence.acceptMutationSnapshot(restored, screenshotId))) return;
+      if (!(await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken))) return;
       setSnapshotNotice((notice) => {
         if (!notice) return null;
         const recoveredDeletes = notice.recoveredDeletes.filter((item) => item.undoToken !== undoToken);
@@ -505,6 +537,7 @@ export default function App() {
       });
       showToast('Recovered screenshot restored');
     } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
       setError(reason instanceof Error ? reason.message : 'The recovered screenshot could not be restored.');
     }
   }
