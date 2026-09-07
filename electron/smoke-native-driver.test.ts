@@ -149,7 +149,7 @@ describe('native smoke driver', () => {
       },
     } as unknown as BrowserWindow;
 
-    const capture = await new NativeUiDriver(window, 100).capture(artifacts, 'matrix.png');
+    const capture = await new NativeUiDriver(window, 1_000).capture(artifacts, 'matrix.png');
 
     expect(capture).toEqual({
       path: path.join(artifacts, 'matrix.png'),
@@ -158,5 +158,41 @@ describe('native smoke driver', () => {
       devicePixelRatio: 2,
     });
     expect(await fs.readFile(capture.path)).toEqual(png);
+    expect(window.webContents.capturePage).toHaveBeenCalledTimes(3);
+  });
+
+  it('discards partial compositor frames and requires three consecutive settled captures', async () => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-settled');
+    await fs.mkdir(artifacts);
+    const frame = (value: string) => ({
+      isEmpty: () => false,
+      toPNG: () => Buffer.from(value),
+      getSize: () => ({ width: 1280, height: 800 }),
+    });
+    const capturePage = vi
+      .fn()
+      .mockResolvedValueOnce(frame('partial'))
+      .mockResolvedValueOnce(frame('partial'))
+      .mockResolvedValue(frame('settled'));
+    const window = {
+      webContents: {
+        capturePage,
+        executeJavaScript: vi.fn(async () => ({
+          cssViewport: { width: 1280, height: 800 },
+          devicePixelRatio: 1,
+        })),
+      },
+    } as unknown as BrowserWindow;
+    const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png');
+    expect(await fs.readFile(result.path)).toEqual(Buffer.from('settled'));
+    expect(capturePage).toHaveBeenCalledTimes(5);
+
+    capturePage.mockImplementation(async () => frame(String(capturePage.mock.calls.length)));
+    await expect(new NativeUiDriver(window, 100).capture(artifacts, 'moving.png')).rejects.toThrow(
+      'did not settle',
+    );
+    await expect(fs.stat(path.join(artifacts, 'moving.png'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

@@ -305,16 +305,30 @@ export class NativeUiDriver {
 
   async capture(directory: string, filename: string): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
-    // DOM assertions can resolve before Chromium paints the new screen. Wait for
-    // fonts/images and a complete paint turn so goldens never capture stale frames.
+    // DOM assertions and animation frames can precede Chromium's compositor update.
+    // Decode assets first, then require a stable sequence of actual captured pixels.
     await this.evaluate(`(async () => {
       await document.fonts.ready;
       await Promise.all([...document.images].map(image => image.decode().catch(() => undefined)));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     })()`);
-    const image = await this.window.webContents.capturePage();
-    if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
-    await fs.writeFile(target, image.toPNG(), { flag: 'wx' });
+    const deadline = Date.now() + this.defaultTimeoutMs;
+    let previous: Buffer | undefined;
+    let stableFrames = 0;
+    let image;
+    let png: Buffer;
+    do {
+      image = await this.window.webContents.capturePage();
+      if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
+      png = image.toPNG();
+      stableFrames = previous?.equals(png) ? stableFrames + 1 : 1;
+      if (stableFrames >= 3) break;
+      previous = png;
+      if (Date.now() >= deadline)
+        throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
+      await wait(100);
+    } while (stableFrames < 3);
+    await fs.writeFile(target, png, { flag: 'wx' });
     const metrics = await this.evaluate<{ cssViewport: SmokeViewport; devicePixelRatio: number }>(
       `({
         cssViewport: { width: window.innerWidth, height: window.innerHeight },
