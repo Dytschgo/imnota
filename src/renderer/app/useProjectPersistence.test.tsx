@@ -307,7 +307,7 @@ describe('useProjectPersistence', () => {
     );
   });
 
-  it('keeps an external event revision pending instead of accepting it as a CAS baseline', async () => {
+  it('blocks metadata CAS when an external event is pending instead of accepting its revision', async () => {
     const mock = bridge();
     window.imnota = mock.value as never;
     const source = snapshot();
@@ -330,12 +330,13 @@ describe('useProjectPersistence', () => {
         changedPaths: ['project.json'],
       }),
     );
+    let saved = true;
     await act(async () => {
-      await result.current.saveProjectMetadata({ ...source.project, name: 'Local name' });
+      saved = await result.current.saveProjectMetadata({ ...source.project, name: 'Local name' });
     });
-    expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedRevision: 'project-1' }),
-    );
+    expect(saved).toBe(false);
+    expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+    expect(result.current.projectRevision).toBe('project-1');
   });
 
   it('waits for watcher initialization and never falls back to an unguarded metadata save', async () => {
@@ -410,7 +411,7 @@ describe('useProjectPersistence', () => {
     );
   });
 
-  it('accepts the authoritative revision carried by the current native snapshot contract', async () => {
+  it('reloads after a revision-bearing native mutation so a later local save cannot be overwritten', async () => {
     const mock = bridge();
     window.imnota = mock.value as never;
     const source = snapshot();
@@ -428,8 +429,167 @@ describe('useProjectPersistence', () => {
     await act(async () => {
       await result.current.acceptMutationSnapshot(mutation);
     });
-    expect(result.current.projectRevision).toBe('project-native-2');
-    expect(mock.value.reloadWatchedProject).not.toHaveBeenCalled();
+    expect(result.current.projectRevision).toBe('project-reload');
+    expect(mock.value.reloadWatchedProject).toHaveBeenCalledWith({ watchId: 'watch' });
+  });
+
+  it('serializes delayed metadata B then C without publishing B over the newer edit', async () => {
+    let resolveB!: (value: unknown) => void;
+    const saveMetadata = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveB = resolve;
+          }),
+      )
+      .mockImplementationOnce(async ({ project: next }: { project: ProjectData }) =>
+        ok({ snapshot: { ...snapshot(), project: next }, projectRevision: 'project-C' }),
+      );
+    const mock = bridge({ saveProjectCompareAndSwap: saveMetadata });
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    const versionB = { ...source.project, description: 'B' };
+    const versionC = { ...source.project, description: 'C' };
+    act(() => result.current.queueProjectMetadata(versionB));
+    let saving!: Promise<boolean>;
+    act(() => {
+      saving = result.current.flushProjectMetadata();
+    });
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(1));
+    act(() => result.current.queueProjectMetadata(versionC));
+    await act(async () =>
+      resolveB(ok({ snapshot: { ...snapshot(), project: versionB }, projectRevision: 'project-B' })),
+    );
+    await expect(saving).resolves.toBe(true);
+    expect(saveMetadata).toHaveBeenCalledTimes(2);
+    expect(saveMetadata.mock.calls[1]![0].project.description).toBe('C');
+    expect(onSnapshot.mock.calls.at(-1)?.[0].project.description).toBe('C');
+    expect(onSnapshot.mock.calls.some(([published]) => published.project.description === 'B')).toBe(false);
+  });
+
+  it('surfaces divergent external metadata from a screenshot save without accepting its revision', async () => {
+    const externalProject = project();
+    externalProject.collections[0] = {
+      ...externalProject.collections[0]!,
+      overallContext: 'External context',
+    };
+    const mock = bridge({
+      saveScreenshotContent: vi.fn(async ({ screenshot: saved }: { screenshot: ScreenshotRecord }) => ({
+        project: { ...externalProject, screenshots: [saved] },
+        savedScreenshotId: saved.id,
+        conflictCreated: false,
+        contentRevision: 'content-external',
+        projectRevision: 'project-external',
+      })),
+    });
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const onProject = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject,
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+    const localProject = structuredClone(source.project);
+    localProject.collections[0]!.overallContext = 'Local context';
+    act(() => {
+      result.current.queueProjectMetadata(localProject);
+      result.current.markScreenshotDirty(shot('one', 'Edited'));
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(result.current.projectRevision).toBeNull();
+    expect(result.current.externalChange?.kind).toBe('metadata-conflict');
+    expect(onProject.mock.calls.at(-1)?.[0].collections[0].overallContext).toBe('Local context');
+    expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  });
+
+  it('preserves metadata typed while a native action is in flight before adopting its latest snapshot', async () => {
+    const mutationProject = project([shot('one'), shot('two')]);
+    const mutation = { ...snapshot(mutationProject.screenshots), project: mutationProject };
+    const mock = bridge({
+      reloadWatchedProject: vi.fn(async () =>
+        ok({ snapshot: mutation, projectRevision: 'project-after-native' }),
+      ),
+    });
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    const typed = structuredClone(source.project);
+    typed.collections[0]!.overallContext = 'Typed while importing';
+    act(() => result.current.queueProjectMetadata(typed));
+    await act(async () => {
+      await result.current.acceptMutationSnapshot(mutation, 'two');
+    });
+    expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'project-after-native',
+        project: expect.objectContaining({
+          collections: [expect.objectContaining({ overallContext: 'Typed while importing' })],
+          screenshots: expect.arrayContaining([expect.objectContaining({ id: 'two' })]),
+        }),
+      }),
+    );
+    expect(onSnapshot.mock.calls.at(-1)?.[0].project.collections[0].overallContext).toBe(
+      'Typed while importing',
+    );
+  });
+
+  it('blocks prompt export while an external watcher event is unresolved', async () => {
+    const mock = bridge();
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    act(() =>
+      mock.emit({
+        watchId: 'watch',
+        projectPath: source.projectPath,
+        kind: 'external-change',
+        projectRevision: 'project-external',
+        changedPaths: ['project.json'],
+      }),
+    );
+    act(() => result.current.dismissExternalChange());
+    expect(result.current.externalChange).toBeNull();
+    await expect(result.current.getSavedContext('collection')).rejects.toThrow(/reload and review/i);
+    expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   });
 
   it('waits for a delayed watcher before accepting a native mutation baseline', async () => {

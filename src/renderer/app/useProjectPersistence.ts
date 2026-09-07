@@ -27,6 +27,17 @@ interface RevisionBearingResult {
   warnings?: string[];
 }
 
+interface PendingMetadataEdit {
+  generation: number;
+  base: ProjectData;
+  project: ProjectData;
+}
+
+interface MetadataMergeResult {
+  project: ProjectData;
+  conflicts: string[];
+}
+
 export interface ExternalProjectChange {
   kind: 'external-change' | 'watch-error' | 'metadata-conflict';
   message: string;
@@ -53,8 +64,9 @@ export interface ProjectPersistenceController {
   hasPendingProjectMetadata(): boolean;
   changeAnnotations(next: Annotation[]): void;
   markScreenshotDirty(screenshot: ScreenshotRecord): void;
-  markProjectMetadataDirty(): void;
+  queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
+  flushProjectMetadata(): Promise<boolean>;
   saveProjectMetadata(project: ProjectData): Promise<boolean>;
   acceptMutationSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): Promise<boolean>;
   getSavedContext(collectionId: string): Promise<{ snapshot: ProjectSnapshot; collectionId: string }>;
@@ -66,29 +78,6 @@ export interface ProjectPersistenceController {
 
 function draftKey(projectPath: string, screenshotId: string): string {
   return `${projectPath}\u0000${screenshotId}`;
-}
-
-function mergeContentMutation(
-  local: ProjectData | undefined,
-  server: ProjectData,
-  savedScreenshotId: string,
-  currentScreenshot: ScreenshotRecord,
-  preserveCurrent: boolean,
-): ProjectData {
-  if (!local) return server;
-  return {
-    ...server,
-    name: local.name,
-    description: local.description,
-    status: local.status,
-    favourite: local.favourite,
-    collections: local.collections,
-    exportPreferences: local.exportPreferences,
-    screenshots: server.screenshots.map((serverShot) => {
-      if (serverShot.id === savedScreenshotId) return preserveCurrent ? currentScreenshot : serverShot;
-      return serverShot;
-    }),
-  };
 }
 
 function mergeNewerEditableScreenshot(
@@ -109,83 +98,156 @@ function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function mergeField<T>(base: T, intended: T, latest: T): T {
-  return !sameValue(intended, base) && sameValue(latest, base) ? intended : latest;
+function mergeField<T>(path: string, base: T, local: T, external: T, conflicts: string[]): T {
+  const localChanged = !sameValue(local, base);
+  const externalChanged = !sameValue(external, base);
+  if (localChanged && externalChanged && !sameValue(local, external)) {
+    conflicts.push(path);
+    return local;
+  }
+  return localChanged ? local : external;
 }
 
-function mergeProjectMetadataForCas(
+function mergeTrackedProjectMetadata(
   base: ProjectData,
-  intended: ProjectData,
-  latest: ProjectData,
-): ProjectData {
+  local: ProjectData,
+  external: ProjectData,
+): MetadataMergeResult {
+  const conflicts: string[] = [];
   const baseCollections = new Map(base.collections.map((item) => [item.id, item]));
-  const intendedCollections = new Map(intended.collections.map((item) => [item.id, item]));
+  const localCollections = new Map(local.collections.map((item) => [item.id, item]));
   const baseScreenshots = new Map(base.screenshots.map((item) => [item.id, item]));
-  const intendedScreenshots = new Map(intended.screenshots.map((item) => [item.id, item]));
-  return {
-    ...latest,
-    name: mergeField(base.name, intended.name, latest.name),
-    description: mergeField(base.description, intended.description, latest.description),
-    updatedAt: mergeField(base.updatedAt, intended.updatedAt, latest.updatedAt),
-    status: mergeField(base.status, intended.status, latest.status),
-    favourite: mergeField(base.favourite, intended.favourite, latest.favourite),
-    exportPreferences: mergeField(
-      base.exportPreferences,
-      intended.exportPreferences,
-      latest.exportPreferences,
+  const localScreenshots = new Map(local.screenshots.map((item) => [item.id, item]));
+  const project: ProjectData = {
+    ...external,
+    name: mergeField('project name', base.name, local.name, external.name, conflicts),
+    description: mergeField(
+      'project description',
+      base.description,
+      local.description,
+      external.description,
+      conflicts,
     ),
-    collections: latest.collections.map((latestCollection) => {
-      const baseCollection = baseCollections.get(latestCollection.id);
-      const intendedCollection = intendedCollections.get(latestCollection.id);
-      if (!baseCollection || !intendedCollection) return latestCollection;
+    status: mergeField('project status', base.status, local.status, external.status, conflicts),
+    favourite: mergeField(
+      'project favourite',
+      base.favourite,
+      local.favourite,
+      external.favourite,
+      conflicts,
+    ),
+    exportPreferences: mergeField(
+      'export preferences',
+      base.exportPreferences,
+      local.exportPreferences,
+      external.exportPreferences,
+      conflicts,
+    ),
+    collections: external.collections.map((externalCollection) => {
+      const baseCollection = baseCollections.get(externalCollection.id);
+      const localCollection = localCollections.get(externalCollection.id);
+      if (!baseCollection || !localCollection) return externalCollection;
       return {
-        ...latestCollection,
-        name: mergeField(baseCollection.name, intendedCollection.name, latestCollection.name),
-        archived: mergeField(baseCollection.archived, intendedCollection.archived, latestCollection.archived),
+        ...externalCollection,
+        name: mergeField(
+          `collection ${externalCollection.id} name`,
+          baseCollection.name,
+          localCollection.name,
+          externalCollection.name,
+          conflicts,
+        ),
+        archived: mergeField(
+          `collection ${externalCollection.id} archive state`,
+          baseCollection.archived,
+          localCollection.archived,
+          externalCollection.archived,
+          conflicts,
+        ),
         overallContext: mergeField(
+          `collection ${externalCollection.id} overall context`,
           baseCollection.overallContext,
-          intendedCollection.overallContext,
-          latestCollection.overallContext,
+          localCollection.overallContext,
+          externalCollection.overallContext,
+          conflicts,
         ),
-        updatedAt: mergeField(
-          baseCollection.updatedAt,
-          intendedCollection.updatedAt,
-          latestCollection.updatedAt,
-        ),
+        updatedAt:
+          localCollection.updatedAt !== baseCollection.updatedAt
+            ? localCollection.updatedAt
+            : externalCollection.updatedAt,
       };
     }),
-    screenshots: latest.screenshots.map((latestScreenshot) => {
-      const baseScreenshot = baseScreenshots.get(latestScreenshot.id);
-      const intendedScreenshot = intendedScreenshots.get(latestScreenshot.id);
-      if (!baseScreenshot || !intendedScreenshot) return latestScreenshot;
+    screenshots: external.screenshots.map((externalScreenshot) => {
+      const baseScreenshot = baseScreenshots.get(externalScreenshot.id);
+      const localScreenshot = localScreenshots.get(externalScreenshot.id);
+      if (!baseScreenshot || !localScreenshot) return externalScreenshot;
       return {
-        ...latestScreenshot,
+        ...externalScreenshot,
         collectionId: mergeField(
+          `screenshot ${externalScreenshot.id} collection`,
           baseScreenshot.collectionId,
-          intendedScreenshot.collectionId,
-          latestScreenshot.collectionId,
+          localScreenshot.collectionId,
+          externalScreenshot.collectionId,
+          conflicts,
         ),
-        title: mergeField(baseScreenshot.title, intendedScreenshot.title, latestScreenshot.title),
+        title: mergeField(
+          `screenshot ${externalScreenshot.id} title`,
+          baseScreenshot.title,
+          localScreenshot.title,
+          externalScreenshot.title,
+          conflicts,
+        ),
         description: mergeField(
+          `screenshot ${externalScreenshot.id} description`,
           baseScreenshot.description,
-          intendedScreenshot.description,
-          latestScreenshot.description,
+          localScreenshot.description,
+          externalScreenshot.description,
+          conflicts,
         ),
-        position: mergeField(baseScreenshot.position, intendedScreenshot.position, latestScreenshot.position),
-        priority: mergeField(baseScreenshot.priority, intendedScreenshot.priority, latestScreenshot.priority),
+        position: mergeField(
+          `screenshot ${externalScreenshot.id} position`,
+          baseScreenshot.position,
+          localScreenshot.position,
+          externalScreenshot.position,
+          conflicts,
+        ),
+        priority: mergeField(
+          `screenshot ${externalScreenshot.id} priority`,
+          baseScreenshot.priority,
+          localScreenshot.priority,
+          externalScreenshot.priority,
+          conflicts,
+        ),
         includeInExport: mergeField(
+          `screenshot ${externalScreenshot.id} prompt inclusion`,
           baseScreenshot.includeInExport,
-          intendedScreenshot.includeInExport,
-          latestScreenshot.includeInExport,
+          localScreenshot.includeInExport,
+          externalScreenshot.includeInExport,
+          conflicts,
         ),
-        updatedAt: mergeField(
-          baseScreenshot.updatedAt,
-          intendedScreenshot.updatedAt,
-          latestScreenshot.updatedAt,
-        ),
+        updatedAt:
+          localScreenshot.updatedAt !== baseScreenshot.updatedAt
+            ? localScreenshot.updatedAt
+            : externalScreenshot.updatedAt,
       };
     }),
   };
+  project.updatedAt = local.updatedAt !== base.updatedAt ? local.updatedAt : external.updatedAt;
+
+  for (const [id, baseCollection] of baseCollections) {
+    if (!external.collections.some((item) => item.id === id)) {
+      const localCollection = localCollections.get(id);
+      if (localCollection && !sameValue(localCollection, baseCollection))
+        conflicts.push(`collection ${id} was removed externally`);
+    }
+  }
+  for (const [id, baseScreenshot] of baseScreenshots) {
+    if (!external.screenshots.some((item) => item.id === id)) {
+      const localScreenshot = localScreenshots.get(id);
+      if (localScreenshot && !sameValue(localScreenshot, baseScreenshot))
+        conflicts.push(`screenshot ${id} was removed externally`);
+    }
+  }
+  return { project, conflicts: [...new Set(conflicts)] };
 }
 
 export function useProjectPersistence({
@@ -202,11 +264,13 @@ export function useProjectPersistence({
   const accessCounter = useRef(0);
   const snapshotRef = useRef<ProjectSnapshot | null>(snapshot);
   const lastPropSnapshot = useRef<ProjectSnapshot | null>(snapshot);
+  const lastSavedSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   if (snapshot !== lastPropSnapshot.current) {
+    const priorPath = snapshotRef.current?.projectPath;
     lastPropSnapshot.current = snapshot;
     snapshotRef.current = snapshot;
+    if (!snapshot || snapshot.projectPath !== priorPath) lastSavedSnapshot.current = snapshot;
   }
-  const lastSavedSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   const activeKey = snapshot && activeScreenshot ? draftKey(snapshot.projectPath, activeScreenshot.id) : null;
   const activeKeyRef = useRef<string | null>(activeKey);
   activeKeyRef.current = activeKey;
@@ -216,8 +280,11 @@ export function useProjectPersistence({
   const ownRevisionGeneration = useRef(0);
   const watchReady = useRef<Promise<boolean>>(Promise.resolve(false));
   const metadataDirty = useRef(false);
-  const pendingMetadataProject = useRef<ProjectData | null>(null);
+  const metadataGeneration = useRef(0);
+  const pendingMetadata = useRef<PendingMetadataEdit | null>(null);
+  const metadataInFlight = useRef<PendingMetadataEdit | null>(null);
   const metadataSave = useRef<Promise<boolean> | null>(null);
+  const pendingExternalChange = useRef<ExternalProjectChange | null>(null);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [error, setError] = useState('');
@@ -225,18 +292,30 @@ export function useProjectPersistence({
   const [externalChange, setExternalChange] = useState<ExternalProjectChange | null>(null);
   const [projectRevision, setProjectRevision] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!snapshot) {
-      lastSavedSnapshot.current = null;
-      return;
-    }
-    if (!metadataDirty.current) lastSavedSnapshot.current = snapshot;
-  }, [snapshot]);
-
   const publishAcceptedRevision = useCallback((revision: string | null) => {
     acceptedRevision.current = revision;
     setProjectRevision(revision);
   }, []);
+
+  const publishExternalChange = useCallback((change: ExternalProjectChange | null) => {
+    pendingExternalChange.current = change;
+    setExternalChange(change);
+  }, []);
+
+  const surfaceMetadataConflict = useCallback(
+    (conflicts: string[]) => {
+      publishAcceptedRevision(null);
+      publishExternalChange({
+        kind: 'metadata-conflict',
+        message: `Project details changed in the workspace while you were editing ${conflicts
+          .slice(0, 2)
+          .join(
+            ' and ',
+          )}. Your local values remain open; reload to review the saved version before exporting or saving again.`,
+      });
+    },
+    [publishAcceptedRevision, publishExternalChange],
+  );
 
   const hasDirtyDrafts = useCallback(
     (projectPath?: string) =>
@@ -267,6 +346,41 @@ export function useProjectPersistence({
       evictCleanDrafts();
     },
     [evictCleanDrafts],
+  );
+
+  const overlayTrackedMetadata = useCallback(
+    (authoritative: ProjectData): MetadataMergeResult => {
+      let project = authoritative;
+      const conflicts: string[] = [];
+      const inFlightEdit = metadataInFlight.current;
+      if (inFlightEdit) {
+        const merged = mergeTrackedProjectMetadata(inFlightEdit.base, inFlightEdit.project, project);
+        conflicts.push(...merged.conflicts);
+        if (!merged.conflicts.length)
+          metadataInFlight.current = {
+            ...inFlightEdit,
+            base: project,
+            project: merged.project,
+          };
+        project = merged.project;
+      }
+      const pendingEdit = pendingMetadata.current;
+      if (pendingEdit) {
+        const merged = mergeTrackedProjectMetadata(pendingEdit.base, pendingEdit.project, project);
+        conflicts.push(...merged.conflicts);
+        if (!merged.conflicts.length)
+          pendingMetadata.current = {
+            ...pendingEdit,
+            base: project,
+            project: merged.project,
+          };
+        project = merged.project;
+      }
+      const uniqueConflicts = [...new Set(conflicts)];
+      if (uniqueConflicts.length) surfaceMetadataConflict(uniqueConflicts);
+      return { project, conflicts: uniqueConflicts };
+    },
+    [surfaceMetadataConflict],
   );
 
   useEffect(() => {
@@ -369,16 +483,23 @@ export function useProjectPersistence({
               callbacks.current.onSelectScreenshot(result.savedScreenshotId);
               const currentSnapshot = snapshotRef.current;
               const sourceThumb = currentSnapshot?.thumbnails[source.screenshot.id];
+              const authoritativeSnapshot = currentSnapshot
+                ? { ...currentSnapshot, project: result.project }
+                : null;
+              if (authoritativeSnapshot) lastSavedSnapshot.current = authoritativeSnapshot;
+              const metadataOverlay = overlayTrackedMetadata(result.project);
+              const displayProject = {
+                ...metadataOverlay.project,
+                screenshots: metadataOverlay.project.screenshots.map((serverScreenshot) =>
+                  serverScreenshot.id === result.savedScreenshotId && hasNewerEdits
+                    ? conflictDraft.screenshot
+                    : serverScreenshot,
+                ),
+              };
               const nextSnapshot = currentSnapshot
                 ? {
                     ...currentSnapshot,
-                    project: mergeContentMutation(
-                      currentSnapshot.project,
-                      result.project,
-                      result.savedScreenshotId,
-                      conflictDraft.screenshot,
-                      hasNewerEdits,
-                    ),
+                    project: displayProject,
                     thumbnails: sourceThumb
                       ? { ...currentSnapshot.thumbnails, [result.savedScreenshotId]: sourceThumb }
                       : currentSnapshot.thumbnails,
@@ -388,7 +509,7 @@ export function useProjectPersistence({
                 snapshotRef.current = nextSnapshot;
                 callbacks.current.onSnapshot(nextSnapshot);
               }
-              setExternalChange({
+              publishExternalChange({
                 kind: 'external-change',
                 message:
                   'External edits were preserved. Your work is in an excluded Copy conflict for review.',
@@ -397,8 +518,8 @@ export function useProjectPersistence({
               key = conflictKey;
               continue;
             }
-            if (resultRevision) publishAcceptedRevision(resultRevision);
-            else publishAcceptedRevision(null);
+            if (!pendingExternalChange.current && resultRevision) publishAcceptedRevision(resultRevision);
+            else if (!resultRevision) publishAcceptedRevision(null);
             const serverShot = result.project.screenshots.find((item) => item.id === source.screenshot.id);
             const hasNewerEdits = current.editRevision > saveRevision;
             const next: EditorDraft = {
@@ -411,17 +532,18 @@ export function useProjectPersistence({
             drafts.current.set(key, next);
             const currentSnapshot = snapshotRef.current;
             if (currentSnapshot?.projectPath === source.projectPath) {
-              const merged = mergeContentMutation(
-                currentSnapshot.project,
-                result.project,
-                source.screenshot.id,
-                next.screenshot,
-                hasNewerEdits,
-              );
-              const mergedSnapshot = { ...currentSnapshot, project: merged };
+              const authoritativeSnapshot = { ...currentSnapshot, project: result.project };
+              lastSavedSnapshot.current = authoritativeSnapshot;
+              const metadataOverlay = overlayTrackedMetadata(result.project);
+              const displayProject = {
+                ...metadataOverlay.project,
+                screenshots: metadataOverlay.project.screenshots.map((item) =>
+                  item.id === source.screenshot.id && hasNewerEdits ? next.screenshot : item,
+                ),
+              };
+              const mergedSnapshot = { ...currentSnapshot, project: displayProject };
               snapshotRef.current = mergedSnapshot;
-              if (!metadataDirty.current) lastSavedSnapshot.current = mergedSnapshot;
-              callbacks.current.onProject(merged);
+              callbacks.current.onProject(displayProject);
             }
             if (activeKeyRef.current === key) {
               setDraft(next);
@@ -450,7 +572,13 @@ export function useProjectPersistence({
       inFlight.current.set(key, operation);
       return operation;
     },
-    [evictCleanDrafts, publishAcceptedRevision, setCurrentDraft],
+    [
+      evictCleanDrafts,
+      overlayTrackedMetadata,
+      publishAcceptedRevision,
+      publishExternalChange,
+      setCurrentDraft,
+    ],
   );
 
   const flush = useCallback(async () => {
@@ -474,7 +602,7 @@ export function useProjectPersistence({
     const projectPath = snapshot?.projectPath;
     let cancelled = false;
     publishAcceptedRevision(null);
-    setExternalChange(null);
+    publishExternalChange(null);
     let resolveReady!: (ready: boolean) => void;
     watchReady.current = new Promise((resolve) => {
       resolveReady = resolve;
@@ -485,7 +613,7 @@ export function useProjectPersistence({
     }
     if (typeof bridge.startProjectWatch !== 'function' || typeof bridge.onProjectWatchEvent !== 'function') {
       resolveReady(false);
-      setExternalChange({
+      publishExternalChange({
         kind: 'watch-error',
         message: 'Safe project change monitoring is unavailable in this build.',
       });
@@ -508,7 +636,7 @@ export function useProjectPersistence({
       })
       .catch((reason) => {
         resolveReady(false);
-        setExternalChange({
+        publishExternalChange({
           kind: 'watch-error',
           message: workflowMessage(reason, 'External project changes cannot be monitored right now.'),
         });
@@ -516,12 +644,15 @@ export function useProjectPersistence({
     const unsubscribe = bridge.onProjectWatchEvent((event) => {
       if (event.watchId !== watchId.current) return;
       if (event.kind === 'watch-error') {
-        setExternalChange({ kind: 'watch-error', message: event.message ?? 'Project monitoring stopped.' });
+        publishExternalChange({
+          kind: 'watch-error',
+          message: event.message ?? 'Project monitoring stopped.',
+        });
         return;
       }
       if (event.projectRevision && event.projectRevision === acceptedRevision.current) return;
       // event.projectRevision is deliberately pending-only. It is not an accepted CAS baseline until reload.
-      setExternalChange({
+      publishExternalChange({
         kind: 'external-change',
         message:
           metadataDirty.current || hasDirtyDrafts()
@@ -538,68 +669,110 @@ export function useProjectPersistence({
       watchId.current = null;
       publishAcceptedRevision(null);
     };
-  }, [hasDirtyDrafts, publishAcceptedRevision, snapshot?.projectPath]);
+  }, [hasDirtyDrafts, publishAcceptedRevision, publishExternalChange, snapshot?.projectPath]);
+
+  const queueProjectMetadata = useCallback((project: ProjectData): number => {
+    const generation = ++metadataGeneration.current;
+    const base =
+      pendingMetadata.current?.base ??
+      metadataInFlight.current?.project ??
+      lastSavedSnapshot.current?.project ??
+      snapshotRef.current?.project;
+    if (!base) return generation;
+    pendingMetadata.current = { generation, base: structuredClone(base), project: structuredClone(project) };
+    metadataDirty.current = true;
+    const currentSnapshot = snapshotRef.current;
+    if (currentSnapshot) snapshotRef.current = { ...currentSnapshot, project };
+    return generation;
+  }, []);
+
+  const flushProjectMetadata = useCallback((): Promise<boolean> => {
+    if (metadataSave.current) return metadataSave.current;
+    if (!pendingMetadata.current) return Promise.resolve(true);
+    const restoreInFlight = () => {
+      const captured = metadataInFlight.current;
+      if (!captured) return;
+      const newer = pendingMetadata.current;
+      pendingMetadata.current = newer ? { ...newer, base: captured.base } : captured;
+      metadataInFlight.current = null;
+      metadataDirty.current = true;
+    };
+    const operation = (async () => {
+      while (pendingMetadata.current) {
+        if (pendingExternalChange.current) {
+          setError('Project details are paused until you reload and review the workspace changes.');
+          return false;
+        }
+        const captured = pendingMetadata.current;
+        pendingMetadata.current = null;
+        metadataInFlight.current = captured;
+        if (!(await flush())) {
+          restoreInFlight();
+          return false;
+        }
+        const ready = await watchReady.current;
+        const id = watchId.current;
+        // Read the revision only after screenshot flushing; content saves also advance project CAS.
+        const revision = acceptedRevision.current;
+        if (!ready || !id || !revision || pendingExternalChange.current) {
+          restoreInFlight();
+          setError(
+            pendingExternalChange.current
+              ? 'Project details are paused until you reload and review the workspace changes.'
+              : 'Project details are waiting for the safe file watcher. Try saving again after it reconnects.',
+          );
+          return false;
+        }
+        try {
+          const intended = metadataInFlight.current?.project ?? captured.project;
+          const saved = workflowValue(
+            await getRendererBridge().saveProjectCompareAndSwap({
+              watchId: id,
+              expectedRevision: revision,
+              project: intended,
+            }),
+          );
+          ownRevisionGeneration.current += 1;
+          lastSavedSnapshot.current = saved.snapshot;
+          publishAcceptedRevision(saved.projectRevision);
+          const overlaid = overlayTrackedMetadata(saved.snapshot.project);
+          metadataInFlight.current = null;
+          if (overlaid.conflicts.length) {
+            pendingMetadata.current ??= captured;
+            metadataDirty.current = true;
+            return false;
+          }
+          const displaySnapshot = { ...saved.snapshot, project: overlaid.project };
+          snapshotRef.current = displaySnapshot;
+          callbacks.current.onSnapshot(displaySnapshot);
+        } catch (reason) {
+          restoreInFlight();
+          if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'project-changed') {
+            publishAcceptedRevision(null);
+            publishExternalChange({
+              kind: 'metadata-conflict',
+              message:
+                'Project details changed on disk. Your edits remain open; reload, compare, and save again.',
+            });
+          } else setError(workflowMessage(reason, 'Project details could not be saved.'));
+          return false;
+        }
+      }
+      metadataDirty.current = false;
+      return true;
+    })().finally(() => {
+      metadataSave.current = null;
+    });
+    metadataSave.current = operation;
+    return operation;
+  }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange]);
 
   const saveProjectMetadata = useCallback(
     (project: ProjectData): Promise<boolean> => {
-      pendingMetadataProject.current = project;
-      metadataDirty.current = true;
-      if (metadataSave.current) return metadataSave.current;
-      const operation = (async () => {
-        while (pendingMetadataProject.current) {
-          const next = pendingMetadataProject.current;
-          const baseProject = lastSavedSnapshot.current?.project;
-          pendingMetadataProject.current = null;
-          if (!(await flush())) return false;
-          const ready = await watchReady.current;
-          const id = watchId.current;
-          const revision = acceptedRevision.current;
-          if (!ready || !id || !revision) {
-            pendingMetadataProject.current = next;
-            setError(
-              'Project details are waiting for the safe file watcher. Try saving again after it reconnects.',
-            );
-            return false;
-          }
-          try {
-            const latestProject = snapshotRef.current?.project;
-            const projectForCas =
-              latestProject && baseProject
-                ? mergeProjectMetadataForCas(baseProject, next, latestProject)
-                : (latestProject ?? next);
-            const saved = workflowValue(
-              await getRendererBridge().saveProjectCompareAndSwap({
-                watchId: id,
-                expectedRevision: revision,
-                project: projectForCas,
-              }),
-            );
-            ownRevisionGeneration.current += 1;
-            publishAcceptedRevision(saved.projectRevision);
-            snapshotRef.current = saved.snapshot;
-            lastSavedSnapshot.current = saved.snapshot;
-            callbacks.current.onSnapshot(saved.snapshot);
-          } catch (reason) {
-            pendingMetadataProject.current = next;
-            if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'project-changed')
-              setExternalChange({
-                kind: 'metadata-conflict',
-                message:
-                  'Project details changed on disk. Your edits remain open; reload, compare, and save again.',
-              });
-            else setError(workflowMessage(reason, 'Project details could not be saved.'));
-            return false;
-          }
-        }
-        metadataDirty.current = false;
-        return true;
-      })().finally(() => {
-        metadataSave.current = null;
-      });
-      metadataSave.current = operation;
-      return operation;
+      queueProjectMetadata(project);
+      return flushProjectMetadata();
     },
-    [flush, publishAcceptedRevision],
+    [flushProjectMetadata, queueProjectMetadata],
   );
 
   const reloadExternal = useCallback(
@@ -615,7 +788,8 @@ export function useProjectPersistence({
             if (retained.projectPath === projectPath) drafts.current.delete(key);
           }
         }
-        pendingMetadataProject.current = null;
+        pendingMetadata.current = null;
+        metadataInFlight.current = null;
         metadataDirty.current = false;
         setDraft(null);
         setSaveState('saved');
@@ -645,14 +819,14 @@ export function useProjectPersistence({
         snapshotRef.current = latest.snapshot;
         lastSavedSnapshot.current = latest.snapshot;
         callbacks.current.onSnapshot(latest.snapshot);
-        setExternalChange(null);
+        publishExternalChange(null);
         return true;
       } catch (reason) {
         setError(workflowMessage(reason, 'The project could not be reloaded.'));
         return false;
       }
     },
-    [flush, hasDirtyDrafts, publishAcceptedRevision],
+    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange],
   );
 
   return {
@@ -676,64 +850,89 @@ export function useProjectPersistence({
       if (!current) return;
       setCurrentDraft({ ...current, screenshot, editRevision: current.editRevision + 1 });
     },
-    markProjectMetadataDirty() {
-      metadataDirty.current = true;
-    },
+    queueProjectMetadata,
     flush,
+    flushProjectMetadata,
     saveProjectMetadata,
     async acceptMutationSnapshot(mutationSnapshot, selectScreenshotId) {
-      let acceptedSnapshot = mutationSnapshot;
       const mutatesCurrentProject = snapshotRef.current?.projectPath === mutationSnapshot.projectPath;
-      if (mutatesCurrentProject) ownRevisionGeneration.current += 1;
-      const mutationRevision = (mutationSnapshot as ProjectSnapshot & RevisionBearingResult).projectRevision;
-      if (mutatesCurrentProject && mutationRevision) {
-        publishAcceptedRevision(mutationRevision);
-        setExternalChange(null);
-      } else if (mutatesCurrentProject) {
-        const ready = await watchReady.current;
-        const id = watchId.current;
-        if (ready && id) {
-          try {
-            const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
-            acceptedSnapshot = latest.snapshot;
-            publishAcceptedRevision(latest.projectRevision);
-            setExternalChange(null);
-          } catch (reason) {
-            publishAcceptedRevision(null);
-            setExternalChange({
-              kind: 'watch-error',
-              message: workflowMessage(
-                reason,
-                'The project changed, but its safe save revision could not be refreshed. Reconnect the workspace before editing project details.',
-              ),
-            });
-          }
-        } else {
-          publishAcceptedRevision(null);
-          setExternalChange({
-            kind: 'watch-error',
-            message:
-              'The project changed, but safe change monitoring is not ready. Reconnect the workspace before editing project details.',
-          });
-        }
+      if (!mutatesCurrentProject) {
+        snapshotRef.current = mutationSnapshot;
+        lastSavedSnapshot.current = mutationSnapshot;
+        callbacks.current.onSnapshot(mutationSnapshot);
+        if (
+          selectScreenshotId &&
+          mutationSnapshot.project.screenshots.some((item) => item.id === selectScreenshotId)
+        )
+          callbacks.current.onSelectScreenshot(selectScreenshotId);
+        return true;
       }
-      snapshotRef.current = acceptedSnapshot;
-      lastSavedSnapshot.current = acceptedSnapshot;
-      callbacks.current.onSnapshot(acceptedSnapshot);
-      if (
-        selectScreenshotId &&
-        acceptedSnapshot.project.screenshots.some((item) => item.id === selectScreenshotId)
-      )
-        callbacks.current.onSelectScreenshot(selectScreenshotId);
-      return !mutatesCurrentProject || acceptedRevision.current !== null;
+      if (!(await flush())) return false;
+      const ready = await watchReady.current;
+      const id = watchId.current;
+      if (!ready || !id) {
+        publishAcceptedRevision(null);
+        publishExternalChange({
+          kind: 'watch-error',
+          message:
+            'The project changed, but safe change monitoring is not ready. Your open edits were preserved; reconnect the workspace and reload before continuing.',
+        });
+        return false;
+      }
+      try {
+        // Always reload after a native mutation. Its response can be older than edits saved while the
+        // native request was in flight, whereas the watcher returns the latest authoritative snapshot.
+        const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
+        ownRevisionGeneration.current += 1;
+        lastSavedSnapshot.current = latest.snapshot;
+        publishAcceptedRevision(latest.projectRevision);
+        const overlaid = overlayTrackedMetadata(latest.snapshot.project);
+        const acceptedSnapshot = {
+          ...latest.snapshot,
+          project: overlaid.project,
+          warnings: (mutationSnapshot as ProjectSnapshot & RevisionBearingResult).warnings,
+          recoveredDeletes: (
+            mutationSnapshot as ProjectSnapshot & {
+              recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
+            }
+          ).recoveredDeletes,
+        };
+        snapshotRef.current = acceptedSnapshot;
+        callbacks.current.onSnapshot(acceptedSnapshot);
+        if (overlaid.conflicts.length) return false;
+        if (!pendingExternalChange.current) publishExternalChange(null);
+        if (pendingMetadata.current && !(await flushProjectMetadata())) return false;
+        if (
+          selectScreenshotId &&
+          snapshotRef.current?.project.screenshots.some((item) => item.id === selectScreenshotId)
+        )
+          callbacks.current.onSelectScreenshot(selectScreenshotId);
+        return acceptedRevision.current !== null && !pendingExternalChange.current;
+      } catch (reason) {
+        publishAcceptedRevision(null);
+        publishExternalChange({
+          kind: 'watch-error',
+          message: workflowMessage(
+            reason,
+            'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
+          ),
+        });
+        return false;
+      }
     },
     async getSavedContext(requestedCollectionId) {
+      await watchReady.current;
+      if (pendingExternalChange.current || !acceptedRevision.current)
+        throw new Error('Reload and review the pending workspace change before preparing prompt bundles.');
       if (!(await flush())) throw new Error('Current screenshot edits could not be saved.');
-      const current = snapshotRef.current;
-      if (!current) throw new Error('Open a project before preparing prompt bundles.');
-      if (metadataDirty.current && !(await saveProjectMetadata(current.project)))
+      if (metadataDirty.current && !(await flushProjectMetadata()))
         throw new Error('Project details could not be saved. Prompt preparation was cancelled.');
+      if (pendingExternalChange.current || !acceptedRevision.current)
+        throw new Error(
+          'The workspace changed while prompt bundles were being prepared. Reload and review it, then try again.',
+        );
       const saved = lastSavedSnapshot.current;
+      if (!saved) throw new Error('Open a project before preparing prompt bundles.');
       if (!saved || !saved.project.collections.some((item) => item.id === requestedCollectionId))
         throw new Error('The selected collection is no longer available.');
       return { snapshot: structuredClone(saved), collectionId: requestedCollectionId };

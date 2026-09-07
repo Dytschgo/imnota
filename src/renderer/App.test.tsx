@@ -189,6 +189,45 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
   });
 
+  it('keeps context C visible when delayed context B finishes saving first', async () => {
+    let resolveB!: (value: unknown) => void;
+    let projectB!: ProjectSnapshot['project'];
+    const saveMetadata = vi
+      .fn()
+      .mockImplementationOnce(({ project }: { project: ProjectSnapshot['project'] }) => {
+        projectB = project;
+        return new Promise((resolve) => {
+          resolveB = resolve;
+        });
+      })
+      .mockImplementationOnce(async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+        ok: true as const,
+        value: {
+          snapshot: { ...useAppStore.getState().snapshot!, project },
+          projectRevision: 'project-C',
+        },
+      }));
+    const { editingSnapshot } = await renderEditingProject({
+      saveProjectCompareAndSwap: saveMetadata as never,
+    });
+    const context = screen.getByRole('textbox', { name: 'Overall context' });
+    fireEvent.change(context, { target: { value: 'B' } });
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(1));
+    fireEvent.change(context, { target: { value: 'C' } });
+    await act(async () =>
+      resolveB({
+        ok: true,
+        value: {
+          snapshot: { ...editingSnapshot, project: projectB },
+          projectRevision: 'project-B',
+        },
+      }),
+    );
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(context).toHaveValue('C'));
+    expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe('C');
+  });
+
   it('runs an available Terminal update from the app banner', async () => {
     const downloadUpdate = vi.fn(async () => {});
     renderApp({

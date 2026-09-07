@@ -75,7 +75,6 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectSearchInputRef = useRef<HTMLInputElement>(null);
   const metadataTimer = useRef<number | null>(null);
-  const metadataPending = useRef(false);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
   const navigationIdentity = useRef(0);
@@ -192,17 +191,13 @@ export default function App() {
       metadataTimer.current = null;
     }
     if (!(await persistence.flush())) return false;
-    if (metadataPending.current || persistence.hasPendingProjectMetadata()) {
-      const project = useAppStore.getState().snapshot?.project;
-      if (!project || !(await persistence.saveProjectMetadata(project))) return false;
-      metadataPending.current = false;
-    }
+    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
     return true;
   }, [persistence]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (allowClose.current || (!persistence.hasUnsavedChanges && !metadataPending.current)) return;
+      if (allowClose.current || !persistence.hasUnsavedChanges) return;
       event.preventDefault();
       event.returnValue = '';
       void flushAll().then((saved) => {
@@ -218,19 +213,18 @@ export default function App() {
 
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {
+      if (changedShot) {
+        useAppStore.getState().updateProject(project);
+        persistence.markScreenshotDirty(changedShot);
+        return;
+      }
+      // Queue the concrete edit before any asynchronous save can publish an older snapshot.
+      persistence.queueProjectMetadata(project);
       useAppStore.getState().updateProject(project);
-      if (changedShot) persistence.markScreenshotDirty(changedShot);
-      else persistence.markProjectMetadataDirty();
-      if (changedShot) return;
-      metadataPending.current = true;
       if (metadataTimer.current !== null) window.clearTimeout(metadataTimer.current);
       metadataTimer.current = window.setTimeout(() => {
         metadataTimer.current = null;
-        void persistence
-          .saveProjectMetadata(useAppStore.getState().snapshot?.project ?? project)
-          .then((saved) => {
-            if (saved) metadataPending.current = false;
-          });
+        void persistence.flushProjectMetadata();
       }, 700);
     },
     [persistence],
@@ -304,7 +298,13 @@ export default function App() {
       }
       try {
         const next = await action();
-        if (next && identity === navigationIdentity.current) adoptSnapshot(next);
+        if (next && identity === navigationIdentity.current) {
+          if (!(await flushAll())) {
+            setError(`${failure} was cancelled because newer edits could not be saved.`);
+            return;
+          }
+          adoptSnapshot(next);
+        }
       } catch (reason) {
         if (identity === navigationIdentity.current)
           setError(reason instanceof Error ? reason.message : failure);
@@ -323,6 +323,10 @@ export default function App() {
       const opensLibrary = ['projects', 'recent', 'favourites'].includes(view);
       if (opensLibrary) await refreshProjects();
       if (identity !== navigationIdentity.current) return;
+      if (!(await flushAll())) {
+        setError('Navigation was cancelled because newer edits could not be saved.');
+        return;
+      }
       const state = useAppStore.getState();
       const currentIsLibrary = ['projects', 'recent', 'favourites'].includes(state.view) && !state.snapshot;
       state.set({
@@ -357,6 +361,12 @@ export default function App() {
     try {
       if (!store.settings.workspacePath && !(await chooseWorkspace())) return;
       const snapshot = await window.imnota.createProject(newProject);
+      if (!(await flushAll())) {
+        setError(
+          'The project was created, but the current project stayed open because newer edits could not be saved.',
+        );
+        return;
+      }
       setDialog(null);
       setNewProject({ name: '', description: '' });
       await refreshProjects();
@@ -383,7 +393,7 @@ export default function App() {
         .filter((shot) => shot.collectionId === current.activeCollectionId && !existingIds.has(shot.id))
         .sort((left, right) => left.position - right.position)
         .at(-1);
-      await persistence.acceptMutationSnapshot(snapshot, newest?.id);
+      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id))) return;
       await refreshProjects();
       showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
     } catch (reason) {
@@ -399,10 +409,13 @@ export default function App() {
         current.snapshot.projectPath,
         current.activeCollectionId,
       );
-      await persistence.acceptMutationSnapshot(
-        snapshot,
-        snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id))?.id,
-      );
+      if (
+        !(await persistence.acceptMutationSnapshot(
+          snapshot,
+          snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id))?.id,
+        ))
+      )
+        return;
       await refreshProjects();
       showToast('Screenshot pasted');
     } catch (reason) {
@@ -425,10 +438,13 @@ export default function App() {
       projectPath: current.snapshot.projectPath,
       screenshot: shot,
     });
-    await persistence.acceptMutationSnapshot(
-      snapshot,
-      snapshot.project.screenshots.find((item) => !existing.has(item.id))?.id,
-    );
+    if (
+      !(await persistence.acceptMutationSnapshot(
+        snapshot,
+        snapshot.project.screenshots.find((item) => !existing.has(item.id))?.id,
+      ))
+    )
+      return;
   }
   async function deleteScreenshot() {
     const current = useAppStore.getState();
@@ -439,7 +455,7 @@ export default function App() {
         projectPath: current.snapshot.projectPath,
         screenshotId: shot.id,
       });
-      await persistence.acceptMutationSnapshot(result.snapshot);
+      if (!(await persistence.acceptMutationSnapshot(result.snapshot))) return;
       setToast({
         message: 'Screenshot moved to trash.',
         action: {
@@ -480,7 +496,7 @@ export default function App() {
         projectPath: current.projectPath,
         undoToken,
       });
-      await persistence.acceptMutationSnapshot(restored, screenshotId);
+      if (!(await persistence.acceptMutationSnapshot(restored, screenshotId))) return;
       setSnapshotNotice((notice) => {
         if (!notice) return null;
         const recoveredDeletes = notice.recoveredDeletes.filter((item) => item.undoToken !== undoToken);
@@ -681,18 +697,15 @@ export default function App() {
               <Button
                 variant="soft"
                 onClick={() => {
-                  const discardLocalChanges = persistence.hasUnsavedChanges || metadataPending.current;
+                  const discardLocalChanges = persistence.hasUnsavedChanges;
                   if (discardLocalChanges) {
                     if (metadataTimer.current !== null) window.clearTimeout(metadataTimer.current);
                     metadataTimer.current = null;
-                    metadataPending.current = false;
                   }
                   void persistence.reloadExternal({ discardLocalChanges });
                 }}
               >
-                {persistence.hasUnsavedChanges || metadataPending.current
-                  ? 'Discard local edits & reload'
-                  : 'Reload project'}
+                {persistence.hasUnsavedChanges ? 'Discard local edits & reload' : 'Reload project'}
               </Button>
               <IconButton label="Dismiss external change notice" onClick={persistence.dismissExternalChange}>
                 <X size={16} aria-hidden="true" />
@@ -842,7 +855,10 @@ export default function App() {
             onSaveProject={persistence.saveProjectMetadata}
             onUpdateProject={(project) => queueProjectSave(project)}
             onSnapshot={async (snapshot, id) => {
-              await persistence.acceptMutationSnapshot(snapshot, id);
+              if (!(await persistence.acceptMutationSnapshot(snapshot, id)))
+                throw new Error(
+                  'The latest project state could not be adopted. Reload the project and try again.',
+                );
             }}
             onSelectScreenshot={selectShot}
             onSelectCollection={selectCollection}
