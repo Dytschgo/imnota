@@ -457,13 +457,18 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   let geometry = await canvasGeometry(driver);
   const panStart = {
     x: Math.round(geometry.stage.x + 20),
-    y: Math.round(geometry.stage.y + geometry.stage.height - 20),
+    y: Math.round(geometry.stage.y + Math.min(100, geometry.stage.height / 2)),
   };
   const beforePan = geometry.image.x;
+  const panTarget = await driver.evaluate<string>(
+    `document.elementFromPoint(${panStart.x}, ${panStart.y})?.outerHTML.slice(0, 300) ?? 'outside viewport'`,
+  );
   await driver.drag(panStart, { x: panStart.x + 70, y: panStart.y - 30 });
   geometry = await canvasGeometry(driver);
   if (geometry.image.x <= beforePan + 40)
-    throw new Error('Default select-tool panning ignored native input.');
+    throw new Error(
+      `Default select-tool panning ignored native input: ${JSON.stringify({ panStart, panTarget, beforePan, afterPan: geometry.image.x, geometry })}`,
+    );
 
   await driver.evaluate(`(() => {
     const stageContainer = document.querySelector('.konvajs-content')?.parentElement;
@@ -871,18 +876,27 @@ async function exercisePreferencesAndChannel(driver: NativeUiDriver, host: Smoke
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
-  await driver.click(channelSelect);
-  await driver.press('END');
-  await driver.press('ENTER');
+  const chooseNightly = async () => {
+    await driver.waitFor(channelSelect);
+    // Focus the HTML select without opening a platform-native popup that webContents
+    // key events cannot control on macOS. The actual selection still uses native keys.
+    await driver.evaluate(`(() => {
+      const select = document.querySelector('[data-testid="update-channel"], .update-settings select');
+      select.scrollIntoView({ block: 'center' });
+      select.focus();
+    })()`);
+    await driver.press('DOWN');
+    if (!(await driver.exists({ selector: '[role="dialog"]', text: 'Switch to Nightly?' })))
+      await driver.press('ENTER');
+  };
+  await chooseNightly();
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Switch to Nightly?' });
   if ((await host.readSettings()).updateChannel !== 'stable')
     throw new Error('Update channel changed before Nightly confirmation.');
   await driver.click({ text: 'Keep Stable', exact: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Switch to Nightly?' }, { absent: true });
 
-  await driver.click(channelSelect);
-  await driver.press('END');
-  await driver.press('ENTER');
+  await chooseNightly();
   await driver.click({ text: 'Use Nightly', exact: true });
   const started = Date.now();
   while ((await host.readSettings()).updateChannel !== 'nightly') {
