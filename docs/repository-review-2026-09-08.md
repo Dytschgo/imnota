@@ -45,6 +45,8 @@ Both entry points now share an install callback. A rejected handoff restores the
 
 The review also found that collection mutations acquired their busy state after awaiting the save preflight. Rapid actions could enter twice and create duplicate collections. The operation now takes a synchronous lock before saving and releases it on every success, failure or blocked save. Regression tests verify single admission during a deferred save and retry after blocked or rejected saves.
 
+Interrupted prompt exports also lacked durable recovery ownership, and finalized native access grants accumulated for the app's lifetime. New sessions now pair a bounded ownership journal with their reservation. Recovery runs only in the authorized collection's export directory and preserves active owners, legacy/foreign records, links, published outputs and ambiguous I/O failures. Existing unmarked leftovers are not removed automatically. Finalized grants retain the most recent 128 completions; active sessions are not evicted, and published files remain on disk. Tests cover abandonment, reservation-only interruption, name collisions, foreign/live/linked preservation and an older active session finishing after the history limit.
+
 ## Scope and remaining checks
 
 The repository-wide review concentrates on data loss, persistence/recovery, export/resource handling, IPC boundaries, renderer async behavior and updates. The preceding sharing review covered the service/client security boundary in detail. Neither review substitutes for external editor paste trials, private-browser recipient visual QA, user sessions, photographic/high-entropy stress fixtures or long-running memory profiling.

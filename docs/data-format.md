@@ -44,6 +44,8 @@ Exports live only under the active collection. Each primary Copy Prompt or fresh
 
 Each set has its own timestamped directory. PNG/Markdown pairs are staged together and published after finalization. Cancellation keeps completed pairs and removes incomplete outputs. An optional ` - overview.md` file is for reviewing the full collection, not the primary copy action.
 
+New export sessions keep a matching ownership journal and timestamp reservation until publication. When starting another export in that collection, the app can remove abandoned staging only after verifying matching records, a stopped owner process, safe paths and no published destination. Foreign, legacy, linked or ambiguous files remain untouched. Existing leftovers without ownership metadata need manual inspection; a filename prefix alone is never permission to delete them. Recent finalized export access is bounded in memory; evicting an old access grant does not delete its published files.
+
 Automatic splitting may produce several pairs. Original Picture numbers continue across pairs. Excluded screenshots stay in project data, do not appear in PNGs and are explicitly recorded in generated Markdown. Prompt outputs are sharing artifacts, not editable project backups; back up the full project folder to retain sources, annotations, descriptions, recovery data and exclusions.
 
 ## Migration and compatibility
