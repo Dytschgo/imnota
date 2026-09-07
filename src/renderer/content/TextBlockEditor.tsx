@@ -5,7 +5,7 @@ import './content-editors.css';
 
 function markdownHtml(value: string): string {
   return DOMPurify.sanitize(marked.parse(value, { async: false, breaks: true, gfm: true }), {
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i,
     FORBID_ATTR: ['srcset', 'style'],
     FORBID_TAGS: [
       'audio',
