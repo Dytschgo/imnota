@@ -281,17 +281,23 @@ describe('feedback controls', () => {
     expect(note).toHaveValue('Original note');
   });
 
-  it('uses the canvas semantic text color until the user chooses an override', async () => {
+  it('shares the semantic text color and manual override between Select and Text creation', async () => {
     await renderEditingProject();
     await waitFor(() =>
       expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
-        expect.objectContaining({ annotationColor: '#ef4444', theme: 'dark' }),
+        expect.objectContaining({ annotationColor: '#ffffff', theme: 'dark', tool: 'select' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use color #22c55e' }));
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#22c55e', theme: 'dark', tool: 'select' }),
       ),
     );
     fireEvent.click(screen.getByRole('button', { name: /^Text/ }));
     await waitFor(() =>
       expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
-        expect.objectContaining({ annotationColor: '#ffffff', theme: 'dark' }),
+        expect.objectContaining({ annotationColor: '#22c55e', theme: 'dark', tool: 'text' }),
       ),
     );
   });

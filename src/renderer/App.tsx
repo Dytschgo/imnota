@@ -600,8 +600,10 @@ export default function App() {
       </div>
     );
   const visibleError = error || persistence.error || preferences.error;
-  const creationKind: Annotation['kind'] = tool === 'select' || tool === 'eraser' ? 'arrow' : tool;
-  const annotationColor = toolColors[tool] ?? semanticAnnotationColor(creationKind, appearance.theme);
+  const creationColorTool: ToolChoice = tool === 'select' ? 'text' : tool;
+  const creationKind: Annotation['kind'] = creationColorTool === 'eraser' ? 'arrow' : creationColorTool;
+  const annotationColor =
+    toolColors[creationColorTool] ?? semanticAnnotationColor(creationKind, appearance.theme);
   const selectedAnnotation = persistence.annotations.find((item) => item.id === selectedAnnotationId);
   const paletteColor = selectedAnnotation
     ? selectedAnnotation.kind === 'text'
@@ -808,7 +810,10 @@ export default function App() {
             }}
             onTool={setTool}
             onColor={(color) => {
-              setToolColors((current) => ({ ...current, [selectedAnnotation?.kind ?? tool]: color }));
+              setToolColors((current) => ({
+                ...current,
+                [selectedAnnotation?.kind ?? creationColorTool]: color,
+              }));
               if (selectedAnnotationId)
                 changeAnnotations(
                   persistence.annotations.map((item) =>
