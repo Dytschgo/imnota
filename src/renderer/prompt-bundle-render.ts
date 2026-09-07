@@ -35,7 +35,8 @@ export interface PromptBundleRenderEnvironment {
 
 export interface ComposedPromptBundle {
   kind: 'composed';
-  dataUrl: string;
+  /** Absent for a text-only bundle; a text PNG would be misleading. */
+  dataUrl?: string;
   width: number;
   height: number;
   encodedCharacters: number;
@@ -141,9 +142,9 @@ function browserEnvironment(): PromptBundleRenderEnvironment {
   };
 }
 
-function labelFor(pictureNumber: number, title: string, originalFilename: string): string {
+function labelFor(pictureNumber: number, title: string, originalFilename: string, kind?: string): string {
   const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim() || originalFilename;
-  return `Picture ${pictureNumber} — ${cleanTitle}`;
+  return `${kind === 'drawing' ? 'Drawing' : 'Picture'} ${pictureNumber} — ${cleanTitle}`;
 }
 
 /**
@@ -155,7 +156,10 @@ export async function composePromptBundle(
   options: ComposePromptBundleOptions = {},
 ): Promise<PromptBundleComposition> {
   throwIfAborted(options.signal);
-  if (!bundle.pictures.length) throw new Error('A visual prompt bundle needs at least one screenshot.');
+  if (!bundle.pictures.length) {
+    if (!bundle.textItems.length) throw new Error('A prompt bundle needs content.');
+    return { kind: 'composed', width: 0, height: 0, encodedCharacters: 0, delivery: 'clipboard' };
+  }
   const maxCharacters =
     options.maxClipboardPngCharacters ?? DEFAULT_PROMPT_BUNDLE_LIMITS.maxEstimatedPngCharacters;
   if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1)
@@ -206,7 +210,7 @@ export async function composePromptBundle(
       if (!item || item.screenshotId !== picture.screenshotId)
         throw new Error('Prompt bundle layout does not match its screenshot order.');
       context.fillText(
-        labelFor(picture.pictureNumber, picture.title, picture.originalFilename),
+        labelFor(picture.pictureNumber, picture.title, picture.originalFilename, picture.kind),
         item.x,
         item.labelY,
         item.width,

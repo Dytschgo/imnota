@@ -1,4 +1,5 @@
 import type { WorkflowBridge } from './workflow-bridge.js';
+import type { ContentBridge, ContentItem } from './content-items.js';
 
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';
@@ -79,7 +80,7 @@ export interface ExportPreferences {
 }
 
 export interface ProjectData {
-  schemaVersion: 3;
+  schemaVersion: 3 | 4;
   collections: Collection[];
   id: string;
   name: string;
@@ -89,6 +90,8 @@ export interface ProjectData {
   status: ProjectStatus;
   favourite: boolean;
   screenshots: ScreenshotRecord[];
+  /** Drawing and text records. Screenshots remain authoritative in `screenshots`. */
+  contentItems?: ContentItem[];
   exportPreferences: ExportPreferences;
 }
 export interface Collection {
@@ -110,6 +113,8 @@ export interface ProjectSnapshot {
   warnings?: string[];
   /** Delete journals recovered during open that still carry a valid Undo grant. */
   recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
+  /** Mixed-content delete journals recovered during open with a valid Undo grant. */
+  recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
 export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };
@@ -171,7 +176,7 @@ export interface DeleteScreenshotResult {
   undoToken: string;
 }
 
-export interface ImnotaBridge extends WorkflowBridge {
+export interface ImnotaBridge extends WorkflowBridge, ContentBridge {
   getSettings(): Promise<WorkspaceSettings>;
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;

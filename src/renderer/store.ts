@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { orderedCollectionItems } from '../shared/content-items';
 import type {
   ProjectData,
   ProjectListItem,
@@ -21,7 +22,7 @@ interface AppState {
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
   set: (patch: Partial<AppState>) => void;
-  setProject: (snapshot: ProjectSnapshot | null) => void;
+  setProject: (snapshot: ProjectSnapshot | null, selectedItemId?: string) => void;
   setActiveCollection: (collectionId: string) => void;
   updateProject: (project: ProjectData) => void;
   activeScreenshot: () => ScreenshotRecord | null;
@@ -62,11 +63,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   leftPanelOpen: localValue('imnota:left-panel') !== 'closed',
   rightPanelOpen: localValue('imnota:right-panel') !== 'closed',
   set: (patch) => set(patch),
-  setProject: (snapshot) => {
+  setProject: (snapshot, selectedItemId) => {
     const previous = get().snapshot;
     const sameProject = Boolean(previous && snapshot && previous.project.id === snapshot.project.id);
     const remembered = snapshot ? localValue(`imnota:last-collection:${snapshot.project.id}`) : null;
+    const selectedItem = selectedItemId
+      ? [...(snapshot?.project.screenshots ?? []), ...(snapshot?.project.contentItems ?? [])].find(
+          (item) => item.id === selectedItemId,
+        )
+      : undefined;
     const collectionId =
+      selectedItem?.collectionId ??
       snapshot?.project.collections.find(
         (collection) =>
           collection.id ===
@@ -77,17 +84,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         .find((collection) => !collection.archived)?.id ??
       snapshot?.project.collections[0]?.id ??
       '001-collection';
+    if (snapshot && selectedItem) remember(`imnota:last-collection:${snapshot.project.id}`, collectionId);
     set({
       snapshot,
       activeCollectionId: collectionId,
       activeScreenshotId:
-        snapshot?.project.screenshots
-          .filter((shot) => shot.collectionId === collectionId)
-          .sort((a, b) => a.position - b.position)
-          .find((shot) => sameProject && shot.id === get().activeScreenshotId)?.id ??
-        snapshot?.project.screenshots
-          .filter((shot) => shot.collectionId === collectionId)
-          .sort((a, b) => a.position - b.position)[0]?.id ??
+        (snapshot ? orderedCollectionItems(snapshot.project, collectionId) : []).find(
+          (shot) => shot.id === (selectedItemId ?? (sameProject ? get().activeScreenshotId : null)),
+        )?.id ??
+        (snapshot ? orderedCollectionItems(snapshot.project, collectionId) : [])[0]?.id ??
         null,
       view: snapshot ? 'workspace' : 'projects',
     });
@@ -98,10 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     remember(`imnota:last-collection:${snapshot.project.id}`, collectionId);
     set({
       activeCollectionId: collectionId,
-      activeScreenshotId:
-        snapshot.project.screenshots
-          .filter((shot) => shot.collectionId === collectionId)
-          .sort((a, b) => a.position - b.position)[0]?.id ?? null,
+      activeScreenshotId: orderedCollectionItems(snapshot.project, collectionId)[0]?.id ?? null,
     });
   },
   updateProject: (project) =>

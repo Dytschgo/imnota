@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { emptyProject } from '../shared/utils';
+import type { CollectionContentItem } from '../shared/markdown';
 import type { Annotation, ScreenshotRecord } from '../shared/types';
 import { prepareContext } from './prepare-context';
 
@@ -71,4 +72,70 @@ it('captures active edits, preserves pre-filter numbering, and reads each other 
   ]);
   expect(load).toHaveBeenCalledTimes(1);
   expect(render.mock.calls[0][1][0].text).toBe('Original mark');
+});
+
+it('keeps drawings in visual order, exports their original JSON, and does not render text as PNG', async () => {
+  const project = emptyProject('Mixed brief', '');
+  project.screenshots = [shot('screen', 1)];
+  const contentItemsForProject: CollectionContentItem[] = [
+    {
+      id: 'drawing',
+      collectionId: '001-collection',
+      kind: 'drawing',
+      position: 0,
+      includeInExport: true,
+      createdAt: '0',
+      updatedAt: '0',
+      title: 'Flow',
+      sourceFilename: 'flow.json',
+      imageFilename: 'flow.png',
+      originalWidth: 10,
+      originalHeight: 10,
+    },
+    {
+      id: 'text',
+      collectionId: '001-collection',
+      kind: 'text',
+      position: 2,
+      includeInExport: true,
+      createdAt: '0',
+      updatedAt: '0',
+      markdownFilename: 'text.md',
+    },
+  ];
+  project.contentItems = contentItemsForProject;
+  const contentItems = vi.fn(async ({ itemId }: { itemId: string }) =>
+    itemId === 'drawing'
+      ? {
+          item: contentItemsForProject[0],
+          image: { filename: 'flow.png', dataUrl: 'drawing-png', width: 10, height: 10 },
+          source: '{"type":"excalidraw"}',
+          contentRevision: 'drawing-1',
+        }
+      : {
+          item: contentItemsForProject[1],
+          markdown: '# Existing heading\n\nBody',
+          contentRevision: 'text-1',
+        },
+  );
+  const render = vi.fn().mockResolvedValue('screen-png');
+  const result = await prepareContext(
+    { project, projectPath: '/fixture', collectionId: '001-collection' },
+    vi.fn().mockResolvedValue({
+      image: { dataUrl: 'screen', width: 10, height: 10, filename: 'screen.png' },
+      annotations: [],
+      description: '',
+      contentRevision: 'screen-1',
+    }),
+    render,
+    () => undefined,
+    contentItems,
+  );
+  expect(result.images.map((image) => image.filename)).toEqual([
+    '01-flow-drawing.png',
+    '02-screen-annotated.png',
+  ]);
+  expect(result.sourceAssets).toEqual([{ filename: 'flow.json', source: '{"type":"excalidraw"}' }]);
+  expect(result.markdown).toContain('# Existing heading\n\nBody');
+  expect(render).toHaveBeenCalledOnce();
 });

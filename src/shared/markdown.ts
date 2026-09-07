@@ -1,29 +1,59 @@
 import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
+import { orderedCollectionItems as orderedContent, type ContentItem } from './content-items.js';
+
+export type CollectionItemKind = 'screenshot' | 'drawing' | 'text';
+
+export type CollectionContentItem = ContentItem;
+
+export type OrderedCollectionItem =
+  | { kind: 'screenshot'; item: ScreenshotRecord; position: number; sourceIndex: number }
+  | {
+      kind: 'drawing';
+      item: Extract<ContentItem, { kind: 'drawing' }>;
+      position: number;
+      sourceIndex: number;
+    }
+  | { kind: 'text'; item: Extract<ContentItem, { kind: 'text' }>; position: number; sourceIndex: number };
+
+/**
+ * Adapt the shared collection order to the export boundary.
+ */
+export function orderedCollectionItems(project: ProjectData, collectionId: string): OrderedCollectionItem[] {
+  return orderedContent(project, collectionId).map((item, sourceIndex): OrderedCollectionItem => {
+    if (item.kind === 'screenshot') return { kind: 'screenshot', item, position: item.position, sourceIndex };
+    if (item.kind === 'drawing') return { kind: 'drawing', item, position: item.position, sourceIndex };
+    return { kind: 'text', item, position: item.position, sourceIndex };
+  });
+}
 
 export interface NumberedScreenshot {
   pictureNumber: number;
   screenshot: ScreenshotRecord;
 }
 
-/** Assign Picture numbers from collection sort order before export filtering. */
+/** Assign Picture numbers from mixed visual order before export filtering. */
 export function numberCollectionScreenshots(
   project: ProjectData,
   collectionId: string,
 ): NumberedScreenshot[] {
-  return project.screenshots
-    .filter((shot) => shot.collectionId === collectionId)
-    .sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt))
-    .map((screenshot, index) => ({ pictureNumber: index + 1, screenshot }));
+  let visualNumber = 0;
+  return orderedCollectionItems(project, collectionId).flatMap((entry) => {
+    if (entry.kind === 'text') return [];
+    visualNumber += 1;
+    return entry.kind === 'screenshot' ? [{ pictureNumber: visualNumber, screenshot: entry.item }] : [];
+  });
 }
 
 function priorityLabel(priority: ScreenshotRecord['priority']): string {
   return priority[0].toUpperCase() + priority.slice(1);
 }
 
+/** Legacy/package overview Markdown. Prompt bundles use the richer planner. */
 export function generateMarkdown(
   project: ProjectData,
   collectionId: string,
   annotations: Record<string, Annotation[]>,
+  markdownByTextItem: Record<string, string> = {},
 ): string {
   const collection = project.collections.find((item) => item.id === collectionId);
   if (!collection) throw new Error('Collection not found.');
@@ -31,27 +61,39 @@ export function generateMarkdown(
   if (collection.overallContext.trim())
     out.push('## Overall context', '', collection.overallContext.trim(), '');
 
-  for (const { screenshot: shot, pictureNumber } of numberCollectionScreenshots(project, collectionId)) {
+  let visualNumber = 0;
+  for (const entry of orderedCollectionItems(project, collectionId)) {
+    if (entry.kind === 'text') {
+      if (!entry.item.includeInExport)
+        out.push('A text block was intentionally excluded from this prompt bundle.', '');
+      else if (markdownByTextItem[entry.item.id]?.trim()) out.push(markdownByTextItem[entry.item.id], '');
+      continue;
+    }
+    visualNumber += 1;
+    if (entry.kind === 'drawing') {
+      if (!entry.item.includeInExport)
+        out.push(`Drawing ${visualNumber} was intentionally excluded from this prompt bundle.`, '');
+      else out.push(`## Drawing ${visualNumber} — ${entry.item.title?.trim() || 'Untitled drawing'}`, '');
+      continue;
+    }
+    const shot = entry.item as ScreenshotRecord;
     if (!shot.includeInExport) {
-      out.push(`Picture ${pictureNumber} was intentionally excluded from this prompt bundle.`, '');
+      out.push(`Picture ${visualNumber} was intentionally excluded from this prompt bundle.`, '');
       continue;
     }
     out.push(
-      `## Picture ${pictureNumber} — ${shot.title || shot.originalFilename}`,
+      `## Picture ${visualNumber} — ${shot.title || shot.originalFilename}`,
       '',
       `Priority for agent: ${priorityLabel(shot.priority)}`,
       '',
     );
     if (shot.description.trim()) out.push(shot.description.trim(), '');
-    const textAnnotations = [...(annotations[shot.id] ?? [])]
-      .sort((a, b) => a.zIndex - b.zIndex)
-      .filter((annotation) => ['text', 'callout'].includes(annotation.kind) && annotation.text?.trim());
+    const textAnnotations = (annotations[shot.id] ?? []).filter(
+      (annotation) => ['text', 'callout'].includes(annotation.kind) && annotation.text?.trim(),
+    );
     textAnnotations.forEach((annotation, noteIndex) => {
-      out.push(`### Picture ${pictureNumber} / Note ${noteIndex + 1}`, '', annotation.text!.trim(), '');
+      out.push(`### Picture ${visualNumber} / Note ${noteIndex + 1}`, '', annotation.text!.trim(), '');
     });
   }
-  return `${out
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()}\n`;
+  return `${out.join('\n').replace(/\n+$/g, '')}\n`;
 }

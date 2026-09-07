@@ -2,3 +2,9 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+
+# Keep the drawing engine's pinned transitive packages on patched releases.
+overrides:
+  'nanoid@<4': 3.3.18
+  'nanoid@>=4 <5.1.16': 5.1.16
+  'lodash-es@<4.18.1': 4.18.1

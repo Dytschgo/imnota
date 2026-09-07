@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ProjectData } from './types.js';
+import type { ContentItem } from './content-items.js';
 import { DEFAULT_EXPORT_PREFERENCES } from './utils.js';
 
 export const filenameSchema = z
@@ -46,8 +47,39 @@ export const screenshotSchema = z.object({
   conflict: z.boolean().optional(),
 });
 
-export const projectSchema = z.object({
-  schemaVersion: z.literal(3),
+const contentItemBaseSchema = z.object({
+  id: z.string().min(1).max(200),
+  collectionId: filenameSchema,
+  position: z.number().int().nonnegative(),
+  includeInExport: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const drawingRecordSchema = contentItemBaseSchema.extend({
+  kind: z.literal('drawing'),
+  title: z.string().max(500),
+  sourceFilename: filenameSchema.refine((value) => value.endsWith('.json'), {
+    message: 'Drawing source must be a JSON filename.',
+  }),
+  imageFilename: filenameSchema.refine((value) => value.endsWith('.png'), {
+    message: 'Drawing image must be a PNG filename.',
+  }),
+  originalWidth: z.number().int().positive().max(16_384),
+  originalHeight: z.number().int().positive().max(16_384),
+});
+
+export const textBlockRecordSchema = contentItemBaseSchema.extend({
+  kind: z.literal('text'),
+  markdownFilename: filenameSchema.refine((value) => value.endsWith('.md'), {
+    message: 'Text content must be a Markdown filename.',
+  }),
+  preview: z.string().max(500).optional(),
+});
+
+export const contentItemSchema = z.discriminatedUnion('kind', [drawingRecordSchema, textBlockRecordSchema]);
+
+const projectFields = {
   collections: z
     .array(
       z.object({
@@ -76,7 +108,21 @@ export const projectSchema = z.object({
       template: z.literal('default'),
     })
     .optional(),
+};
+
+const projectV3Schema = z.object({
+  schemaVersion: z.literal(3),
+  ...projectFields,
+  contentItems: z.never().optional(),
 });
+
+const projectV4Schema = z.object({
+  schemaVersion: z.literal(4),
+  ...projectFields,
+  contentItems: z.array(contentItemSchema).max(10_000),
+});
+
+export const projectSchema = z.discriminatedUnion('schemaVersion', [projectV3Schema, projectV4Schema]);
 
 const legacyReference = z.string().min(1);
 export const legacyScreenshotSchema = z.object({
@@ -140,7 +186,7 @@ function portablePathKey(value: string): string {
   return value.replaceAll('\\', '/').normalize('NFC').toLowerCase();
 }
 
-function hasDuplicates(values: readonly string[]): boolean {
+function hasDuplicates<T>(values: readonly T[]): boolean {
   return new Set(values).size !== values.length;
 }
 
@@ -187,6 +233,11 @@ export function validateProject(value: unknown): ProjectData {
     throw new Error('Project contains invalid collection references.');
   if (new Set(parsed.screenshots.map((shot) => shot.id)).size !== parsed.screenshots.length)
     throw new Error('Project contains duplicate screenshot IDs.');
+  const contentItems: ContentItem[] = parsed.schemaVersion === 4 ? parsed.contentItems : [];
+  if (contentItems.some((item) => !ids.has(item.collectionId)))
+    throw new Error('Project contains invalid collection references.');
+  const allIds = [...parsed.screenshots.map((item) => item.id), ...contentItems.map((item) => item.id)];
+  if (hasDuplicates(allIds)) throw new Error('Project contains duplicate content IDs.');
   if (
     hasDuplicates(
       parsed.screenshots.map((shot) => portablePathKey(`${shot.collectionId}/${shot.storedFilename}`)),
@@ -201,12 +252,33 @@ export function validateProject(value: unknown): ProjectData {
     )
   )
     throw new Error('Screenshot file references do not match its collection.');
+  if (parsed.schemaVersion === 4) {
+    const pathKeys = contentItems.flatMap((item) =>
+      item.kind === 'drawing'
+        ? [
+            portablePathKey(`${item.collectionId}/drawings/${item.sourceFilename}`),
+            portablePathKey(`${item.collectionId}/drawings/${item.imageFilename}`),
+          ]
+        : [portablePathKey(`${item.collectionId}/text/${item.markdownFilename}`)],
+    );
+    if (hasDuplicates(pathKeys)) throw new Error('Content items contain aliased storage paths.');
+    for (const collection of parsed.collections) {
+      const positions = [
+        ...parsed.screenshots
+          .filter((item) => item.collectionId === collection.id)
+          .map((item) => item.position),
+        ...contentItems.filter((item) => item.collectionId === collection.id).map((item) => item.position),
+      ];
+      if (hasDuplicates(positions))
+        throw new Error(`Collection ${collection.id} contains duplicate mixed-content positions.`);
+    }
+  }
   return { ...parsed, exportPreferences: parsed.exportPreferences ?? { ...DEFAULT_EXPORT_PREFERENCES } };
 }
 
 export function parseProjectFile(value: unknown): ProjectData | LegacyProjectData {
   const version = z.object({ schemaVersion: z.number().int() }).parse(value).schemaVersion;
-  if (version === 3) return validateProject(value);
+  if (version === 3 || version === 4) return validateProject(value);
   if (version === 1 || version === 2) return validateLegacyProject(value);
   throw new Error(`Unsupported project schema version: ${version}.`);
 }

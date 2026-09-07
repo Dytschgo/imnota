@@ -1,0 +1,250 @@
+.drawing-editor,
+.text-block-editor {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.content-editor-heading,
+.content-loading,
+.content-inspector,
+.content-hint {
+  padding: 12px 14px;
+}
+
+.content-editor-heading {
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.content-loading,
+.content-hint {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.content-inspector {
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.drawing-editor-tools,
+.text-block-editor-bar {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.drawing-editor-tools {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.drawing-tool {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.drawing-tool:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+.drawing-tool.is-active {
+  color: var(--imnota-accent-hover);
+  background: var(--imnota-accent-soft);
+  border-color: color-mix(in srgb, var(--imnota-accent) 35%, transparent);
+}
+
+.drawing-editor-shortcut {
+  margin-left: 7px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  color: var(--ink-4);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.drawing-editor-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  background: var(--input);
+}
+
+.drawing-editor-canvas .excalidraw {
+  height: 100%;
+}
+
+/* The host toolbar provides the intentionally small tool set above. Excalidraw's
+   footer remains available for undo/redo, zoom, and panning controls. */
+.drawing-editor .drawing-editor-canvas .excalidraw .App-toolbar-container,
+.drawing-editor .drawing-editor-canvas .excalidraw .App-menu_top,
+.drawing-editor .drawing-editor-canvas .excalidraw .App-top-bar {
+  display: none;
+}
+
+.text-block-editor-bar {
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline: 14px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.text-block-editor-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input);
+}
+
+.text-block-editor-toggle button {
+  min-height: 25px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.text-block-editor-toggle button:hover {
+  color: var(--ink-2);
+}
+
+.text-block-editor-toggle button.is-active {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.markdown-input,
+.markdown-preview {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 20px 22px 56px;
+  overflow: auto;
+  border: 0;
+  background: var(--input);
+  color: var(--ink);
+  font:
+    14px/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    'Liberation Mono',
+    monospace;
+  outline: 0;
+  resize: none;
+}
+
+.markdown-input::placeholder {
+  color: var(--ink-4);
+}
+
+.markdown-preview {
+  font-family: inherit;
+  text-wrap: pretty;
+}
+
+.markdown-preview > :first-child {
+  margin-top: 0;
+}
+
+.markdown-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-preview :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.5em 0 0.55em;
+  color: var(--ink);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.markdown-preview h1 {
+  font-size: 1.75em;
+}
+
+.markdown-preview h2 {
+  font-size: 1.4em;
+}
+
+.markdown-preview h3 {
+  font-size: 1.15em;
+}
+
+.markdown-preview p,
+.markdown-preview ul,
+.markdown-preview ol,
+.markdown-preview blockquote {
+  margin: 0 0 1em;
+}
+
+.markdown-preview a {
+  color: var(--imnota-accent-hover);
+}
+
+.markdown-preview code,
+.markdown-preview pre {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+}
+
+.markdown-preview code {
+  padding: 0.12em 0.32em;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.9em;
+}
+
+.markdown-preview pre {
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.markdown-preview pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-preview blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--imnota-accent);
+  color: var(--ink-2);
+}
+
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
+}
