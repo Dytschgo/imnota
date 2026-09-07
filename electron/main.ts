@@ -845,6 +845,7 @@ function registerIpc(): void {
       if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
       if (material === 'acrylic') target.setBackgroundMaterial(active ? 'acrylic' : 'none');
       target.setBackgroundColor(active ? '#00000000' : appearance.mode === 'light' ? '#f5f6f8' : '#0b0d12');
+      if (material === 'vibrancy') target.invalidateShadow();
       return { active };
     } catch {
       target.setBackgroundColor('#0b0d12');
@@ -1509,6 +1510,10 @@ async function createWindow(): Promise<BrowserWindow> {
     minWidth: 1080,
     minHeight: 680,
     backgroundColor: '#0b0d12',
+    // macOS must create an alpha-capable compositor before runtime vibrancy is
+    // enabled. Changing only the background colour of an opaque window can
+    // retain old frames while scrolling. Solid mode still paints opaque CSS.
+    transparent: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {

@@ -236,10 +236,6 @@ export function useAppearance(
     const backdropActive = effective.glassLevel !== 'off' && Boolean(preferences.backgroundImage);
     root.dataset.background = backdropActive ? 'active' : 'none';
     root.dataset.desktopGlass = desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off';
-    root.style.setProperty(
-      '--imnota-backdrop-position',
-      isBackdropPreset(preferences.backgroundImage) ? '75% center' : 'center',
-    );
     root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, preferences.backgroundOpacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',

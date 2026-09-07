@@ -109,14 +109,8 @@ button:disabled {
    or dimming it twice behind chrome; the screenshot canvas stays opaque. */
 :root[data-background='active']:not([data-glass-level='off'])
   :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  background-image:
-    linear-gradient(
-      color-mix(in srgb, var(--surface) calc(100% - var(--imnota-background-opacity) * 55%), transparent),
-      color-mix(in srgb, var(--surface) calc(100% - var(--imnota-background-opacity) * 55%), transparent)
-    ),
-    var(--imnota-background-image);
-  background-size: cover;
-  background-position: var(--imnota-backdrop-position, center);
+  /* One wallpaper belongs to the shell, never to individual panels. */
+  background: color-mix(in srgb, var(--surface) 18%, transparent);
   backdrop-filter: none;
 }
 :root[data-desktop-glass='active'],
@@ -172,6 +166,7 @@ button:disabled {
   background-image: var(--imnota-background-image);
   background-position: center;
   background-size: cover;
+  background-repeat: no-repeat;
   opacity: var(--imnota-background-opacity, 0);
 }
 .app-shell > * {

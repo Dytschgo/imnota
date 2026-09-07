@@ -981,6 +981,10 @@ async function exercisePreferencesAndChannel(
     image.src = cssImage.slice(5, -2);
     await image.decode();
     if (!image.naturalWidth) throw new Error('Backdrop surface URL did not load');
+    for (const panel of document.querySelectorAll('.sidebar, .topbar, .settings-navigation')) {
+      if (getComputedStyle(panel).backgroundImage !== 'none')
+        throw new Error('Chrome duplicates the app-wide wallpaper');
+    }
   })()`);
   if (artifactDirectory) {
     await driver.evaluate(
@@ -991,6 +995,12 @@ async function exercisePreferencesAndChannel(
     await driver.waitFor({ selector: '.workspace' });
     await driver.resize(SMOKE_VIEWPORTS[0]);
     await waitForStableCanvas(driver);
+    await driver.evaluate(`(() => {
+      for (const panel of document.querySelectorAll('.sidebar, .topbar, .shot-rail, .inspector')) {
+        if (getComputedStyle(panel).backgroundImage !== 'none')
+          throw new Error('Workspace panel duplicates the app-wide wallpaper');
+      }
+    })()`);
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png'));
     await driver.click({ selector: '.sidebar-toggle' });
     await driver.waitFor({ selector: '.navigation-restore' });
