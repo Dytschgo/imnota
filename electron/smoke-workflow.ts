@@ -786,13 +786,20 @@ interface PromptSet {
   name: string;
 }
 
-async function promptSets(host: SmokeWorkflowHost, projectPath: string): Promise<PromptSet[]> {
+async function promptSets(
+  host: SmokeWorkflowHost,
+  projectPath: string,
+  allowInProgress = false,
+): Promise<PromptSet[]> {
   const project = await host.readProject(projectPath);
   const collection = project.collections.find((item) => !item.archived) ?? project.collections.at(-1);
   if (!collection) throw new Error('Prompt fixture lost its collection.');
   const exportsDirectory = path.join(projectPath, 'collections', collection.id, 'exports');
   const entries = await fs.readdir(exportsDirectory, { withFileTypes: true }).catch(() => []);
-  if (entries.some((entry) => entry.name.includes('.prompt-staging-') || entry.name.endsWith('.reservation')))
+  if (
+    !allowInProgress &&
+    entries.some((entry) => entry.name.includes('.prompt-staging-') || entry.name.endsWith('.reservation'))
+  )
     throw new Error('Completed prompt workflow left staging or reservation artifacts.');
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
@@ -807,7 +814,7 @@ async function waitForNewPromptSet(
 ): Promise<PromptSet> {
   const started = Date.now();
   do {
-    const added = (await promptSets(host, projectPath)).find((set) => !previousNames.has(set.name));
+    const added = (await promptSets(host, projectPath, true)).find((set) => !previousNames.has(set.name));
     if (added) return added;
     await delay(50);
   } while (Date.now() - started < 30_000);
@@ -880,6 +887,7 @@ async function exercisePromptWorkflow(
     latestSet = await waitForNewPromptSet(host, projectPath, existingNames);
     existingNames.add(latestSet.name);
     await waitForPromptGrants(driver, cards.length);
+    await promptSets(host, projectPath);
     await verifyPromptSet(projectPath, latestSet, cards.length);
   }
   if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
