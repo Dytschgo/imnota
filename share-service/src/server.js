@@ -3,8 +3,9 @@ import { cleanupExpired, reconcileArtifacts } from './maintenance.js';
 import { backupMetadata } from './metadata-backup.js';
 
 const service = createService();
+await cleanupExpired({ db: service.db, config: service.config });
 await reconcileArtifacts({ db: service.db, config: service.config, aggressive: true });
-await backupMetadata({ db: service.db, config: service.config });
+await backupMetadata({ db: service.db, config: service.config, onlyIfDue: true });
 const server = service.app.listen(service.config.port, () => {
   console.log(
     `Imnota share service listening on port ${service.config.port} with Node ${process.version}; private storage and metadata backup initialized`,
@@ -30,7 +31,7 @@ const cleanupTimer = setInterval(() => {
 cleanupTimer.unref();
 
 const backupTimer = setInterval(() => {
-  backupMetadata({ db: service.db, config: service.config })
+  backupMetadata({ db: service.db, config: service.config, onlyIfDue: true })
     .then((result) => console.log('Metadata backup:', result))
     .catch((error) => console.error('Scheduled metadata backup failed:', error));
 }, service.config.backupIntervalMs);

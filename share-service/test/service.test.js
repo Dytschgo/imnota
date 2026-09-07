@@ -431,6 +431,9 @@ test('creates consistent private SQLite backups and prunes retention-expired cop
   restored.close();
   const entries = await fsp.readdir(instance.config.backupsDir);
   assert.deepEqual(entries, [second.filename]);
+  const restarted = await backupMetadata({ db: instance.db, config: instance.config, onlyIfDue: true });
+  assert.equal(restarted.skipped, true);
+  assert.deepEqual(await fsp.readdir(instance.config.backupsDir), entries);
 });
 
 test('pairing is one logical upload, supports receipt recovery, and management revokes only its share', async (t) => {
