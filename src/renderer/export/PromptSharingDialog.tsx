@@ -27,10 +27,20 @@ export interface PromptSharingDialogProps {
 }
 
 function progressLabel(progress: PromptBundleProgress): string {
+  if (progress.phase === 'complete') return progress.message ?? 'Export complete';
+  if (progress.phase === 'cancelled') return progress.message ?? 'Export cancelled';
+  if (progress.phase === 'error') return progress.message ?? 'Export failed';
   if (progress.message) return progress.message;
-  if (progress.bundleNumber && progress.totalBundles)
-    return `Preparing Prompt ${progress.bundleNumber} of ${progress.totalBundles}`;
-  return progress.phase === 'cancelled' ? 'Export cancelled' : 'Preparing prompt bundles';
+  if (progress.bundleNumber && progress.totalBundles) {
+    const action = {
+      planning: 'Preparing',
+      rendering: 'Rendering',
+      writing: 'Writing',
+      copying: 'Copying',
+    }[progress.phase];
+    return `${action} Prompt ${progress.bundleNumber} of ${progress.totalBundles}`;
+  }
+  return 'Preparing prompt bundles';
 }
 
 export function PromptSharingDialog({
@@ -53,7 +63,12 @@ export function PromptSharingDialog({
   const busy = progress ? ['planning', 'rendering', 'writing', 'copying'].includes(progress.phase) : false;
   const current = progress?.bundleNumber ?? 0;
   const total = progress?.totalBundles ?? bundles.length;
-  const progressValue = total ? Math.min(100, Math.round((current / total) * 100)) : undefined;
+  const progressValue =
+    progress?.phase === 'complete'
+      ? 100
+      : busy && total
+        ? Math.min(100, Math.round((current / total) * 100))
+        : undefined;
   return (
     <Modal
       title="Share prompt bundles"

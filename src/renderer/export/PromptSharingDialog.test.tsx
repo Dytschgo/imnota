@@ -33,7 +33,7 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
       onCancel={onCancel}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Preparing Prompt 2 of 4');
+  expect(screen.getByRole('status')).toHaveTextContent('Rendering Prompt 2 of 4');
   expect(screen.queryByText('No prompt bundle to share')).not.toBeInTheDocument();
   expect(screen.getByText(/Reading the saved collection/)).toBeInTheDocument();
   expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
@@ -41,6 +41,43 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
   expect(onCancel).toHaveBeenCalledOnce();
   expect(screen.getByRole('dialog')).toHaveTextContent(/confirm that both Markdown and image are present/i);
   expect(screen.getByRole('dialog')).not.toHaveTextContent(/receiver detected|attachment received/i);
+});
+
+it('reports completed exports at 100% regardless of the last bundle number', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      progress={{ phase: 'complete', bundleNumber: 1, totalBundles: 6 }}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('status')).toHaveTextContent('Export complete');
+  expect(screen.getByRole('status')).toHaveTextContent('100%');
+  expect(screen.getByRole('progressbar')).toHaveAttribute('value', '100');
+  expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'false');
+  expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).not.toHaveTextContent(/preparing/i);
+});
+
+it.each([
+  ['cancelled', 'Export cancelled'],
+  ['error', 'Export failed'],
+] as const)('does not present %s progress as active preparation', (phase, label) => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      progress={{ phase, bundleNumber: 1, totalBundles: 6 }}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('status')).toHaveTextContent(label);
+  expect(screen.getByRole('status')).not.toHaveTextContent(/preparing/i);
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
 });
 
 it('offers explicit retry when native export cleanup is still pending', () => {
