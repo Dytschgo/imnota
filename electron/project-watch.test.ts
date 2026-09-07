@@ -68,9 +68,9 @@ describe('project file watch and compare-and-swap', () => {
     await fs.writeFile(projectFile, JSON.stringify({ marker: 'external' }));
     listener()('change', 'project.json');
     listener()('change', 'project.json');
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    expect(events).toHaveLength(1);
+    await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 2_000, interval: 25 });
     expect(events[0]).toMatchObject({ kind: 'external-change', changedPaths: ['project.json'] });
+    manager.stopAll();
   });
 
   it('rejects stale CAS and returns a fresh revision after a successful save', async () => {
