@@ -742,7 +742,10 @@ export function createService(overrides = {}) {
         'Content-Type': 'text/markdown; charset=utf-8',
         'Content-Disposition': 'attachment; filename="prompt.md"',
       });
-      return response.sendFile(path.join(config.uploadsDir, record.id, 'prompt.md'));
+      return response.sendFile('prompt.md', {
+        root: path.join(config.uploadsDir, record.id),
+        dotfiles: 'deny',
+      });
     }),
   );
 
@@ -760,7 +763,10 @@ export function createService(overrides = {}) {
         'Content-Type': 'image/png',
         'Content-Disposition': `inline; filename="${asset.filename}"`,
       });
-      return response.sendFile(path.join(config.uploadsDir, record.id, asset.filename));
+      return response.sendFile(asset.filename, {
+        root: path.join(config.uploadsDir, record.id),
+        dotfiles: 'deny',
+      });
     }),
   );
 
@@ -773,7 +779,10 @@ export function createService(overrides = {}) {
         'Content-Type': 'application/zip',
         'Content-Disposition': 'attachment; filename="imnota-prompt.zip"',
       });
-      return response.sendFile(path.join(config.uploadsDir, record.id, 'archive.zip'));
+      return response.sendFile('archive.zip', {
+        root: path.join(config.uploadsDir, record.id),
+        dotfiles: 'deny',
+      });
     }),
   );
 

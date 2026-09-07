@@ -80,7 +80,8 @@ function craftedPng(width, height, inflatedData, { depth = 8, colorType = 6 } = 
 }
 
 async function fixture(options = {}) {
-  const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'imnota-share-test-'));
+  // Production intentionally stores artifacts below a private, dot-prefixed directory.
+  const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), '.imnota-share-test-'));
   let clock = Date.UTC(2026, 8, 8, 12);
   const service = createService({
     dataDir,
