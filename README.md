@@ -72,7 +72,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-The collection/prompt workflow on this branch is under verification and has not been published by this implementation task. See the [implementation verification record](docs/implementation-verification.md) for completed checks and remaining acceptance work.
+The collection/prompt workflow is implemented and locally verified on Windows, but has not been published by this implementation task. See the [implementation verification record](docs/implementation-verification.md) for test results, measured performance, and remaining platform checks.
 
 Quality checks:
 
