@@ -31,17 +31,22 @@ export async function exerciseMixedContent(
   if (!clipboard.readText().includes('# System overview') || !clipboard.readImage().isEmpty())
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
+  await driver.resize({ width: 1280, height: 800 });
   await driver.click({ text: 'Add drawing', exact: true });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
   await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });
   const canvas = await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });
-  await driver.drag({ x: canvas.x + 180, y: canvas.y + 160 }, { x: canvas.x + 360, y: canvas.y + 260 });
+  const point = (x: number, y: number) => ({
+    x: Math.round(canvas.x + canvas.width * x),
+    y: Math.round(canvas.y + canvas.height * y),
+  });
+  await driver.drag(point(0.1, 0.25), point(0.35, 0.4));
   await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });
-  await driver.drag({ x: canvas.x + 460, y: canvas.y + 160 }, { x: canvas.x + 600, y: canvas.y + 260 });
+  await driver.drag(point(0.6, 0.25), point(0.85, 0.4));
   await driver.click({ selector: '[data-testid="drawing-tool-arrow"]' });
-  await driver.drag({ x: canvas.x + 360, y: canvas.y + 210 }, { x: canvas.x + 460, y: canvas.y + 210 });
+  await driver.drag(point(0.35, 0.325), point(0.6, 0.325));
   await driver.click({ selector: '[data-testid="drawing-tool-select"]' });
-  await driver.drag({ x: canvas.x + 180, y: canvas.y + 210 }, { x: canvas.x + 180, y: canvas.y + 320 });
+  await driver.drag(point(0.1, 0.325), point(0.1, 0.525));
   if (artifactDirectory) {
     await driver.resize({ width: 1440, height: 900 });
     captures.push(await driver.capture(artifactDirectory, 'mixed-content-drawing.png'));
