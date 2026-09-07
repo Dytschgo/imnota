@@ -25,6 +25,7 @@ import {
   NOTE_BADGE_GAP,
   NOTE_BADGE_HEIGHT,
   noteBadgeWidth,
+  normalizeAnnotationBounds,
   textAnnotationLayout,
 } from '../../shared/annotation-geometry';
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
@@ -643,13 +644,7 @@ export function AnnotationCanvas({
       setDraft(null);
       return;
     }
-    const completed = {
-      ...draft,
-      x: draft.points ? draft.x : Math.min(draft.x, draft.x + (draft.width ?? 0)),
-      y: draft.points ? draft.y : Math.min(draft.y, draft.y + (draft.height ?? 0)),
-      width: Math.abs(draft.width ?? 0),
-      height: Math.abs(draft.height ?? 0),
-    };
+    const completed = normalizeAnnotationBounds(draft);
     onChange([...annotations, completed]);
     onSelect(completed.id);
     if (completed.kind === 'callout') beginTextEditing(completed, true);
@@ -972,7 +967,7 @@ export function AnnotationCanvas({
             <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
               <KonvaImage image={imageObj} width={image?.width} height={image?.height} listening={false} />
               {[...annotations].sort((left, right) => left.zIndex - right.zIndex).map(renderAnnotation)}
-              {draft && renderAnnotation(draft)}
+              {draft && renderAnnotation(normalizeAnnotationBounds(draft))}
               <Transformer
                 ref={transformerRef}
                 rotateEnabled={
@@ -980,7 +975,8 @@ export function AnnotationCanvas({
                     annotations.find((annotation) => annotation.id === selectedId)?.kind ?? '',
                   )
                 }
-                keepRatioEnabled={false}
+                keepRatio={false}
+                flipEnabled={false}
                 borderStroke="#8e83ff"
                 anchorStroke="#6857f5"
                 anchorFill="#ffffff"

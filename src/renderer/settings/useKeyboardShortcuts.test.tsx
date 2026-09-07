@@ -9,15 +9,23 @@ function Harness({
   bindings,
   onText,
   onCollections = () => {},
+  onDelete = () => {},
+  platform = 'windows',
 }: {
   bindings: ShortcutBindings;
   onText: () => void;
   onCollections?: () => void;
+  onDelete?: () => void;
+  platform?: 'windows' | 'mac';
 }) {
   useKeyboardShortcuts({
     bindings,
-    platform: 'windows',
-    handlers: { 'tool.text': onText, 'panel.toggleCollections': onCollections },
+    platform,
+    handlers: {
+      'tool.text': onText,
+      'panel.toggleCollections': onCollections,
+      'edit.deleteAnnotation': onDelete,
+    },
   });
   return (
     <div>
@@ -30,6 +38,17 @@ function Harness({
 }
 
 describe('useKeyboardShortcuts', () => {
+  it('deletes with Mac Backspace but never while typing or inside a dialog', () => {
+    const onDelete = vi.fn();
+    const { getByLabelText, getByRole } = render(
+      <Harness bindings={{}} platform="mac" onText={vi.fn()} onDelete={onDelete} />,
+    );
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(onDelete).toHaveBeenCalledOnce();
+    fireEvent.keyDown(getByLabelText('Description'), { key: 'Backspace' });
+    fireEvent.keyDown(getByRole('button', { name: 'Dialog action' }), { key: 'Backspace' });
+    expect(onDelete).toHaveBeenCalledOnce();
+  });
   it('runs a configured action outside typing and dialog contexts', () => {
     const onText = vi.fn();
     const { getByRole, getByLabelText } = render(<Harness bindings={{}} onText={onText} />);

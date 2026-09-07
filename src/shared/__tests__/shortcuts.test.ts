@@ -21,6 +21,14 @@ describe('shortcut normalization', () => {
   });
 
   it('creates platform-aware defaults and resets overrides', () => {
+    expect(getDefaultShortcuts('mac')['edit.deleteAnnotation']).toBe('Backspace');
+    expect(getDefaultShortcuts('windows')['edit.deleteAnnotation']).toBe('Delete');
+    expect(
+      resolveShortcutBindings({ 'edit.deleteAnnotation': null }, 'mac')['edit.deleteAnnotation'],
+    ).toBeNull();
+    expect(resolveShortcutBindings({ 'edit.deleteAnnotation': 'X' }, 'mac')['edit.deleteAnnotation']).toBe(
+      'X',
+    );
     expect(getDefaultShortcuts('mac')['prompt.copy']).toBe('Meta+Shift+C');
     expect(getDefaultShortcuts('windows')['prompt.copy']).toBe('Ctrl+Shift+C');
     expect(resolveShortcutBindings({ 'tool.text': 'x', 'tool.arrow': null }, 'windows')).toMatchObject({

@@ -451,6 +451,10 @@ async function waitForStableCanvas(driver: NativeUiDriver): Promise<void> {
 }
 
 async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
+  // Reopening creates a hidden local smoke window. Present the disposable window
+  // so Konva's hit canvas is repainted before successive native double-clicks.
+  driver.browserWindow.show();
+  driver.browserWindow.focus();
   await driver.waitFor({ selector: '.konvajs-content' });
   // Hosted runners can finish their first ResizeObserver/layout pass after the stage mounts.
   await waitForStableCanvas(driver);
@@ -568,7 +572,8 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   const cancelled = await driver.evaluate<string>(
     `document.querySelector('[aria-label="Edit annotation text"]')?.value ?? ''`,
   );
-  if (cancelled !== 'Trusted pointer note') throw new Error('Escape did not restore inline text.');
+  if (cancelled !== 'Trusted pointer note')
+    throw new Error(`Escape did not restore inline text: ${JSON.stringify(cancelled)}.`);
   await driver.press('ENTER');
 
   geometry = await canvasGeometry(driver);
@@ -922,6 +927,17 @@ async function exercisePreferencesAndChannel(
       `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
+    await driver.click({ selector: '.nav-submenu-item' });
+    await driver.waitFor({ selector: '.workspace' });
+    await driver.resize(SMOKE_VIEWPORTS[0]);
+    await waitForStableCanvas(driver);
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png'));
+    await driver.click({ selector: '.sidebar-toggle' });
+    await driver.waitFor({ selector: '.navigation-restore' });
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png'));
+    await driver.click({ selector: '.navigation-restore' });
+    await driver.click({ selector: '[data-testid="settings-button"]' });
+    await driver.waitFor({ selector: '.settings-view' });
   }
   await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
   await driver.waitFor({ selector: ':root[data-glass-level="off"]' });
@@ -932,6 +948,7 @@ async function exercisePreferencesAndChannel(
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
+  await driver.click({ text: 'Updates & help', exact: true });
   const chooseNightly = async () => {
     await driver.waitFor(channelSelect);
     // Standard DOM option selection avoids OS-owned popup menus outside webContents.
