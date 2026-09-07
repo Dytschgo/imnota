@@ -4,27 +4,9 @@ Screenshots that AI understands.
 
 Imnota is a local-first desktop tool for turning annotated screenshots into prompt bundles for AI assistants and coding agents. Add screenshots to a collection, mark what matters, add an optional description, and copy the generated Markdown and high-resolution prompt image into the tool you already use.
 
-[imnota.xyz](https://imnota.xyz) · [Latest downloads](https://github.com/Dytschgo/imnota/releases/latest) · [User guide](docs/user-guide.md)
-
 ```text
 Paste or import screenshots → Annotate → Describe → Copy prompt bundle
 ```
-
-<p align="center">
-  <img src="docs/images/imnota-workflow.png" alt="Imnota workflow from screenshots to an AI-ready prompt bundle" width="760">
-</p>
-
-## Current status
-
-The repository currently targets Imnota **0.2.4**. The core collection and prompt-bundle workflow is implemented and locally accepted. The latest verification passed 310 application tests, 34 script tests, formatting, linting, type checking, a production build and the Windows native stress workflow.
-
-Verification is strongest on Windows. macOS launch, Linux packaging and paste acceptance inside individual coding editors still require broader platform checks. The implementation is local-first: no release, cloud service or runtime AI provider is required for the core workflow. See the [implementation verification record](docs/implementation-verification.md) for measured results and known limits.
-
-<p align="center">
-  <img src="docs/images/imnota-handoff.png" alt="Annotated visual evidence becoming a structured implementation brief" width="760">
-</p>
-
-Imnota is a context layer between product evidence and implementation. The screenshot shows where the issue is, annotations make the relevant area explicit, and Markdown describes what the receiving person or agent should understand.
 
 ## Why local-first
 
@@ -41,17 +23,14 @@ Projects are plain folders containing JSON, Markdown and image files. There is n
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection
 - Automatic splitting for readable, clipboard-safe exports on a white background
-- Non-destructive crop with Apply, Cancel, Reset and resize handles
 - Screenshot deletion through the operating-system trash with Imnota-managed Undo recovery
-- Light, dark, system and curated appearance settings with an optional desktop glass effect
-- Curated backdrops and a local uploaded-image library
-- Stable and Nightly update channels with platform-specific update actions
+- Light, dark, system and curated appearance settings
 - First-run onboarding that can be replayed from Settings
 - Secure Electron preload bridge with context isolation and no renderer Node.js access
 
 ## Supported platforms
 
-Development and packaging targets are Windows, macOS and Linux. The current native workflow has been verified on Windows. Unsigned artifacts are suitable for local testing. macOS packages are ad-hoc signed but not Apple-notarised; Linux package and clean-machine coverage remain part of the release checklist.
+Development and packaging targets are Windows, macOS and Linux. Unsigned artifacts are suitable for local testing. Production signing and notarisation are intentionally optional.
 
 ## Installation
 
@@ -69,7 +48,7 @@ irm https://raw.githubusercontent.com/Dytschgo/imnota/main/scripts/install.ps1 |
 
 The installer downloads the latest published desktop build. Users do not need Node.js, pnpm, Electron or any development dependencies. The Mac archive supports both Apple Silicon and Intel, verifies its checksum and ad-hoc signature, and installs in `~/Applications`. Existing apps are kept as timestamped backups; project files are not moved.
 
-macOS packages are **not Apple-notarised**. If macOS blocks opening Imnota, open System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper. You can also [download the Mac ZIP directly](https://github.com/Dytschgo/imnota/releases/latest/download/Imnota-mac.zip), extract it and move Imnota to Applications.
+This first release is **not Apple-notarised**. If macOS blocks opening Imnota, open System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper. You can also [download the Mac ZIP directly](https://github.com/Dytschgo/imnota/releases/latest/download/Imnota-mac.zip), extract it and move Imnota to Applications.
 
 For manual installation, download a release artifact for your platform, or build from source:
 
@@ -93,7 +72,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-The collection/prompt workflow is implemented and locally verified on Windows. See the [implementation verification record](docs/implementation-verification.md) for test results, measured performance and remaining platform checks.
+The collection/prompt workflow is implemented and locally verified on Windows, but has not been published by this implementation task. See the [implementation verification record](docs/implementation-verification.md) for test results, measured performance, and remaining platform checks.
 
 Quality checks:
 
@@ -136,7 +115,6 @@ electron/                 Secure main process and preload bridge
 src/shared/               Shared types, validation helpers and Markdown generation
 src/renderer/             React application shell, workbench and Konva canvas
 docs/                     Architecture, data format and troubleshooting
-docs/images/              README workflow and handoff illustrations
 examples/example-project/ Example metadata-only project
 .github/                  Issue templates, workflows and Dependabot
 ```
