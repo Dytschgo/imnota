@@ -297,17 +297,19 @@ export default function App() {
         setError(`${failure} was cancelled so your unsaved work stays open.`);
         return;
       }
+      const nativeMutationToken = persistence.beginNativeMutation();
       try {
         const next = await action();
-        if (next && identity === navigationIdentity.current) {
-          if (!(await flushAll())) {
-            setError(`${failure} was cancelled because newer edits could not be saved.`);
-            return;
-          }
-          if (!(await persistence.adoptAuthoritativeSnapshot(next)))
-            setError(`${failure} could not safely adopt the latest project state.`);
+        if (identity !== navigationIdentity.current) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          return;
         }
+        if (next) {
+          if (!(await persistence.adoptAuthoritativeSnapshot(next, nativeMutationToken)))
+            setError(`${failure} could not safely adopt the latest project state.`);
+        } else await persistence.cancelNativeMutation(nativeMutationToken);
       } catch (reason) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
         if (identity === navigationIdentity.current)
           setError(reason instanceof Error ? reason.message : failure);
       }

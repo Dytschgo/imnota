@@ -618,13 +618,23 @@ describe('useProjectPersistence', () => {
       }),
     );
     await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    const token = result.current.beginNativeMutation();
+    const typedWhileReopening = structuredClone(source.project);
+    typedWhileReopening.collections[0]!.overallContext = 'Keep this local context';
+    act(() => result.current.queueProjectMetadata(typedWhileReopening));
     await act(async () => {
-      expect(await result.current.adoptAuthoritativeSnapshot(recovered)).toBe(true);
+      expect(await result.current.adoptAuthoritativeSnapshot(recovered, token)).toBe(true);
     });
     const exported = await result.current.getSavedContext('collection');
     expect(exported.snapshot.project.description).toBe('Recovered S2');
-    expect(exported.snapshot.projectRevision).toBe('project-recovered-S2');
-    expect(onSnapshot).toHaveBeenLastCalledWith(recovered);
+    expect(exported.snapshot.project.collections[0]!.overallContext).toBe('Keep this local context');
+    expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'project-recovered-S2',
+        project: expect.objectContaining({ description: 'Recovered S2' }),
+      }),
+    );
+    expect(onSnapshot.mock.calls.at(-1)?.[0].project.description).toBe('Recovered S2');
   });
 
   it('holds debounced metadata behind a native mutation and saves it against the new revision', async () => {
@@ -670,6 +680,66 @@ describe('useProjectPersistence', () => {
         }),
       }),
     );
+  });
+
+  it('rebases a stale metadata CAS when an unsuspended native collection mutation is adopted', async () => {
+    const source = snapshot();
+    const renamed = structuredClone(source);
+    renamed.project.collections[0]!.name = 'Renamed natively';
+    const saveMetadata = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'project-changed',
+          message: 'The native collection mutation advanced project.json.',
+          retryable: true,
+        },
+      })
+      .mockImplementationOnce(async ({ project: next }: { project: ProjectData }) =>
+        ok({ snapshot: { ...renamed, project: next }, projectRevision: 'project-rebased' }),
+      );
+    const mock = bridge({
+      reloadWatchedProject: vi.fn(async () =>
+        ok({ snapshot: renamed, projectRevision: 'project-after-rename' }),
+      ),
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    window.imnota = mock.value as never;
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+    const typed = structuredClone(source.project);
+    typed.collections[0]!.overallContext = 'Context typed during rename';
+    await act(async () => {
+      expect(await result.current.saveProjectMetadata(typed)).toBe(false);
+    });
+    expect(result.current.externalChange?.kind).toBe('metadata-conflict');
+    await act(async () => {
+      expect(await result.current.acceptMutationSnapshot(renamed)).toBe(true);
+    });
+    expect(saveMetadata).toHaveBeenCalledTimes(2);
+    expect(saveMetadata.mock.calls[1]![0]).toEqual(
+      expect.objectContaining({
+        expectedRevision: 'project-after-rename',
+        project: expect.objectContaining({
+          collections: [
+            expect.objectContaining({
+              name: 'Renamed natively',
+              overallContext: 'Context typed during rename',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(result.current.externalChange).toBeNull();
   });
 
   it('waits for a delayed watcher before accepting a native mutation baseline', async () => {
