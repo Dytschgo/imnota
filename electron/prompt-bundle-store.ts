@@ -10,6 +10,10 @@ export const MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS = 2_000_000;
 export const MAX_PROMPT_BUNDLE_MARKDOWN_BYTES = 8_000_000;
 export const MAX_PROMPT_BUNDLE_SOURCE_BYTES = 8_000_000;
 const MAX_TIMESTAMP_ATTEMPTS = 86_400;
+const MAX_OWNERSHIP_RECORD_BYTES = 4_096;
+const MAX_RECOVERY_ENTRIES = 10_000;
+const OWNERSHIP_RECORD_FILENAME = '.imnota-prompt-export.json';
+const OWNERSHIP_RECORD_KIND = 'imnota-prompt-export-session';
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
@@ -76,6 +80,8 @@ export interface FinishPromptBundleSessionOptions {
 export interface PromptBundleStoreDependencies {
   now(): Date;
   randomId(): string;
+  ownerProcessId(): number;
+  isProcessAlive(processId: number): boolean;
   writeAtomically(filePath: string, content: string | Uint8Array): Promise<void>;
   /** Must fully decode the structurally bounded PNG, not merely inspect its header. */
   validateDecodedPng(
@@ -96,6 +102,7 @@ interface StoredSession {
   stagingDirectory: string;
   finalDirectory: string;
   reservationPath: string;
+  ownershipJournalPath: string;
   completed: Map<number, StoredPromptBundle>;
   sourceAssets: Map<string, string>;
   incompleteFiles: Set<string>;
@@ -103,6 +110,15 @@ interface StoredSession {
   queue: Promise<void>;
   cancelRequested: boolean;
   finalizing: boolean;
+}
+
+interface PromptBundleOwnershipRecord {
+  kind: typeof OWNERSHIP_RECORD_KIND;
+  version: 1;
+  sessionId: string;
+  collectionId: string;
+  setName: string;
+  ownerProcessId: number;
 }
 
 function validatePathSegment(value: string, label: string): string {
@@ -279,6 +295,103 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function defaultProcessAlive(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+function parseOwnershipRecord(value: string): PromptBundleOwnershipRecord | undefined {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+  const record = candidate as Record<string, unknown>;
+  if (
+    Object.keys(record).sort().join(',') !== 'collectionId,kind,ownerProcessId,sessionId,setName,version' ||
+    record.kind !== OWNERSHIP_RECORD_KIND ||
+    record.version !== 1 ||
+    typeof record.sessionId !== 'string' ||
+    typeof record.collectionId !== 'string' ||
+    typeof record.setName !== 'string' ||
+    !Number.isSafeInteger(record.ownerProcessId) ||
+    (record.ownerProcessId as number) < 1
+  )
+    return undefined;
+  try {
+    validatePathSegment(record.sessionId, 'Session ID');
+    validatePathSegment(record.collectionId, 'Collection ID');
+    validatePathSegment(record.setName, 'Export set name');
+  } catch {
+    return undefined;
+  }
+  return record as unknown as PromptBundleOwnershipRecord;
+}
+
+async function readOwnershipRecord(filePath: string): Promise<PromptBundleOwnershipRecord | undefined> {
+  await assertNoLinks(filePath);
+  const handle = await fs.open(filePath, 'r').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (!handle) return undefined;
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_OWNERSHIP_RECORD_BYTES) return undefined;
+    const content = Buffer.alloc(stat.size);
+    const { bytesRead } = await handle.read(content, 0, content.length, 0);
+    if (bytesRead !== content.length) return undefined;
+    const trailing = Buffer.alloc(1);
+    if ((await handle.read(trailing, 0, 1, content.length)).bytesRead) return undefined;
+    try {
+      return parseOwnershipRecord(new TextDecoder('utf-8', { fatal: true }).decode(content));
+    } catch {
+      return undefined;
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+function sameOwnershipRecord(left: PromptBundleOwnershipRecord, right: PromptBundleOwnershipRecord): boolean {
+  return (
+    left.kind === right.kind &&
+    left.version === right.version &&
+    left.sessionId === right.sessionId &&
+    left.collectionId === right.collectionId &&
+    left.setName === right.setName &&
+    left.ownerProcessId === right.ownerProcessId
+  );
+}
+
+async function lstatIfExists(filePath: string) {
+  return await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+}
+
+async function containsLinkOrTooManyEntries(directory: string): Promise<boolean> {
+  let visited = 0;
+  const pending = [directory];
+  while (pending.length) {
+    const current = pending.pop()!;
+    for (const entry of await fs.readdir(current, { withFileTypes: true })) {
+      visited++;
+      if (visited > MAX_RECOVERY_ENTRIES || entry.isSymbolicLink()) return true;
+      if (entry.isDirectory()) pending.push(path.join(current, entry.name));
+      else if (!entry.isFile()) return true;
+    }
+  }
+  return false;
+}
+
 async function removeFiles(filePaths: readonly string[]): Promise<string[]> {
   const errors: string[] = [];
   for (const filePath of filePaths) {
@@ -302,6 +415,8 @@ export class PromptBundleStore {
     this.dependencies = {
       now: dependencies.now ?? (() => new Date()),
       randomId: dependencies.randomId ?? (() => randomUUID()),
+      ownerProcessId: dependencies.ownerProcessId ?? (() => process.pid),
+      isProcessAlive: dependencies.isProcessAlive ?? defaultProcessAlive,
       writeAtomically: dependencies.writeAtomically ?? atomicWrite,
       validateDecodedPng: dependencies.validateDecodedPng,
     };
@@ -328,6 +443,12 @@ export class PromptBundleStore {
     await assertNoLinks(collectionDirectory);
     const collectionStat = await fs.stat(collectionDirectory).catch(() => null);
     if (!collectionStat?.isDirectory()) throw new Error('Collection folder is unavailable.');
+    await assertNoLinks(exportsDirectory);
+    await fs.mkdir(exportsDirectory, { recursive: true });
+    await this.recoverOwnedSessions(exportsDirectory, collectionId);
+    const sessionId = this.dependencies.randomId();
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId) || this.sessions.has(sessionId))
+      throw new Error('Could not create a unique export session.');
     const baseTime = this.dependencies.now();
     let timestamp = '';
     let setName = '';
@@ -346,11 +467,22 @@ export class PromptBundleStore {
       reservationPath = path.join(exportsDirectory, `.${setName}.reservation`);
       await assertNoLinks(finalDirectory);
       await assertNoLinks(exportsDirectory);
-      await fs.mkdir(exportsDirectory, { recursive: true });
       if (await fs.stat(finalDirectory).catch(() => null)) continue;
       try {
         const reservation = await fs.open(reservationPath, 'wx');
-        await reservation.close();
+        try {
+          const ownership: PromptBundleOwnershipRecord = {
+            kind: OWNERSHIP_RECORD_KIND,
+            version: 1,
+            sessionId,
+            collectionId,
+            setName,
+            ownerProcessId: this.dependencies.ownerProcessId(),
+          };
+          await reservation.writeFile(JSON.stringify(ownership), 'utf8');
+        } finally {
+          await reservation.close();
+        }
         reserved = true;
         break;
       } catch (error) {
@@ -359,22 +491,28 @@ export class PromptBundleStore {
     }
     if (!reserved) throw new Error('Could not reserve a unique prompt export timestamp.');
 
-    const sessionId = this.dependencies.randomId();
-    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId) || this.sessions.has(sessionId)) {
-      await fs.unlink(reservationPath).catch(() => undefined);
-      throw new Error('Could not create a unique export session.');
-    }
     const stagingDirectory = path.join(exportsDirectory, `.prompt-staging-${sessionId}`);
+    const ownershipJournalPath = path.join(stagingDirectory, OWNERSHIP_RECORD_FILENAME);
+    let createdStaging = false;
     try {
       await assertNoLinks(stagingDirectory);
       await fs.mkdir(stagingDirectory, { recursive: false });
+      createdStaging = true;
       const [realExports, realStaging] = await Promise.all([
         fs.realpath(exportsDirectory),
         fs.realpath(stagingDirectory),
       ]);
       if (!isWithin(realExports, realStaging) || realExports === realStaging)
         throw new Error('Prompt staging directory escaped its collection exports folder.');
+      const reservationRecord = await readOwnershipRecord(reservationPath);
+      if (!reservationRecord) throw new Error('Prompt export ownership reservation is invalid.');
+      await fs.writeFile(ownershipJournalPath, JSON.stringify(reservationRecord), {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
     } catch (error) {
+      if (createdStaging)
+        await fs.rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined);
       await fs.unlink(reservationPath).catch(() => undefined);
       throw error;
     }
@@ -388,6 +526,7 @@ export class PromptBundleStore {
       stagingDirectory,
       finalDirectory,
       reservationPath,
+      ownershipJournalPath,
       completed: new Map(),
       sourceAssets: new Map(),
       incompleteFiles: new Set(),
@@ -397,6 +536,69 @@ export class PromptBundleStore {
       finalizing: false,
     });
     return { sessionId, collectionId, timestamp, setName };
+  }
+
+  private async recoverOwnedSessions(exportsDirectory: string, collectionId: string): Promise<void> {
+    const entries = await fs.readdir(exportsDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.name.startsWith('.prompt-staging-') || !entry.isDirectory() || entry.isSymbolicLink())
+        continue;
+      const sessionId = entry.name.slice('.prompt-staging-'.length);
+      if (!/^[a-zA-Z0-9_-]+$/.test(sessionId) || this.sessions.has(sessionId)) continue;
+      const stagingDirectory = path.join(exportsDirectory, entry.name);
+      try {
+        const stagingRecord = await readOwnershipRecord(
+          path.join(stagingDirectory, OWNERSHIP_RECORD_FILENAME),
+        );
+        if (
+          !stagingRecord ||
+          stagingRecord.sessionId !== sessionId ||
+          stagingRecord.collectionId !== collectionId ||
+          stagingRecord.ownerProcessId === this.dependencies.ownerProcessId() ||
+          this.dependencies.isProcessAlive(stagingRecord.ownerProcessId)
+        )
+          continue;
+        const reservationPath = path.join(exportsDirectory, `.${stagingRecord.setName}.reservation`);
+        const reservationRecord = await readOwnershipRecord(reservationPath);
+        if (!reservationRecord || !sameOwnershipRecord(stagingRecord, reservationRecord)) continue;
+        const finalDirectory = path.join(exportsDirectory, stagingRecord.setName);
+        if ((await lstatIfExists(finalDirectory)) || (await containsLinkOrTooManyEntries(stagingDirectory)))
+          continue;
+        await assertNoLinks(stagingDirectory);
+        await assertNoLinks(reservationPath);
+        await fs.rm(stagingDirectory, { recursive: true });
+        await fs.unlink(reservationPath).catch(() => undefined);
+      } catch {
+        // Foreign, malformed, linked, changing, or inaccessible entries are left untouched.
+      }
+    }
+    await this.recoverOwnedReservations(exportsDirectory, collectionId);
+  }
+
+  private async recoverOwnedReservations(exportsDirectory: string, collectionId: string): Promise<void> {
+    const entries = await fs.readdir(exportsDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.name.startsWith('.') || !entry.name.endsWith('.reservation') || !entry.isFile()) continue;
+      const reservationPath = path.join(exportsDirectory, entry.name);
+      try {
+        const record = await readOwnershipRecord(reservationPath);
+        if (
+          !record ||
+          entry.name !== `.${record.setName}.reservation` ||
+          record.collectionId !== collectionId ||
+          this.sessions.has(record.sessionId) ||
+          record.ownerProcessId === this.dependencies.ownerProcessId() ||
+          this.dependencies.isProcessAlive(record.ownerProcessId)
+        )
+          continue;
+        const stagingDirectory = path.join(exportsDirectory, `.prompt-staging-${record.sessionId}`);
+        if (await lstatIfExists(stagingDirectory)) continue;
+        await assertNoLinks(reservationPath);
+        await fs.unlink(reservationPath);
+      } catch {
+        // Reservations that cannot be proven abandoned and app-owned remain untouched.
+      }
+    }
   }
 
   async commitBundle(input: CommitPromptBundleInput): Promise<StoredPromptBundle> {
@@ -631,6 +833,11 @@ export class PromptBundleStore {
         warnings.push(
           'The reserved destination appeared before publication. Complete bundle pairs remain in the reported recovery folder; nothing was overwritten.',
         );
+        await assertNoLinks(session.ownershipJournalPath);
+        await fs.writeFile(session.ownershipJournalPath, '{"kind":"imnota-prompt-export-retained"}');
+        await fs.unlink(session.ownershipJournalPath).catch((error) => {
+          warnings.push(`Export ownership marker cleanup failed: ${errorMessage(error)}`);
+        });
         await fs.unlink(session.reservationPath).catch((error) => {
           warnings.push(`Timestamp reservation cleanup failed: ${errorMessage(error)}`);
         });
@@ -647,6 +854,9 @@ export class PromptBundleStore {
         };
       }
       await fs.rename(session.stagingDirectory, session.finalDirectory);
+      await fs
+        .unlink(path.join(session.finalDirectory, OWNERSHIP_RECORD_FILENAME))
+        .catch((error) => warnings.push(`Export ownership marker cleanup failed: ${errorMessage(error)}`));
       await fs.unlink(session.reservationPath).catch((error) => {
         warnings.push(`Timestamp reservation cleanup failed: ${errorMessage(error)}`);
       });
