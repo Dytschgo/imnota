@@ -28,6 +28,13 @@ export function isStrictChild(parent, target) {
   return difference !== '' && !difference.startsWith('..') && !isAbsolute(difference);
 }
 
+export function nativeVerificationEnvironment(inherited) {
+  const environment = { ...inherited };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  delete environment.VITE_DEV_SERVER_URL;
+  return environment;
+}
+
 export function prepareArtifactDirectory(requestedPath) {
   if (!requestedPath) return undefined;
   if (!isAbsolute(requestedPath)) throw new Error('IMNOTA_SMOKE_ARTIFACT_DIR must be absolute.');
@@ -111,14 +118,13 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
     mkdirSync(profilePath);
     const artifactDirectory = prepareArtifactDirectory(process.env.IMNOTA_SMOKE_ARTIFACT_DIR);
     const env = {
-      ...process.env,
+      ...nativeVerificationEnvironment(process.env),
       IMNOTA_SMOKE: '1',
       IMNOTA_SMOKE_MODE: mode,
       IMNOTA_SMOKE_RESULT: reportPath,
       IMNOTA_SMOKE_USER_DATA: profilePath,
       ...(artifactDirectory ? { IMNOTA_SMOKE_ARTIFACT_DIR: artifactDirectory } : {}),
     };
-    delete env.ELECTRON_RUN_AS_NODE;
     const executable = packagedExecutable ?? electron;
     const args = packagedExecutable ? [] : ['.'];
     const timeoutMs = mode === 'stress' ? 15 * 60_000 : 3 * 60_000;

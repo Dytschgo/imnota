@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { isStrictChild, prepareArtifactDirectory, removeRunDirectory } from './smoke-process.mjs';
+import {
+  isStrictChild,
+  nativeVerificationEnvironment,
+  prepareArtifactDirectory,
+  removeRunDirectory,
+} from './smoke-process.mjs';
 
 const temporary = [];
 afterEach(() => {
@@ -11,6 +16,16 @@ afterEach(() => {
 });
 
 describe('native smoke process safety', () => {
+  it('uses built renderer assets without mutating the inherited environment', () => {
+    const inherited = {
+      ELECTRON_RUN_AS_NODE: '1',
+      VITE_DEV_SERVER_URL: 'http://localhost:5173',
+      PATH: 'test',
+    };
+    assert.deepEqual(nativeVerificationEnvironment(inherited), { PATH: 'test' });
+    assert.equal(inherited.ELECTRON_RUN_AS_NODE, '1');
+    assert.equal(inherited.VITE_DEV_SERVER_URL, 'http://localhost:5173');
+  });
   it('accepts a dedicated newly created artifact directory and rejects broad names', () => {
     const parent = mkdtempSync(join(tmpdir(), 'imnota-smoke-script-test-'));
     temporary.push(parent);
