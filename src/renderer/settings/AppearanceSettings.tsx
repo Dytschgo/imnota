@@ -103,6 +103,12 @@ export function AppearanceSettings({
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const readGeneration = useRef(0);
+  const busyRef = useRef(false);
+  const valueRef = useRef(value);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   useEffect(
     () => () => {
@@ -111,15 +117,26 @@ export function AppearanceSettings({
     [],
   );
 
-  const update = async (patch: Partial<AppearancePreferences>) => {
-    if (busy || disabled) return;
+  const invalidatePendingUpload = () => {
+    readGeneration.current += 1;
+    return readGeneration.current;
+  };
+
+  const update = async (
+    patch: Partial<AppearancePreferences>,
+    { invalidateUpload = true }: { invalidateUpload?: boolean } = {},
+  ) => {
+    if (invalidateUpload) invalidatePendingUpload();
+    if (busyRef.current || disabled) return;
+    busyRef.current = true;
     setBusy(true);
     setError('');
     try {
-      await onChange({ ...value, ...patch });
+      await onChange({ ...valueRef.current, ...patch });
     } catch {
       setError('Appearance could not be saved. Your previous preference is still active.');
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -271,6 +288,7 @@ export function AppearanceSettings({
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
+                const generation = invalidatePendingUpload();
                 if (!file) return;
                 if (!file.type.startsWith('image/')) {
                   setError('Choose an image file from this device.');
@@ -280,13 +298,13 @@ export function AppearanceSettings({
                   setError('Choose an image smaller than 5.5 MB.');
                   return;
                 }
-                const generation = ++readGeneration.current;
                 const reader = new FileReader();
                 reader.onload = () => {
                   if (generation !== readGeneration.current || typeof reader.result !== 'string') return;
                   void normalizeBackdrop(reader.result)
                     .then((normalized) => {
-                      if (generation === readGeneration.current) void update({ backgroundImage: normalized });
+                      if (generation === readGeneration.current)
+                        void update({ backgroundImage: normalized }, { invalidateUpload: false });
                     })
                     .catch(() => {
                       if (generation === readGeneration.current)

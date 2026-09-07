@@ -837,6 +837,8 @@ async function captureWorkspaceMatrix(
       throw new Error(`Settings UI displayed ${theme}, but native preferences retained ${persistedTheme}.`);
 
     driver.setWindow(await host.reopenWindow());
+    driver.browserWindow.show();
+    driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
     for (const viewport of SMOKE_VIEWPORTS) {
@@ -860,6 +862,10 @@ async function exercisePreferencesAndChannel(
   artifactDirectory?: string,
   artifacts: SmokeCapture[] = [],
 ): Promise<void> {
+  // Reopened local smoke windows may be hidden. Present this isolated fixture so
+  // native focus and screenshot paint reflect the same settings state as the DOM.
+  driver.browserWindow.show();
+  driver.browserWindow.focus();
   const profile = await driver.evaluate<{
     performanceClass: string;
     platform: string;
@@ -912,6 +918,9 @@ async function exercisePreferencesAndChannel(
     if (!image.naturalWidth) throw new Error('Backdrop surface URL did not load');
   })()`);
   if (artifactDirectory) {
+    await driver.evaluate(
+      `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    );
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
   }
   await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
@@ -1418,14 +1427,30 @@ export async function runSmokeWorkflow(
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' });
   await driver.press('End');
-  await driver.waitFor({ selector: '[role="option"]:focus' });
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (document.activeElement?.getAttribute('role') === 'option') return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection option did not receive focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
   const focusedCollection = await driver.evaluate<boolean>(
     `document.activeElement?.getAttribute('role') === 'option'`,
   );
   if (!focusedCollection) throw new Error('Collection picker did not focus an option with native keys.');
   await driver.press('Escape');
   await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' }, { absent: true });
-  await driver.waitFor({ selector: '[data-testid="collection-picker"]:focus' });
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (document.activeElement?.getAttribute('data-testid') === 'collection-picker') return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection trigger did not regain focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
   const pickerFocusRestored = await driver.evaluate<boolean>(
     `document.activeElement?.getAttribute('data-testid') === 'collection-picker'`,
   );
