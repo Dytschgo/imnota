@@ -162,13 +162,26 @@ describe('HostedShareClient request boundary', () => {
           json({ error: { code: 'quota_exceeded', message: 'Storage quota is full.' } }, 507),
         ),
     );
-    const { client } = await fixture();
+    const { root, client } = await fixture();
     await expect(client.create(upload(), artifacts())).rejects.toMatchObject({
       code: 'upload-rejected',
       message: 'Storage quota is full.',
       retryable: false,
+      details: { requestMayHaveCommitted: false },
     });
     expect((await client.list()).records).toEqual([]);
+    expect(JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'))).toEqual({});
+  });
+
+  it('clears pending capability on a definitive rejection even when its error body is malformed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{broken', { status: 413 })));
+    const { root, client } = await fixture();
+
+    await expect(client.create(upload(), artifacts())).rejects.toMatchObject({
+      code: 'upload-rejected',
+      details: { requestMayHaveCommitted: false },
+    });
+    expect(JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'))).toEqual({});
   });
 
   it('accepts bounded archive overhead in the stored receipt size', async () => {
@@ -287,6 +300,36 @@ describe('HostedShareClient persistence and recovery', () => {
     await expect(client.list()).resolves.toMatchObject({ records: [{ id: firstShare }], recoveryErrors: [] });
   });
 
+  it('keeps the original capability when a lost response is retried with a changed pairing code', async () => {
+    const { root, client } = await fixture();
+    const fetch = vi.fn().mockRejectedValue(new TypeError('connection closed after upload'));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(client.create(upload(), artifacts())).rejects.toMatchObject({
+      code: 'network-failure',
+      retryable: true,
+    });
+    const original = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'))[
+      firstRequest
+    ];
+
+    await expect(
+      client.create({ ...upload(), pairingToken: 'z'.repeat(43) }, artifacts()),
+    ).rejects.toMatchObject({
+      code: 'invalid-input',
+      message: expect.stringMatching(/unresolved upload.*original pairing code.*Recover/i),
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const preserved = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'))[
+      firstRequest
+    ];
+    expect(preserved).toEqual(original);
+    expect(preserved.pairingToken).toBe('a'.repeat(43));
+    expect(preserved.payloadFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(Date.parse(preserved.deadlineAt) - Date.parse(preserved.createdAt)).toBe(24 * 60 * 60 * 1000);
+  });
+
   it('does not race receipt recovery against an active upload', async () => {
     const { client } = await fixture();
     let started!: () => void;
@@ -337,6 +380,65 @@ describe('HostedShareClient persistence and recovery', () => {
     const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
     expect(pending).not.toHaveProperty(firstRequest);
     expect(pending).toHaveProperty(secondRequest);
+  });
+
+  it('expires legacy recovery capabilities after 24 hours without contacting the service', async () => {
+    const { root, client } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(
+      pendingFile,
+      JSON.stringify({
+        [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) },
+      }),
+    );
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await fs.utimes(pendingFile, old, old);
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+
+    const result = await client.list();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result.records).toEqual([]);
+    expect(result.recoveryErrors).toEqual([
+      'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.',
+    ]);
+    expect(JSON.parse(await fs.readFile(pendingFile, 'utf8'))).toEqual({});
+  });
+
+  it('clears definitive receipt failures while retaining an ambiguous in-progress request', async () => {
+    const thirdRequest = '123e4567-e89b-42d3-a456-426614174003';
+    const { root, client } = await fixture();
+    await fs.writeFile(
+      path.join(root, 'hosted-share-pending.json'),
+      JSON.stringify({
+        [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) },
+        [secondRequest]: { requestId: secondRequest, pairingToken: 'b'.repeat(43) },
+        [thirdRequest]: { requestId: thirdRequest, pairingToken: 'c'.repeat(43) },
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (target: string) => {
+        if (target.includes(firstRequest))
+          return json({ error: { code: 'receipt_not_found', message: 'No receipt exists.' } }, 404);
+        if (target.includes(secondRequest))
+          return json({ error: { code: 'invalid_pairing', message: 'Pairing rejected.' } }, 401);
+        return json({ error: { code: 'upload_in_progress', message: 'Upload still running.' } }, 409);
+      }),
+    );
+
+    const result = await client.list();
+
+    expect(result.recoveryErrors).toEqual([
+      'No receipt exists. Its local recovery capability was cleared.',
+      'This pairing code expired or was already used. Create a new code in your browser. Its local recovery capability was cleared.',
+      'Upload still running.',
+    ]);
+    const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
+    expect(pending).not.toHaveProperty(firstRequest);
+    expect(pending).not.toHaveProperty(secondRequest);
+    expect(pending).toHaveProperty(thirdRequest);
   });
 
   it('preserves corrupt local files and reports actionable history and recovery errors', async () => {

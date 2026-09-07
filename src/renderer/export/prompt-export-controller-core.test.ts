@@ -690,6 +690,39 @@ describe('prompt export controller orchestration', () => {
     expect((await controller.loadPreview(1)).ok).toBe(false);
   });
 
+  test('reports the exact finalized bundles that contain PNG artifacts for hosted review', async () => {
+    const visualNative = fakeBridge();
+    const visualController = engine(
+      async () => savedContext([screenshot(0)]),
+      visualNative.bridge,
+      fakeRendering().rendering,
+    );
+    await expect(visualController.prepareHostedShare()).resolves.toMatchObject({
+      ok: true,
+      value: { bundleNumbers: [1], imageBundleNumbers: [1] },
+    });
+
+    const textContext = savedContext([]);
+    (textContext.snapshot.project as ProjectData & { contentItems: unknown[] }).contentItems = [
+      {
+        id: 'text-1',
+        collectionId: 'collection',
+        kind: 'text',
+        position: 0,
+        includeInExport: true,
+        createdAt: '2026-09-07T10:00:00.000Z',
+        updatedAt: '2026-09-07T10:00:00.000Z',
+        markdownFilename: 'text-1.md',
+      },
+    ];
+    const textNative = fakeBridge();
+    const textController = engine(async () => textContext, textNative.bridge, fakeRendering().rendering);
+    await expect(textController.prepareHostedShare()).resolves.toMatchObject({
+      ok: true,
+      value: { bundleNumbers: [1], imageBundleNumbers: [] },
+    });
+  });
+
   test('uses final drawing PNG dimensions without screenshot annotation padding', async () => {
     const context = savedContext([]);
     const native = fakeBridge();

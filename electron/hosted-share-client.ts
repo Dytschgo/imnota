@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { HostedShareList, HostedShareRecord, HostedShareUpload } from '../src/shared/workflow-bridge.js';
@@ -15,10 +15,17 @@ const MAX_RESPONSE_BYTES = 65_536;
 const MAX_MARKDOWN_BYTES = 1_000_000;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_STORED_SHARE_BYTES = MAX_UPLOAD_BYTES * 2 + 1024 * 1024;
+const PENDING_RECOVERY_MS = 24 * 60 * 60 * 1000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 type StoredShare = HostedShareRecord & { managementToken: string };
-type PendingShare = { requestId: string; pairingToken: string };
+type PendingShare = {
+  requestId: string;
+  pairingToken: string;
+  createdAt: string;
+  deadlineAt: string;
+  payloadFingerprint?: string;
+};
 type JsonObject = Record<string, unknown>;
 
 export interface HostedShareArtifacts {
@@ -178,6 +185,18 @@ function errorFor(status: number, code: unknown, message: unknown, fallback: str
   return new NativeWorkflowError('network-failure', safeMessage, status >= 500);
 }
 
+function isDefinitiveNonCommitStatus(status: number): boolean {
+  if (status === 507) return true;
+  return status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status);
+}
+
+function withCommitState(error: NativeWorkflowError, requestMayHaveCommitted: boolean): NativeWorkflowError {
+  return new NativeWorkflowError(error.code, error.message, error.retryable, {
+    ...error.details,
+    requestMayHaveCommitted,
+  });
+}
+
 async function readJson(response: Response): Promise<JsonObject> {
   const reader = response.body?.getReader();
   if (!reader) throw invalidResponse('The share service returned no response body.');
@@ -241,7 +260,16 @@ export class HostedShareClient {
       controller.abort();
     }, 60_000);
     try {
-      await this.savePending(input);
+      const payload = {
+        requestId: input.requestId,
+        title: artifacts.title,
+        markdown: artifacts.markdown,
+        images: artifacts.images,
+        includeArchive: input.includeArchive,
+        expiresInDays: input.expiresInDays,
+      };
+      const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+      await this.savePending(input, payloadFingerprint);
       const target = `${originForTests()}/api/shares`;
       const response = await fetch(target, {
         method: 'POST',
@@ -250,26 +278,37 @@ export class HostedShareClient {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({
-          requestId: input.requestId,
-          title: artifacts.title,
-          markdown: artifacts.markdown,
-          images: artifacts.images,
-          includeArchive: input.includeArchive,
-          expiresInDays: input.expiresInDays,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
         redirect: 'error',
       });
       validateResponseDestination(response, target);
-      const body = await readJson(response);
-      if (!response.ok)
-        throw errorFor(
+      let body: JsonObject;
+      try {
+        body = await readJson(response);
+      } catch (error) {
+        if (isDefinitiveNonCommitStatus(response.status)) {
+          await this.clearPending(input.requestId);
+          throw withCommitState(
+            errorFor(response.status, undefined, undefined, 'The share service rejected this upload.'),
+            false,
+          );
+        }
+        throw error;
+      }
+      if (!response.ok) {
+        const responseError = errorFor(
           response.status,
           isObject(body.error) ? body.error.code : undefined,
           isObject(body.error) ? body.error.message : undefined,
           'The share service rejected this upload.',
         );
+        if (isDefinitiveNonCommitStatus(response.status)) {
+          await this.clearPending(input.requestId);
+          throw withCommitState(responseError, false);
+        }
+        throw withCommitState(responseError, true);
+      }
       const record = validateReceipt(body);
       await this.save(record);
       await this.clearPending(input.requestId);
@@ -382,18 +421,22 @@ export class HostedShareClient {
     timeoutMessage: string,
   ): Promise<{ response: Response; body: JsonObject }> {
     const controller = new AbortController();
+    let response: Response | undefined;
     let timedOut = false;
     const deadline = setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, timeoutMs);
     try {
-      const response = await fetch(target, { ...init, signal: controller.signal, redirect: 'error' });
+      response = await fetch(target, { ...init, signal: controller.signal, redirect: 'error' });
       validateResponseDestination(response, target);
       return { response, body: await readJson(response) };
     } catch (error) {
       if (timedOut) throw new NativeWorkflowError('network-failure', timeoutMessage, true);
-      if (error instanceof NativeWorkflowError) throw error;
+      if (error instanceof NativeWorkflowError) {
+        if (response && isDefinitiveNonCommitStatus(response.status)) throw withCommitState(error, false);
+        throw error;
+      }
       throw new NativeWorkflowError(
         'network-failure',
         'Could not reach the share service. Your local exports remain available.',
@@ -431,6 +474,13 @@ export class HostedShareClient {
     const errors: string[] = [];
     for (const pending of Object.values(all)) {
       if (this.active.has(pending.requestId)) continue;
+      if (Date.parse(pending.deadlineAt) <= Date.now()) {
+        await this.clearPending(pending.requestId);
+        errors.push(
+          'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.',
+        );
+        continue;
+      }
       try {
         const target = `${originForTests()}/api/shares/receipt/${encodeURIComponent(pending.requestId)}`;
         const { response, body } = await this.requestJson(
@@ -439,27 +489,45 @@ export class HostedShareClient {
           15_000,
           'Receipt recovery did not answer within 15 seconds.',
         );
-        if (response.status === 404) continue;
         if (response.status === 410) {
           await this.clearPending(pending.requestId);
           errors.push('A previous share upload could not be recovered because its receipt expired.');
           continue;
         }
         if (!response.ok) {
-          errors.push(
-            errorFor(
-              response.status,
-              isObject(body.error) ? body.error.code : undefined,
-              isObject(body.error) ? body.error.message : undefined,
-              'A previous share upload could not be recovered.',
-            ).message,
+          const responseError = errorFor(
+            response.status,
+            isObject(body.error) ? body.error.code : undefined,
+            isObject(body.error) ? body.error.message : undefined,
+            response.status === 404
+              ? 'A previous share upload has no recoverable receipt.'
+              : 'A previous share upload could not be recovered.',
           );
+          if (isDefinitiveNonCommitStatus(response.status)) {
+            await this.clearPending(pending.requestId);
+            errors.push(`${responseError.message} Its local recovery capability was cleared.`);
+          } else {
+            errors.push(responseError.message);
+          }
           continue;
         }
         const record = validateReceipt(body);
         await this.save(record);
         await this.clearPending(pending.requestId);
       } catch (error) {
+        if (error instanceof NativeWorkflowError && error.details?.requestMayHaveCommitted === false) {
+          try {
+            await this.clearPending(pending.requestId);
+            errors.push(`${error.message} Its local recovery capability was cleared.`);
+          } catch (clearError) {
+            errors.push(
+              clearError instanceof Error
+                ? clearError.message
+                : 'A previous share recovery capability could not be cleared.',
+            );
+          }
+          continue;
+        }
         errors.push(
           error instanceof NativeWorkflowError
             ? error.message
@@ -470,10 +538,31 @@ export class HostedShareClient {
     return [...new Set(errors)];
   }
 
-  private async savePending(input: HostedShareUpload): Promise<void> {
+  private async savePending(input: HostedShareUpload, payloadFingerprint: string): Promise<void> {
     await this.enqueueState(async () => {
       const all = await this.pending();
-      all[input.requestId] = { requestId: input.requestId, pairingToken: input.pairingToken };
+      const existing = all[input.requestId];
+      if (existing) {
+        if (
+          existing.pairingToken !== input.pairingToken ||
+          !existing.payloadFingerprint ||
+          existing.payloadFingerprint !== payloadFingerprint
+        )
+          throw new NativeWorkflowError(
+            'invalid-input',
+            'This request has an unresolved upload with its original pairing code and artifacts. Recover it from local share history before changing the code or publishing options.',
+            false,
+          );
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      all[input.requestId] = {
+        requestId: input.requestId,
+        pairingToken: input.pairingToken,
+        createdAt,
+        deadlineAt: new Date(Date.parse(createdAt) + PENDING_RECOVERY_MS).toISOString(),
+        payloadFingerprint,
+      };
       await this.writePending(all);
     });
   }
@@ -487,10 +576,18 @@ export class HostedShareClient {
   }
 
   private async pending(): Promise<Record<string, PendingShare>> {
-    const raw = await fs.readFile(this.pendingFile(), 'utf8').catch((error: NodeJS.ErrnoException) => {
+    const pendingFile = this.pendingFile();
+    const raw = await fs.readFile(pendingFile, 'utf8').catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return '{}';
       throw error;
     });
+    const fileModifiedAt = await fs
+      .stat(pendingFile)
+      .then((stat) => stat.mtimeMs)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return Date.now();
+        throw error;
+      });
     let value: unknown;
     try {
       value = JSON.parse(raw);
@@ -513,14 +610,36 @@ export class HostedShareClient {
         !isObject(entry) ||
         !UUID.test(key) ||
         entry.requestId !== key ||
-        !TOKEN.test(typeof entry.pairingToken === 'string' ? entry.pairingToken : '')
+        !TOKEN.test(typeof entry.pairingToken === 'string' ? entry.pairingToken : '') ||
+        (entry.payloadFingerprint !== undefined &&
+          !/^[0-9a-f]{64}$/.test(
+            typeof entry.payloadFingerprint === 'string' ? entry.payloadFingerprint : '',
+          )) ||
+        (entry.createdAt === undefined) !== (entry.deadlineAt === undefined) ||
+        (entry.createdAt !== undefined &&
+          (!validTimestamp(entry.createdAt) ||
+            !validTimestamp(entry.deadlineAt) ||
+            Date.parse(entry.deadlineAt as string) - Date.parse(entry.createdAt) !== PENDING_RECOVERY_MS))
       )
         throw new NativeWorkflowError(
           'io-failure',
           'Hosted-share recovery metadata is corrupt. The local file was preserved for inspection.',
           false,
         );
-      validated[key] = { requestId: key, pairingToken: entry.pairingToken as string };
+      const createdAt =
+        typeof entry.createdAt === 'string' ? entry.createdAt : new Date(fileModifiedAt).toISOString();
+      validated[key] = {
+        requestId: key,
+        pairingToken: entry.pairingToken as string,
+        createdAt,
+        deadlineAt:
+          typeof entry.deadlineAt === 'string'
+            ? entry.deadlineAt
+            : new Date(Date.parse(createdAt) + PENDING_RECOVERY_MS).toISOString(),
+        ...(typeof entry.payloadFingerprint === 'string'
+          ? { payloadFingerprint: entry.payloadFingerprint }
+          : {}),
+      };
     }
     return validated;
   }

@@ -31,7 +31,7 @@ const artifacts = {
   title: 'Final prompt',
   sessionId: 'final-session',
   bundleNumbers: [1, 2],
-  imageCount: 1,
+  imageBundleNumbers: [1],
 };
 
 afterEach(() => {
@@ -75,6 +75,10 @@ describe('HostedShareDialog', () => {
 
     const publish = screen.getByRole('button', { name: 'Publish HTTPS link' });
     expect(screen.getByText(/hosting provider may record visits and share URLs/i)).toBeInTheDocument();
+    expect(screen.getByText('prompt.md')).toBeInTheDocument();
+    expect(screen.getByText('prompt-001.png')).toBeInTheDocument();
+    expect(screen.queryByText(/prompt-002\.png/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/or text-only/i)).not.toBeInTheDocument();
     expect(publish).toBeDisabled();
     fireEvent.change(screen.getByLabelText('2. One-use pairing code'), {
       target: { value: 'a'.repeat(43) },
@@ -84,6 +88,33 @@ describe('HostedShareDialog', () => {
     fireEvent.click(screen.getByLabelText(/I understand that anyone with the link can read these files/i));
     expect(publish).toBeEnabled();
     expect(native.createHostedShare).not.toHaveBeenCalled();
+  });
+
+  it('allocates a fresh request only after the service confirms the previous request did not commit', async () => {
+    const createHostedShare = vi
+      .fn<ImnotaBridge['createHostedShare']>()
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'upload-rejected',
+          message: 'The upload was too large.',
+          retryable: false,
+          details: { requestMayHaveCommitted: false },
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, value: active });
+    bridge({ createHostedShare });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    approveAndPublish();
+    expect(await screen.findByRole('alert')).toHaveTextContent('The upload was too large.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Publish HTTPS link' }));
+    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+
+    expect(createHostedShare).toHaveBeenCalledTimes(2);
+    expect(createHostedShare.mock.calls[1]![0].requestId).not.toBe(
+      createHostedShare.mock.calls[0]![0].requestId,
+    );
   });
 
   it('cancels the exact in-flight request while keeping the dialog open', async () => {

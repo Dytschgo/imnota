@@ -24,9 +24,10 @@ export function HostedShareDialog({
   onClose(): void;
   onError(message: string): void;
 }) {
+  const imageCount = artifacts.imageBundleNumbers.length;
   const quotaProblem =
-    artifacts.imageCount > 20
-      ? `This export has ${artifacts.imageCount} PNGs; hosted sharing accepts up to 20. Exclude or split collection content, then prepare a fresh export.`
+    imageCount > 20
+      ? `This export has ${imageCount} PNGs; hosted sharing accepts up to 20. Exclude or split collection content, then prepare a fresh export.`
       : undefined;
   const [token, setToken] = useState('');
   const [approved, setApproved] = useState(false);
@@ -74,6 +75,7 @@ export function HostedShareDialog({
     setBusy(false);
     if (!result.ok) {
       setError(result.error.message);
+      if (result.error.details?.requestMayHaveCommitted === false) setRequest(undefined);
       return;
     }
     setRecord(result.value);
@@ -123,13 +125,13 @@ export function HostedShareDialog({
             <div className="hosted-share-manifest">
               <strong>{artifacts.title}</strong>
               <span>
-                1 Markdown file · {artifacts.imageCount} rendered PNG
-                {artifacts.imageCount === 1 ? '' : 's'}
+                1 Markdown file · {imageCount} rendered PNG
+                {imageCount === 1 ? '' : 's'}
               </span>
               <ul>
                 <li>prompt.md</li>
-                {artifacts.bundleNumbers.map((number) => (
-                  <li key={number}>prompt-{String(number).padStart(3, '0')}.png or text-only</li>
+                {artifacts.imageBundleNumbers.map((number) => (
+                  <li key={number}>prompt-{String(number).padStart(3, '0')}.png</li>
                 ))}
               </ul>
             </div>

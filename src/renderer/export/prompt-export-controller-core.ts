@@ -157,7 +157,7 @@ export interface HostedShareArtifacts {
   title: string;
   sessionId: string;
   bundleNumbers: readonly number[];
-  imageCount: number;
+  imageBundleNumbers: readonly number[];
 }
 
 export interface PromptBundleLargePreview {
@@ -1110,7 +1110,10 @@ export class PromptBundleControllerEngine {
           title: plan.plan.collectionName || 'Imnota prompt',
           sessionId: artifact.sessionId,
           bundleNumbers: [...artifact.grants.keys()].sort((left, right) => left - right),
-          imageCount: [...artifact.grants.values()].filter((grant) => Boolean(grant.pngFilename)).length,
+          imageBundleNumbers: [...artifact.grants.entries()]
+            .filter(([, grant]) => Boolean(grant.pngFilename))
+            .map(([bundleNumber]) => bundleNumber)
+            .sort((left, right) => left - right),
         },
       };
     } catch (error) {
