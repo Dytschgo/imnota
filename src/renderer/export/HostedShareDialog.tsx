@@ -203,7 +203,7 @@ export function HostedShareDialog({
               </p>
             )}
             <footer className="hosted-share-actions">
-              <Button variant="ghost" onClick={onClose}>
+              <Button variant="ghost" disabled={busy} onClick={onClose}>
                 Back
               </Button>
               {busy ? (

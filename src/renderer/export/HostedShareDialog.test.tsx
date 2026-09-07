@@ -93,9 +93,14 @@ describe('HostedShareDialog', () => {
     );
     const createHostedShare = vi.fn<ImnotaBridge['createHostedShare']>(() => pending);
     const native = bridge({ createHostedShare });
-    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    const onClose = vi.fn();
+    render(<HostedShareDialog artifacts={artifacts} onClose={onClose} onError={vi.fn()} />);
     approveAndPublish();
     const cancel = await screen.findByRole('button', { name: /Cancel upload/i });
+    const back = screen.getByRole('button', { name: 'Back' });
+    expect(back).toBeDisabled();
+    fireEvent.click(back);
+    expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(cancel);
 
     const requestId = createHostedShare.mock.calls[0]![0].requestId;

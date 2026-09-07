@@ -64,6 +64,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:share-contract
       - run: node --test scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs
       - run: pnpm build
       - run: bash -n scripts/install.sh
