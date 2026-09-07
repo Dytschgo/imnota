@@ -2306,6 +2306,8 @@ kbd {
   .nav-item {
     justify-content: center;
     padding: 0;
+    font-size: 0;
+    gap: 0;
   }
   .nav-item span {
     font-size: 0;
