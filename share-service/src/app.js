@@ -615,7 +615,10 @@ export function createService(overrides = {}) {
             {
               id,
               request_id: upload.requestId,
+              title: upload.title,
+              created_at: createdAt,
               expires_at: expiresAt,
+              byte_size: byteSize,
               has_archive: upload.includeArchive ? 1 : 0,
             },
             bearer,

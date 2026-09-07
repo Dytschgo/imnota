@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 
 export function openDatabase(config) {
   fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
@@ -8,6 +9,10 @@ export function openDatabase(config) {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS service_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS pairings (
       id TEXT PRIMARY KEY,
       token_hash TEXT NOT NULL UNIQUE,
@@ -50,5 +55,22 @@ export function openDatabase(config) {
     CREATE INDEX IF NOT EXISTS shares_revoked_idx ON shares(revoked_at);
     CREATE INDEX IF NOT EXISTS pairings_expiry_idx ON pairings(expires_at);
   `);
+  const fingerprint = createHash('sha256')
+    .update(Buffer.from(config.receiptSecret, 'base64url'))
+    .digest('hex');
+  const stored = db.prepare("SELECT value FROM service_metadata WHERE key = 'receipt-secret-sha256'").get();
+  if (
+    (stored && stored.value !== fingerprint) ||
+    (!stored && db.prepare('SELECT COUNT(*) AS count FROM shares').get().count > 0)
+  ) {
+    db.close();
+    throw new Error(
+      'Receipt secret does not match this database. Restore the matching server secret before starting.',
+    );
+  }
+  if (!stored)
+    db.prepare("INSERT INTO service_metadata (key, value) VALUES ('receipt-secret-sha256', ?)").run(
+      fingerprint,
+    );
   return db;
 }

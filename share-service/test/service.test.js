@@ -267,6 +267,18 @@ test('a server-only receipt secret prevents offline token derivation from an exp
       createService({ dataDir: instance.config.dataDir, publicOrigin: origin, receiptSecret: 'too-short' }),
     /32-byte server secret/,
   );
+  assert.throws(
+    () =>
+      createService({
+        dataDir: instance.config.dataDir,
+        publicOrigin: origin,
+        receiptSecret: Buffer.alloc(32, 8).toString('base64url'),
+      }),
+    /Receipt secret does not match this database/,
+  );
+  const reopened = createService({ dataDir: instance.config.dataDir, publicOrigin: origin, receiptSecret });
+  assert.equal(reopened.db.prepare('SELECT COUNT(*) AS count FROM shares').get().count, 1);
+  reopened.close();
 });
 
 test('concurrent identical POSTs create one share and recover one receipt', async (t) => {
