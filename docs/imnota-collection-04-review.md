@@ -93,4 +93,17 @@ All checks passed:
 - Keep the screenshot-selection regression fix and add coverage for the new behavior.
 - Exercise native picker keyboard input, actual packaged backdrop image loading, saved selection, solid fallback, and removal in the release smoke workflow.
 
-Final validation and release acceptance are pending while these corrections are implemented.
+## Correction validation
+
+Runtime candidate: `b6cf9a6feb6ef125051fd414f9d71200765c7bc8`.
+
+- 54 Vitest files, 320 tests passed.
+- 34 Node tests passed; the real packaged macOS update fixture is skipped on Windows and runs in macOS CI.
+- Type checking, ESLint, build, and all tracked formatted source/document files passed. The broad local formatting command also saw an unrelated, untracked website prompt; that file was preserved and is not part of this release.
+- Isolated Windows native smoke passed 14 assertion groups, including collection keyboard focus, all four bundled image decodes and persisted preset selections, actual CSS backdrop URL decoding, solid fallback, removal, and the existing annotated prompt workflow.
+- Captured light/dark workspace layouts at 1280x800, 1440x900, 1920x1080, and 3440x1440; inspected the laptop layouts and actual backdrop settings surface.
+- A dedicated four-test upload suite covers delayed FileReader versus preset selection, delayed decoding versus Remove, decode failure, and the exact 5.5 MB file allowance.
+
+The renderer still reports the existing Vite large-chunk warning (about 647 kB minified). This is not a new build failure. Generated artwork adds approximately 6.3 MB of local assets. No user workspace or normal application profile was used for testing.
+
+Independent review and the pull request's exact-head platform/security checks must pass before merge. The nightly workflow then tests packaged applications on Windows, macOS, and Linux before publishing. Its run and the pull request record are the authority for final release status; local verification alone is not publication acceptance.
