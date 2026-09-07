@@ -1,8 +1,11 @@
 import type { Annotation } from '../shared/types';
 import { exportBounds } from '../shared/crop';
+import { normalizeAnnotationBounds } from '../shared/annotation-geometry';
 
 export function pixelatedRegion(image: HTMLImageElement, annotation: Annotation): HTMLCanvasElement {
-  const bounds = exportBounds(image.naturalWidth, image.naturalHeight, [{ ...annotation, kind: 'crop' }]);
+  const bounds = exportBounds(image.naturalWidth, image.naturalHeight, [
+    { ...normalizeAnnotationBounds(annotation), kind: 'crop' },
+  ]);
   const block = Math.max(4, Math.min(100, annotation.blurIntensity ?? 14));
   const small = document.createElement('canvas');
   small.width = Math.max(1, Math.ceil(bounds.width / block));
