@@ -7,6 +7,7 @@ import {
   SMOKE_VIEWPORTS,
   pathIsWithin,
   validateCreatedSmokeDirectory,
+  type SmokeCapture,
   type SmokeLocator,
   type SmokePoint,
 } from './smoke-native-driver.js';
@@ -49,7 +50,7 @@ export interface SmokeWorkflowReport {
   passed: true;
   version: string;
   mode: SmokeWorkflowMode;
-  artifacts: string[];
+  artifacts: SmokeCapture[];
   timings: SmokeTiming[];
   assertions: string[];
 }
@@ -69,7 +70,6 @@ interface PromptCardState {
   title: string;
   text: string;
   copyLabel?: string;
-  fileLabel?: string;
 }
 
 type WorkflowFailureCode =
@@ -232,7 +232,7 @@ async function createProjectThroughUi(
 async function exerciseOnboarding(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
-  artifacts: string[],
+  artifacts: SmokeCapture[],
 ): Promise<boolean> {
   const present = await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog);
   if (!present) return false;
@@ -302,8 +302,9 @@ async function createBenchmarkProject(
   driver: NativeUiDriver,
   sources: readonly FixtureSource[],
   count: number,
+  projectName?: string,
 ): Promise<{ projectPath: string; importMs: number; reopenMs: number }> {
-  const name = `Verification ${String(count).padStart(3, '0')}`;
+  const name = projectName ?? `Verification ${String(count).padStart(3, '0')}`;
   const projectPath = await driver.evaluate<string>(`(async () => {
     const snapshot = await window.imnota.createProject({ name: ${JSON.stringify(name)}, description: 'Synthetic native verification fixture' });
     return snapshot.projectPath;
@@ -457,25 +458,6 @@ async function installDeterministicExportAnnotations(
   })()`);
 }
 
-async function newestPng(directory: string): Promise<string> {
-  const started = Date.now();
-  do {
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
-    const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.png'));
-    if (files.length) {
-      const ranked = await Promise.all(
-        files.map(async (entry) => ({
-          path: path.join(directory, entry.name),
-          modified: (await fs.stat(path.join(directory, entry.name))).mtimeMs,
-        })),
-      );
-      return ranked.sort((left, right) => right.modified - left.modified)[0].path;
-    }
-    await delay(50);
-  } while (Date.now() - started < 20_000);
-  throw new Error(`No exported PNG appeared in ${directory}.`);
-}
-
 function pixelAt(image: Electron.NativeImage, x: number, y: number): Buffer {
   const size = image.getSize();
   if (x < 0 || y < 0 || x >= size.width || y >= size.height)
@@ -485,32 +467,48 @@ function pixelAt(image: Electron.NativeImage, x: number, y: number): Buffer {
   return bitmapData.subarray(offset, offset + 4);
 }
 
-async function verifyPngExport(
-  driver: NativeUiDriver,
-  host: SmokeWorkflowHost,
+async function verifyOneImagePromptBundle(
   projectPath: string,
+  setDirectory: string,
   annotations: readonly Annotation[],
 ): Promise<void> {
-  await clickAny(driver, [
-    { selector: '[data-testid="export-selected-png"]' },
-    { text: 'Export selected screenshot as PNG', exact: true },
-  ]);
-  const project = await host.readProject(projectPath);
-  const screenshot = project.screenshots[0];
-  const exportDirectory = path.join(projectPath, 'collections', screenshot.collectionId, 'exports');
-  const exportedPath = await newestPng(exportDirectory);
+  const files = (await fs.readdir(setDirectory)).sort();
+  const pngFiles = files.filter((name) => name.endsWith('.png'));
+  const bundleMarkdownFiles = files.filter(
+    (name) => name.endsWith('.md') && !name.endsWith(' - overview.md'),
+  );
+  const overviewFiles = files.filter((name) => name.endsWith(' - overview.md'));
+  const expectedFileCount = pngFiles.length + bundleMarkdownFiles.length + overviewFiles.length;
+  if (
+    pngFiles.length !== 1 ||
+    bundleMarkdownFiles.length !== 1 ||
+    overviewFiles.length > 1 ||
+    files.length !== expectedFileCount
+  )
+    throw new Error(
+      `One-image prompt must publish one PNG/Markdown bundle pair and at most its collection overview: ${files.join(', ')}.`,
+    );
+  if (path.basename(pngFiles[0], '.png') !== path.basename(bundleMarkdownFiles[0], '.md'))
+    throw new Error('One-image prompt PNG and Markdown filenames do not match.');
+  const exportedPath = path.join(setDirectory, pngFiles[0]);
   if (!pathIsWithin(projectPath, exportedPath)) throw new Error('PNG export escaped its fixture project.');
   const exported = nativeImage.createFromPath(exportedPath);
-  if (exported.isEmpty()) throw new Error('Exported PNG could not be decoded.');
+  if (exported.isEmpty()) throw new Error('Prompt bundle PNG could not be decoded.');
   if (annotations.length !== 3) throw new Error('Deterministic export annotations changed.');
-  const expected = { x: 160, y: 76, width: 1176, height: 604 };
+  const expandedScreenshot = { x: 160, y: 76, width: 1176, height: 604 };
+  const expected = {
+    width: expandedScreenshot.width + 64,
+    height: 32 + 36 + 12 + expandedScreenshot.height + 32,
+  };
   const size = exported.getSize();
   if (size.width !== expected.width || size.height !== expected.height)
     throw new Error(
-      `Crop/out-of-bounds export changed native dimensions: expected ${expected.width}x${expected.height}, got ${size.width}x${size.height}.`,
+      `Prompt header/margins changed deterministic dimensions: expected ${expected.width}x${expected.height}, got ${size.width}x${size.height}.`,
     );
-  const maskX = Math.round(320 - expected.x + 48);
-  const maskY = Math.round(220 - expected.y + 40);
+  const imageX = 32;
+  const imageY = 32 + 36 + 12;
+  const maskX = imageX + Math.round(320 - expandedScreenshot.x + 48);
+  const maskY = imageY + Math.round(220 - expandedScreenshot.y + 40);
   const pixel = pixelAt(exported, maskX, maskY);
   if (!pixel.equals(Buffer.from([18, 13, 11, 255])))
     throw new Error(`Redaction pixel was not opaque: ${pixel.toString('hex')}.`);
@@ -543,7 +541,7 @@ async function excludeScreenshotThroughUi(
 async function captureWorkspaceMatrix(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
-  artifacts: string[],
+  artifacts: SmokeCapture[],
 ): Promise<void> {
   if (!artifactDirectory) return;
   for (const theme of ['light', 'dark'] as const) {
@@ -644,22 +642,17 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
       text: card.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
-      copyLabel: buttons.find((button) => /Copy (?:fresh prompt|Prompt \\d+)/i.test(button.textContent ?? ''))?.textContent?.trim(),
-      fileLabel: buttons.find((button) => /Prepare fresh files/i.test(button.textContent ?? ''))?.textContent?.trim()
+      copyLabel: buttons.find((button) => /Copy (?:fresh prompt|Prompt \\d+)/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
 }
 
-async function promptActionPoint(
-  driver: NativeUiDriver,
-  cardIndex: number,
-  action: 'copy' | 'files',
-): Promise<SmokePoint> {
+async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Promise<SmokePoint> {
   return driver.evaluate<SmokePoint>(`(() => {
     const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
     const card = cards[${cardIndex}];
     if (!card) throw new Error('Prompt card ${cardIndex + 1} disappeared');
-    const pattern = ${action === 'copy' ? '/Copy (?:fresh prompt|Prompt \\d+)/i' : '/Prepare fresh files/i'};
+    const pattern = /Copy (?:fresh prompt|Prompt \\d+)/i;
     const button = [...card.querySelectorAll('button')].find((candidate) => pattern.test(candidate.textContent ?? ''));
     if (!button || button.disabled) throw new Error('Prompt ${cardIndex + 1} action is unavailable');
     const bounds = button.getBoundingClientRect();
@@ -667,63 +660,131 @@ async function promptActionPoint(
   })()`);
 }
 
-async function waitForPromptAction(driver: NativeUiDriver, cardIndex: number): Promise<void> {
+async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number): Promise<void> {
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
       const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
-      const card = cards[${cardIndex}];
-      const busy = card?.getAttribute('aria-busy') === 'true';
-      const enabledFallback = card && [...card.querySelectorAll('.prompt-bundle-fallbacks button')]
-        .some((button) => !button.disabled);
-      if (card && !busy && (card.textContent?.includes('Copied') || enabledFallback)) return resolve(true);
-      if (Date.now() - started > 30000) return reject(new Error('Prompt ${cardIndex + 1} action timed out'));
+      const complete = cards.length === ${bundleCount} && cards.every((card) => {
+        const busy = card.getAttribute('aria-busy') === 'true';
+        const fallbacks = [...card.querySelectorAll('.prompt-bundle-fallbacks button')];
+        return !busy && fallbacks.length >= 2 && fallbacks.every((button) => !button.disabled);
+      });
+      if (complete) return resolve(true);
+      if (Date.now() - started > 30000) return reject(new Error('Prompt bundle grants timed out'));
       setTimeout(check, 50);
     };
     check();
   })`);
 }
 
+interface PromptSet {
+  directory: string;
+  name: string;
+}
+
+async function promptSets(host: SmokeWorkflowHost, projectPath: string): Promise<PromptSet[]> {
+  const project = await host.readProject(projectPath);
+  const collection = project.collections.find((item) => !item.archived) ?? project.collections.at(-1);
+  if (!collection) throw new Error('Prompt fixture lost its collection.');
+  const exportsDirectory = path.join(projectPath, 'collections', collection.id, 'exports');
+  const entries = await fs.readdir(exportsDirectory, { withFileTypes: true }).catch(() => []);
+  if (entries.some((entry) => entry.name.includes('.prompt-staging-') || entry.name.endsWith('.reservation')))
+    throw new Error('Completed prompt workflow left staging or reservation artifacts.');
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => ({ name: entry.name, directory: path.join(exportsDirectory, entry.name) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function waitForNewPromptSet(
+  host: SmokeWorkflowHost,
+  projectPath: string,
+  previousNames: ReadonlySet<string>,
+): Promise<PromptSet> {
+  const started = Date.now();
+  do {
+    const added = (await promptSets(host, projectPath)).find((set) => !previousNames.has(set.name));
+    if (added) return added;
+    await delay(50);
+  } while (Date.now() - started < 30_000);
+  throw new Error('Fresh prompt action did not publish a new export set.');
+}
+
+async function verifyPromptSet(projectPath: string, set: PromptSet, bundleCount: number): Promise<void> {
+  if (!pathIsWithin(projectPath, set.directory)) throw new Error('Prompt export set escaped its project.');
+  const files = await fs.readdir(set.directory);
+  if (files.some((name) => name.endsWith('.zip')))
+    throw new Error('Legacy ZIP output appeared in the prompt bundle workflow.');
+  const pngStems = files
+    .filter((name) => name.endsWith('.png'))
+    .map((name) => path.basename(name, '.png'))
+    .sort();
+  const markdownStems = files
+    .filter((name) => name.endsWith('.md') && !name.endsWith(' - overview.md'))
+    .map((name) => path.basename(name, '.md'))
+    .sort();
+  if (pngStems.length !== bundleCount || markdownStems.length !== bundleCount)
+    throw new Error(
+      `Prompt set contains ${pngStems.length} PNG and ${markdownStems.length} Markdown bundles; expected ${bundleCount} pairs.`,
+    );
+  if (JSON.stringify(pngStems) !== JSON.stringify(markdownStems))
+    throw new Error('Prompt PNG and Markdown grants are not complete matching pairs.');
+}
+
+interface PromptWorkflowOptions {
+  artifactDirectory?: string;
+  artifacts: SmokeCapture[];
+  expectedExcludedPicture?: number;
+  freshActions: number;
+  requireSplit: boolean;
+}
+
 async function exercisePromptWorkflow(
   driver: NativeUiDriver,
-  artifactDirectory: string | undefined,
-  artifacts: string[],
-  expectedExcludedPicture: number,
-): Promise<{ bundleCount: number; renderMs: number }> {
+  host: SmokeWorkflowHost,
+  projectPath: string,
+  options: PromptWorkflowOptions,
+): Promise<{ bundleCount: number; renderMs: number; latestSet: PromptSet }> {
   const renderStarted = performance.now();
-  await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
+  const existingNames = new Set((await promptSets(host, projectPath)).map((set) => set.name));
+  if (!(await existsAny(driver, SMOKE_UI_CONTRACT.shareBundles)))
+    await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
   await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
   await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
   const cards = await promptCards(driver);
   if (!cards.length) throw new Error('Share prompt bundles dialog contains no real bundle cards.');
-  if (cards.length < 2) throw new Error('Mixed native-resolution fixture did not split into prompt bundles.');
-  if (artifactDirectory) {
+  if (options.requireSplit && cards.length < 2)
+    throw new Error('Mixed native-resolution fixture did not split into prompt bundles.');
+  if (options.artifactDirectory) {
     await driver.resize(SMOKE_VIEWPORTS[2]);
-    artifacts.push(await driver.capture(artifactDirectory, '1920x1080-sharing.png'));
+    options.artifacts.push(await driver.capture(options.artifactDirectory, '1920x1080-sharing.png'));
     await driver.resize(SMOKE_VIEWPORTS[3]);
-    artifacts.push(await driver.capture(artifactDirectory, '3440x1440-sharing.png'));
+    options.artifacts.push(await driver.capture(options.artifactDirectory, '3440x1440-sharing.png'));
   }
-  let copied = false;
-  let lastCopiedIndex = -1;
-  for (let index = 0; index < cards.length; index += 1) {
-    const action = cards[index].copyLabel ? 'copy' : cards[index].fileLabel ? 'files' : null;
-    if (!action) throw new Error(`Prompt ${index + 1} exposes no primary action.`);
-    await driver.clickPoint(await promptActionPoint(driver, index, action));
-    await waitForPromptAction(driver, index);
-    if (action === 'copy') {
-      copied = true;
-      lastCopiedIndex = index;
-    }
+  const copiedIndex = cards.findIndex((card) => card.copyLabel);
+  if (copiedIndex < 0)
+    throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
+  let latestSet: PromptSet | undefined;
+  for (let action = 0; action < options.freshActions; action += 1) {
+    await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
+    latestSet = await waitForNewPromptSet(host, projectPath, existingNames);
+    existingNames.add(latestSet.name);
+    await waitForPromptGrants(driver, cards.length);
+    await verifyPromptSet(projectPath, latestSet, cards.length);
   }
-  if (!copied) throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
+  if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
   const text = clipboard.readText();
   const html = clipboard.readHTML();
   const image = clipboard.readImage();
   if (!text.includes('Picture ') || !html || image.isEmpty())
     throw new Error('Prompt copy did not place Markdown, HTML, and PNG on the native clipboard.');
-  if (!text.includes(`Picture ${expectedExcludedPicture} was intentionally excluded`))
+  if (
+    options.expectedExcludedPicture !== undefined &&
+    !text.includes(`Picture ${options.expectedExcludedPicture} was intentionally excluded`)
+  )
     throw new Error('Prompt Markdown lost the eye-row exclusion or pre-filter Picture number.');
-  const canvasDimensions = cards[lastCopiedIndex].text.match(/Canvas\s+(\d+)\s*[×x]\s*(\d+)/i);
+  const canvasDimensions = cards[copiedIndex].text.match(/Canvas\s+(\d+)\s*[×x]\s*(\d+)/i);
   if (!canvasDimensions) throw new Error('Copied prompt card did not expose verifiable canvas dimensions.');
   const clipboardSize = image.getSize();
   if (
@@ -733,9 +794,6 @@ async function exercisePromptWorkflow(
     throw new Error(
       `Clipboard prompt changed native bundle dimensions: ${clipboardSize.width}x${clipboardSize.height}.`,
     );
-  const first = cards[0];
-  if (!first.text.match(/1920|2560|3840/))
-    throw new Error('Prompt bundle card did not expose native-resolution dimensions.');
   const clipboardPng = image.toPNG();
   await assertWorkflowFailure(
     driver,
@@ -744,7 +802,11 @@ async function exercisePromptWorkflow(
   );
   if (clipboard.readText() !== text || !clipboard.readImage().toPNG().equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
-  return { bundleCount: cards.length, renderMs: Math.round(performance.now() - renderStarted) };
+  return {
+    bundleCount: cards.length,
+    renderMs: Math.round(performance.now() - renderStarted),
+    latestSet,
+  };
 }
 
 async function closePromptDialog(driver: NativeUiDriver): Promise<void> {
@@ -753,31 +815,6 @@ async function closePromptDialog(driver: NativeUiDriver): Promise<void> {
     { selector: '[role="dialog"] [aria-label="Close"]' },
   ]);
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Share prompt bundles' }, { absent: true });
-}
-
-async function verifyPromptFiles(host: SmokeWorkflowHost, projectPath: string): Promise<void> {
-  const project = await host.readProject(projectPath);
-  const collection = project.collections.find((item) => !item.archived) ?? project.collections.at(-1);
-  if (!collection) throw new Error('Prompt fixture lost its collection.');
-  const exportsDirectory = path.join(projectPath, 'collections', collection.id, 'exports');
-  const entries = await fs.readdir(exportsDirectory, { withFileTypes: true });
-  const sets = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'));
-  if (!sets.length) throw new Error('Prompt workflow did not publish an export set.');
-  let pngCount = 0;
-  let markdownCount = 0;
-  for (const set of sets) {
-    const directory = path.join(exportsDirectory, set.name);
-    if (!pathIsWithin(projectPath, directory)) throw new Error('Prompt export set escaped its project.');
-    const files = await fs.readdir(directory);
-    pngCount += files.filter((name) => name.endsWith('.png')).length;
-    markdownCount += files.filter((name) => name.endsWith('.md')).length;
-    if (files.some((name) => name.endsWith('.zip')))
-      throw new Error('Legacy ZIP output appeared in the prompt bundle workflow.');
-  }
-  if (!pngCount || !markdownCount)
-    throw new Error('Prompt export sets must contain PNG and Markdown artifacts.');
-  if (entries.some((entry) => entry.name.includes('.prompt-staging-') || entry.name.endsWith('.reservation')))
-    throw new Error('Completed prompt workflow left staging or reservation artifacts.');
 }
 
 async function assertWorkflowFailure(
@@ -912,7 +949,7 @@ export async function runSmokeWorkflow(
   )
     throw new Error('Artifact directory must be outside the disposable smoke fixture.');
   await host.setWorkspace(fixtureRoot);
-  const artifacts: string[] = [];
+  const artifacts: SmokeCapture[] = [];
   const assertions: string[] = [];
   const timings: SmokeTiming[] = [];
   const sources = await createFixtureSources(fixtureRoot);
@@ -940,20 +977,19 @@ export async function runSmokeWorkflow(
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver);
   assertions.push('trusted pan, crop, redaction, outside-bound drag, double-click, Enter and Escape');
-
-  const deterministic = await installDeterministicExportAnnotations(driver, projectPath);
-  activeWindow = await host.reopenWindow();
-  driver.setWindow(activeWindow);
-  await driver.waitFor({ selector: '.konvajs-content' });
-  await verifyPngExport(driver, host, projectPath, deterministic.annotations);
-  assertions.push('native-resolution crop/outside bounds and opaque redaction PNG pixels');
   const excludedPicture = await excludeScreenshotThroughUi(driver, host, projectPath);
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
   await captureWorkspaceMatrix(driver, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
-  const promptTiming = await exercisePromptWorkflow(driver, artifactDirectory, artifacts, excludedPicture);
+  const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
+    artifactDirectory,
+    artifacts,
+    expectedExcludedPicture: excludedPicture,
+    freshActions: 2,
+    requireSplit: true,
+  });
   const promptMemory = await memoryMegabytes(driver.browserWindow);
   timings.push({
     scenario: 'mixed-native-10-prompt-render',
@@ -963,9 +999,31 @@ export async function runSmokeWorkflow(
     ...promptTiming,
     ...promptMemory,
   });
-  assertions.push('collection prompt bundle split and text, HTML, PNG clipboard payload');
-  await verifyPromptFiles(host, projectPath);
-  assertions.push('fresh prompt PNG/Markdown sets without legacy ZIP or staging residue');
+  assertions.push(
+    'two fresh collection prompt actions, complete PNG/Markdown grants, split layout, and text/HTML/PNG clipboard',
+  );
+  await closePromptDialog(driver);
+
+  const pixelFixture = await createBenchmarkProject(driver, sources, 1, 'Verification Pixel Bundle');
+  const deterministic = await installDeterministicExportAnnotations(driver, pixelFixture.projectPath);
+  activeWindow = await host.reopenWindow();
+  driver.setWindow(activeWindow);
+  await driver.waitFor({ selector: '.konvajs-content' });
+  const pixelPrompt = await exercisePromptWorkflow(driver, host, pixelFixture.projectPath, {
+    artifacts,
+    freshActions: 1,
+    requireSplit: false,
+  });
+  if (pixelPrompt.bundleCount !== 1)
+    throw new Error(`One-image pixel fixture unexpectedly split into ${pixelPrompt.bundleCount} bundles.`);
+  await verifyOneImagePromptBundle(
+    pixelFixture.projectPath,
+    pixelPrompt.latestSet.directory,
+    deterministic.annotations,
+  );
+  assertions.push(
+    'one-image prompt header/margins, expanded crop/outside bounds, opaque redaction pixels, and one PNG/Markdown pair',
+  );
   await closePromptDialog(driver);
 
   await exerciseWatchAndConflict(driver, host, projectPath);
@@ -977,7 +1035,11 @@ export async function runSmokeWorkflow(
 
   await assertWorkflowFailure(
     driver,
-    `workflow.startPromptExport({ projectPath: ${JSON.stringify(path.join(fixtureRoot, 'outside'))}, collectionId: 'missing' })`,
+    `workflow.startPromptExport({
+      projectPath: ${JSON.stringify(path.join(fixtureRoot, 'outside'))},
+      collectionId: 'missing',
+      bundles: [{ bundleNumber: 1, width: 100, height: 100 }]
+    })`,
     ['invalid-input', 'permission-denied', 'project-not-found', 'collection-not-found', 'linked-path'],
   );
   assertions.push('prompt workflow path and collection rejection');
@@ -1006,20 +1068,22 @@ export async function runSmokeWorkflow(
     );
     if (!openedTitle.includes('Verification 100'))
       throw new Error('Stress reopen did not activate the latest 100-image fixture.');
-    const stressExcluded = await excludeScreenshotThroughUi(driver, host, stressProject);
-    const stressPromptTiming = await exercisePromptWorkflow(driver, undefined, artifacts, stressExcluded);
+    const stressPromptTiming = await exercisePromptWorkflow(driver, host, stressProject, {
+      artifacts,
+      freshActions: 1,
+      requireSplit: true,
+    });
     const stressMemory = await memoryMegabytes(driver.browserWindow);
     timings.push({
-      scenario: 'mixed-native-100-sequential-prompt-render',
+      scenario: 'mixed-native-100-prompt-render',
       screenshotCount: 100,
       importMs: 0,
       reopenMs: 0,
       ...stressPromptTiming,
       ...stressMemory,
     });
-    await verifyPromptFiles(host, stressProject);
     await closePromptDialog(driver);
-    assertions.push('mixed-resolution 1/10/20/100 fixture and sequential 100-image prompt benchmark');
+    assertions.push('mixed-resolution 1/10/20/100 fixtures and one complete 100-image prompt render action');
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
 
   const report: SmokeWorkflowReport = {

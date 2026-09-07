@@ -18,6 +18,13 @@ export interface SmokeViewport {
   height: number;
 }
 
+export interface SmokeCapture {
+  path: string;
+  cssViewport: SmokeViewport;
+  pngPixels: SmokeViewport;
+  devicePixelRatio: number;
+}
+
 export const SMOKE_VIEWPORTS: readonly SmokeViewport[] = [
   { width: 1280, height: 800 },
   { width: 1440, height: 900 },
@@ -233,21 +240,35 @@ export class NativeUiDriver {
   }
 
   async resize(viewport: SmokeViewport): Promise<void> {
-    this.window.setSize(viewport.width, viewport.height, false);
+    this.window.setContentSize(viewport.width, viewport.height, false);
     await wait(200);
-    const actual = this.window.getSize();
-    if (actual[0] !== viewport.width || actual[1] !== viewport.height)
+    const actual = await this.evaluate<SmokeViewport>(
+      `({ width: window.innerWidth, height: window.innerHeight })`,
+    );
+    if (actual.width !== viewport.width || actual.height !== viewport.height)
       throw new Error(
-        `Window did not reach ${viewport.width}x${viewport.height}; got ${actual[0]}x${actual[1]}.`,
+        `OS clamped the requested ${viewport.width}x${viewport.height} CSS viewport to ${actual.width}x${actual.height}. Use an isolated compatible display/window host; this matrix entry was not verified.`,
       );
   }
 
-  async capture(directory: string, filename: string): Promise<string> {
+  async capture(directory: string, filename: string): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
     const image = await this.window.webContents.capturePage();
     if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
     await fs.writeFile(target, image.toPNG(), { flag: 'wx' });
-    return target;
+    const metrics = await this.evaluate<{ cssViewport: SmokeViewport; devicePixelRatio: number }>(
+      `({
+        cssViewport: { width: window.innerWidth, height: window.innerHeight },
+        devicePixelRatio: window.devicePixelRatio
+      })`,
+    );
+    const pngSize = image.getSize();
+    return {
+      path: target,
+      cssViewport: metrics.cssViewport,
+      pngPixels: { width: pngSize.width, height: pngSize.height },
+      devicePixelRatio: metrics.devicePixelRatio,
+    };
   }
 }
 

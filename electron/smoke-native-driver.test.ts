@@ -66,4 +66,62 @@ describe('native smoke driver', () => {
       expect.objectContaining({ type: 'keyDown', keyCode: 'ENTER' }),
     );
   });
+
+  it('sizes and verifies the renderer CSS viewport instead of the outer window frame', async () => {
+    const setContentSize = vi.fn();
+    const executeJavaScript = vi.fn(async () => ({ width: 1280, height: 800 }));
+    const window = {
+      setContentSize,
+      webContents: { executeJavaScript },
+    } as unknown as BrowserWindow;
+
+    await new NativeUiDriver(window, 100).resize({ width: 1280, height: 800 });
+
+    expect(setContentSize).toHaveBeenCalledWith(1280, 800, false);
+    expect(executeJavaScript).toHaveBeenCalledWith(expect.stringContaining('window.innerWidth'), true);
+  });
+
+  it('fails a viewport matrix entry when the OS clamps its content size', async () => {
+    const window = {
+      setContentSize: vi.fn(),
+      webContents: {
+        executeJavaScript: vi.fn(async () => ({ width: 1920, height: 1040 })),
+      },
+    } as unknown as BrowserWindow;
+
+    await expect(new NativeUiDriver(window, 100).resize({ width: 3440, height: 1440 })).rejects.toThrow(
+      'OS clamped the requested 3440x1440 CSS viewport to 1920x1040',
+    );
+  });
+
+  it('records CSS viewport, PNG pixels, and device-pixel ratio separately', async () => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-capture');
+    await fs.mkdir(artifacts);
+    const png = Buffer.from('captured-png');
+    const window = {
+      webContents: {
+        capturePage: vi.fn(async () => ({
+          isEmpty: () => false,
+          toPNG: () => png,
+          getSize: () => ({ width: 2560, height: 1600 }),
+        })),
+        executeJavaScript: vi.fn(async () => ({
+          cssViewport: { width: 1280, height: 800 },
+          devicePixelRatio: 2,
+        })),
+      },
+    } as unknown as BrowserWindow;
+
+    const capture = await new NativeUiDriver(window, 100).capture(artifacts, 'matrix.png');
+
+    expect(capture).toEqual({
+      path: path.join(artifacts, 'matrix.png'),
+      cssViewport: { width: 1280, height: 800 },
+      pngPixels: { width: 2560, height: 1600 },
+      devicePixelRatio: 2,
+    });
+    expect(await fs.readFile(capture.path)).toEqual(png);
+  });
 });
