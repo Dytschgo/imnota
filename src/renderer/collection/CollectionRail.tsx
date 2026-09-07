@@ -6,13 +6,15 @@ import {
   Eye,
   EyeOff,
   FileImage,
+  FileText,
   PanelLeft,
   Pencil,
   Plus,
   Upload,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
-import type { ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
+import type { ProjectData, ProjectSnapshot } from '../../shared/types';
+import { orderedCollectionItems } from '../../shared/content-items';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
 import { useAppStore } from '../store';
@@ -27,6 +29,7 @@ export interface CollectionRailProps {
   onPaste(): void | Promise<void>;
   onMessage(message: string): void;
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
+  onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
 }
 
 export function CollectionControls({
@@ -260,7 +263,7 @@ export function CollectionControls({
         <TextArea
           aria-label="Overall context"
           rows={4}
-          placeholder="Context shared by every screenshot in this collection"
+          placeholder="Context shared by every item in this collection"
           value={current.overallContext}
           onChange={(event) => updateOverallContext(event.target.value)}
           onBlur={() => {
@@ -325,45 +328,78 @@ export function CollectionRail({
   onPaste,
   onMessage,
   onSnapshot,
+  onAddContent,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const project = store.snapshot?.project;
-  const shots =
-    project?.screenshots
-      .filter((shot) => shot.collectionId === store.activeCollectionId)
-      .sort((left, right) => left.position - right.position) ?? [];
+  const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
 
-  async function reorderScreenshot(targetIndex: number) {
-    if (dragIndex === null || dragIndex === targetIndex || !project) return;
-    const ordered = [...shots];
-    const [moved] = ordered.splice(dragIndex, 1);
+  async function reorderScreenshot(targetIndex: number, sourceIndex = dragIndex) {
+    if (sourceIndex === null || sourceIndex === targetIndex || !project) return;
+    const sourceId = shots[sourceIndex]?.id;
+    const targetId = shots[targetIndex]?.id;
+    const activeBefore = useAppStore.getState().activeScreenshotId;
+    if (!(await onFlush())) return;
+    const after = useAppStore.getState();
+    const latest = after.snapshot?.project;
+    if (!latest || latest.id !== project.id || after.activeCollectionId !== store.activeCollectionId) return;
+    const remap = (id: string | undefined) =>
+      id === activeBefore && after.activeScreenshotId !== activeBefore ? after.activeScreenshotId : id;
+    const ordered = orderedCollectionItems(latest, store.activeCollectionId);
+    const latestSource = ordered.findIndex((item) => item.id === remap(sourceId));
+    const latestTarget = ordered.findIndex((item) => item.id === remap(targetId));
+    if (latestSource < 0 || latestTarget < 0) return;
+    const [moved] = ordered.splice(latestSource, 1);
     if (!moved) return;
-    ordered.splice(targetIndex, 0, moved);
+    ordered.splice(latestTarget, 0, moved);
     const positions = new Map(ordered.map((item, position) => [item.id, position]));
     const next = {
-      ...project,
+      ...latest,
       updatedAt: nowIso(),
-      screenshots: project.screenshots.map((item) => ({
+      screenshots: latest.screenshots.map((item) => ({
         ...item,
         position: positions.get(item.id) ?? item.position,
       })),
+      ...(latest.contentItems
+        ? {
+            contentItems: latest.contentItems.map((item) => ({
+              ...item,
+              position: positions.get(item.id) ?? item.position,
+            })),
+          }
+        : {}),
     };
     store.updateProject(next);
     setDragIndex(null);
-    if (!(await onSaveProject(next)))
-      onMessage('The new screenshot order remains open but has not been saved.');
+    if (!(await onSaveProject(next))) onMessage('The new item order remains open but has not been saved.');
   }
 
-  async function toggleVisibility(screenshot: ScreenshotRecord) {
+  async function toggleVisibility(screenshot: (typeof shots)[number]) {
     if (!project) return;
+    const activeBefore = useAppStore.getState().activeScreenshotId;
+    if (!(await onFlush())) return;
+    const after = useAppStore.getState();
+    const latest = after.snapshot?.project;
+    if (!latest || latest.id !== project.id || after.activeCollectionId !== store.activeCollectionId) return;
+    const targetId =
+      screenshot.id === activeBefore && after.activeScreenshotId !== activeBefore
+        ? after.activeScreenshotId
+        : screenshot.id;
     const next = {
-      ...project,
+      ...latest,
       updatedAt: nowIso(),
-      screenshots: project.screenshots.map((item) =>
-        item.id === screenshot.id ? { ...item, includeInExport: !item.includeInExport } : item,
+      screenshots: latest.screenshots.map((item) =>
+        item.id === targetId ? { ...item, includeInExport: !item.includeInExport } : item,
       ),
+      ...(latest.contentItems
+        ? {
+            contentItems: latest.contentItems.map((item) =>
+              item.id === targetId ? { ...item, includeInExport: !item.includeInExport } : item,
+            ),
+          }
+        : {}),
     };
     store.updateProject(next);
     if (!(await onSaveProject(next)))
@@ -373,7 +409,7 @@ export function CollectionRail({
   return (
     <aside
       className={`shot-rail ${store.leftPanelOpen ? '' : 'collapsed'}`}
-      aria-label="Collections and screenshots"
+      aria-label="Collections and content"
       data-testid="collection-rail"
     >
       <div className="rail-heading">
@@ -394,15 +430,17 @@ export function CollectionRail({
             onSelectCollection={onSelectCollection}
             onSnapshot={onSnapshot}
           />
-          <div className="shot-list" aria-label="Screenshot sequence">
+          <div className="shot-list" aria-label="Content sequence">
             {shots.map((item, index) => (
               <div
                 key={item.id}
                 draggable
                 className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''} ${item.includeInExport ? '' : 'excluded'}`}
                 onDragStart={() => setDragIndex(index)}
+                onDragEnd={() => setDragIndex(null)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
+                  event.preventDefault();
                   event.stopPropagation();
                   void reorderScreenshot(index);
                 }}
@@ -411,24 +449,44 @@ export function CollectionRail({
                   className="shot-select"
                   onClick={() => void onSelectScreenshot(item.id)}
                   data-testid={`screenshot-${item.id}`}
+                  onKeyDown={(event) => {
+                    if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+                      event.preventDefault();
+                      const next = index + (event.key === 'ArrowUp' ? -1 : 1);
+                      if (next >= 0 && next < shots.length) void reorderScreenshot(next, index);
+                    }
+                  }}
+                  title="Alt + Up/Down to reorder"
                 >
                   <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
                   <div className="thumb">
                     {store.snapshot?.thumbnails[item.id] ? (
                       <img src={store.snapshot.thumbnails[item.id]} alt="" />
+                    ) : item.kind === 'text' ? (
+                      <FileText size={18} aria-hidden="true" />
+                    ) : item.kind === 'drawing' ? (
+                      <Pencil size={18} aria-hidden="true" />
                     ) : (
                       <FileImage size={18} aria-hidden="true" />
                     )}
                   </div>
                   <span className="shot-copy">
-                    <strong>{item.title || item.originalFilename}</strong>
+                    <strong>
+                      {item.kind === 'text'
+                        ? item.preview || 'Text block'
+                        : item.title || (item.kind === 'screenshot' ? item.originalFilename : 'Drawing')}
+                    </strong>
                     <small>
-                      {item.conflict
+                      {'conflict' in item && item.conflict
                         ? item.includeInExport
                           ? 'Copy conflict · included manually · '
                           : 'Copy conflict · excluded · '
                         : ''}
-                      {item.priority} priority
+                      {item.kind === 'screenshot'
+                        ? `${item.priority} priority`
+                        : item.kind === 'drawing'
+                          ? 'Drawing'
+                          : 'Markdown'}
                     </small>
                   </span>
                 </button>
@@ -437,8 +495,8 @@ export function CollectionRail({
                   className="shot-visibility"
                   label={
                     item.includeInExport
-                      ? `Exclude ${item.title} from prompt`
-                      : `Include ${item.title} in prompt`
+                      ? `Exclude ${item.kind === 'text' ? item.preview || 'text block' : item.title} from prompt`
+                      : `Include ${item.kind === 'text' ? item.preview || 'text block' : item.title} in prompt`
                   }
                   onClick={() => void toggleVisibility(item)}
                 >
@@ -452,6 +510,26 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
+            {onAddContent && (
+              <>
+                <Button
+                  variant="soft"
+                  disabled={collection?.archived}
+                  onClick={() => void onAddContent('drawing')}
+                >
+                  <Pencil size={15} aria-hidden="true" />
+                  Add drawing
+                </Button>
+                <Button
+                  variant="soft"
+                  disabled={collection?.archived}
+                  onClick={() => void onAddContent('text')}
+                >
+                  <FileText size={15} aria-hidden="true" />
+                  Add text
+                </Button>
+              </>
+            )}
             <Button variant="soft" disabled={collection?.archived} onClick={onImport}>
               <Upload size={15} aria-hidden="true" />
               Add screenshots

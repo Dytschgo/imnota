@@ -11,7 +11,7 @@ export function screenshotPath(projectPath: string, shot: ScreenshotRecord): str
 }
 
 export async function ensureCollection(projectPath: string, collectionId: string): Promise<void> {
-  for (const folder of ['screenshots', 'annotations', 'descriptions', 'exports']) {
+  for (const folder of ['screenshots', 'annotations', 'descriptions', 'drawings', 'text', 'exports']) {
     const target = path.join(projectPath, 'collections', collectionId, folder);
     await assertNoLinks(target);
     await fs.mkdir(target, { recursive: true });
@@ -90,7 +90,7 @@ export async function migrateProject(
   projectPath: string,
   project: ProjectData | LegacyProjectData,
 ): Promise<ProjectData> {
-  if (project.schemaVersion === 3) return project;
+  if (project.schemaVersion === 3 || project.schemaVersion === 4) return project;
 
   project = validateLegacyProject(project);
 

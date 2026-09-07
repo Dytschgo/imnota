@@ -167,6 +167,103 @@ describe('prompt bundle planning', () => {
     expect(result.bundles[0].markdown).toContain('Description:\n\n    code()');
     expect(result.bundles[0].markdown).toContain('### Picture 1 / Note 1\n\n    noteCode()');
   });
+
+  it('keeps mixed content interleaved, numbers only visuals, and supports text-only bundles', () => {
+    const input: PromptCollectionInput = {
+      ...collection([]),
+      items: [
+        {
+          id: 'text-before',
+          kind: 'text',
+          position: 0,
+          includeInExport: true,
+          markdown: '## User heading\n\nStart with this.',
+          contentRevision: 't1',
+        },
+        screenshot('screen', 1),
+        {
+          id: 'drawing',
+          kind: 'drawing',
+          position: 2,
+          title: 'Flow',
+          originalFilename: 'Flow',
+          includeInExport: true,
+          nativeWidth: 80,
+          nativeHeight: 40,
+          contentRevision: 'd1',
+          sourceFilename: 'flow.json',
+        },
+        {
+          id: 'hidden-text',
+          kind: 'text',
+          position: 3,
+          includeInExport: false,
+          markdown: '',
+          contentRevision: 'hidden',
+        },
+        screenshot('hidden-screen', 4, { includeInExport: false }),
+      ],
+    };
+    const mixed = planPromptBundles(input, [rendered('screen'), rendered('drawing', 80, 40)]);
+    expect(mixed.kind).toBe('ready');
+    if (mixed.kind !== 'ready') return;
+    expect(mixed.bundles[0].pictureNumbers).toEqual([1, 2]);
+    expect(mixed.bundles[0].markdown).toMatch(/Start with this\.[\s\S]*## Picture 1[\s\S]*## Drawing 2/);
+    expect(mixed.bundles[0].markdown).toContain('## User heading');
+    expect(mixed.bundles[0].markdown).not.toContain('## Text');
+    expect(mixed.bundles[0].markdown).toContain('Picture 3 was intentionally excluded');
+    expect(mixed.bundles[0].markdown).toContain('A text block was intentionally excluded');
+
+    const textOnly = planPromptBundles({ ...collection([]), items: [input.items![0]] }, []);
+    expect(textOnly).toMatchObject({ kind: 'ready' });
+    if (textOnly.kind === 'ready') {
+      expect(textOnly.bundles[0]).toMatchObject({ pictureNumbers: [], layout: { width: 0, height: 0 } });
+      expect(textOnly.bundles[0].markdown).toContain('Start with this.');
+    }
+
+    const drawingOnly = planPromptBundles(
+      {
+        ...collection([]),
+        items: [
+          {
+            id: 'drawing-only',
+            kind: 'drawing',
+            position: 0,
+            title: 'Architecture',
+            originalFilename: 'Architecture',
+            includeInExport: true,
+            nativeWidth: 90,
+            nativeHeight: 60,
+            contentRevision: 'drawing-only-1',
+            sourceFilename: 'architecture.json',
+          },
+        ],
+      },
+      [rendered('drawing-only', 90, 60)],
+    );
+    if (drawingOnly.kind === 'ready') {
+      expect(drawingOnly.bundles[0].markdown).toContain('## Drawing 1 — Architecture');
+      expect(drawingOnly.bundles[0].pictureNumbers).toEqual([1]);
+    } else throw new Error(drawingOnly.message);
+  });
+
+  it('retains duplicate ID, dimensions, and split safety checks for mixed collections', () => {
+    expect(() =>
+      planPromptBundles(
+        {
+          ...collection([]),
+          items: [screenshot('same', 0), { ...screenshot('same', 1), kind: 'screenshot' }],
+        },
+        [rendered('same')],
+      ),
+    ).toThrow(/duplicate content item IDs/);
+    expect(() => planPromptBundles({ ...collection([]), items: [screenshot('missing', 0)] }, [])).toThrow(
+      /Measured visual is missing/,
+    );
+    expect(() =>
+      planPromptBundles({ ...collection([]), items: [screenshot('bad', 0)] }, [rendered('bad', 0, 100)]),
+    ).toThrow(/width must be a positive integer/);
+  });
 });
 
 describe('prompt layout', () => {

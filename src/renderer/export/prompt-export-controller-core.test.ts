@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import type { Annotation, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
+import type { Annotation, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type {
   PromptExportBundleContent,
   PromptExportBundleGrant,
@@ -97,8 +97,9 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
   const writes: Array<{
     sessionId: string;
     bundleNumber: number;
-    pngDataUrl: string;
+    pngDataUrl?: string;
     markdown: string;
+    sourceAssets?: readonly { filename: string; source: string }[];
   }> = [];
   const copies: Array<{ sessionId: string; bundleNumber: number; target: string }> = [];
   const opens: Array<{ sessionId: string; bundleNumber: number; target: string }> = [];
@@ -111,7 +112,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
       .filter((write) => write.sessionId === sessionId)
       .map((write) => ({
         bundleNumber: write.bundleNumber,
-        pngFilename: `Prompt-${write.bundleNumber}.png`,
+        pngFilename: write.pngDataUrl ? `Prompt-${write.bundleNumber}.png` : '',
         markdownFilename: `Prompt-${write.bundleNumber}.md`,
       }));
 
@@ -129,6 +130,42 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
         annotations: structuredClone(options.annotations?.[item.id] ?? []),
         description: item.description,
         contentRevision: options.revisionForLoad?.(item.id, callNumber) ?? `revision-${item.id}`,
+      };
+    },
+    async loadContentItem({ itemId }) {
+      if (itemId.startsWith('text'))
+        return {
+          item: {
+            id: itemId,
+            collectionId: 'collection',
+            kind: 'text' as const,
+            position: 0,
+            includeInExport: true,
+            createdAt: '2026-09-07T10:00:00.000Z',
+            updatedAt: '2026-09-07T10:00:00.000Z',
+            markdownFilename: `${itemId}.md`,
+          },
+          markdown: `Text body for ${itemId}.`,
+          contentRevision: `revision-${itemId}`,
+        };
+      return {
+        item: {
+          id: itemId,
+          collectionId: 'collection',
+          kind: 'drawing' as const,
+          position: 0,
+          includeInExport: true,
+          createdAt: '2026-09-07T10:00:00.000Z',
+          updatedAt: '2026-09-07T10:00:00.000Z',
+          title: 'Drawing',
+          sourceFilename: `${itemId}.json`,
+          imageFilename: `${itemId}.png`,
+          originalWidth: 100,
+          originalHeight: 80,
+        },
+        source: '{"type":"excalidraw"}',
+        image: { filename: `${itemId}.png`, dataUrl: PNG, width: 100, height: 80 },
+        contentRevision: `revision-${itemId}`,
       };
     },
     async startPromptExport(input) {
@@ -249,6 +286,10 @@ function fakeRendering(options: FakeRenderingOptions = {}) {
         for (const picture of bundle.pictures) {
           const resolved = await composeOptions.resolvePicturePng(picture);
           expect(resolved.contentRevision).toBe(picture.contentRevision);
+          expect({ width: resolved.width, height: resolved.height }).toEqual({
+            width: picture.width,
+            height: picture.height,
+          });
           resolved.release?.();
         }
         return {
@@ -614,6 +655,57 @@ describe('prompt export controller orchestration', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'save-failed' } });
     expect(native.starts).toHaveLength(0);
     expect(native.copies).toHaveLength(0);
+  });
+
+  test('exports an all-text collection as Markdown only without a fake image', async () => {
+    const context = savedContext([]);
+    (context.snapshot.project as ProjectData & { contentItems: unknown[] }).contentItems = [
+      {
+        id: 'text-1',
+        collectionId: 'collection',
+        kind: 'text',
+        position: 0,
+        includeInExport: true,
+        createdAt: '2026-09-07T10:00:00.000Z',
+        updatedAt: '2026-09-07T10:00:00.000Z',
+        markdownFilename: 'text-1.md',
+      },
+    ];
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+
+    const result = await controller.copyFresh(1);
+
+    expect(result.ok).toBe(true);
+    expect(native.starts[0].bundles).toEqual([{ bundleNumber: 1, hasImage: false, width: 0, height: 0 }]);
+    expect(native.writes[0]).toMatchObject({
+      pngDataUrl: undefined,
+      markdown: expect.stringContaining('Text body for text-1.'),
+    });
+    expect(renderer.stats.renderCount).toBe(0);
+    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'context' }]);
+    expect((await controller.openFiles(1)).ok).toBe(true);
+    expect(native.opens).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'markdown' }]);
+    expect((await controller.loadPreview(1)).ok).toBe(false);
+  });
+
+  test('uses final drawing PNG dimensions without screenshot annotation padding', async () => {
+    const context = savedContext([]);
+    const native = fakeBridge();
+    const loaded = await native.bridge.loadContentItem!({
+      projectPath: context.snapshot.projectPath,
+      itemId: 'drawing-1',
+    });
+    context.snapshot.project.schemaVersion = 4;
+    context.snapshot.project.contentItems = [loaded.item];
+    const renderer = fakeRendering({ preflightSize: { width: 180, height: 160 } });
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    expect(preflight).not.toHaveBeenCalled();
+    expect(native.writes[0].markdown).toContain('Drawing 1');
+    expect(native.writes[0].sourceAssets).toEqual([{ filename: 'drawing-1.json', source: loaded.source }]);
   });
 
   test('cancels the native session when finalization fails', async () => {

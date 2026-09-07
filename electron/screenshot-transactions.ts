@@ -6,7 +6,15 @@ import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 const TRANSACTION_DIRECTORY = '.imnota-transactions';
 const MAX_TRANSACTION_WRITES = 256;
 const TOKEN_PATTERN = /^txn-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const KINDS = ['save', 'conflict', 'recovery-restore'] as const;
+const KINDS = [
+  'save',
+  'conflict',
+  'recovery-restore',
+  'content-create',
+  'content-save',
+  'content-conflict',
+  'content-duplicate',
+] as const;
 const PHASES = ['staged', 'applying', 'committed'] as const;
 
 export type ScreenshotTransactionKind = (typeof KINDS)[number];

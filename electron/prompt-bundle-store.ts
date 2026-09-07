@@ -8,6 +8,7 @@ export const MAX_PROMPT_BUNDLE_PNG_EDGE = 16_384;
 export const MAX_PROMPT_BUNDLE_PNG_PIXELS = 64_000_000;
 export const MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS = 2_000_000;
 export const MAX_PROMPT_BUNDLE_MARKDOWN_BYTES = 8_000_000;
+export const MAX_PROMPT_BUNDLE_SOURCE_BYTES = 8_000_000;
 const MAX_TIMESTAMP_ATTEMPTS = 86_400;
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -22,8 +23,15 @@ export interface StartPromptBundleSessionInput {
 
 export interface PromptBundleManifestItem {
   bundleNumber: number;
+  /** False reserves a Markdown-only bundle and intentionally no PNG file. */
+  hasImage?: boolean;
   width: number;
   height: number;
+}
+
+export interface PromptBundleSourceAsset {
+  filename: string;
+  source: string;
 }
 
 export interface PromptBundleSessionInfo {
@@ -36,8 +44,9 @@ export interface PromptBundleSessionInfo {
 export interface CommitPromptBundleInput {
   sessionId: string;
   bundleNumber: number;
-  png: Uint8Array;
+  png?: Uint8Array;
   markdown: string;
+  sourceAssets?: readonly PromptBundleSourceAsset[];
 }
 
 export interface StoredPromptBundle {
@@ -88,6 +97,8 @@ interface StoredSession {
   finalDirectory: string;
   reservationPath: string;
   completed: Map<number, StoredPromptBundle>;
+  sourceAssets: Map<string, string>;
+  incompleteFiles: Set<string>;
   manifest: Map<number, PromptBundleManifestItem>;
   queue: Promise<void>;
   cancelRequested: boolean;
@@ -246,17 +257,20 @@ function validateManifest(items: readonly PromptBundleManifestItem[]): Map<numbe
   for (const [index, item] of items.entries()) {
     if (item.bundleNumber !== index + 1)
       throw new Error('Prompt export manifest bundle numbers must be contiguous from 1.');
+    const hasImage = item.hasImage !== false;
     if (
       !Number.isSafeInteger(item.width) ||
       !Number.isSafeInteger(item.height) ||
-      item.width < 1 ||
-      item.height < 1 ||
+      item.width < (hasImage ? 1 : 0) ||
+      item.height < (hasImage ? 1 : 0) ||
       item.width > MAX_PROMPT_BUNDLE_PNG_EDGE ||
       item.height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
       item.width * item.height > MAX_PROMPT_BUNDLE_PNG_PIXELS
     )
       throw new Error(`Prompt ${item.bundleNumber} dimensions exceed safe storage limits.`);
-    manifest.set(item.bundleNumber, { ...item });
+    if (!hasImage && (item.width !== 0 || item.height !== 0))
+      throw new Error(`Text-only Prompt ${item.bundleNumber} must not reserve image dimensions.`);
+    manifest.set(item.bundleNumber, { ...item, hasImage });
   }
   return manifest;
 }
@@ -375,6 +389,8 @@ export class PromptBundleStore {
       finalDirectory,
       reservationPath,
       completed: new Map(),
+      sourceAssets: new Map(),
+      incompleteFiles: new Set(),
       manifest,
       queue: Promise.resolve(),
       cancelRequested: false,
@@ -387,7 +403,11 @@ export class PromptBundleStore {
     const session = this.session(input.sessionId);
     const expected = session.manifest.get(input.bundleNumber);
     if (!expected) throw new Error(`Prompt ${input.bundleNumber} is not in the reserved bundle manifest.`);
-    validatePromptBundlePng(input.png, expected);
+    const hasImage = expected.hasImage !== false;
+    if (hasImage && !input.png) throw new Error(`Prompt ${input.bundleNumber} requires a PNG.`);
+    if (!hasImage && input.png)
+      throw new Error(`Text-only Prompt ${input.bundleNumber} must not include a PNG.`);
+    if (input.png) validatePromptBundlePng(input.png, expected);
     if (
       typeof input.markdown !== 'string' ||
       !input.markdown.trim() ||
@@ -399,14 +419,14 @@ export class PromptBundleStore {
     return await this.enqueue(session, async () => {
       if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
       if (session.finalizing) throw new Error('Prompt export is already finishing.');
-      await this.dependencies.validateDecodedPng(input.png, expected);
+      if (input.png) await this.dependencies.validateDecodedPng(input.png, expected);
       if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
       if (session.completed.has(input.bundleNumber))
         throw new Error(`Prompt ${input.bundleNumber} is already stored.`);
       const base = `${session.setName} - ${suffix}`;
-      const pngFilename = `${base}.png`;
+      const pngFilename = hasImage ? `${base}.png` : '';
       const markdownFilename = `${base}.md`;
-      const pngPath = path.join(session.stagingDirectory, pngFilename);
+      const pngPath = hasImage ? path.join(session.stagingDirectory, pngFilename) : undefined;
       const markdownPath = path.join(session.stagingDirectory, markdownFilename);
       const [realExports, realStaging] = await Promise.all([
         fs.realpath(session.exportsDirectory),
@@ -415,33 +435,43 @@ export class PromptBundleStore {
       if (!isWithin(realExports, realStaging) || realExports === realStaging)
         throw new Error('Prompt staging directory escaped its collection exports folder.');
       await assertNoLinks(session.stagingDirectory);
-      await assertNoLinks(pngPath);
+      if (pngPath) await assertNoLinks(pngPath);
       await assertNoLinks(markdownPath);
-      if ((await fs.stat(pngPath).catch(() => null)) || (await fs.stat(markdownPath).catch(() => null)))
+      if (
+        (pngPath && (await fs.stat(pngPath).catch(() => null))) ||
+        (await fs.stat(markdownPath).catch(() => null))
+      )
         throw new Error(`Prompt ${input.bundleNumber} would overwrite an existing staged file.`);
+      const ownedPaths = [...(pngPath ? [pngPath] : []), markdownPath];
+      const addedSources = new Map<string, string>();
+      ownedPaths.forEach((target) => session.incompleteFiles.add(target));
       try {
-        await this.dependencies.writeAtomically(pngPath, input.png);
+        if (pngPath && input.png) await this.dependencies.writeAtomically(pngPath, input.png);
         if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
         await this.dependencies.writeAtomically(markdownPath, input.markdown);
         if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
+        await this.writeSourceAssets(session, input.sourceAssets ?? [], ownedPaths, addedSources);
         const stored = {
           bundleNumber: input.bundleNumber,
           width: expected.width,
           height: expected.height,
           pngFilename,
           markdownFilename,
-          pngPath,
+          pngPath: pngPath ?? '',
           markdownPath,
         };
         session.completed.set(input.bundleNumber, stored);
+        addedSources.forEach((source, filename) => session.sourceAssets.set(filename, source));
+        ownedPaths.forEach((target) => session.incompleteFiles.delete(target));
         return stored;
       } catch (error) {
-        const cleanupErrors = await removeFiles([pngPath, markdownPath]);
+        const cleanupErrors = await removeFiles(ownedPaths);
         if (cleanupErrors.length)
           throw new AggregateError(
             [error, ...cleanupErrors.map((message) => new Error(message))],
             `Prompt ${input.bundleNumber} failed and incomplete files could not all be removed.`,
           );
+        ownedPaths.forEach((target) => session.incompleteFiles.delete(target));
         throw error;
       }
     });
@@ -498,6 +528,41 @@ export class PromptBundleStore {
     return result;
   }
 
+  /** Sources are written under a fixed child directory, never from a renderer path. */
+  private async writeSourceAssets(
+    session: StoredSession,
+    assets: readonly PromptBundleSourceAsset[],
+    ownedPaths: string[],
+    addedSources: Map<string, string>,
+  ): Promise<void> {
+    for (const asset of assets) {
+      const filename = validatePathSegment(asset.filename, 'Source filename');
+      if (!filename.endsWith('.json')) throw new Error('Drawing source filename must end in .json.');
+      if (
+        typeof asset.source !== 'string' ||
+        !asset.source.trim() ||
+        Buffer.byteLength(asset.source, 'utf8') > MAX_PROMPT_BUNDLE_SOURCE_BYTES
+      )
+        throw new Error('Drawing source is empty or too large to store.');
+      const prior = session.sourceAssets.get(filename) ?? addedSources.get(filename);
+      if (prior !== undefined) {
+        if (prior !== asset.source) throw new Error(`Drawing source ${filename} changed during export.`);
+        continue;
+      }
+      const sourceDirectory = path.join(session.stagingDirectory, 'sources');
+      const sourcePath = path.join(sourceDirectory, filename);
+      await assertNoLinks(sourceDirectory);
+      await fs.mkdir(sourceDirectory, { recursive: true });
+      await assertNoLinks(sourcePath);
+      if (await fs.stat(sourcePath).catch(() => null))
+        throw new Error(`Drawing source ${filename} already exists.`);
+      ownedPaths.push(sourcePath);
+      session.incompleteFiles.add(sourcePath);
+      await this.dependencies.writeAtomically(sourcePath, asset.source);
+      addedSources.set(filename, asset.source);
+    }
+  }
+
   private async finalize(
     session: StoredSession,
     status: FinalizedPromptBundleSession['status'],
@@ -511,6 +576,12 @@ export class PromptBundleStore {
     const warnings: string[] = [];
     let masterMarkdownFilename: string | undefined;
     try {
+      const cleanupErrors = await removeFiles([...session.incompleteFiles]);
+      if (cleanupErrors.length)
+        throw new Error(
+          `Incomplete export files need cleanup before publication: ${cleanupErrors.join('; ')}`,
+        );
+      session.incompleteFiles.clear();
       if (
         status === 'completed' &&
         (completed.length !== session.manifest.size ||
@@ -589,7 +660,7 @@ export class PromptBundleStore {
           : undefined,
         bundles: completed.map((bundle) => ({
           ...bundle,
-          pngPath: path.join(session.finalDirectory, bundle.pngFilename),
+          pngPath: bundle.pngFilename ? path.join(session.finalDirectory, bundle.pngFilename) : '',
           markdownPath: path.join(session.finalDirectory, bundle.markdownFilename),
         })),
         warnings,

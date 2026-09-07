@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
+import { exerciseMixedContent } from './mixed-content-smoke.js';
 import {
   NativeUiDriver,
   SMOKE_VIEWPORTS,
@@ -1743,6 +1744,11 @@ export async function runSmokeWorkflow(
       'mixed-resolution 1/10/20/100 fixtures with one complete 20-image and one complete 100-image prompt render action',
     );
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
+
+  artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
+  assertions.push(
+    'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
+  );
 
   const report: SmokeWorkflowReport = {
     passed: true,

@@ -1,4 +1,5 @@
 import { isTextAnnotation } from '../../shared/annotation-order';
+import { orderedCollectionItems, type CollectionContentItem } from '../../shared/markdown';
 import type { TextWidthMeasurer } from '../../shared/annotation-geometry';
 import { EXPORT_SAFETY_MARGIN, expandedExportBounds } from '../../shared/crop';
 import {
@@ -10,8 +11,18 @@ import {
   type PromptBundleNoContent,
   type PromptBundleProgress,
   type PromptCollectionInput,
+  type PromptCollectionItemInput,
+  type PromptDrawingInput,
+  type PromptScreenshotInput,
+  type PromptTextInput,
 } from '../../shared/prompt-bundles';
-import type { Annotation, ImagePayload, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
+import type {
+  Annotation,
+  ImagePayload,
+  ProjectData,
+  ProjectSnapshot,
+  ScreenshotRecord,
+} from '../../shared/types';
 import type {
   PromptExportBundleContent,
   PromptExportBundleGrant,
@@ -52,6 +63,13 @@ export interface PromptBundleControllerBridge {
     description: string;
     contentRevision: string;
   }>;
+  loadContentItem?(input: { projectPath: string; itemId: string }): Promise<{
+    item: CollectionContentItem;
+    markdown?: string;
+    source?: string;
+    image?: ImagePayload;
+    contentRevision: string;
+  }>;
   startPromptExport(input: {
     projectPath: string;
     collectionId: string;
@@ -60,8 +78,9 @@ export interface PromptBundleControllerBridge {
   writePromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;
-    pngDataUrl: string;
+    pngDataUrl?: string;
     markdown: string;
+    sourceAssets?: readonly { filename: string; source: string }[];
   }): Promise<WorkflowResult<PromptExportBundleGrant>>;
   finishPromptExport(input: {
     sessionId: string;
@@ -166,6 +185,7 @@ interface PreparedPromptMetadata {
   input: Readonly<PromptCollectionInput>;
   measured: readonly MeasuredPromptScreenshot[];
   thumbnails: Readonly<Record<string, string>>;
+  sourceByItemId: ReadonlyMap<string, { filename: string; source: string; contentRevision: string }>;
 }
 
 interface PreparedPromptPlan extends PreparedPromptMetadata {
@@ -350,30 +370,41 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
       `- ${bundle.reference ?? `Prompt ${bundle.number}`}: ${bundle.pictureNumbers.map((number) => `Picture ${number}`).join(', ')}`,
     );
   lines.push('');
-  lines.push('## Collection pictures', '');
-  const ordered = input.screenshots
-    .map((screenshot, sourceIndex) => ({ screenshot, sourceIndex }))
-    .sort(
-      (left, right) =>
-        left.screenshot.position - right.screenshot.position || left.sourceIndex - right.sourceIndex,
-    );
+  lines.push('## Collection content', '');
+  const ordered = (input.items ?? input.screenshots)
+    .map((item, sourceIndex) => ({ item, sourceIndex }))
+    .sort((left, right) => left.item.position - right.item.position || left.sourceIndex - right.sourceIndex);
   const includedById = new Map(
     plan.bundles.flatMap((bundle) =>
       bundle.pictures.map((picture) => [picture.screenshotId, picture] as const),
     ),
   );
-  for (const [index, { screenshot }] of ordered.entries()) {
-    const pictureNumber = index + 1;
+  let visualNumber = 0;
+  for (const { item } of ordered) {
+    if (item.kind === 'text') {
+      if (item.includeInExport && item.markdown.trim()) lines.push(normalizedMarkdown(item.markdown), '');
+      else if (!item.includeInExport)
+        lines.push('A text block was intentionally excluded from this export.', '');
+      continue;
+    }
+    const pictureNumber = ++visualNumber;
+    const screenshot = item as PromptScreenshotInput | PromptDrawingInput;
+    const visualLabel = item.kind === 'drawing' ? 'Drawing' : 'Picture';
     lines.push(
-      `### Picture ${pictureNumber} — ${plainHeading(screenshot.title, screenshot.originalFilename)}`,
-      '',
-      `Priority for agent: ${screenshot.priority[0].toUpperCase()}${screenshot.priority.slice(1)}`,
+      `### ${visualLabel} ${pictureNumber} — ${plainHeading(screenshot.title, screenshot.originalFilename)}`,
       '',
     );
-    const description = normalizedMarkdown(screenshot.description);
-    if (description.trim()) lines.push(description, '');
+    if (item.kind === 'screenshot') {
+      const screenshotItem = item as PromptScreenshotInput;
+      lines.push(
+        `Priority for agent: ${screenshotItem.priority[0].toUpperCase()}${screenshotItem.priority.slice(1)}`,
+        '',
+      );
+      const description = normalizedMarkdown(screenshotItem.description);
+      if (description.trim()) lines.push(description, '');
+    }
     if (!screenshot.includeInExport) {
-      lines.push(`Picture ${pictureNumber} was intentionally excluded from this export.`, '');
+      lines.push(`${visualLabel} ${pictureNumber} was intentionally excluded from this export.`, '');
       continue;
     }
     for (const note of includedById.get(screenshot.id)?.notes ?? [])
@@ -393,6 +424,7 @@ function cardsForPlan(
     bundleNumber: bundle.number,
     pictureNumbers: bundle.pictureNumbers,
     screenshotCount: bundle.pictures.length,
+    textCount: bundle.textItems.length,
     excludedCount: bundle.excludedCount,
     width: bundle.layout.width,
     height: bundle.layout.height,
@@ -485,6 +517,16 @@ export class PromptBundleControllerEngine {
     if (this.activeRun !== run) throw cancelledFailure();
   }
 
+  private async loadContentItem(input: { projectPath: string; itemId: string }) {
+    if (!this.bridge.loadContentItem)
+      throw failure(
+        'save-failed',
+        'Mixed content is unavailable until the native content bridge is installed.',
+        true,
+      );
+    return this.bridge.loadContentItem(input);
+  }
+
   private async prepareMetadata(run: ActiveRun): Promise<PreparedPromptMetadata | PromptBundleNoContent> {
     this.emit({ error: undefined, noContentMessage: undefined, progress: { phase: 'planning' } });
     let saved: SavedPromptExportContext;
@@ -506,16 +548,104 @@ export class PromptBundleControllerEngine {
         'The current collection no longer exists. Reload the project and try again.',
         true,
       );
-    const screenshots = context.snapshot.project.screenshots.filter(
-      (screenshot) => screenshot.collectionId === context.collectionId,
-    );
     const measured: MeasuredPromptScreenshot[] = [];
-    const promptScreenshots: PromptCollectionInput['screenshots'][number][] = [];
-    for (const screenshot of screenshots) {
+    const promptItems: PromptCollectionItemInput[] = [];
+    const hasMixedContentItems = Boolean(
+      (context.snapshot.project as ProjectData & { contentItems?: unknown[] }).contentItems?.length,
+    );
+    const sourceByItemId = new Map<string, { filename: string; source: string; contentRevision: string }>();
+    for (const entry of orderedCollectionItems(context.snapshot.project, context.collectionId)) {
       this.assertActive(run);
+      if (entry.kind === 'text') {
+        const item = entry.item;
+        if (!item.includeInExport) {
+          promptItems.push({
+            id: item.id,
+            kind: 'text',
+            position: item.position,
+            includeInExport: false,
+            markdown: '',
+            contentRevision: 'excluded',
+          });
+          continue;
+        }
+        const loaded = await this.loadContentItem({
+          projectPath: context.snapshot.projectPath,
+          itemId: item.id,
+        });
+        this.assertActive(run);
+        promptItems.push({
+          id: item.id,
+          kind: 'text',
+          position: item.position,
+          includeInExport: true,
+          markdown: loaded.markdown ?? '',
+          contentRevision: loaded.contentRevision,
+        } satisfies PromptTextInput);
+        continue;
+      }
+      if (entry.kind === 'drawing') {
+        const item = entry.item;
+        if (!item.includeInExport) {
+          promptItems.push({
+            id: item.id,
+            kind: 'drawing',
+            position: item.position,
+            title: item.title ?? 'Untitled drawing',
+            originalFilename: item.imageFilename,
+            includeInExport: false,
+            nativeWidth: item.originalWidth ?? 1,
+            nativeHeight: item.originalHeight ?? 1,
+            contentRevision: 'excluded',
+            sourceFilename: item.sourceFilename ?? `${item.id}.json`,
+          });
+          continue;
+        }
+        const loaded = await this.loadContentItem({
+          projectPath: context.snapshot.projectPath,
+          itemId: item.id,
+        });
+        this.assertActive(run);
+        if (!loaded.image)
+          throw failure(
+            'content-changed',
+            'A drawing image is unavailable. Save the drawing and export again.',
+            true,
+          );
+        // Drawing PNGs already contain their final white crop/padding. Screenshot
+        // preflight adds annotation margins that resolvePicture does not render again.
+        measured.push({
+          screenshotId: item.id,
+          width: loaded.image.width,
+          height: loaded.image.height,
+          estimatedPngCharacters: loaded.image.dataUrl.length,
+        });
+        const sourceFilename = item.sourceFilename ?? `${item.id}.json`;
+        if (loaded.source)
+          sourceByItemId.set(item.id, {
+            filename: sourceFilename,
+            source: loaded.source,
+            contentRevision: loaded.contentRevision,
+          });
+        promptItems.push({
+          id: item.id,
+          kind: 'drawing',
+          position: item.position,
+          title: item.title ?? 'Untitled drawing',
+          originalFilename: item.imageFilename,
+          includeInExport: true,
+          nativeWidth: loaded.image.width,
+          nativeHeight: loaded.image.height,
+          contentRevision: loaded.contentRevision,
+          sourceFilename,
+        } satisfies PromptDrawingInput);
+        continue;
+      }
+      const screenshot = entry.item as ScreenshotRecord;
       if (!screenshot.includeInExport) {
-        promptScreenshots.push({
+        promptItems.push({
           id: screenshot.id,
+          kind: 'screenshot',
           position: screenshot.position,
           title: screenshot.title,
           originalFilename: screenshot.originalFilename,
@@ -543,8 +673,9 @@ export class PromptBundleControllerEngine {
         height: dimensions.height,
         estimatedPngCharacters: dimensions.estimatedPngCharacters,
       });
-      promptScreenshots.push({
+      promptItems.push({
         id: screenshot.id,
+        kind: 'screenshot',
         position: screenshot.position,
         title: screenshot.title,
         originalFilename: screenshot.originalFilename,
@@ -561,7 +692,8 @@ export class PromptBundleControllerEngine {
       collectionId: collection.id,
       collectionName: collection.name,
       overallContext: collection.overallContext,
-      screenshots: promptScreenshots,
+      screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
+      items: hasMixedContentItems ? promptItems : undefined,
     }) as Readonly<PromptCollectionInput>;
     const initial = planPromptBundles(input, measured);
     if (initial.kind === 'no-content') return initial;
@@ -570,6 +702,7 @@ export class PromptBundleControllerEngine {
       input,
       measured: cloneAndFreeze(measured) as readonly MeasuredPromptScreenshot[],
       thumbnails: context.snapshot.thumbnails,
+      sourceByItemId,
     };
   }
 
@@ -588,6 +721,26 @@ export class PromptBundleControllerEngine {
     signal: AbortSignal,
   ): Promise<PromptPictureResolveResult> {
     throwIfAborted(signal);
+    if (picture.kind === 'drawing') {
+      const loaded = await this.loadContentItem({
+        projectPath: prepared.context.snapshot.projectPath,
+        itemId: picture.screenshotId,
+      });
+      throwIfAborted(signal);
+      if (!loaded.image || loaded.contentRevision !== picture.contentRevision)
+        throw failure(
+          'content-changed',
+          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
+          true,
+        );
+      return {
+        dataUrl: loaded.image.dataUrl,
+        width: loaded.image.width,
+        height: loaded.image.height,
+        contentRevision: loaded.contentRevision,
+        release: () => undefined,
+      };
+    }
     const screenshot = prepared.context.snapshot.project.screenshots.find(
       (item) => item.collectionId === prepared.context.collectionId && item.id === picture.screenshotId,
     );
@@ -621,6 +774,15 @@ export class PromptBundleControllerEngine {
   }
 
   private async compose(prepared: PreparedPromptPlan, bundle: PromptBundle, signal: AbortSignal) {
+    if (!bundle.pictures.length)
+      return {
+        kind: 'composed' as const,
+        dataUrl: undefined,
+        width: 0,
+        height: 0,
+        encodedCharacters: 0,
+        delivery: 'clipboard' as const,
+      };
     assertBundleRenderLimit(bundle);
     const composeOptions = {
       signal,
@@ -630,10 +792,58 @@ export class PromptBundleControllerEngine {
     return this.rendering.compose(bundle, composeOptions);
   }
 
+  private async verifyBundleContent(
+    prepared: PreparedPromptPlan,
+    bundle: PromptBundle,
+    signal: AbortSignal,
+  ): Promise<readonly { filename: string; source: string }[]> {
+    const assets: { filename: string; source: string }[] = [];
+    for (const text of bundle.textItems) {
+      throwIfAborted(signal);
+      const loaded = await this.loadContentItem({
+        projectPath: prepared.context.snapshot.projectPath,
+        itemId: text.itemId,
+      });
+      if (loaded.contentRevision !== text.contentRevision || (loaded.markdown ?? '') !== text.markdown)
+        throw failure(
+          'content-changed',
+          'Text content changed after export planning. Save and export again.',
+          true,
+        );
+    }
+    for (const picture of bundle.pictures) {
+      if (picture.kind !== 'drawing') continue;
+      throwIfAborted(signal);
+      const loaded = await this.loadContentItem({
+        projectPath: prepared.context.snapshot.projectPath,
+        itemId: picture.screenshotId,
+      });
+      if (loaded.contentRevision !== picture.contentRevision || !loaded.source)
+        throw failure(
+          'content-changed',
+          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
+          true,
+        );
+      const expected = prepared.sourceByItemId.get(picture.screenshotId);
+      if (
+        !expected ||
+        expected.contentRevision !== loaded.contentRevision ||
+        expected.source !== loaded.source
+      )
+        throw failure(
+          'content-changed',
+          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
+          true,
+        );
+      assets.push({ filename: expected.filename, source: expected.source });
+    }
+    return assets;
+  }
+
   private async settleSplits(run: ActiveRun, metadata: PreparedPromptMetadata): Promise<SettledPromptPlan> {
     const breaks = new Set<string>();
-    const includedCount = metadata.input.screenshots.filter(
-      (screenshot) => screenshot.includeInExport,
+    const includedCount = (metadata.input.items ?? metadata.input.screenshots).filter(
+      (item) => item.includeInExport && item.kind !== 'text',
     ).length;
     for (let attempt = 0; attempt <= includedCount; attempt += 1) {
       this.assertActive(run);
@@ -762,6 +972,7 @@ export class PromptBundleControllerEngine {
     this.assertActive(run);
     const manifests = settled.plan.bundles.map((bundle) => ({
       bundleNumber: bundle.number,
+      ...(bundle.pictures.length ? {} : { hasImage: false }),
       width: bundle.layout.width,
       height: bundle.layout.height,
     }));
@@ -804,6 +1015,7 @@ export class PromptBundleControllerEngine {
           bundleNumber: bundle.number,
           pngDataUrl: composition.dataUrl,
           markdown: bundle.markdown,
+          sourceAssets: await this.verifyBundleContent(prepared, bundle, run.controller.signal),
         }),
       );
       this.assertActive(run);
@@ -1003,8 +1215,10 @@ export class PromptBundleControllerEngine {
 
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
     return this.nativeArtifactAction(selection, async (sessionId, bundleNumber) => {
-      const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
-      if (!png.ok) return png;
+      if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
+        const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
+        if (!png.ok) return png;
+      }
       return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
     });
   }
@@ -1040,6 +1254,8 @@ export class PromptBundleControllerEngine {
     try {
       const artifact = this.latestArtifact;
       const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
+      if (card && !card.pictureNumbers.length)
+        throw failure('invalid-bundle', 'This text-only prompt has no image preview.', true);
       const cardUsesArtifact =
         artifact &&
         card?.planId === artifact.planId &&
@@ -1054,7 +1270,11 @@ export class PromptBundleControllerEngine {
         this.emit({
           preview: {
             bundleNumber,
-            dataUrl: content.imageDataUrl,
+            dataUrl:
+              content.imageDataUrl ??
+              (() => {
+                throw failure('invalid-bundle', 'This text-only prompt has no image preview.', true);
+              })(),
             width: card?.width ?? 0,
             height: card?.height ?? 0,
           },
@@ -1077,7 +1297,11 @@ export class PromptBundleControllerEngine {
       this.emit({
         preview: {
           bundleNumber,
-          dataUrl: composition.dataUrl,
+          dataUrl:
+            composition.dataUrl ??
+            (() => {
+              throw failure('invalid-bundle', 'This text-only prompt has no image preview.', true);
+            })(),
           width: composition.width,
           height: composition.height,
         },

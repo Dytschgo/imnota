@@ -845,3 +845,251 @@ Do not build in this implementation cycle:
 - Two-way Markdown synchronization.
 
 The first milestone is a reliable, local, open-source workflow that turns a collection of screenshots into clear, high-resolution, agent-ready prompt bundles that users can copy into any coding tool.
+
+## Feature plan — drawings and text blocks
+
+### Product goal
+
+Allow users to build a complete explanation for an AI coding agent in one local collection. A collection can contain screenshots, architecture drawings, and written Markdown in one deliberate sequence:
+
+```text
+Text block → Drawing → Text block → Screenshot
+```
+
+Drawings are useful for architecture, flows, state diagrams, and rough design ideas. Text blocks provide the surrounding explanation. Both should be as easy to add, rearrange, save, hide, duplicate, and export as screenshots.
+
+This feature remains local-first and agent-agnostic. It must not require a native integration with a specific AI provider.
+
+### Agreed product decisions
+
+- Screenshots, drawings, and text blocks share one ordered list per collection.
+- The collection order controls Markdown order and the order of exported visual assets.
+- Text blocks contain only body content. Users write Markdown directly; there is no separate title field.
+- Text blocks should have an edit/preview experience, with the source Markdown remaining authoritative.
+- Drawings use an essential Excalidraw-style tool set rather than the full Excalidraw feature set in the first version.
+- The initial drawing tools are select/move, rectangle, rounded rectangle, ellipse, diamond, container/group, text, arrow/connector, freehand line, zoom/pan, and undo/redo.
+- Connectors attach to shapes and remain attached when shapes move.
+- A drawing has no separate description field. Explanations belong in adjacent text blocks.
+- Each drawing saves editable JSON plus a rendered PNG in the collection work tree.
+- The JSON should use an Excalidraw-compatible direction so import/export can be added later without replacing the storage model.
+- Rendered drawing PNGs use a white background, automatic content cropping, and a small padding margin.
+- All three item types support include/exclude visibility.
+- All three item types support drag-and-drop reordering, deletion with Undo, duplication, and debounced autosave.
+- Copy context includes generated Markdown plus the rendered PNGs for included screenshots and drawings. Text blocks do not create image assets.
+- Markdown labels drawings explicitly, for example `Drawing 1 — Application architecture`, while screenshots remain labeled as pictures.
+
+### Proposed content model
+
+Replace screenshot-only collection ordering with a collection content-item list, while preserving screenshot compatibility during migration. The exact TypeScript shape should be finalized against the existing persistence and conflict model before implementation.
+
+```ts
+type ContentItemKind = 'screenshot' | 'drawing' | 'text';
+
+interface ContentItemBase {
+  id: string;
+  collectionId: string;
+  kind: ContentItemKind;
+  position: number;
+  includeInExport: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DrawingRecord extends ContentItemBase {
+  kind: 'drawing';
+  title: string;
+  sourceFilename: string; // editable Excalidraw-compatible JSON
+  imageFilename: string; // rendered PNG used by export/copy context
+}
+
+interface TextBlockRecord extends ContentItemBase {
+  kind: 'text';
+  markdownFilename: string;
+}
+```
+
+Possible implementation strategies are:
+
+1. Introduce a new `contentItems` array and keep `screenshots` temporarily as a compatibility projection.
+2. Generalize the existing screenshot record into a discriminated visual/content record.
+
+Choose the strategy that minimizes data duplication and keeps existing screenshot recovery, conflict detection, and migration behavior safe. Do not force drawing or text-only fields into `ScreenshotRecord` just to avoid a schema change.
+
+### Work-tree layout
+
+New files should live under the existing collection directory structure and use safe, validated filenames. A possible layout is:
+
+```text
+collections/
+  <collection-id>/
+    screenshots/
+    annotations/
+    descriptions/
+    drawings/
+      <drawing-filename>.json
+      <drawing-filename>.png
+    text/
+      <text-block-filename>.md
+```
+
+The implementation should use the same path validation, atomic writes, revision checks, recovery journal, and trash/Undo conventions already used for screenshots. Drawing JSON and rendered PNG must be committed together where possible so a project cannot point to an editable drawing without its image counterpart.
+
+### User workflow
+
+#### Adding content
+
+- Add `Drawing` and `Text` actions to the collection rail.
+- `Add drawing` creates a new drawing at the end of the collection, opens the drawing editor, and focuses it.
+- `Add text` creates a new text block at the end of the collection and focuses its editor.
+- New items receive stable IDs and the next collection position.
+- New items are included in export by default.
+
+#### Editing content
+
+- Text editing supports direct Markdown input and an optional preview toggle.
+- Drawing editing supports the agreed essential tools and architecture-diagram connectors.
+- Edits autosave with a small `Saving…` / `Saved` indicator.
+- Save failures identify the affected item and preserve unsaved in-memory content for retry.
+- Reopening a project restores each item and its last persisted content.
+
+#### Organizing content
+
+- The collection rail displays a clear type indicator for screenshot, drawing, or text.
+- Drag-and-drop works across all item types.
+- Position changes preserve stable item IDs.
+- Visibility controls are available directly on each row.
+- Hidden items remain editable and reorderable but are omitted from visual export and marked as intentionally excluded in Markdown.
+
+#### Deleting and duplicating
+
+- Delete uses the existing recoverable trash workflow and offers Undo.
+- Deleting an item removes its metadata and associated content files together.
+- Duplicating a drawing copies its editable JSON and PNG, assigning new filenames and a new stable ID.
+- Duplicating a text block copies its Markdown file and creates a new position.
+- Duplicate items should be included by default unless existing conflict rules require otherwise.
+
+### Markdown and export behavior
+
+Update Markdown generation to iterate over the ordered collection content items.
+
+- Text blocks emit their Markdown body verbatim in sequence.
+- Drawings emit an explicit drawing heading and reference their rendered PNG.
+- Screenshots retain their existing picture heading and annotation/description behavior.
+- Hidden items remain represented textually with an exclusion statement.
+- Picture numbering and drawing numbering must be deterministic and documented. Prefer numbering visual items in collection order while retaining explicit type labels, unless existing prompt consumers require separate counters.
+- Text-only collections must produce valid Markdown and must not attempt to create an empty image bundle.
+- Copy context must provide Markdown and all included rendered visual assets.
+- Package export must include Markdown, screenshot assets, drawing PNGs, and editable drawing JSON files.
+
+Add tests for mixed sequences, text-only collections, drawing-only collections, hidden items, reordered items, and duplicate items.
+
+### Migration and compatibility
+
+- Existing schema version 3 projects with screenshots must open unchanged.
+- Migration should create the new content ordering from existing screenshot positions.
+- Existing screenshot IDs, filenames, annotations, descriptions, and ordering must remain stable.
+- New projects should use the generalized content model from creation.
+- If a compatibility projection is used, define one authoritative ordering source and test that saves cannot silently diverge.
+- Increment the schema version only when the final model is chosen.
+- Preserve a migration backup and retain the existing recovery behavior if migration fails.
+- Do not migrate old screenshot notes into text blocks automatically unless there is a clear, lossless mapping; preserve the current description migration rules.
+
+### Native bridge and persistence work
+
+Add bridge operations for the smallest safe set of native mutations, likely including:
+
+- Create a drawing.
+- Load drawing source and rendered image.
+- Save drawing source and rendered image atomically.
+- Create, load, and save a text block.
+- Reorder content items.
+- Duplicate a drawing or text block.
+- Delete and undo-delete a drawing or text block.
+
+The bridge must validate project ownership, collection membership, filenames, content sizes, and revisions in the same way as existing screenshot operations. Renderer code should not write directly to the work tree.
+
+### Rendering architecture
+
+- Keep drawing source state separate from the rendered PNG cache.
+- Render from the canonical drawing JSON after edits and before export.
+- Use white as the export background regardless of the application theme.
+- Calculate drawing bounds from visible drawing elements and add a small fixed padding margin.
+- Ensure text, connectors, grouped shapes, and freehand paths are included in bounds.
+- Avoid rendering empty or invisible elements into the exported crop.
+- Keep the editor theme-aware, while keeping exported drawing output stable and readable.
+
+### UI states and accessibility
+
+Cover at minimum:
+
+- Empty collection with Add drawing and Add text actions.
+- Newly created drawing with an empty canvas.
+- Newly created empty text block.
+- Saving and saved states.
+- Save failure with retry.
+- Hidden item styling and accessible visibility labels.
+- Dragging, drop target, and keyboard-reorder states.
+- Deletion confirmation according to the existing preference, plus Undo notification.
+- Loading and malformed-content recovery states.
+- Light and dark application themes.
+- Keyboard focus and shortcuts for the drawing tools and text editor.
+- Reduced-motion behavior for drawers, notifications, and editor transitions.
+
+### Testing plan
+
+#### Shared and renderer tests
+
+- Schema validation for drawing and text records.
+- Migration from screenshot-only schema 3 projects.
+- Stable ordering across mixed item types.
+- Visibility filtering and exclusion Markdown.
+- Text Markdown source and preview behavior.
+- Drawing JSON load/save round trips.
+- Connector attachment when a shape moves.
+- Drawing bounds and PNG rendering with text, groups, and connectors.
+- Autosave debounce, retry, and stale revision handling.
+- Duplicate, delete, Undo, and recovery behavior.
+- Markdown and package export for every item combination.
+- Copy-context behavior with and without visual assets.
+
+#### Electron and smoke tests
+
+Extend the existing workflow coverage to:
+
+1. Create a project and collection.
+2. Add a text block and enter Markdown.
+3. Add a drawing and create connected architecture shapes.
+4. Add or import a screenshot.
+5. Reorder the three item types.
+6. Hide one item.
+7. Close and reopen the project.
+8. Confirm content and ordering.
+9. Copy context and export a package.
+10. Duplicate and delete items, then Undo deletion.
+
+### Recommended implementation order for this feature
+
+1. Decide and document the authoritative generalized content model.
+2. Add schema versioning, migration, and path helpers.
+3. Add native bridge persistence with atomic/revision-safe transactions.
+4. Add text blocks and mixed-item ordering first.
+5. Update collection rail, visibility, duplicate, delete, Undo, and autosave behavior for all item types.
+6. Build the essential drawing editor and Excalidraw-compatible source format.
+7. Add connector attachment and shape/group behavior.
+8. Add deterministic drawing PNG rendering and automatic cropping.
+9. Update Markdown, copy context, package export, and previews.
+10. Add migration, renderer, Electron smoke, and performance tests.
+11. Manually verify the complete mixed-content workflow on light and dark themes.
+
+### Explicit non-goals for the first version
+
+- Full Excalidraw feature parity.
+- Importing `.excalidraw` files.
+- Exporting `.excalidraw` files through the UI.
+- Rich-text controls for text blocks.
+- Separate drawing descriptions.
+- Separate drawing or text collections.
+- Cloud sync or collaboration.
+- AI-generated diagrams or automatic diagram interpretation.
+- PDF/SVG export.
+- Mobile or web-specific drawing layouts.

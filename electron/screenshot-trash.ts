@@ -331,22 +331,42 @@ function parseCurrentProject(value: Buffer, token: string): ProjectData {
 }
 
 function withoutScreenshot(project: ProjectData, screenshot: ScreenshotRecord): ProjectData {
-  const collectionShots = project.screenshots
-    .filter((item) => item.collectionId === screenshot.collectionId && item.id !== screenshot.id)
-    .sort((a, b) => a.position - b.position)
+  const normalized = [
+    ...project.screenshots.filter(
+      (item) => item.collectionId === screenshot.collectionId && item.id !== screenshot.id,
+    ),
+    ...(project.contentItems ?? []).filter((item) => item.collectionId === screenshot.collectionId),
+  ]
+    .sort(
+      (a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    )
     .map((item, position) => ({ ...item, position }));
-  let cursor = 0;
+  const positions = new Map(normalized.map((item) => [item.id, item.position]));
   return validateProject({
     ...project,
     updatedAt: nowIso(),
     screenshots: project.screenshots
       .filter((item) => item.id !== screenshot.id)
-      .map((item) => (item.collectionId === screenshot.collectionId ? collectionShots[cursor++] : item)),
+      .map((item) =>
+        item.collectionId === screenshot.collectionId ? { ...item, position: positions.get(item.id)! } : item,
+      ),
+    ...(project.schemaVersion === 4
+      ? {
+          contentItems: (project.contentItems ?? []).map((item) =>
+            item.collectionId === screenshot.collectionId
+              ? { ...item, position: positions.get(item.id)! }
+              : item,
+          ),
+        }
+      : {}),
   });
 }
 
 function withScreenshot(project: ProjectData, screenshot: ScreenshotRecord, token: string): ProjectData {
-  if (project.screenshots.some((item) => item.id === screenshot.id))
+  if (
+    project.screenshots.some((item) => item.id === screenshot.id) ||
+    (project.contentItems ?? []).some((item) => item.id === screenshot.id)
+  )
     throw new ScreenshotTrashError('undo-failed', 'This screenshot has already been restored.', token);
   if (!project.collections.some((collection) => collection.id === screenshot.collectionId))
     throw new ScreenshotTrashError('undo-failed', 'The screenshot collection no longer exists.', token);
@@ -365,16 +385,29 @@ function withScreenshot(project: ProjectData, screenshot: ScreenshotRecord, toke
       'A later screenshot already owns one of the paths required by Undo.',
       token,
     );
-  const collectionShots = project.screenshots
-    .filter((item) => item.collectionId === screenshot.collectionId)
-    .sort((a, b) => a.position - b.position);
-  collectionShots.splice(Math.min(screenshot.position, collectionShots.length), 0, screenshot);
-  const normalized = collectionShots.map((item, position) => ({ ...item, position }));
-  const normalizedById = new Map(normalized.map((item) => [item.id, item]));
+  const collectionItems = [
+    ...project.screenshots.filter((item) => item.collectionId === screenshot.collectionId),
+    ...(project.contentItems ?? []).filter((item) => item.collectionId === screenshot.collectionId),
+  ].sort(
+    (a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  );
+  collectionItems.splice(Math.min(screenshot.position, collectionItems.length), 0, screenshot);
+  const positions = new Map(collectionItems.map((item, position) => [item.id, position]));
   return validateProject({
     ...project,
     updatedAt: nowIso(),
-    screenshots: [...project.screenshots, screenshot].map((item) => normalizedById.get(item.id) ?? item),
+    screenshots: [...project.screenshots, screenshot].map((item) =>
+      item.collectionId === screenshot.collectionId ? { ...item, position: positions.get(item.id)! } : item,
+    ),
+    ...(project.schemaVersion === 4
+      ? {
+          contentItems: (project.contentItems ?? []).map((item) =>
+            item.collectionId === screenshot.collectionId
+              ? { ...item, position: positions.get(item.id)! }
+              : item,
+          ),
+        }
+      : {}),
   });
 }
 

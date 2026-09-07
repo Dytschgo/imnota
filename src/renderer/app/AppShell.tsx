@@ -223,7 +223,7 @@ export function AppShell({
             {store.snapshot && store.view !== 'settings' && (
               <>
                 <span className="crumb-separator">/</span>
-                <span>Screenshots</span>
+                <span>Collection</span>
               </>
             )}
           </div>

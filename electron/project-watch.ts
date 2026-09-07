@@ -56,6 +56,7 @@ export function ignoredProjectWatchPath(relativePath: string): boolean {
   return (
     parts.includes('exports') ||
     parts.includes('.imnota-undo') ||
+    parts.includes('.imnota-content-undo') ||
     parts.includes('.imnota-transactions') ||
     basename === '.imnota-recovery.json' ||
     basename === '.imnota-recovery-backup.json' ||

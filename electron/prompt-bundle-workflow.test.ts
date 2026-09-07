@@ -106,4 +106,22 @@ describe('main-owned prompt bundle grants', () => {
     await fs.truncate(markdownPath, MAX_PROMPT_BUNDLE_MARKDOWN_BYTES + 1);
     await expect(workflow.copy(session.sessionId, 1, 'markdown')).rejects.toThrow(/safe .*byte read limit/);
   });
+
+  it('copies text-only context as text and rejects image-only actions honestly', async () => {
+    const { workflow, projectPath, collectionId, copyText, copyContext } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, [
+      { bundleNumber: 1, hasImage: false, width: 0, height: 0 },
+    ]);
+    await workflow.write(session.sessionId, 1, undefined, '# Text prompt\n');
+    const finalized = await workflow.finish(session.sessionId);
+    expect(finalized.bundles[0].pngFilename).toBe('');
+    await workflow.copy(session.sessionId, 1, 'context');
+    expect(copyText).toHaveBeenCalledWith('# Text prompt\n');
+    expect(copyContext).not.toHaveBeenCalled();
+    await expect(workflow.copy(session.sessionId, 1, 'image')).rejects.toThrow(/no image/);
+    await expect(workflow.read(session.sessionId, 1)).resolves.toMatchObject({
+      markdown: '# Text prompt\n',
+      imageDataUrl: undefined,
+    });
+  });
 });

@@ -47,12 +47,15 @@ export interface PromptExportSessionInfo {
 
 export interface PromptExportBundleManifest {
   bundleNumber: number;
+  /** Text-only bundles deliberately reserve no PNG. */
+  hasImage?: boolean;
   width: number;
   height: number;
 }
 
 export interface PromptExportBundleGrant {
   bundleNumber: number;
+  /** Empty only for a text-only bundle; no fake PNG is created. */
   pngFilename: string;
   markdownFilename: string;
 }
@@ -67,7 +70,14 @@ export interface PromptExportFinalized {
 
 export interface PromptExportBundleContent extends PromptExportBundleGrant {
   markdown: string;
-  imageDataUrl: string;
+  /** Omitted for a text-only bundle. */
+  imageDataUrl?: string;
+}
+
+/** Drawing sources are carried into the reserved export directory, never rasterized as text. */
+export interface PromptExportSourceAsset {
+  filename: string;
+  source: string;
 }
 
 export type PromptExportCopyTarget = 'context' | 'markdown' | 'image';
@@ -107,8 +117,10 @@ export interface WorkflowBridge {
   writePromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;
-    pngDataUrl: string;
+    /** Required only when the manifest reserved a visual PNG. */
+    pngDataUrl?: string;
     markdown: string;
+    sourceAssets?: readonly PromptExportSourceAsset[];
   }): Promise<WorkflowResult<PromptExportBundleGrant>>;
   finishPromptExport(input: {
     sessionId: string;

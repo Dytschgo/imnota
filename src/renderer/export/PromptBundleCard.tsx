@@ -16,6 +16,7 @@ export interface PromptBundleCardModel {
   bundleNumber: number;
   pictureNumbers: readonly number[];
   screenshotCount: number;
+  textCount?: number;
   excludedCount: number;
   width: number;
   height: number;
@@ -89,7 +90,7 @@ export function PromptBundleCard({
         type="button"
         className="prompt-bundle-preview"
         aria-label={`Open full-resolution preview for Prompt ${bundle.bundleNumber}`}
-        disabled={disabled || !onLoadPreview || busy}
+        disabled={disabled || !onLoadPreview || busy || !bundle.pictureNumbers.length}
         onClick={() => void onLoadPreview?.(request)}
       >
         {bundle.previewDataUrl ? (
@@ -105,7 +106,7 @@ export function PromptBundleCard({
         <div className="prompt-bundle-heading">
           <div>
             <h3 id={`prompt-bundle-${bundle.bundleNumber}`}>Prompt {bundle.bundleNumber}</h3>
-            <p>{pictureLabel(bundle.pictureNumbers)}</p>
+            <p>{bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'}</p>
           </div>
           {bundle.state === 'copied' && (
             <span className="prompt-bundle-state prompt-bundle-state-success">
@@ -115,8 +116,12 @@ export function PromptBundleCard({
         </div>
         <dl className="prompt-bundle-facts">
           <div>
-            <dt>Screenshots</dt>
+            <dt>Visuals</dt>
             <dd>{bundle.screenshotCount}</dd>
+          </div>
+          <div>
+            <dt>Text</dt>
+            <dd>{bundle.textCount ?? 0}</dd>
           </div>
           <div>
             <dt>Excluded</dt>
@@ -124,9 +129,7 @@ export function PromptBundleCard({
           </div>
           <div>
             <dt>Canvas</dt>
-            <dd>
-              {bundle.width} × {bundle.height}
-            </dd>
+            <dd>{bundle.width && bundle.height ? `${bundle.width} × ${bundle.height}` : 'None'}</dd>
           </div>
         </dl>
         <p className="prompt-bundle-size">{formatBytes(bundle.estimatedBytes)}</p>
@@ -181,7 +184,7 @@ export function PromptBundleCard({
           </Button>
           <Button
             variant="ghost"
-            disabled={!fallbacksReady || !onCopyImage}
+            disabled={!fallbacksReady || !onCopyImage || !bundle.pictureNumbers.length}
             onClick={() => void onCopyImage?.(request)}
           >
             <FileImage size={14} aria-hidden="true" /> Image

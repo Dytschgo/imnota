@@ -66,3 +66,65 @@ it('keeps the selected screenshot when the current project snapshot is refreshed
 
   expect(useAppStore.getState().activeScreenshotId).toBe('later');
 });
+
+it('selects the restored item and its collection atomically after Undo elsewhere', () => {
+  const value = snapshot();
+  value.project.contentItems = [
+    {
+      id: 'restored',
+      kind: 'text',
+      collectionId: '002-collection',
+      position: 2,
+      includeInExport: true,
+      createdAt: '2020',
+      updatedAt: '2020',
+      markdownFilename: 'restored.md',
+    },
+  ];
+  useAppStore.getState().setProject(value);
+  expect(useAppStore.getState().activeCollectionId).toBe('001-collection');
+  useAppStore.getState().setProject(value, 'restored');
+  expect(useAppStore.getState().activeCollectionId).toBe('002-collection');
+  expect(useAppStore.getState().activeScreenshotId).toBe('restored');
+});
+
+it('restores a text-first collection and preserves drawing selection through autosave snapshots', () => {
+  const value = snapshot();
+  value.project.contentItems = [
+    {
+      id: 'intro',
+      kind: 'text',
+      collectionId: '002-collection',
+      position: 0,
+      includeInExport: true,
+      createdAt: '2020',
+      updatedAt: '2020',
+      markdownFilename: 'intro.md',
+    },
+    {
+      id: 'architecture',
+      kind: 'drawing',
+      collectionId: '002-collection',
+      position: 3,
+      includeInExport: true,
+      createdAt: '2020',
+      updatedAt: '2020',
+      title: 'Architecture',
+      sourceFilename: 'architecture.json',
+      imageFilename: 'architecture.png',
+      originalWidth: 160,
+      originalHeight: 120,
+    },
+  ];
+  value.project.screenshots = value.project.screenshots.map((item) => ({
+    ...item,
+    position: item.position + 1,
+  }));
+  useAppStore.getState().setProject(value);
+  useAppStore.getState().setActiveCollection('002-collection');
+  expect(useAppStore.getState().activeScreenshotId).toBe('intro');
+  expect(useAppStore.getState().activeScreenshot()).toBeNull();
+  useAppStore.getState().set({ activeScreenshotId: 'architecture' });
+  useAppStore.getState().setProject({ ...value, projectRevision: 'new' });
+  expect(useAppStore.getState().activeScreenshotId).toBe('architecture');
+});

@@ -53,7 +53,7 @@ export interface ProjectPersistenceOptions {
   snapshot: ProjectSnapshot | null;
   activeScreenshot: ScreenshotRecord | null;
   onProject(project: ProjectData): void;
-  onSnapshot(snapshot: ProjectSnapshot): void;
+  onSnapshot(snapshot: ProjectSnapshot, selectedItemId?: string): void;
   onSelectScreenshot(id: string): void;
 }
 
@@ -131,6 +131,8 @@ function mergeTrackedProjectMetadata(
   const localCollections = new Map(local.collections.map((item) => [item.id, item]));
   const baseScreenshots = new Map(base.screenshots.map((item) => [item.id, item]));
   const localScreenshots = new Map(local.screenshots.map((item) => [item.id, item]));
+  const baseContent = new Map(base.contentItems?.map((item) => [item.id, item]));
+  const localContent = new Map(local.contentItems?.map((item) => [item.id, item]));
   const project: ProjectData = {
     ...external,
     name: mergeField('project name', base.name, local.name, external.name, conflicts),
@@ -245,6 +247,46 @@ function mergeTrackedProjectMetadata(
     }),
   };
   project.updatedAt = local.updatedAt !== base.updatedAt ? local.updatedAt : external.updatedAt;
+  if (external.contentItems) {
+    project.contentItems = external.contentItems.map((item) => {
+      const before = baseContent.get(item.id);
+      const edited = localContent.get(item.id);
+      if (!before || !edited) return item;
+      return {
+        ...item,
+        position: mergeField(
+          `item ${item.id} position`,
+          before.position,
+          edited.position,
+          item.position,
+          conflicts,
+        ),
+        includeInExport: mergeField(
+          `item ${item.id} visibility`,
+          before.includeInExport,
+          edited.includeInExport,
+          item.includeInExport,
+          conflicts,
+        ),
+        ...(item.kind === 'drawing' && before.kind === 'drawing' && edited.kind === 'drawing'
+          ? {
+              title: mergeField(
+                `drawing ${item.id} title`,
+                before.title,
+                edited.title,
+                item.title,
+                conflicts,
+              ),
+            }
+          : {}),
+      };
+    });
+    for (const [id, before] of baseContent) {
+      const edited = localContent.get(id);
+      if (!external.contentItems.some((item) => item.id === id) && edited && !sameValue(before, edited))
+        conflicts.push(`item ${id} was removed externally`);
+    }
+  }
 
   for (const [id, baseCollection] of baseCollections) {
     if (!external.collections.some((item) => item.id === id)) {
@@ -989,10 +1031,12 @@ export function useProjectPersistence({
         await finishNativeMutation(nativeMutationToken, false);
         snapshotRef.current = mutationSnapshot;
         lastSavedSnapshot.current = mutationSnapshot;
-        callbacks.current.onSnapshot(mutationSnapshot);
+        callbacks.current.onSnapshot(mutationSnapshot, selectScreenshotId);
         if (
           selectScreenshotId &&
-          mutationSnapshot.project.screenshots.some((item) => item.id === selectScreenshotId)
+          [...mutationSnapshot.project.screenshots, ...(mutationSnapshot.project.contentItems ?? [])].some(
+            (item) => item.id === selectScreenshotId,
+          )
         )
           callbacks.current.onSelectScreenshot(selectScreenshotId);
         return true;
@@ -1030,9 +1074,10 @@ export function useProjectPersistence({
               recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
             }
           ).recoveredDeletes,
+          recoveredContentDeletes: mutationSnapshot.recoveredContentDeletes,
         };
         snapshotRef.current = acceptedSnapshot;
-        callbacks.current.onSnapshot(acceptedSnapshot);
+        callbacks.current.onSnapshot(acceptedSnapshot, selectScreenshotId);
         if (overlaid.conflicts.length) {
           await finishNativeMutation(nativeMutationToken, false);
           return false;
@@ -1042,7 +1087,10 @@ export function useProjectPersistence({
         if (!(await finishNativeMutation(nativeMutationToken, true))) return false;
         if (
           selectScreenshotId &&
-          snapshotRef.current?.project.screenshots.some((item) => item.id === selectScreenshotId)
+          [
+            ...(snapshotRef.current?.project.screenshots ?? []),
+            ...(snapshotRef.current?.project.contentItems ?? []),
+          ].some((item) => item.id === selectScreenshotId)
         )
           callbacks.current.onSelectScreenshot(selectScreenshotId);
         return acceptedRevision.current !== null && !pendingExternalChange.current;
