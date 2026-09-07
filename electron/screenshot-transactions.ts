@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
 const TRANSACTION_DIRECTORY = '.imnota-transactions';
+const MAX_TRANSACTION_WRITES = 256;
 const TOKEN_PATTERN = /^txn-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const KINDS = ['save', 'conflict', 'recovery-restore'] as const;
 const PHASES = ['staged', 'applying', 'committed'] as const;
@@ -229,7 +230,7 @@ function parseManifest(value: unknown, expectedToken: string): TransactionManife
     input.commitPath !== 'project.json' ||
     !Array.isArray(input.entries) ||
     input.entries.length < 2 ||
-    input.entries.length > 100
+    input.entries.length > MAX_TRANSACTION_WRITES
   )
     throw new ScreenshotTransactionError(
       'invalid-journal',
@@ -558,7 +559,7 @@ export async function stageScreenshotTransaction(
 ): Promise<ScreenshotTransactionSummary> {
   const root = await projectRoot(projectPath);
   await cleanupCommittedBeforeStage(root, operations);
-  if (!KINDS.includes(input.kind) || input.writes.length < 2 || input.writes.length > 100)
+  if (!KINDS.includes(input.kind) || input.writes.length < 2 || input.writes.length > MAX_TRANSACTION_WRITES)
     throw new ScreenshotTransactionError('invalid-journal', 'Transaction input is invalid.');
 
   const normalized = input.writes.map((write) => ({

@@ -695,4 +695,22 @@ describe('screenshot multi-file transactions', () => {
     ).rejects.toThrow('Linked');
     expect(await fs.readdir(outside)).toEqual([]);
   });
+
+  it('keeps the expanded recovery capacity bounded at 256 writes', async () => {
+    const directory = await temporaryProject();
+    const metadata = Buffer.from('metadata-A');
+    await atomicWrite(path.join(directory, 'project.json'), metadata);
+    await expect(
+      stageScreenshotTransaction(directory, {
+        kind: 'recovery-restore',
+        writes: [
+          ...Array.from({ length: 256 }, (_, index) =>
+            transactionWrite(`sidecars/${index}.txt`, Buffer.from('candidate'), null),
+          ),
+          transactionWrite('project.json', Buffer.from('metadata-B'), metadata),
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-journal' });
+    expect(await listScreenshotTransactions(directory)).toEqual([]);
+  });
 });
