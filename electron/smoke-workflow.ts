@@ -7,6 +7,7 @@ import {
   SMOKE_VIEWPORTS,
   mapSourcePointToPromptPixel,
   pathIsWithin,
+  sourceBoxInteriorPoint,
   validateCreatedSmokeDirectory,
   type SmokeCapture,
   type SmokeLocator,
@@ -375,7 +376,12 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   if (geometry.image.x <= beforePan + 40)
     throw new Error('Default select-tool panning ignored native input.');
 
-  await driver.press('0');
+  await driver.evaluate(`(() => {
+    const stageContainer = document.querySelector('.konvajs-content')?.parentElement;
+    if (!stageContainer) throw new Error('Canvas command target is unavailable');
+    stageContainer.dispatchEvent(new CustomEvent('imnota:canvas-command', { detail: 'fit' }));
+  })()`);
+  await delay(80);
   geometry = await canvasGeometry(driver);
   const textPoint = {
     x: Math.round(geometry.image.x + geometry.image.width * 0.5),
@@ -400,14 +406,53 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   await driver.doubleClick(textPoint);
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
   await driver.fill({ selector: '[aria-label="Edit annotation text"]' }, 'Trusted pointer note');
+  const filled = await driver.evaluate<string>(
+    `document.querySelector('[aria-label="Edit annotation text"]')?.value ?? ''`,
+  );
+  if (filled !== 'Trusted pointer note')
+    throw new Error('Native text input did not receive the expected value.');
   await driver.press('ENTER');
-  await delay(150);
-  await driver.doubleClick(textPoint);
+  await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' }, { absent: true });
+  const reopenPoint = sourceBoxInteriorPoint(textPoint, { width: 260, height: 42 }, geometry.image.scale);
+  await driver.evaluate(`window.__imnotaPointerGeometry.reopenPoint = ${JSON.stringify(reopenPoint)}`);
+  await delay(600);
+  await driver.clickPoint(reopenPoint);
+  await driver.waitFor({ selector: '.annotation-properties' });
+  const inspectorText = await driver.evaluate<string | null>(`(() => {
+    const field = [...document.querySelectorAll('.annotation-properties label.field')]
+      .find((label) => label.querySelector('.field-label')?.textContent?.trim() === 'Text');
+    return field?.querySelector('input')?.value ?? null;
+  })()`);
+  if (inspectorText !== 'Trusted pointer note')
+    throw new Error(
+      `Committed annotation text did not reach the inspector: ${JSON.stringify(inspectorText)}.`,
+    );
+  await delay(600);
+  await driver.doubleClick(reopenPoint);
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
-  await driver.fill({ selector: '[aria-label="Edit annotation text"]' }, 'Must be cancelled');
+  const reopened = await driver.evaluate<string>(
+    `document.querySelector('[aria-label="Edit annotation text"]')?.value ?? ''`,
+  );
+  if (reopened !== 'Trusted pointer note') throw new Error('Double-click did not reopen the committed text.');
+  await driver.press('END');
+  await driver.typeText(' must be cancelled');
+  const replacement = await driver.evaluate<string>(
+    `document.querySelector('[aria-label="Edit annotation text"]')?.value ?? ''`,
+  );
+  if (replacement !== 'Trusted pointer note must be cancelled')
+    throw new Error(`Native edit text was not entered: ${JSON.stringify(replacement)}.`);
   await driver.press('ESCAPE');
+  await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' }, { absent: true });
   await delay(150);
-  await driver.doubleClick(textPoint);
+  const afterEscape = await driver.evaluate<string | null>(`(() => {
+    const field = [...document.querySelectorAll('.annotation-properties label.field')]
+      .find((label) => label.querySelector('.field-label')?.textContent?.trim() === 'Text');
+    return field?.querySelector('input')?.value ?? null;
+  })()`);
+  if (afterEscape !== 'Trusted pointer note')
+    throw new Error(`Escape changed the committed inspector text: ${JSON.stringify(afterEscape)}.`);
+  await driver.doubleClick(reopenPoint);
+  await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
   const cancelled = await driver.evaluate<string>(
     `document.querySelector('[aria-label="Edit annotation text"]')?.value ?? ''`,
   );
@@ -611,17 +656,7 @@ async function captureWorkspaceMatrix(
 
     driver.setWindow(await host.reopenWindow());
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
-    await driver.evaluate(`new Promise((resolve, reject) => {
-      const started = Date.now();
-      const check = () => {
-        if (document.documentElement.dataset.theme === ${JSON.stringify(theme)})
-          return resolve(true);
-        if (Date.now() - started > 10000)
-          return reject(new Error('Reopened renderer did not load the saved ${theme} theme'));
-        setTimeout(check, 25);
-      };
-      check();
-    })()`);
+    await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
       artifacts.push(

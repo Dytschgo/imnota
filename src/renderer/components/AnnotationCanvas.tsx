@@ -46,6 +46,7 @@ import {
   releaseContentPointer,
   type ActiveAnnotationDrag,
 } from '../canvas/pointer-interaction';
+import { CANVAS_COMMAND_EVENT, canvasCommandFromEvent, viewportForCanvasCommand } from '../canvas/commands';
 import { pixelatedRegion } from '../pixelate';
 import { zoomAt } from '../viewport';
 import type { ToolChoice } from './Toolbar';
@@ -287,25 +288,6 @@ export function AnnotationCanvas({
         pan.current = null;
         onSelect(null);
       }
-      if (['+', '=', '-'].includes(event.key)) {
-        event.preventDefault();
-        setViewport((current) =>
-          zoomAt(current, { x: size.width / 2, y: size.height / 2 }, event.key === '-' ? 1 / 1.1 : 1.1),
-        );
-      }
-      if (event.key === '1' && image)
-        setViewport({ x: (size.width - image.width) / 2, y: (size.height - image.height) / 2, scale: 1 });
-      if (event.key === '0' && image) {
-        const fit = Math.max(
-          0.02,
-          Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1),
-        );
-        setViewport({
-          x: (size.width - image.width * fit) / 2,
-          y: (size.height - image.height * fit) / 2,
-          scale: fit,
-        });
-      }
     };
     const up = (event: KeyboardEvent) => {
       if (event.code !== 'Space') return;
@@ -326,7 +308,7 @@ export function AnnotationCanvas({
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [image, onSelect, size]);
+  }, [onSelect]);
 
   useEffect(() => {
     if (!image?.dataUrl) {
@@ -367,6 +349,18 @@ export function AnnotationCanvas({
     viewportRef.current = next;
     setViewport(next);
   }, [image, size]);
+
+  useEffect(() => {
+    const container = stageRef.current?.container();
+    if (!container || !imageObj || !image) return;
+    const handleCommand = (event: Event) => {
+      const command = canvasCommandFromEvent(event);
+      if (!command) return;
+      setViewport((current) => viewportForCanvasCommand(current, command, size, image));
+    };
+    container.addEventListener(CANVAS_COMMAND_EVENT, handleCommand);
+    return () => container.removeEventListener(CANVAS_COMMAND_EVENT, handleCommand);
+  }, [image, imageObj, size, stageRef]);
 
   const pixelated = useMemo(
     () =>

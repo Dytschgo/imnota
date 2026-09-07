@@ -25,6 +25,17 @@ export interface SmokeCapture {
   devicePixelRatio: number;
 }
 
+export function sourceBoxInteriorPoint(
+  origin: SmokePoint,
+  sourceSize: SmokeViewport,
+  scale: number,
+): SmokePoint {
+  return {
+    x: Math.round(origin.x + sourceSize.width * scale * 0.35),
+    y: Math.round(origin.y + sourceSize.height * scale * 0.5),
+  };
+}
+
 export function mapSourcePointToPromptPixel(
   sourcePoint: SmokePoint,
   expandedSourceOrigin: SmokePoint,
@@ -118,6 +129,15 @@ function locatorScript(locator: SmokeLocator): string {
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
+function isTransientLocatorExecutionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes('Script failed to execute') ||
+    message.includes('Execution context was destroyed') ||
+    message.includes('Render frame was disposed')
+  );
+}
+
 export class NativeUiDriver {
   constructor(
     private window: BrowserWindow,
@@ -133,11 +153,24 @@ export class NativeUiDriver {
   }
 
   async evaluate<T>(source: string): Promise<T> {
-    return (await this.window.webContents.executeJavaScript(source, true)) as T;
+    try {
+      return (await this.window.webContents.executeJavaScript(source, true)) as T;
+    } catch (error) {
+      const summary = source.replace(/\s+/g, ' ').trim().slice(0, 180);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Renderer evaluation failed near ${JSON.stringify(summary)}: ${message}`, {
+        cause: error,
+      });
+    }
   }
 
   async bounds(locator: SmokeLocator): Promise<(Rectangle & { text: string; disabled: boolean }) | null> {
-    return this.evaluate(locatorScript(locator));
+    try {
+      return await this.evaluate(locatorScript(locator));
+    } catch (error) {
+      if (isTransientLocatorExecutionError(error)) return null;
+      throw error;
+    }
   }
 
   async waitFor(
@@ -207,6 +240,11 @@ export class NativeUiDriver {
       keyCode: 'A',
       modifiers: [modifier],
     });
+    await this.window.webContents.insertText(value);
+    await wait(40);
+  }
+
+  async typeText(value: string): Promise<void> {
     await this.window.webContents.insertText(value);
     await wait(40);
   }

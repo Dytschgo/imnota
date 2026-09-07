@@ -9,6 +9,7 @@ import {
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
+  sourceBoxInteriorPoint,
   validateCreatedSmokeDirectory,
 } from './smoke-native-driver.js';
 
@@ -22,6 +23,13 @@ describe('native smoke driver', () => {
     expect(mapSourcePointToPromptPixel({ x: 1200, y: 400 }, { x: 160, y: 76 }, { x: 32, y: 80 })).toEqual({
       x: 1072,
       y: 404,
+    });
+  });
+
+  it('chooses an interior annotation point away from transformer edge anchors', () => {
+    expect(sourceBoxInteriorPoint({ x: 790, y: 501 }, { width: 260, height: 42 }, 0.31)).toEqual({
+      x: 818,
+      y: 508,
     });
   });
 
@@ -63,6 +71,7 @@ describe('native smoke driver', () => {
     await driver.drag({ x: 1, y: 2 }, { x: 9, y: 10 }, 2);
     await driver.wheel({ x: 5, y: 6 }, 20, -10);
     await driver.press('ENTER');
+    await driver.typeText('Typed text');
 
     expect(sendInputEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'mouseDown', button: 'left', x: 60, y: 40 }),
@@ -73,6 +82,7 @@ describe('native smoke driver', () => {
     expect(sendInputEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'keyDown', keyCode: 'ENTER' }),
     );
+    expect(window.webContents.insertText).toHaveBeenCalledWith('Typed text');
   });
 
   it('sizes and verifies the renderer CSS viewport instead of the outer window frame', async () => {
@@ -87,6 +97,19 @@ describe('native smoke driver', () => {
 
     expect(setContentSize).toHaveBeenCalledWith(1280, 800, false);
     expect(executeJavaScript).toHaveBeenCalledWith(expect.stringContaining('window.innerWidth'), true);
+  });
+
+  it('retries locator polling when navigation replaces the renderer execution context', async () => {
+    const executeJavaScript = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Script failed to execute'))
+      .mockResolvedValueOnce({ x: 4, y: 8, width: 20, height: 10, text: 'Ready', disabled: false });
+    const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+
+    await expect(new NativeUiDriver(window, 200).waitFor({ text: 'Ready' })).resolves.toEqual(
+      expect.objectContaining({ text: 'Ready' }),
+    );
+    expect(executeJavaScript).toHaveBeenCalledTimes(2);
   });
 
   it('fails a viewport matrix entry when the OS clamps its content size', async () => {
