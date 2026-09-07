@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.5
+
+- Added standalone drawings with essential Excalidraw tools and connectors that stay attached to shapes. Drawings save editable JSON and a cropped PNG with a white background and padding in the collection's work tree.
+- Added body-only Markdown items with editing and preview, stored alongside screenshots and drawings.
+- Added shared ordering, visibility controls, duplication, and recoverable deletion for all three item types. Drawing and text editors autosave with a saving indicator.
+- Mixed-content exports follow collection order and include written explanations and images. Text-only collections export Markdown without placeholder images.
+- Back up workspaces before upgrading. Adding drawing or text items upgrades a project to schema 4 and preserves a schema 3 backup; older app versions cannot open the upgraded project.
+
 ## 0.2.4
 
 - Corrected macOS temporary test paths so release checks exercise regular folders without bypassing symlink protection. The v0.2.3 tag did not publish a release because these checks failed.
