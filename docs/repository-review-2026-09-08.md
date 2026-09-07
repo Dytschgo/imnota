@@ -37,6 +37,12 @@ All five open PRs were inspected; there were no open issues. These version-only 
 
 The Hooks reproduction changed only dependency files in a separate worktree. No runtime or lint-policy changes were integrated. Compiler-oriented lint findings alone do not prove a user-visible bug; any refactor must preserve persistence, cancellation and async identity behavior with regression tests.
 
+## Major code finding and correction
+
+The review found a data-loss path in `App.tsx`: both update entry points set the close bypass before calling the native installer, but never cleared it after installation failed. An edit made afterward could bypass the normal save-before-close flow.
+
+Both entry points now share an install callback. A rejected handoff restores the guard immediately; native rollback status and newly dirty screenshot/content state also revoke the bypass. A successful handoff without new edits retains permission to quit, because Electron can schedule that quit after the IPC call returns. Regression coverage exercises rejection, asynchronous rollback, an abandoned resolved handoff followed by edits, and successful close without new edits. This correction is subsequent source work and is not in the already published nightly binaries.
+
 ## Scope and remaining checks
 
 The repository-wide review concentrates on data loss, persistence/recovery, export/resource handling, IPC boundaries, renderer async behavior and updates. The preceding sharing review covered the service/client security boundary in detail. Neither review substitutes for external editor paste trials, private-browser recipient visual QA, user sessions, photographic/high-entropy stress fixtures or long-running memory profiling.
