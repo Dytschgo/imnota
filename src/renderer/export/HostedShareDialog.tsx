@@ -6,13 +6,10 @@ import { Button, Modal, TextInput } from '../components/ui';
 import './hosted-share.css';
 
 function requestId() {
-  return `share_${crypto.randomUUID().replaceAll('-', '')}`;
+  return crypto.randomUUID();
 }
 function formatExpiry(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
-}
-function base64Bytes(value: string) {
-  return Math.floor((value.length * 3) / 4) - (value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0);
 }
 
 export function HostedShareDialog({
@@ -24,15 +21,10 @@ export function HostedShareDialog({
   onClose(): void;
   onError(message: string): void;
 }) {
-  const artifactBytes =
-    new TextEncoder().encode(artifacts.markdown).byteLength +
-    artifacts.images.reduce((total, image) => total + base64Bytes(image.dataBase64), 0);
   const quotaProblem =
-    artifacts.images.length > 20
-      ? `This export has ${artifacts.images.length} PNGs; hosted sharing accepts up to 20. Exclude or split collection content, then prepare a fresh export.`
-      : artifactBytes > 25 * 1024 * 1024
-        ? 'This export exceeds the 25 MB hosted-sharing bundle limit. Exclude or reduce visual content, then prepare a fresh export.'
-        : undefined;
+    artifacts.imageCount > 20
+      ? `This export has ${artifacts.imageCount} PNGs; hosted sharing accepts up to 20. Exclude or split collection content, then prepare a fresh export.`
+      : undefined;
   const [token, setToken] = useState('');
   const [approved, setApproved] = useState(false);
   const [includeArchive, setIncludeArchive] = useState(true);
@@ -57,9 +49,8 @@ export function HostedShareDialog({
     const result = await window.imnota.createHostedShare({
       requestId: id,
       pairingToken: token.trim(),
-      title: artifacts.title,
-      markdown: artifacts.markdown,
-      images: artifacts.images,
+      sessionId: artifacts.sessionId,
+      bundleNumbers: artifacts.bundleNumbers,
       includeArchive,
       expiresInDays,
     });
@@ -90,7 +81,7 @@ export function HostedShareDialog({
     <Modal
       title="Publish a hosted prompt"
       description="A read-only HTTPS copy is created only after you approve the finalized artifacts below."
-      onClose={onClose}
+      onClose={busy ? () => undefined : onClose}
       closeTestId="hosted-share-close"
     >
       <section className="hosted-share" aria-busy={busy}>
@@ -101,22 +92,21 @@ export function HostedShareDialog({
               <div>
                 <strong>Review before upload</strong>
                 <p>
-                  Imnota will upload only this generated Markdown and these rendered PNGs. It will not upload
-                  your project folder, local paths, source screenshots, drawing JSON, settings, or other
-                  metadata.
+                  Imnota will upload only the listed generated Markdown and rendered PNG artifacts. Review
+                  their contents before publishing the link.
                 </p>
               </div>
             </div>
             <div className="hosted-share-manifest">
               <strong>{artifacts.title}</strong>
               <span>
-                1 Markdown file · {artifacts.images.length} rendered PNG
-                {artifacts.images.length === 1 ? '' : 's'}
+                1 Markdown file · {artifacts.imageCount} rendered PNG
+                {artifacts.imageCount === 1 ? '' : 's'}
               </span>
               <ul>
                 <li>prompt.md</li>
-                {artifacts.images.map((image) => (
-                  <li key={image.filename}>{image.filename}</li>
+                {artifacts.bundleNumbers.map((number) => (
+                  <li key={number}>prompt-{String(number).padStart(3, '0')}.png or text-only</li>
                 ))}
               </ul>
             </div>

@@ -21,15 +21,17 @@ describe('HostedShareClient', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     await expect(
-      (await client()).create({
-        requestId: 'share_1',
-        pairingToken: 'short',
-        title: 'Prompt',
-        markdown: '# prompt',
-        images: [],
-        includeArchive: true,
-        expiresInDays: 30,
-      }),
+      (await client()).create(
+        {
+          requestId: '123e4567-e89b-42d3-a456-426614174000',
+          pairingToken: 'short',
+          sessionId: 'session',
+          bundleNumbers: [1],
+          includeArchive: true,
+          expiresInDays: 30,
+        },
+        { title: 'Prompt', markdown: '# prompt', images: [] },
+      ),
     ).rejects.toMatchObject({ code: 'invalid-input' });
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -37,34 +39,34 @@ describe('HostedShareClient', () => {
   it('persists only local management metadata after a successful rendered-artifact upload', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              id: 'share-a',
-              url: 'https://app.imnota.xyz/s/a',
-              title: 'Prompt',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              expiresAt: '2026-01-31T00:00:00.000Z',
-              managementToken: 'manage-secret',
-              byteSize: 12,
-            }),
-            { status: 201, headers: { 'Content-Type': 'application/json' } },
-          ),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 'share-a',
+            url: 'https://app.imnota.xyz/s/abcdefghijklmnop',
+            title: 'Prompt',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            expiresAt: '2026-01-31T00:00:00.000Z',
+            managementToken: 'manage-secret',
+            byteSize: 12,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
         ),
+      ),
     );
     const instance = await client();
-    const share = await instance.create({
-      requestId: 'share_2',
-      pairingToken: 'a'.repeat(43),
-      title: 'Prompt',
-      markdown: '# prompt',
-      images: [{ filename: 'prompt-001.png', dataBase64: 'YWJj' }],
-      includeArchive: true,
-      expiresInDays: 30,
-    });
-    expect(share.url).toBe('https://app.imnota.xyz/s/a');
+    const share = await instance.create(
+      {
+        requestId: '123e4567-e89b-42d3-a456-426614174001',
+        pairingToken: 'a'.repeat(43),
+        sessionId: 'session',
+        bundleNumbers: [1],
+        includeArchive: true,
+        expiresInDays: 30,
+      },
+      { title: 'Prompt', markdown: '# prompt', images: [{ filename: 'prompt-001.png', dataBase64: 'YWJj' }] },
+    );
+    expect(share.url).toBe('https://app.imnota.xyz/s/abcdefghijklmnop');
     expect(await instance.list()).toEqual([share]);
   });
 });

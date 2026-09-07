@@ -1121,37 +1121,48 @@ function registerIpc(): void {
         .tuple([
           z
             .object({
-              requestId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
+              requestId: z.string().uuid(),
               pairingToken: z.string().min(32).max(512),
-              title: z.string().min(1).max(200),
-              markdown: z.string().min(1).max(1_000_000),
-              images: z
-                .array(
-                  z
-                    .object({
-                      filename: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.png$/),
-                      dataBase64: z
-                        .string()
-                        .max(14_000_000)
-                        .regex(/^[A-Za-z0-9+/]+={0,2}$/),
-                    })
-                    .strict(),
-                )
-                .max(20),
+              sessionId: workflowSessionId,
+              bundleNumbers: z.array(workflowBundleNumber).min(1).max(20),
               includeArchive: z.boolean(),
               expiresInDays: z.number().int().min(1).max(30),
             })
             .strict(),
         ])
         .parse(args);
-      return hostedShareClient!.create(input);
+      const unique = [...new Set(input.bundleNumbers)].sort((left, right) => left - right);
+      if (unique.length !== input.bundleNumbers.length)
+        throw new Error('Each finalized prompt bundle can be shared once.');
+      const bundles = await Promise.all(
+        unique.map((bundleNumber) => promptBundleWorkflow!.read(input.sessionId, bundleNumber)),
+      );
+      const images = bundles.flatMap((bundle) =>
+        bundle.imageDataUrl
+          ? [
+              {
+                filename: `prompt-${String(bundle.bundleNumber).padStart(3, '0')}.png`,
+                dataBase64: bundle.imageDataUrl.replace(/^data:image\/png;base64,/, ''),
+              },
+            ]
+          : [],
+      );
+      for (const image of images) {
+        const native = nativeImage.createFromBuffer(Buffer.from(image.dataBase64, 'base64'));
+        const size = native.getSize();
+        if (native.isEmpty() || size.width > 10_000 || size.height > 10_000)
+          throw new Error('A finalized PNG exceeds hosted-sharing dimensions.');
+      }
+      return hostedShareClient!.create(input, {
+        title: 'Imnota prompt',
+        markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
+        images,
+      });
     },
     true,
   );
   handleWorkflow('workflow:hosted-share:cancel', async (_event, ...args) => {
-    const [input] = z
-      .tuple([z.object({ requestId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/) }).strict()])
-      .parse(args);
+    const [input] = z.tuple([z.object({ requestId: z.string().uuid() }).strict()]).parse(args);
     await hostedShareClient!.cancel(input.requestId);
   });
   handleWorkflow('workflow:hosted-share:list', async (_event, ...args) => {

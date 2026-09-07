@@ -155,8 +155,9 @@ export type PromptBundleControllerActionResult =
 
 export interface HostedShareArtifacts {
   title: string;
-  markdown: string;
-  images: readonly { filename: string; dataBase64: string }[];
+  sessionId: string;
+  bundleNumbers: readonly number[];
+  imageCount: number;
 }
 
 export interface PromptBundleLargePreview {
@@ -1103,29 +1104,13 @@ export class PromptBundleControllerEngine {
       const plan = this.latestPlan;
       if (!artifact || !plan)
         throw failure('native-failure', 'The finalized local export is unavailable. Prepare it again.', true);
-      const contents = await Promise.all(
-        [...artifact.grants.keys()]
-          .sort((a, b) => a - b)
-          .map((bundleNumber) =>
-            this.bridge.readPromptExportBundle({ sessionId: artifact.sessionId, bundleNumber }),
-          ),
-      );
-      const bundles = contents.map((result) => unwrap(result));
       return {
         ok: true,
         value: {
           title: plan.plan.collectionName || 'Imnota prompt',
-          markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
-          images: bundles.flatMap((bundle) =>
-            bundle.imageDataUrl
-              ? [
-                  {
-                    filename: `prompt-${String(bundle.bundleNumber).padStart(3, '0')}.png`,
-                    dataBase64: bundle.imageDataUrl.replace(/^data:image\/png;base64,/, ''),
-                  },
-                ]
-              : [],
-          ),
+          sessionId: artifact.sessionId,
+          bundleNumbers: [...artifact.grants.keys()].sort((left, right) => left - right),
+          imageCount: [...artifact.grants.values()].filter((grant) => Boolean(grant.pngFilename)).length,
         },
       };
     } catch (error) {

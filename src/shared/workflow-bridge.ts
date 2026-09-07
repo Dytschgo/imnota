@@ -81,9 +81,8 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
 export interface HostedShareUpload {
   requestId: string;
   pairingToken: string;
-  title: string;
-  markdown: string;
-  images: readonly { filename: string; dataBase64: string }[];
+  sessionId: string;
+  bundleNumbers: readonly number[];
   includeArchive: boolean;
   expiresInDays: number;
 }
