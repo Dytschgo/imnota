@@ -11,6 +11,9 @@ function requestId() {
 function formatExpiry(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
 }
+function isExpired(record: HostedShareRecord) {
+  return Date.parse(record.expiresAt) <= Date.now();
+}
 
 export function HostedShareDialog({
   artifacts,
@@ -34,8 +37,22 @@ export function HostedShareDialog({
   const [record, setRecord] = useState<HostedShareRecord>();
   const [request, setRequest] = useState<string>();
   const [history, setHistory] = useState<readonly HostedShareRecord[]>([]);
+  const [recoveryErrors, setRecoveryErrors] = useState<readonly string[]>([]);
+  const [revokeTarget, setRevokeTarget] = useState<HostedShareRecord>();
   useEffect(() => {
-    void window.imnota.listHostedShares().then((result) => result.ok && setHistory(result.value));
+    let mounted = true;
+    void window.imnota.listHostedShares().then((result) => {
+      if (!mounted) return;
+      if (result.ok) {
+        setHistory(result.value.records);
+        setRecoveryErrors(result.value.recoveryErrors);
+      } else {
+        setError(result.error.message);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
   const upload = async () => {
     if (quotaProblem) {
@@ -65,9 +82,12 @@ export function HostedShareDialog({
   const cancel = async () => {
     if (request) await window.imnota.cancelHostedShare({ requestId: request });
   };
-  const revoke = async (id = record?.id) => {
-    if (!id) return;
+  const revoke = async () => {
+    if (!revokeTarget) return;
+    const id = revokeTarget.id;
+    setRevokeTarget(undefined);
     setBusy(true);
+    setError(undefined);
     const result = await window.imnota.revokeHostedShare({ id });
     setBusy(false);
     if (!result.ok) {
@@ -77,6 +97,8 @@ export function HostedShareDialog({
     if (record?.id === result.value.id) setRecord(result.value);
     setHistory((items) => items.map((item) => (item.id === result.value.id ? result.value : item)));
   };
+  const recordExpired = record ? isExpired(record) : false;
+  const recordUnavailable = Boolean(record?.revokedAt) || recordExpired;
   return (
     <Modal
       title="Publish a hosted prompt"
@@ -95,6 +117,7 @@ export function HostedShareDialog({
                   Imnota will upload only the listed generated Markdown and rendered PNG artifacts. Review
                   their contents before publishing the link.
                 </p>
+                <p>The hosting provider may record visits and share URLs in access logs.</p>
               </div>
             </div>
             <div className="hosted-share-manifest">
@@ -174,12 +197,6 @@ export function HostedShareDialog({
               onChange={(event) => setToken(event.target.value)}
               placeholder="Paste code from app.imnota.xyz/new"
             />
-            {error && (
-              <p className="hosted-share-error" role="alert">
-                <AlertTriangle size={15} />
-                {error}
-              </p>
-            )}
             {busy && (
               <p className="hosted-share-progress" role="status">
                 Uploading approved artifacts securely…
@@ -205,56 +222,121 @@ export function HostedShareDialog({
             </footer>
           </>
         ) : (
-          <div className="hosted-share-success">
-            <Check size={22} aria-hidden="true" />
-            <h3>Hosted prompt is ready</h3>
+          <div className={`hosted-share-success${recordUnavailable ? ' is-unavailable' : ''}`}>
+            {recordUnavailable ? (
+              <AlertTriangle size={22} aria-hidden="true" />
+            ) : (
+              <Check size={22} aria-hidden="true" />
+            )}
+            <h3>
+              {record.revokedAt
+                ? 'Hosted prompt was revoked'
+                : recordExpired
+                  ? 'Hosted prompt has expired'
+                  : 'Hosted prompt is ready'}
+            </h3>
             <p>
-              It expires {formatExpiry(record.expiresAt)}. Anyone with this link can view the approved
-              artifacts until then.
+              {record.revokedAt
+                ? 'The published link can no longer be opened.'
+                : recordExpired
+                  ? `The published link expired ${formatExpiry(record.expiresAt)} and can no longer be opened.`
+                  : `It expires ${formatExpiry(record.expiresAt)}. Anyone with this link can view the approved artifacts until then.`}
             </p>
             <TextInput label="Share link" readOnly value={record.url} />
             <div className="hosted-share-actions">
-              <Button variant="soft" onClick={() => void window.imnota.copyText(record.url)}>
-                <Copy size={14} /> Copy link
-              </Button>
-              <a className="btn btn-primary" href={record.url} target="_blank" rel="noreferrer">
-                <ExternalLink size={14} /> Open link
-              </a>
+              {!recordUnavailable && (
+                <>
+                  <Button variant="soft" onClick={() => void window.imnota.copyText(record.url)}>
+                    <Copy size={14} /> Copy link
+                  </Button>
+                  <a className="btn btn-primary" href={record.url} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} /> Open link
+                  </a>
+                </>
+              )}
               <Button
                 variant="danger"
                 busy={busy}
-                disabled={Boolean(record.revokedAt)}
-                onClick={() => void revoke()}
+                disabled={recordUnavailable}
+                onClick={() => setRevokeTarget(record)}
               >
-                <Trash2 size={14} /> {record.revokedAt ? 'Revoked' : 'Revoke link'}
+                <Trash2 size={14} />{' '}
+                {record.revokedAt ? 'Revoked' : recordExpired ? 'Expired' : 'Revoke link'}
               </Button>
+            </div>
+          </div>
+        )}
+        {error && (
+          <p className="hosted-share-error" role="alert">
+            <AlertTriangle size={15} />
+            {error}
+          </p>
+        )}
+        {recoveryErrors.length > 0 && (
+          <div className="hosted-share-recovery-errors" role="alert">
+            <AlertTriangle size={15} aria-hidden="true" />
+            <div>
+              <strong>Some previous uploads could not be recovered</strong>
+              {recoveryErrors.map((message) => (
+                <p key={message}>{message}</p>
+              ))}
             </div>
           </div>
         )}
         {history.length > 0 && (
           <details className="hosted-share-history">
             <summary>Local share history ({history.length})</summary>
-            {history.map((item) => (
-              <div key={item.id} className="hosted-share-history-row">
-                <p>
-                  {item.title} · {item.revokedAt ? 'revoked' : `expires ${formatExpiry(item.expiresAt)}`}
-                </p>
-                <Button variant="ghost" onClick={() => void window.imnota.copyText(item.url)}>
-                  Copy
-                </Button>
-                <a className="btn btn-ghost" href={item.url} target="_blank" rel="noreferrer">
-                  Open
-                </a>
-                <Button
-                  variant="ghost"
-                  disabled={Boolean(item.revokedAt) || busy}
-                  onClick={() => void revoke(item.id)}
-                >
-                  Revoke
+            {history.map((item) => {
+              const expired = isExpired(item);
+              const unavailable = Boolean(item.revokedAt) || expired;
+              return (
+                <div key={item.id} className="hosted-share-history-row">
+                  <p>
+                    {item.title} ·{' '}
+                    {item.revokedAt
+                      ? 'revoked'
+                      : expired
+                        ? 'expired'
+                        : `expires ${formatExpiry(item.expiresAt)}`}
+                  </p>
+                  {!unavailable && (
+                    <>
+                      <Button variant="ghost" onClick={() => void window.imnota.copyText(item.url)}>
+                        Copy
+                      </Button>
+                      <a className="btn btn-ghost" href={item.url} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    </>
+                  )}
+                  <Button
+                    variant="ghost"
+                    disabled={unavailable || busy}
+                    onClick={() => setRevokeTarget(item)}
+                  >
+                    {item.revokedAt ? 'Revoked' : expired ? 'Expired' : 'Revoke'}
+                  </Button>
+                </div>
+              );
+            })}
+          </details>
+        )}
+        {revokeTarget && (
+          <Modal
+            title="Revoke this hosted link?"
+            description="Anyone using this link will lose access immediately. This cannot be undone."
+            onClose={() => setRevokeTarget(undefined)}
+          >
+            <div className="modal-form">
+              <p>{revokeTarget.title}</p>
+              <div className="modal-actions">
+                <Button onClick={() => setRevokeTarget(undefined)}>Keep link</Button>
+                <Button variant="danger" onClick={() => void revoke()}>
+                  Revoke link
                 </Button>
               </div>
-            ))}
-          </details>
+            </div>
+          </Modal>
         )}
       </section>
     </Modal>

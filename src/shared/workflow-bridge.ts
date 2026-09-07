@@ -97,6 +97,12 @@ export interface HostedShareRecord {
   byteSize?: number;
 }
 
+export interface HostedShareList {
+  records: readonly HostedShareRecord[];
+  /** Recovery problems are shown alongside intact local history and can be retried later. */
+  recoveryErrors: readonly string[];
+}
+
 /** Drawing sources are carried into the reserved export directory, never rasterized as text. */
 export interface PromptExportSourceAsset {
   filename: string;
@@ -167,7 +173,7 @@ export interface WorkflowBridge {
   openHostedSharePairing(): Promise<WorkflowResult<void>>;
   createHostedShare(input: HostedShareUpload): Promise<WorkflowResult<HostedShareRecord>>;
   cancelHostedShare(input: { requestId: string }): Promise<WorkflowResult<void>>;
-  listHostedShares(): Promise<WorkflowResult<readonly HostedShareRecord[]>>;
+  listHostedShares(): Promise<WorkflowResult<HostedShareList>>;
   revokeHostedShare(input: { id: string }): Promise<WorkflowResult<HostedShareRecord>>;
 
   startProjectWatch(input: { projectPath: string }): Promise<WorkflowResult<ProjectWatchGrant>>;

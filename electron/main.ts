@@ -78,6 +78,7 @@ import {
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
+import { collectHostedShareArtifacts, hostedPngDimensionsAreSafe } from './hosted-share-artifacts.js';
 import {
   clipboardContextHtml,
   clipboardPngDimensions,
@@ -107,6 +108,7 @@ if (process.env.IMNOTA_SMOKE === '1') {
     throw new Error('Run smoke tests through scripts/smoke.mjs with an isolated profile.');
   app.setPath('userData', profile);
   app.setPath('sessionData', profile);
+  nativeTheme.themeSource = 'light';
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1131,33 +1133,24 @@ function registerIpc(): void {
             .strict(),
         ])
         .parse(args);
-      const unique = [...new Set(input.bundleNumbers)].sort((left, right) => left - right);
-      if (unique.length !== input.bundleNumbers.length)
-        throw new Error('Each finalized prompt bundle can be shared once.');
-      const bundles = await Promise.all(
-        unique.map((bundleNumber) => promptBundleWorkflow!.read(input.sessionId, bundleNumber)),
+      const artifacts = await collectHostedShareArtifacts(
+        promptBundleWorkflow!,
+        input.sessionId,
+        input.bundleNumbers,
+        (dataBase64) => {
+          const image = nativeImage.createFromBuffer(Buffer.from(dataBase64, 'base64'));
+          if (image.isEmpty()) return undefined;
+          const size = image.getSize();
+          if (!hostedPngDimensionsAreSafe(size.width, size.height))
+            return { width: size.width, height: size.height, dataBase64: '' };
+          return {
+            width: size.width,
+            height: size.height,
+            dataBase64: image.toPNG().toString('base64'),
+          };
+        },
       );
-      const images = bundles.flatMap((bundle) =>
-        bundle.imageDataUrl
-          ? [
-              {
-                filename: `prompt-${String(bundle.bundleNumber).padStart(3, '0')}.png`,
-                dataBase64: bundle.imageDataUrl.replace(/^data:image\/png;base64,/, ''),
-              },
-            ]
-          : [],
-      );
-      for (const image of images) {
-        const native = nativeImage.createFromBuffer(Buffer.from(image.dataBase64, 'base64'));
-        const size = native.getSize();
-        if (native.isEmpty() || size.width > 10_000 || size.height > 10_000)
-          throw new Error('A finalized PNG exceeds hosted-sharing dimensions.');
-      }
-      return hostedShareClient!.create(input, {
-        title: 'Imnota prompt',
-        markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
-        images,
-      });
+      return hostedShareClient!.create(input, artifacts);
     },
     true,
   );

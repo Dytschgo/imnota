@@ -79,7 +79,8 @@
   gap: 7px;
   justify-content: flex-end;
 }
-.hosted-share-error {
+.hosted-share-error,
+.hosted-share-recovery-errors {
   display: flex;
   gap: 7px;
   align-items: center;
@@ -87,6 +88,9 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
   color: var(--danger) !important;
+}
+.hosted-share-recovery-errors p {
+  color: var(--danger);
 }
 .hosted-share-progress {
   color: var(--ink-2) !important;
@@ -106,6 +110,9 @@
 }
 .hosted-share-success > svg {
   color: var(--success);
+}
+.hosted-share-success.is-unavailable > svg {
+  color: var(--danger);
 }
 .hosted-share-success h3 {
   margin: 6px 0 0;
