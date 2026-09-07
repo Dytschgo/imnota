@@ -333,7 +333,7 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
     const scale = Number(wrap.dataset.imageScale);
     const x = bounds.x + Number(wrap.dataset.imageX);
     const y = bounds.y + Number(wrap.dataset.imageY);
-    const meta = document.querySelector('.canvas-meta')?.textContent ?? '';
+    const meta = document.querySelector('.canvas-meta > span:first-child')?.textContent ?? '';
     const dimensions = meta.match(/(\\d+)\\s*[×x]\\s*(\\d+)/);
     if (!dimensions || !Number.isFinite(scale)) throw new Error('Canvas dimensions are unavailable');
     return {
@@ -381,6 +381,22 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
     x: Math.round(geometry.image.x + geometry.image.width * 0.5),
     y: Math.round(geometry.image.y + geometry.image.height * 0.5),
   };
+  if (
+    textPoint.x < geometry.stage.x ||
+    textPoint.x > geometry.stage.x + geometry.stage.width ||
+    textPoint.y < geometry.stage.y ||
+    textPoint.y > geometry.stage.y + geometry.stage.height
+  )
+    throw new Error(`Text test point escaped the visible canvas: ${JSON.stringify({ geometry, textPoint })}`);
+  await driver.evaluate(`(() => {
+    window.__imnotaPointerTrace = [];
+    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'lostpointercapture'])
+      document.addEventListener(type, (event) => {
+        window.__imnotaPointerTrace.push({ type, x: event.clientX, y: event.clientY, target: event.target?.className, detail: event.detail });
+        if (window.__imnotaPointerTrace.length > 60) window.__imnotaPointerTrace.shift();
+      }, true);
+    window.__imnotaPointerGeometry = ${JSON.stringify({ geometry, textPoint })};
+  })()`);
   await driver.doubleClick(textPoint);
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
   await driver.fill({ selector: '[aria-label="Edit annotation text"]' }, 'Trusted pointer note');

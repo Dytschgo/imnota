@@ -1620,7 +1620,7 @@ app.whenReady().then(async () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         rendererState = await mainWindow.webContents
           .executeJavaScript(
-            `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000) })`,
+            `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
           )
           .catch(() => undefined);
         if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
