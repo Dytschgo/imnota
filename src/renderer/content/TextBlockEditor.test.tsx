@@ -4,6 +4,18 @@ import { TextBlockEditor } from './TextBlockEditor';
 
 afterEach(cleanup);
 
+it('keeps relative numbered links while stripping executable link schemes', () => {
+  render(
+    <TextBlockEditor
+      value={'[Relative](diagram2.md)\n\n<a href="javascript:alert(1)">Unsafe</a>'}
+      onChange={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  expect(screen.getByText('Relative')).toHaveAttribute('href', 'diagram2.md');
+  expect(screen.getByText('Unsafe')).not.toHaveAttribute('href');
+});
+
 it('edits markdown directly and autofocuses the body field', () => {
   const onChange = vi.fn();
   render(<TextBlockEditor value="Initial note" onChange={onChange} />);
