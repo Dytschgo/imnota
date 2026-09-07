@@ -612,10 +612,18 @@ describe('feedback controls', () => {
     } as unknown as ImnotaBridge;
     render(<SettingsView />);
 
+    expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('heading', { name: 'Privacy' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace & privacy' }));
+    expect(screen.getByRole('heading', { name: 'Privacy' })).toBeVisible();
+    expect(screen.queryByRole('radio', { name: 'Dark' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ theme: 'dark' }));
 
     setSettings.mockRejectedValueOnce(new Error('unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Editing & shortcuts' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Interface scale' }), { target: { value: '1.1' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('This preference could not be saved');
   });

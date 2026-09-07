@@ -1472,6 +1472,7 @@ async function createWindow(): Promise<BrowserWindow> {
     minHeight: 680,
     backgroundColor: '#0b0d12',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

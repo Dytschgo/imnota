@@ -11,7 +11,7 @@ import {
   Settings2,
   Sparkles,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, IconButton } from '../components/ui';
 import { Logo } from '../components/Logo';
 import { useAppStore, type AppView } from '../store';
@@ -46,6 +46,16 @@ export function AppShell({
   onDropFiles,
 }: AppShellProps) {
   const store = useAppStore();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const previousNavigationOpen = useRef(store.navigationOpen);
+  useLayoutEffect(() => {
+    if (previousNavigationOpen.current !== store.navigationOpen) {
+      shellRef.current
+        ?.querySelector<HTMLButtonElement>(store.navigationOpen ? '.sidebar-toggle' : '.navigation-restore')
+        ?.focus();
+      previousNavigationOpen.current = store.navigationOpen;
+    }
+  }, [store.navigationOpen]);
   const [expandedGroups, setExpandedGroups] = useState({ recent: true, favourites: true });
   const nav: Array<{ id: LibraryView; label: string; icon: typeof Layers3 }> = [
     { id: 'projects', label: 'Projects', icon: Layers3 },
@@ -71,7 +81,8 @@ export function AppShell({
     .slice(0, 4);
   return (
     <div
-      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
+      ref={shellRef}
+      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''} ${store.navigationOpen ? '' : 'navigation-hidden'}`}
       data-testid="app-shell"
       onDragOver={(event) => {
         if (store.snapshot && onDropFiles) event.preventDefault();
@@ -85,9 +96,9 @@ export function AppShell({
       <aside
         className={`sidebar ${store.navigationOpen ? '' : 'sidebar-collapsed'}`}
         aria-label="Side navigation"
+        hidden={!store.navigationOpen}
       >
         <div className="sidebar-top">
-          <Logo compact={!store.navigationOpen} />
           <IconButton
             className="sidebar-toggle"
             label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
@@ -95,6 +106,7 @@ export function AppShell({
           >
             <PanelLeft size={16} aria-hidden="true" />
           </IconButton>
+          <Logo />
         </div>
         <div className="sidebar-links" hidden={!store.navigationOpen}>
           <nav aria-label="Primary">
@@ -192,6 +204,15 @@ export function AppShell({
       <main className="main-shell">
         <header className="topbar">
           <div className="crumbs">
+            {!store.navigationOpen && (
+              <IconButton
+                className="navigation-restore"
+                label="Show navigation"
+                onClick={() => store.set({ navigationOpen: true })}
+              >
+                <PanelLeft size={16} aria-hidden="true" />
+              </IconButton>
+            )}
             <span className="crumb-muted">
               {store.view === 'settings'
                 ? 'Settings'

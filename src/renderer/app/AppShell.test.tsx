@@ -74,5 +74,11 @@ describe('AppShell navigation', () => {
       }),
     );
     expect(onOpenCollection).toHaveBeenCalledWith('/workspace/atlas', 'atlas-recent');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide navigation' }));
+    expect(screen.getByLabelText('Side navigation')).not.toBeVisible();
+    expect(screen.getByRole('button', { name: 'Show navigation' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Show navigation' }));
+    expect(screen.getByLabelText('Side navigation')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Hide navigation' })).toHaveFocus();
   });
 });

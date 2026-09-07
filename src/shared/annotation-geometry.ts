@@ -3,6 +3,17 @@ import type { Annotation } from './types';
 export const NOTE_BADGE_GAP = 8;
 export const NOTE_BADGE_HEIGHT = 20;
 
+/** Keep the pointer's origin fixed while presenting signed drag bounds in any quadrant. */
+export function normalizeAnnotationBounds(annotation: Annotation): Annotation {
+  return {
+    ...annotation,
+    x: annotation.points ? annotation.x : annotation.x + Math.min(0, annotation.width ?? 0),
+    y: annotation.points ? annotation.y : annotation.y + Math.min(0, annotation.height ?? 0),
+    width: annotation.width === undefined ? undefined : Math.abs(annotation.width),
+    height: annotation.height === undefined ? undefined : Math.abs(annotation.height),
+  };
+}
+
 export interface TextMeasureStyle {
   fontFamily: string;
   fontSize: number;

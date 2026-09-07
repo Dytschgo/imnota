@@ -186,7 +186,9 @@ export function getDefaultShortcuts(platform: ShortcutPlatform): ResolvedShortcu
   return Object.fromEntries(
     Object.entries(DEFAULT_COMMON).map(([actionId, binding]) => [
       actionId,
-      binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null,
+      platform === 'mac' && actionId === 'edit.deleteAnnotation'
+        ? 'Backspace'
+        : (binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null),
     ]),
   ) as ResolvedShortcutBindings;
 }

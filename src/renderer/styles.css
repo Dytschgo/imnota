@@ -103,7 +103,13 @@ button:disabled {
   backdrop-filter: blur(var(--imnota-glass-blur)) saturate(var(--imnota-glass-saturation));
 }
 :root[data-background='active']:not([data-glass-level='off']) .workspace {
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  background: transparent;
+}
+/* The wallpaper already has its own opacity. Avoid blurring it into a flat colour
+   or dimming it twice behind chrome; the screenshot canvas stays opaque. */
+:root[data-background='active']:not([data-glass-level='off']) :is(.sidebar, .topbar, .shot-rail, .inspector) {
+  background: color-mix(in srgb, var(--surface) calc(var(--imnota-glass-opacity) * 0.75), transparent);
+  backdrop-filter: none;
 }
 :root[data-glass-level='off'] .app-shell::after {
   background-image: none;
@@ -137,7 +143,7 @@ button:disabled {
 }
 .app-shell::after {
   position: absolute;
-  z-index: -1;
+  z-index: 0;
   inset: 0;
   content: '';
   pointer-events: none;
@@ -151,34 +157,48 @@ button:disabled {
   z-index: 1;
 }
 .platform-mac {
-  padding-top: 38px;
+  --window-controls-inset: 80px;
 }
 .platform-mac::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 38px;
-  background: var(--surface);
-  -webkit-app-region: drag;
-  pointer-events: none;
+  content: none;
 }
 .sidebar {
   width: 224px;
   flex: 0 0 224px;
   display: flex;
   flex-direction: column;
-  padding: 18px 12px 14px;
+  padding: 0 12px 14px;
   border-right: 1px solid var(--line);
   background: var(--surface);
 }
 .sidebar-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 6px;
-  padding: 3px 10px 12px;
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 0 0 4px;
+  margin-bottom: 12px;
+  -webkit-app-region: drag;
+}
+.sidebar-top button,
+.topbar button,
+.topbar input {
+  -webkit-app-region: no-drag;
+}
+.platform-mac .sidebar {
+  width: 264px;
+  flex-basis: 264px;
+}
+.platform-mac .sidebar-top {
+  padding-left: calc(var(--window-controls-inset) - 12px);
+}
+.sidebar[hidden] {
+  display: none;
+}
+.platform-mac.navigation-hidden .topbar {
+  padding-left: var(--window-controls-inset);
 }
 .sidebar-footer {
   display: flex;
@@ -548,8 +568,9 @@ button.icon-button.new-collection-button svg {
   flex-direction: column;
 }
 .topbar {
-  height: 62px;
-  flex: 0 0 62px;
+  height: 48px;
+  flex: 0 0 48px;
+  -webkit-app-region: drag;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -892,6 +913,29 @@ button.icon-button.new-collection-button svg {
   gap: 22px;
   align-items: flex-end;
   margin-bottom: 28px;
+}
+.settings-navigation {
+  position: sticky;
+  top: -1px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 0;
+  margin-bottom: 16px;
+  background: var(--bg);
+}
+.settings-navigation button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--ink-2);
+}
+.settings-navigation button:hover,
+.settings-navigation button[aria-current='page'] {
+  background: var(--imnota-accent-soft);
+  color: var(--ink);
 }
 .library-heading h1,
 .settings-heading h1 {
