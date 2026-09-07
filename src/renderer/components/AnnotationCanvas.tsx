@@ -41,9 +41,9 @@ import {
   type CanvasTheme,
 } from '../canvas/annotation-layout';
 import {
-  captureStagePointer,
+  captureContentPointer,
   finalizeAnnotationDrag,
-  releaseStagePointer,
+  releaseContentPointer,
   type ActiveAnnotationDrag,
 } from '../canvas/pointer-interaction';
 import { pixelatedRegion } from '../pixelate';
@@ -411,10 +411,12 @@ export function AnnotationCanvas({
   }
 
   function capturePointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    const stage = event.target.getStage();
-    if (!stage) return;
+    const content = event.target.getStage()?.content;
+    if (!content) return;
     try {
-      capturedPointer.current = captureStagePointer(stage, event.evt.pointerId) ? event.evt.pointerId : null;
+      capturedPointer.current = captureContentPointer(content, event.evt.pointerId)
+        ? event.evt.pointerId
+        : null;
     } catch {
       capturedPointer.current = null;
     }
@@ -424,10 +426,10 @@ export function AnnotationCanvas({
     const pointerId = capturedPointer.current;
     if (pointerId === null) return;
     capturedPointer.current = null;
-    const stage = stageRef.current;
-    if (!stage) return;
+    const content = stageRef.current?.content;
+    if (!content) return;
     try {
-      releaseStagePointer(stage, pointerId);
+      releaseContentPointer(content, pointerId);
     } catch {
       // Capture may already have been released by the browser after cancellation.
     }

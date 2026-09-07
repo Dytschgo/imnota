@@ -1,9 +1,9 @@
 import type { AnnotationKind } from '../../shared/types';
 
-export interface PointerCaptureStage {
+export interface PointerCaptureContent {
   setPointerCapture(pointerId: number): void;
   hasPointerCapture(pointerId: number): boolean;
-  releaseCapture(pointerId: number): void;
+  releasePointerCapture(pointerId: number): void;
 }
 
 export interface DraggableAnnotationNode {
@@ -29,14 +29,14 @@ export interface DragPosition {
   y: number;
 }
 
-/** Uses Konva's capture map and stage.content instead of the non-listening outer container. */
-export function captureStagePointer(stage: PointerCaptureStage, pointerId: number): boolean {
-  stage.setPointerCapture(pointerId);
-  return stage.hasPointerCapture(pointerId);
+/** Capture on stage.content without changing Konva's shape hit/click capture map. */
+export function captureContentPointer(content: PointerCaptureContent, pointerId: number): boolean {
+  content.setPointerCapture(pointerId);
+  return content.hasPointerCapture(pointerId);
 }
 
-export function releaseStagePointer(stage: PointerCaptureStage, pointerId: number): void {
-  if (stage.hasPointerCapture(pointerId)) stage.releaseCapture(pointerId);
+export function releaseContentPointer(content: PointerCaptureContent, pointerId: number): void {
+  if (content.hasPointerCapture(pointerId)) content.releasePointerCapture(pointerId);
 }
 
 /** Idempotently stops Konva drag state and persists the final source-world position once. */
