@@ -305,6 +305,13 @@ export class NativeUiDriver {
 
   async capture(directory: string, filename: string): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
+    // DOM assertions can resolve before Chromium paints the new screen. Wait for
+    // fonts/images and a complete paint turn so goldens never capture stale frames.
+    await this.evaluate(`(async () => {
+      await document.fonts.ready;
+      await Promise.all([...document.images].map(image => image.decode().catch(() => undefined)));
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()`);
     const image = await this.window.webContents.capturePage();
     if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
     await fs.writeFile(target, image.toPNG(), { flag: 'wx' });
