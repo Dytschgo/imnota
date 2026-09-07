@@ -83,6 +83,10 @@ export function Workspace(props: WorkspaceProps) {
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
   const closeInspector = useCallback(() => useAppStore.getState().set({ rightPanelOpen: false }), []);
+  const dismissInspector = useCallback(() => {
+    closeInspector();
+    inspectorTriggerRef.current?.focus();
+  }, [closeInspector]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 950px)');
@@ -93,19 +97,35 @@ export function Workspace(props: WorkspaceProps) {
 
   useEffect(() => {
     if (!store.rightPanelOpen || !narrowViewport) return;
-    const trigger = inspectorTriggerRef.current;
     const drawer = inspectorDrawerRef.current;
     const focusTarget = drawer?.querySelector<HTMLElement>('[data-drawer-autofocus]') ?? drawer;
     focusTarget?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      closeInspector();
-      trigger?.focus();
+      if (event.defaultPrevented || !drawer?.contains(event.target as Node)) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismissInspector();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(
+        drawer.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+        ),
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [closeInspector, narrowViewport, store.rightPanelOpen]);
+  }, [dismissInspector, narrowViewport, store.rightPanelOpen]);
   return (
     <section
       className="workspace"
@@ -230,15 +250,22 @@ export function Workspace(props: WorkspaceProps) {
         <div
           className="inspector-drawer-layer"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeInspector();
+            if (event.target === event.currentTarget) dismissInspector();
           }}
         >
-          <div ref={inspectorDrawerRef} className="inspector-drawer" tabIndex={-1}>
+          <div
+            ref={inspectorDrawerRef}
+            className="inspector-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Inspector"
+            tabIndex={-1}
+          >
             <IconButton
               data-drawer-autofocus
               className="inspector-drawer-close"
               label="Close inspector"
-              onClick={closeInspector}
+              onClick={dismissInspector}
             >
               ×
             </IconButton>

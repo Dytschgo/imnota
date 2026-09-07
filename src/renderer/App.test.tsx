@@ -244,6 +244,7 @@ describe('feedback controls', () => {
     fireEvent.change(editor, { target: { value: 'Local edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
     expect(await screen.findByRole('dialog', { name: 'Delete this item?' })).toBeInTheDocument();
+    act(() => useAppStore.getState().set({ activeScreenshotId: text.id }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
     await waitFor(() =>
       expect(deleteContentItem).toHaveBeenCalledWith({
@@ -263,6 +264,7 @@ describe('feedback controls', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
     expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(deleteScreenshot).not.toHaveBeenCalled();
 
@@ -294,6 +296,62 @@ describe('feedback controls', () => {
     }));
   });
 
+  it('deletes the screenshot captured before confirmation when the selection changes', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: {
+          ...state.snapshot!,
+          project: {
+            ...state.snapshot!.project,
+            screenshots: [
+              ...state.snapshot!.project.screenshots,
+              { ...state.snapshot!.project.screenshots[0], id: 'second-shot', title: 'Second screen' },
+            ],
+          },
+        },
+      })),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    act(() => useAppStore.getState().set({ activeScreenshotId: 'second-shot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('aborts a confirmed deletion when the project changed while the modal was open', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: { ...state.snapshot!, projectPath: '/workspace/other-project' },
+      })),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument(),
+    );
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+  });
+
   it('opens the inspector as a focusable narrow-window drawer and dismisses it with Escape', async () => {
     await renderEditingProject({}, true);
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
@@ -301,9 +359,15 @@ describe('feedback controls', () => {
     const trigger = screen.getByRole('button', { name: 'Expand inspector' });
     fireEvent.click(trigger);
     const dismiss = await screen.findByRole('button', { name: 'Close inspector' });
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
     expect(dismiss).toHaveFocus();
 
-    fireEvent.keyDown(document, { key: 'Escape' });
+    const preventedEscape = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' });
+    preventedEscape.preventDefault();
+    dismiss.dispatchEvent(preventedEscape);
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
+
+    fireEvent.keyDown(dismiss, { key: 'Escape' });
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
     );

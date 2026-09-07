@@ -52,7 +52,12 @@ interface SnapshotExtras {
   recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
-type PendingDeletion = 'content' | 'screenshot' | null;
+type PendingDeletion = {
+  kind: 'content' | 'screenshot';
+  projectPath: string;
+  itemId: string;
+  title: string;
+};
 
 export default function App() {
   const store = useAppStore();
@@ -64,7 +69,7 @@ export default function App() {
   const [dialog, setDialog] = useState<AppDialog>(null);
   const [newProject, setNewProject] = useState<NewProjectDraft>({ name: '', description: '' });
   const [dialogBusy, setDialogBusy] = useState(false);
-  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>(null);
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -498,19 +503,14 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The item could not be created.');
     }
   }
-  async function mutateContent(action: 'duplicate' | 'delete', confirmed = false) {
-    if (action === 'delete' && !confirmed && store.settings.confirmBeforeDeletion) {
-      setPendingDeletion('content');
-      return;
-    }
+  async function mutateContent(action: 'duplicate' | 'delete', pending?: PendingDeletion) {
     const token = await beginCurrentProjectMutation();
     if (token === null) return;
     try {
       const current = useAppStore.getState();
-      const item = current.snapshot?.project.contentItems?.find(
-        (entry) => entry.id === current.activeScreenshotId,
-      );
-      if (!current.snapshot || !item) {
+      const itemId = pending?.itemId ?? current.activeScreenshotId;
+      const item = current.snapshot?.project.contentItems?.find((entry) => entry.id === itemId);
+      if (!current.snapshot || !item || (pending && current.snapshot.projectPath !== pending.projectPath)) {
         await persistence.cancelNativeMutation(token);
         return;
       }
@@ -541,6 +541,25 @@ export default function App() {
           : `The item could not be ${action === 'delete' ? 'deleted' : 'duplicated'}.`,
       );
     }
+  }
+  async function requestContentDeletion() {
+    if (!(await flushAll())) return;
+    const current = useAppStore.getState();
+    const item = current.snapshot?.project.contentItems?.find(
+      (entry) => entry.id === current.activeScreenshotId,
+    );
+    if (!current.snapshot || !item) return;
+    const pending = {
+      kind: 'content' as const,
+      projectPath: current.snapshot.projectPath,
+      itemId: item.id,
+      title: item.kind === 'drawing' ? item.title : 'Text block',
+    };
+    if (store.settings.confirmBeforeDeletion) {
+      setPendingDeletion(pending);
+      return;
+    }
+    await mutateContent('delete', pending);
   }
   async function undoContent(projectPath: string, undoToken: string, itemId: string) {
     const token = await beginCurrentProjectMutation();
@@ -604,17 +623,27 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be duplicated.');
     }
   }
-  async function deleteScreenshot() {
-    if (store.settings.confirmBeforeDeletion) {
-      setPendingDeletion('screenshot');
-      return;
-    }
-    await deleteScreenshotNow();
-  }
-  async function deleteScreenshotNow() {
+  async function requestScreenshotDeletion() {
+    if (!(await flushAll())) return;
     const current = useAppStore.getState();
     const shot = current.activeScreenshot();
     if (!current.snapshot || !shot) return;
+    const pending = {
+      kind: 'screenshot' as const,
+      projectPath: current.snapshot.projectPath,
+      itemId: shot.id,
+      title: shot.title,
+    };
+    if (store.settings.confirmBeforeDeletion) {
+      setPendingDeletion(pending);
+      return;
+    }
+    await deleteScreenshotNow(pending);
+  }
+  async function deleteScreenshotNow(pending: PendingDeletion) {
+    const current = useAppStore.getState();
+    const shot = current.snapshot?.project.screenshots.find((entry) => entry.id === pending.itemId);
+    if (!current.snapshot || current.snapshot.projectPath !== pending.projectPath || !shot) return;
     const nativeMutationToken = await beginCurrentProjectMutation();
     if (nativeMutationToken === null) return;
     try {
@@ -998,7 +1027,7 @@ export default function App() {
             onContentRetry={contentPersistence.retry}
             onAddContent={addContent}
             onDuplicateContent={() => mutateContent('duplicate')}
-            onDeleteContent={() => mutateContent('delete')}
+            onDeleteContent={requestContentDeletion}
             onDrawingTitle={(title) => {
               const current = useAppStore.getState().snapshot?.project;
               if (!current) return;
@@ -1079,7 +1108,7 @@ export default function App() {
             onDescriptionChange={changeDescription}
             onUndoDescription={undoDescription}
             onDuplicate={duplicateScreenshot}
-            onDeleteScreenshot={deleteScreenshot}
+            onDeleteScreenshot={requestScreenshotDeletion}
             onDeleteProject={() => setDialog('delete-project')}
           />
         )}
@@ -1123,26 +1152,26 @@ export default function App() {
       />
       {pendingDeletion && (
         <Modal
-          title={pendingDeletion === 'content' ? 'Delete this item?' : 'Delete this screenshot?'}
+          title={pendingDeletion.kind === 'content' ? 'Delete this item?' : 'Delete this screenshot?'}
           description={
-            pendingDeletion === 'content'
+            pendingDeletion.kind === 'content'
               ? 'This moves the item to the project trash. You can undo it immediately after deletion.'
               : 'This moves the screenshot to the project trash. You can undo it immediately after deletion.'
           }
           onClose={() => setPendingDeletion(null)}
         >
           <div className="modal-actions">
-            <Button variant="ghost" onClick={() => setPendingDeletion(null)}>
+            <Button data-autofocus variant="ghost" onClick={() => setPendingDeletion(null)}>
               Keep it
             </Button>
             <Button
-              data-autofocus
               variant="danger"
               onClick={() => {
                 const target = pendingDeletion;
                 setPendingDeletion(null);
-                if (target === 'content') void mutateContent('delete', true);
-                else void deleteScreenshotNow();
+                if (!target) return;
+                if (target.kind === 'content') void mutateContent('delete', target);
+                else void deleteScreenshotNow(target);
               }}
             >
               Move to trash

@@ -2292,11 +2292,12 @@ kbd {
     flex-basis: 60px;
     padding: 18px 8px 14px;
   }
-  .sidebar .logo span,
+  .sidebar .logo,
   .nav-label,
-  .nav-item:not(.active) span,
   .nav-item kbd,
-  .privacy-note {
+  .privacy-note,
+  .nav-submenu,
+  .nav-submenu-chevron {
     display: none;
   }
   .sidebar-top {
@@ -2305,6 +2306,9 @@ kbd {
   .nav-item {
     justify-content: center;
     padding: 0;
+  }
+  .nav-item span {
+    font-size: 0;
   }
   .nav-item.active {
     box-shadow: inset 0 -2px 0 var(--imnota-accent);
