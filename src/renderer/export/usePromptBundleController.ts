@@ -5,6 +5,8 @@ import {
   type PromptBundleControllerBridge,
   type PromptBundleControllerRendering,
   type PromptBundleSelection,
+  type HostedShareArtifacts,
+  type PromptBundleControllerError,
   type SavedPromptExportContext,
 } from './prompt-export-controller-core';
 
@@ -38,6 +40,9 @@ export interface PromptBundleController {
   cancel(): Promise<PromptBundleControllerActionResult>;
   retryCleanup(): Promise<PromptBundleControllerActionResult>;
   loadPreview(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
+  prepareHostedShare(): Promise<
+    { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
+  >;
 }
 
 function browserBridge(): PromptBundleControllerBridge {
@@ -85,6 +90,7 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
       cancel: () => engine.cancel(),
       retryCleanup: () => engine.retryCleanup(),
       loadPreview: (selection: PromptBundleSelection) => engine.loadPreview(selection),
+      prepareHostedShare: () => engine.prepareHostedShare(),
     }),
     [engine, state],
   );

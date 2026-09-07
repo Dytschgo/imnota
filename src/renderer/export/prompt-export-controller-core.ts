@@ -153,6 +153,13 @@ export interface PromptBundleControllerError {
 export type PromptBundleControllerActionResult =
   { ok: true; sessionId?: string; bundleNumber?: number } | { ok: false; error: PromptBundleControllerError };
 
+export interface HostedShareArtifacts {
+  title: string;
+  sessionId: string;
+  bundleNumbers: readonly number[];
+  imageBundleNumbers: readonly number[];
+}
+
 export interface PromptBundleLargePreview {
   bundleNumber: number;
   dataUrl: string;
@@ -1083,6 +1090,35 @@ export class PromptBundleControllerEngine {
 
   async prepareFreshFiles(selection?: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
     return this.fresh(selectionNumber(selection), false);
+  }
+
+  /** Creates a new local finalized export, then reads only Markdown and rendered PNG bytes for opt-in sharing. */
+  async prepareHostedShare(): Promise<
+    { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
+  > {
+    const prepared = await this.fresh(undefined, false);
+    if (!prepared.ok || !prepared.sessionId)
+      return prepared as { ok: false; error: PromptBundleControllerError };
+    try {
+      const artifact = this.latestArtifact;
+      const plan = this.latestPlan;
+      if (!artifact || !plan)
+        throw failure('native-failure', 'The finalized local export is unavailable. Prepare it again.', true);
+      return {
+        ok: true,
+        value: {
+          title: plan.plan.collectionName || 'Imnota prompt',
+          sessionId: artifact.sessionId,
+          bundleNumbers: [...artifact.grants.keys()].sort((left, right) => left - right),
+          imageBundleNumbers: [...artifact.grants.entries()]
+            .filter(([, grant]) => Boolean(grant.pngFilename))
+            .map(([bundleNumber]) => bundleNumber)
+            .sort((left, right) => left - right),
+        },
+      };
+    } catch (error) {
+      return this.resultError(error) as { ok: false; error: PromptBundleControllerError };
+    }
   }
 
   private async fresh(

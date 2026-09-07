@@ -1,4 +1,4 @@
-import { AlertTriangle, FolderOpen, Square } from 'lucide-react';
+import { AlertTriangle, CloudUpload, FolderOpen, Square } from 'lucide-react';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
 import { Button, Modal } from '../components/ui';
 import {
@@ -24,6 +24,7 @@ export interface PromptSharingDialogProps {
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
   onRetryCleanup?(): void | Promise<void>;
+  onShareHosted?(): void | Promise<void>;
 }
 
 function progressLabel(progress: PromptBundleProgress): string {
@@ -59,6 +60,7 @@ export function PromptSharingDialog({
   onOpenExportFolder,
   onCancel,
   onRetryCleanup,
+  onShareHosted,
 }: PromptSharingDialogProps) {
   const busy = progress ? ['planning', 'rendering', 'writing', 'copying'].includes(progress.phase) : false;
   const current = progress?.bundleNumber ?? 0;
@@ -135,6 +137,11 @@ export function PromptSharingDialog({
             {onOpenExportFolder && (
               <Button variant="ghost" disabled={busy} onClick={() => void onOpenExportFolder()}>
                 <FolderOpen size={14} aria-hidden="true" /> Open export folder
+              </Button>
+            )}
+            {onShareHosted && (
+              <Button variant="soft" disabled={busy || !bundles.length} onClick={() => void onShareHosted()}>
+                <CloudUpload size={14} aria-hidden="true" /> Share online
               </Button>
             )}
             {busy && onCancel && (

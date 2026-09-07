@@ -25,6 +25,7 @@ afterEach(() => {
     activeScreenshotId: null,
     view: 'projects',
     search: '',
+    rightPanelOpen: true,
   });
 });
 
@@ -61,7 +62,8 @@ const snapshot: ProjectSnapshot = {
 };
 
 describe('feedback controls', () => {
-  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
+  let changeViewport: (narrow: boolean) => void;
+  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}, narrowViewport = false) {
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
@@ -107,11 +109,32 @@ describe('feedback controls', () => {
       reloadWatchedProject: async () => ({ ok: true, value: { snapshot, projectRevision: 'project-2' } }),
       ...overrides,
     } as unknown as ImnotaBridge;
-    window.matchMedia = vi.fn(() => ({ matches: false })) as unknown as typeof window.matchMedia;
+    const viewportListeners = new Set<() => void>();
+    const viewport = {
+      matches: narrowViewport,
+      addEventListener: (_event: string, callback: () => void) => viewportListeners.add(callback),
+      removeEventListener: (_event: string, callback: () => void) => viewportListeners.delete(callback),
+    };
+    changeViewport = (narrow) => {
+      viewport.matches = narrow;
+      viewportListeners.forEach((callback) => callback());
+    };
+    window.matchMedia = vi.fn((query) =>
+      query === '(max-width: 950px)'
+        ? viewport
+        : {
+            matches: false,
+            addEventListener() {},
+            removeEventListener() {},
+          },
+    ) as unknown as typeof window.matchMedia;
     return render(<App />);
   }
 
-  async function renderEditingProject(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
+  async function renderEditingProject(
+    overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
+    narrowViewport = false,
+  ) {
     const editingSnapshot: ProjectSnapshot = {
       ...snapshot,
       project: {
@@ -149,16 +172,19 @@ describe('feedback controls', () => {
       contentRevision: 'b'.repeat(64),
       projectRevision: 'project-content-2',
     }));
-    renderApp({
-      saveScreenshotContent: save,
-      loadScreenshotContent: async () => ({
-        image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
-        annotations: [],
-        description: 'Original note',
-        contentRevision: 'a'.repeat(64),
-      }),
-      ...overrides,
-    });
+    renderApp(
+      {
+        saveScreenshotContent: save,
+        loadScreenshotContent: async () => ({
+          image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+          annotations: [],
+          description: 'Original note',
+          contentRevision: 'a'.repeat(64),
+        }),
+        ...overrides,
+      },
+      narrowViewport,
+    );
     await screen.findByRole('textbox', { name: 'Search projects' });
     act(() => useAppStore.getState().setProject(editingSnapshot));
     const note = await screen.findByRole('textbox', { name: 'Description' });
@@ -236,6 +262,9 @@ describe('feedback controls', () => {
     const editor = await screen.findByRole('textbox', { name: 'Markdown' });
     fireEvent.change(editor, { target: { value: 'Local edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete this item?' })).toBeInTheDocument();
+    act(() => useAppStore.getState().set({ activeScreenshotId: text.id }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
     await waitFor(() =>
       expect(deleteContentItem).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -243,6 +272,147 @@ describe('feedback controls', () => {
       }),
     );
     expect(persisted.project.contentItems?.map((item) => item.id)).toEqual([text.id]);
+  });
+
+  it('cancels and confirms screenshot deletion when confirmation is enabled', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('deletes immediately when confirmation is disabled', async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    await waitFor(() => expect(deleteScreenshot).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
+  it('deletes the screenshot captured before confirmation when the selection changes', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: {
+          ...state.snapshot!,
+          project: {
+            ...state.snapshot!.project,
+            screenshots: [
+              ...state.snapshot!.project.screenshots,
+              { ...state.snapshot!.project.screenshots[0], id: 'second-shot', title: 'Second screen' },
+            ],
+          },
+        },
+      })),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    act(() => useAppStore.getState().set({ activeScreenshotId: 'second-shot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('aborts a confirmed deletion when the project changed while the modal was open', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: { ...state.snapshot!, projectPath: '/workspace/other-project' },
+      })),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument(),
+    );
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+  });
+
+  it('opens the inspector as a focusable narrow-window drawer and dismisses it with Escape', async () => {
+    await renderEditingProject({}, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+
+    const trigger = screen.getByRole('button', { name: 'Expand inspector' });
+    fireEvent.click(trigger);
+    const dismiss = await screen.findByRole('button', { name: 'Close inspector' });
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
+    expect(dismiss).toHaveFocus();
+
+    const preventedEscape = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' });
+    preventedEscape.preventDefault();
+    dismiss.dispatchEvent(preventedEscape);
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
+
+    fireEvent.keyDown(dismiss, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
+  });
+
+  it('keeps the desktop inspector modeless', async () => {
+    await renderEditingProject();
+    expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBeInTheDocument();
+  });
+
+  it('restores focus when an already-open inspector enters and leaves drawer mode', async () => {
+    await renderEditingProject();
+    const trigger = screen.getByTestId('inspector-toggle');
+    trigger.focus();
+    act(() => changeViewport(true));
+    expect(screen.getByRole('dialog', { name: 'Inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus();
+    act(() => changeViewport(false));
+    expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    act(() => changeViewport(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    expect(trigger).toHaveFocus();
   });
 
   it('keeps the project and notes open when saving before search fails', async () => {

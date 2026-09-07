@@ -57,10 +57,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix share-service
+      - run: npm test --prefix share-service
+      - run: npm audit --prefix share-service --omit=dev --audit-level=high
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:share-contract
       - run: node --test scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs
       - run: pnpm build
       - run: bash -n scripts/install.sh
@@ -113,6 +117,18 @@ jobs:
         run: node scripts/verify-packaged.mjs windows
         env:
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-nightly-windows
+      - name: Compare approved Windows visuals
+        if: matrix.platform == 'windows'
+        run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-nightly-windows" "${{ runner.temp }}/imnota-visual-differences"
+      - name: Retain Windows visual evidence
+        if: always() && matrix.platform == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-visual-evidence-nightly
+          path: |
+            ${{ runner.temp }}/imnota-verification-artifacts-nightly-windows/
+            ${{ runner.temp }}/imnota-visual-differences/
       - name: Smoke packaged Linux nightly
         if: matrix.platform == 'linux'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux

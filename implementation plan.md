@@ -1093,3 +1093,170 @@ Extend the existing workflow coverage to:
 - AI-generated diagrams or automatic diagram interpretation.
 - PDF/SVG export.
 - Mobile or web-specific drawing layouts.
+
+## Feature plan — hosted static sharing
+
+### Product goal
+
+Allow a user to share a finished prompt bundle through a read-only HTTPS link. The shared result is an opt-in cloud copy of the generated Markdown and visual assets; the normal Imnota project remains local-first and is never uploaded automatically.
+
+The first deployment target is a Node.js application hosted at `app.imnota.xyz` on Hostinger. The existing `app.imnota.xyz` subdomain points to `/home/u644068606/domains/imnota.xyz/public_html/app` and is ready for application deployment.
+
+### First-version scope
+
+The first version shares only finalized export artifacts:
+
+- generated Markdown;
+- included prompt PNG files;
+- an optional ZIP containing those artifacts.
+
+It does not share the original project folder, source screenshots not included in the prompt, annotation JSON, recovery files, editable drawing JSON or local settings. Editable drawing sources may be added later only as an explicit sharing choice.
+
+The recipient does not need an account. A share page provides a Markdown reading view, PNG previews/downloads and a ZIP download when available.
+
+### Access model
+
+Shares use unguessable random bearer tokens:
+
+```text
+https://app.imnota.xyz/s/<random-token>
+```
+
+Anyone with the complete URL can view the share. This is link privacy, not authentication. The service must:
+
+- generate at least 128 bits of cryptographically secure token entropy;
+- store a hash of the token rather than the raw token where practical;
+- never use sequential or project-derived public IDs;
+- support expiration, with a 30-day default for the first version;
+- support immediate revocation;
+- send `X-Robots-Tag: noindex, nofollow` and omit shares from sitemaps;
+- avoid exposing local paths, workspace names or private project metadata;
+- rate-limit public reads and all upload/session endpoints.
+
+The share page must clearly identify that the content was intentionally published and show its expiration state.
+
+### Upload authorization
+
+The desktop application must not contain a permanent Hostinger API key or server secret. A distributed desktop secret could be extracted and abused for anonymous uploads.
+
+The recommended first flow is browser pairing:
+
+1. The user selects **Share prompt** in Imnota.
+2. Imnota opens `app.imnota.xyz/new` in the default browser.
+3. The service creates a short-lived, one-time pairing session.
+4. The browser returns a one-time upload code or pairing token to Imnota.
+5. Imnota generates the normal finalized export and uploads it over HTTPS.
+6. The service returns the public share URL and expiration date.
+7. Imnota displays Copy link, Open link, expiration and Revoke actions.
+
+The pairing token must be single-use, short-lived and scoped to one upload. A future account-based flow may replace pairing, but accounts are not required for the first version.
+
+### Service architecture
+
+Use a small Node.js/Express service deployed to Hostinger:
+
+- `POST /api/pairing` creates a short-lived browser/device pairing session;
+- `POST /api/shares` accepts one authorized finalized bundle;
+- `GET /s/:token` renders the public share page;
+- `GET /s/:token/markdown` downloads the Markdown file;
+- `GET /s/:token/assets/:filename` downloads an included PNG;
+- `GET /s/:token/archive.zip` downloads the optional ZIP;
+- `POST /api/shares/:id/revoke` revokes a share through the paired client;
+- `GET /api/shares` lists shares known to the paired local client where local share metadata exists.
+
+For the initial low-volume service, metadata can use SQLite and files can use a dedicated uploads directory outside the public document root. The server should stream files through controlled routes rather than exposing the upload directory directly. If Hostinger storage or process persistence is unsuitable, move binary artifacts to S3-compatible object storage while retaining the same API contract.
+
+### Share record
+
+```ts
+interface ShareRecord {
+  id: string;
+  tokenHash: string;
+  title: string;
+  markdownPath: string;
+  imagePaths: string[];
+  archivePath?: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  byteSize: number;
+}
+```
+
+The desktop project stores only local share metadata and the public URL. It must not treat a remote share as the project source of truth.
+
+### Client workflow and failure states
+
+The desktop sharing dialog must cover:
+
+- privacy confirmation before upload;
+- preparation of a fresh export from the latest saved state;
+- upload progress and cancellation;
+- pairing expired or already used;
+- network failure and retry;
+- file-size or server quota rejection;
+- successful link copy/open;
+- expiration and revoke status;
+- offline use of the existing local export actions.
+
+The UI must state which files will be uploaded and must never silently fall back from local copy to cloud sharing.
+
+### Storage and retention
+
+The service must enforce:
+
+- maximum Markdown size;
+- maximum image dimensions and total bundle size;
+- maximum files per share;
+- expiration cleanup;
+- revoked-share cleanup;
+- storage-usage monitoring;
+- backups for metadata and a documented recovery procedure.
+
+Expired and revoked files should be deleted by a scheduled cleanup job after a short recovery grace period. Cleanup must not remove active shares.
+
+### Security and privacy checks
+
+Before release, test:
+
+- token unpredictability and no ID enumeration;
+- access after expiration and revocation;
+- upload authorization, replay and pairing-token reuse;
+- path traversal and unsafe filenames;
+- SVG/HTML/script injection through Markdown titles and text;
+- oversized uploads and decompression bombs;
+- content-type and download-header correctness;
+- rate limits and abuse responses;
+- absence of local project paths and hidden metadata in the public page;
+- HTTPS, secure cookies if introduced, CSP, frame restrictions and security headers.
+
+Markdown preview must be sanitised. Images should be served with safe content types and download names derived from validated filenames.
+
+### Implementation order
+
+1. Define the export artifact contract and privacy confirmation copy.
+2. Create the Node.js share service and health endpoint on `app.imnota.xyz`.
+3. Add pairing sessions with single-use expiry.
+4. Add SQLite metadata and private artifact storage.
+5. Add share creation, token lookup, public rendering, download and cleanup routes.
+6. Add the desktop sharing dialog and upload client.
+7. Add revoke/expiry handling and local share metadata.
+8. Run security, quota, expiry and cross-platform upload tests.
+9. Perform a manual end-to-end test from Windows, macOS and Linux builds.
+10. Publish only after verifying that local-only workflows remain unchanged when the service is unavailable.
+
+### Acceptance criteria
+
+A user can select a collection, see exactly which finalized Markdown and PNG files will leave the device, approve the upload, receive a working HTTPS link, open that link in a private browser, download the artifacts, revoke the link and confirm that access is denied afterwards. An expired share behaves the same way. Existing local copy, export and project persistence continue to work with the sharing service offline.
+
+### First-version non-goals
+
+- recipient accounts;
+- editing shared content;
+- comments or collaboration;
+- public search or share discovery;
+- project-folder synchronization;
+- sharing recovery files or local project metadata;
+- permanent links with no expiration;
+- permanent anonymous upload credentials;
+- analytics or tracking by default.

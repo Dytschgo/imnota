@@ -9,6 +9,27 @@ permissions:
   contents: read
 
 jobs:
+  share-service:
+    name: Share service security (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: share-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: share-service/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +46,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: npm ci --prefix share-service
+      - run: pnpm test:share-contract
       - run: pnpm build
       - run: bash -n scripts/install.sh
       - name: Configure Electron sandbox helper
@@ -61,6 +84,8 @@ jobs:
         run: pnpm test
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+      - run: npm ci --prefix share-service
+      - run: pnpm test:share-contract
       - name: Verify packaged Mac application
         if: matrix.os == 'macos-latest'
         env:
@@ -71,6 +96,19 @@ jobs:
       - name: Smoke packaged Windows application
         if: matrix.os == 'windows-latest'
         run: node scripts/verify-packaged.mjs windows
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-windows
+      - name: Compare approved Windows visuals
+        if: matrix.os == 'windows-latest'
+        run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
+      - name: Retain Windows visual evidence
+        if: always() && matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-visual-evidence
+          path: |
+            ${{ runner.temp }}/imnota-verification-artifacts-windows/
+            ${{ runner.temp }}/imnota-visual-differences/
       - name: Smoke packaged Linux application
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux

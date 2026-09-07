@@ -14,7 +14,10 @@ export type WorkflowErrorCode =
   | 'path-too-long'
   | 'linked-path'
   | 'io-failure'
-  | 'watch-failure';
+  | 'watch-failure'
+  | 'network-failure'
+  | 'pairing-expired'
+  | 'upload-rejected';
 
 export interface WorkflowError {
   code: WorkflowErrorCode;
@@ -72,6 +75,32 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
   markdown: string;
   /** Omitted for a text-only bundle. */
   imageDataUrl?: string;
+}
+
+/** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
+export interface HostedShareUpload {
+  requestId: string;
+  pairingToken: string;
+  sessionId: string;
+  bundleNumbers: readonly number[];
+  includeArchive: boolean;
+  expiresInDays: number;
+}
+
+export interface HostedShareRecord {
+  id: string;
+  url: string;
+  title: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  byteSize?: number;
+}
+
+export interface HostedShareList {
+  records: readonly HostedShareRecord[];
+  /** Recovery problems are shown alongside intact local history and can be retried later. */
+  recoveryErrors: readonly string[];
 }
 
 /** Drawing sources are carried into the reserved export directory, never rasterized as text. */
@@ -141,6 +170,11 @@ export interface WorkflowBridge {
     bundleNumber: number;
     target: PromptExportOpenTarget;
   }): Promise<WorkflowResult<void>>;
+  openHostedSharePairing(): Promise<WorkflowResult<void>>;
+  createHostedShare(input: HostedShareUpload): Promise<WorkflowResult<HostedShareRecord>>;
+  cancelHostedShare(input: { requestId: string }): Promise<WorkflowResult<void>>;
+  listHostedShares(): Promise<WorkflowResult<HostedShareList>>;
+  revokeHostedShare(input: { id: string }): Promise<WorkflowResult<HostedShareRecord>>;
 
   startProjectWatch(input: { projectPath: string }): Promise<WorkflowResult<ProjectWatchGrant>>;
   stopProjectWatch(input: { watchId: string }): Promise<WorkflowResult<void>>;

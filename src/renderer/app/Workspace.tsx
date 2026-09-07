@@ -1,5 +1,5 @@
 import { Copy, ImagePlus, PanelRight, Trash2, Upload } from 'lucide-react';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
 import type {
@@ -73,12 +73,76 @@ export interface WorkspaceProps {
 
 export function Workspace(props: WorkspaceProps) {
   const store = useAppStore();
+  const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const inspectorDrawerRef = useRef<HTMLDivElement>(null);
+  const inspectorReturnFocus = useRef<HTMLElement | null>(null);
+  const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
   const saveState = item ? (props.contentSaveState ?? 'saved') : props.saveState;
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
+  const closeInspector = useCallback(() => useAppStore.getState().set({ rightPanelOpen: false }), []);
+  const restoreInspectorFocus = useCallback(() => {
+    const previous = inspectorReturnFocus.current;
+    const target =
+      previous?.isConnected && !previous.hasAttribute('data-drawer-autofocus')
+        ? previous
+        : (inspectorTriggerRef.current ??
+          document.querySelector<HTMLButtonElement>('[data-testid="inspector-toggle"]'));
+    target?.focus();
+  }, []);
+  const dismissInspector = useCallback(() => {
+    closeInspector();
+    restoreInspectorFocus();
+  }, [closeInspector, restoreInspectorFocus]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 950px)');
+    const updateViewport = () => setNarrowViewport(media.matches);
+    media.addEventListener?.('change', updateViewport);
+    return () => media.removeEventListener?.('change', updateViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!store.rightPanelOpen || !narrowViewport) return;
+    const drawer = inspectorDrawerRef.current;
+    inspectorReturnFocus.current =
+      document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    const focusTarget = drawer?.querySelector<HTMLElement>('[data-drawer-autofocus]') ?? drawer;
+    focusTarget?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !drawer?.contains(event.target as Node)) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismissInspector();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(
+        drawer.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+        ),
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      restoreInspectorFocus();
+    };
+  }, [dismissInspector, narrowViewport, restoreInspectorFocus, store.rightPanelOpen]);
   return (
     <section
       className="workspace"
@@ -86,7 +150,7 @@ export function Workspace(props: WorkspaceProps) {
       data-left-panel={store.leftPanelOpen ? 'open' : 'closed'}
       data-right-panel={store.rightPanelOpen ? 'open' : 'closed'}
       style={{
-        gridTemplateColumns: `${store.leftPanelOpen ? 'minmax(190px, 236px)' : '48px'} minmax(0, 1fr)${store.rightPanelOpen ? ' minmax(256px, 304px)' : ''}`,
+        gridTemplateColumns: `${store.leftPanelOpen ? 'minmax(190px, 236px)' : '48px'} minmax(0, 1fr)${store.rightPanelOpen && !narrowViewport ? ' minmax(256px, 304px)' : ''}`,
       }}
     >
       <CollectionRail
@@ -134,8 +198,12 @@ export function Workspace(props: WorkspaceProps) {
               </Button>
             )}
             <IconButton
+              data-testid="inspector-toggle"
               label={store.rightPanelOpen ? 'Collapse inspector' : 'Expand inspector'}
-              onClick={() => store.set({ rightPanelOpen: !store.rightPanelOpen })}
+              onClick={(event) => {
+                inspectorTriggerRef.current = event.currentTarget;
+                store.set({ rightPanelOpen: !store.rightPanelOpen });
+              }}
             >
               <PanelRight size={17} aria-hidden="true" />
             </IconButton>
@@ -196,57 +264,82 @@ export function Workspace(props: WorkspaceProps) {
           />
         )}
       </div>
-      {store.rightPanelOpen &&
-        (item ? (
-          <aside className="inspector content-inspector" aria-label="Content details">
-            {item.kind === 'drawing' ? (
-              <label className="field">
-                <span className="field-label">Drawing title</span>
-                <input
-                  className="input"
-                  aria-label="Drawing title"
-                  value={item.title}
-                  onChange={(event) => props.onDrawingTitle?.(event.target.value)}
-                />
-              </label>
+      {store.rightPanelOpen && (
+        <div
+          className="inspector-drawer-layer"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) dismissInspector();
+          }}
+        >
+          <div
+            ref={inspectorDrawerRef}
+            className="inspector-drawer"
+            role={narrowViewport ? 'dialog' : undefined}
+            aria-modal={narrowViewport ? true : undefined}
+            aria-label={narrowViewport ? 'Inspector' : undefined}
+            tabIndex={narrowViewport ? -1 : undefined}
+          >
+            <IconButton
+              data-drawer-autofocus
+              className="inspector-drawer-close"
+              label="Close inspector"
+              onClick={dismissInspector}
+            >
+              ×
+            </IconButton>
+            {item ? (
+              <aside className="inspector content-inspector" aria-label="Content details">
+                {item.kind === 'drawing' ? (
+                  <label className="field">
+                    <span className="field-label">Drawing title</span>
+                    <input
+                      className="input"
+                      aria-label="Drawing title"
+                      value={item.title}
+                      onChange={(event) => props.onDrawingTitle?.(event.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <p>Write Markdown directly. Your text appears at this position in the agent prompt.</p>
+                )}
+                <p className="content-hint">
+                  {item.kind === 'drawing'
+                    ? 'Explain this diagram in a text block before or after it.'
+                    : 'Use headings, lists, and code blocks to describe the task.'}
+                </p>
+                <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>
+                  <Copy size={15} aria-hidden="true" />
+                  Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
+                </Button>
+                <Button variant="ghost" onClick={() => void props.onDeleteContent?.()}>
+                  <Trash2 size={15} aria-hidden="true" />
+                  Delete {item.kind === 'text' ? 'text' : 'drawing'}
+                </Button>
+              </aside>
             ) : (
-              <p>Write Markdown directly. Your text appears at this position in the agent prompt.</p>
+              <ScreenshotInspector
+                shot={shot}
+                selectedAnnotation={selectedAnnotation}
+                onUpdateShot={props.onUpdateShot}
+                onDescriptionChange={props.onDescriptionChange}
+                onUndoDescription={props.onUndoDescription}
+                canUndoDescription={props.canUndoDescription}
+                onChangeAnnotation={(patch) => {
+                  if (!props.selectedAnnotationId) return;
+                  props.onChangeAnnotations(
+                    props.annotations.map((item) =>
+                      item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
+                    ),
+                  );
+                }}
+                onDuplicate={props.onDuplicate}
+                onDeleteScreenshot={props.onDeleteScreenshot}
+                onDeleteProject={props.onDeleteProject}
+              />
             )}
-            <p className="content-hint">
-              {item.kind === 'drawing'
-                ? 'Explain this diagram in a text block before or after it.'
-                : 'Use headings, lists, and code blocks to describe the task.'}
-            </p>
-            <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>
-              <Copy size={15} aria-hidden="true" />
-              Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
-            </Button>
-            <Button variant="ghost" onClick={() => void props.onDeleteContent?.()}>
-              <Trash2 size={15} aria-hidden="true" />
-              Delete {item.kind === 'text' ? 'text' : 'drawing'}
-            </Button>
-          </aside>
-        ) : (
-          <ScreenshotInspector
-            shot={shot}
-            selectedAnnotation={selectedAnnotation}
-            onUpdateShot={props.onUpdateShot}
-            onDescriptionChange={props.onDescriptionChange}
-            onUndoDescription={props.onUndoDescription}
-            canUndoDescription={props.canUndoDescription}
-            onChangeAnnotation={(patch) => {
-              if (!props.selectedAnnotationId) return;
-              props.onChangeAnnotations(
-                props.annotations.map((item) =>
-                  item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
-                ),
-              );
-            }}
-            onDuplicate={props.onDuplicate}
-            onDeleteScreenshot={props.onDeleteScreenshot}
-            onDeleteProject={props.onDeleteProject}
-          />
-        ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

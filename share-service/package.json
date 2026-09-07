@@ -1,0 +1,30 @@
+{
+  "name": "@imnota/share-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private static sharing service for finalized Imnota prompt bundles",
+  "type": "module",
+  "main": "src/hostinger.cjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "node --check src/hostinger.cjs && node --check src/server.js && node --check src/app.js",
+    "backup": "node src/backup.js",
+    "start": "node src/server.js",
+    "cleanup": "node src/cleanup.js",
+    "test": "node --test --test-concurrency=1"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "markdown-it": "^14.1.0",
+    "pngjs": "7.0.0",
+    "sanitize-html": "^2.17.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.4"
+  }
+}

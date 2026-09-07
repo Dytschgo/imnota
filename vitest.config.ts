@@ -6,6 +6,13 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    exclude: ['node_modules', 'dist-electron/**', 'scripts/*.test.mjs'],
+    // The service uses node:test and its own Node/SQLite runtime, exercised separately in CI.
+    exclude: [
+      '**/node_modules/**',
+      'dist-electron/**',
+      'scripts/*.test.mjs',
+      'share-service/**',
+      'electron/hosted-share-contract.test.ts',
+    ],
   },
 });

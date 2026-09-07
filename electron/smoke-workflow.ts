@@ -887,6 +887,30 @@ async function captureWorkspaceMatrix(
         ),
       );
     }
+    // A zoomed/resized renderer can be narrower than the ordinary desktop window.
+    // Lower only this disposable test window's minimum to exercise the drawer.
+    const minimum = driver.browserWindow.getMinimumSize();
+    driver.browserWindow.setMinimumSize(800, 680);
+    try {
+      await driver.resize({ width: 900, height: 800 });
+      await driver.waitFor({ selector: '.inspector-drawer-close' });
+      const drawerVisible = await driver.evaluate<boolean>(`(() => {
+        const drawer = document.querySelector('.inspector-drawer').getBoundingClientRect();
+        const close = document.querySelector('.inspector-drawer-close').getBoundingClientRect();
+        return drawer.width >= 256 && drawer.right <= innerWidth && close.width > 0;
+      })()`);
+      if (!drawerVisible) throw new Error('Narrow inspector did not render as an accessible drawer.');
+      artifacts.push(await driver.capture(artifactDirectory, `900x800-inspector-${theme}.png`));
+      await driver.click({ selector: 'button[aria-label="Close inspector"]' });
+      await driver.waitFor({ selector: '.inspector-drawer-layer' }, { absent: true });
+      await driver.click({ selector: 'button[aria-label="Expand inspector"]' });
+      await driver.press('Escape');
+      await driver.waitFor({ selector: '.inspector-drawer-layer' }, { absent: true });
+      await driver.click({ selector: 'button[aria-label="Expand inspector"]' });
+    } finally {
+      driver.browserWindow.setMinimumSize(minimum[0], minimum[1]);
+      await driver.resize(SMOKE_VIEWPORTS[1]);
+    }
   }
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.resize(SMOKE_VIEWPORTS[1]);
@@ -974,6 +998,7 @@ async function exercisePreferencesAndChannel(
   });
   await driver.click({ selector: 'label:has(input[name="glass-level"][value="balanced"])' });
   await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
+  await driver.waitFor({ selector: 'input[name="glass-level"][value="balanced"]:checked:not(:disabled)' });
   await driver.evaluate(`(async () => {
     if (document.documentElement.dataset.glassLevel === 'off') return;
     const cssImage = getComputedStyle(document.querySelector('.app-shell'), '::after').backgroundImage;
@@ -1510,6 +1535,13 @@ export async function runSmokeWorkflow(
   const onboardingPresent = await exerciseOnboarding(driver, artifactDirectory, artifacts);
   if (onboardingPresent) assertions.push('onboarding sample and native clipboard action');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', onboardingPresent);
+  // Use a stable user-facing name while retaining random, isolated filesystem paths.
+  // This keeps approved visual captures independent of the temporary workspace name.
+  await driver.click({ selector: 'button[aria-label="Rename"]' });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Rename collection' });
+  await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
+  await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
+  await driver.waitFor({ selector: '[role="dialog"]' }, { absent: true });
   await importImages(driver, projectPath, sources, 10);
   assertions.push('real new-project prompt and collection import');
 

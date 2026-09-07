@@ -46,6 +46,20 @@ export default defineConfig({
     },
   ],
   base: './',
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Keep the screenshot engine cacheable independently of the application shell.
+        // The larger drawing engine stays behind Workspace's existing lazy import.
+        manualChunks(id) {
+          const modulePath = id.replaceAll('\\', '/');
+          if (/\/node_modules\/(?:konva|react-konva)\//.test(modulePath)) return 'annotation-engine';
+          if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(modulePath)) return 'react-runtime';
+        },
+      },
+    },
+  },
   server: { strictPort: true },
 });

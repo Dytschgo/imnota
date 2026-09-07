@@ -78,6 +78,7 @@ import {
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
+import { collectHostedShareArtifacts, hostedPngDimensionsAreSafe } from './hosted-share-artifacts.js';
 import {
   clipboardContextHtml,
   clipboardPngDimensions,
@@ -88,6 +89,7 @@ import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { prepareTerminalUpdate } from './terminal-update.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
@@ -106,6 +108,7 @@ if (process.env.IMNOTA_SMOKE === '1') {
     throw new Error('Run smoke tests through scripts/smoke.mjs with an isolated profile.');
   app.setPath('userData', profile);
   app.setPath('sessionData', profile);
+  nativeTheme.themeSource = 'light';
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -113,6 +116,7 @@ let mainWindow: BrowserWindow | null = null;
 let updateController: UpdateController;
 let projectWatchManager: ProjectWatchManager | undefined;
 let promptBundleWorkflow: PromptBundleWorkflow | undefined;
+let hostedShareClient: HostedShareClient | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -907,6 +911,9 @@ function registerIpc(): void {
     },
     new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
   );
+  hostedShareClient = new HostedShareClient(app.getPath('userData'), async (url) => {
+    await shell.openExternal(url);
+  });
   handle('settings:get', () => settings);
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -1105,6 +1112,64 @@ function registerIpc(): void {
       .parse(args);
     await promptBundleWorkflow!.open(input.sessionId, input.bundleNumber, input.target);
   });
+  handleWorkflow('workflow:hosted-share:pair', async (_event, ...args) => {
+    z.tuple([]).parse(args);
+    await hostedShareClient!.openPairing();
+  });
+  handleWorkflow(
+    'workflow:hosted-share:create',
+    async (_event, ...args) => {
+      const [input] = z
+        .tuple([
+          z
+            .object({
+              requestId: z.string().uuid(),
+              pairingToken: z.string().min(32).max(512),
+              sessionId: workflowSessionId,
+              bundleNumbers: z.array(workflowBundleNumber).min(1).max(20),
+              includeArchive: z.boolean(),
+              expiresInDays: z.number().int().min(1).max(30),
+            })
+            .strict(),
+        ])
+        .parse(args);
+      const artifacts = await collectHostedShareArtifacts(
+        promptBundleWorkflow!,
+        input.sessionId,
+        input.bundleNumbers,
+        (dataBase64) => {
+          const image = nativeImage.createFromBuffer(Buffer.from(dataBase64, 'base64'));
+          if (image.isEmpty()) return undefined;
+          const size = image.getSize();
+          if (!hostedPngDimensionsAreSafe(size.width, size.height))
+            return { width: size.width, height: size.height, dataBase64: '' };
+          return {
+            width: size.width,
+            height: size.height,
+            dataBase64: image.toPNG().toString('base64'),
+          };
+        },
+      );
+      return hostedShareClient!.create(input, artifacts);
+    },
+    true,
+  );
+  handleWorkflow('workflow:hosted-share:cancel', async (_event, ...args) => {
+    const [input] = z.tuple([z.object({ requestId: z.string().uuid() }).strict()]).parse(args);
+    await hostedShareClient!.cancel(input.requestId);
+  });
+  handleWorkflow('workflow:hosted-share:list', async (_event, ...args) => {
+    z.tuple([]).parse(args);
+    return hostedShareClient!.list();
+  });
+  handleWorkflow(
+    'workflow:hosted-share:revoke',
+    async (_event, ...args) => {
+      const [input] = z.tuple([z.object({ id: z.string().min(1).max(200) }).strict()]).parse(args);
+      return hostedShareClient!.revoke(input.id);
+    },
+    true,
+  );
   handleWorkflow(
     'workflow:project-watch:start',
     async (_event, ...args) => {
