@@ -317,6 +317,19 @@ async function setPhase(
   return next;
 }
 
+function parseCurrentProject(value: Buffer, token: string): ProjectData {
+  try {
+    return validateProject(JSON.parse(value.toString('utf8')));
+  } catch (error) {
+    throw new ScreenshotTrashError(
+      'baseline-changed',
+      'Current project.json is invalid; Undo preserved all backups.',
+      token,
+      { cause: error },
+    );
+  }
+}
+
 function withoutScreenshot(project: ProjectData, screenshot: ScreenshotRecord): ProjectData {
   const collectionShots = project.screenshots
     .filter((item) => item.collectionId === screenshot.collectionId && item.id !== screenshot.id)
@@ -332,11 +345,26 @@ function withoutScreenshot(project: ProjectData, screenshot: ScreenshotRecord): 
   });
 }
 
-function withScreenshot(project: ProjectData, screenshot: ScreenshotRecord): ProjectData {
+function withScreenshot(project: ProjectData, screenshot: ScreenshotRecord, token: string): ProjectData {
   if (project.screenshots.some((item) => item.id === screenshot.id))
-    throw new ScreenshotTrashError('undo-failed', 'This screenshot has already been restored.');
+    throw new ScreenshotTrashError('undo-failed', 'This screenshot has already been restored.', token);
   if (!project.collections.some((collection) => collection.id === screenshot.collectionId))
-    throw new ScreenshotTrashError('undo-failed', 'The screenshot collection no longer exists.');
+    throw new ScreenshotTrashError('undo-failed', 'The screenshot collection no longer exists.', token);
+  const restoredPaths = expectedScreenshotPaths(screenshot);
+  if (
+    project.screenshots.some(
+      (item) =>
+        item.collectionId === screenshot.collectionId &&
+        (item.storedFilename === screenshot.storedFilename ||
+          item.annotationFile === restoredPaths.annotations ||
+          item.descriptionFile === restoredPaths.description),
+    )
+  )
+    throw new ScreenshotTrashError(
+      'baseline-changed',
+      'A later screenshot already owns one of the paths required by Undo.',
+      token,
+    );
   const collectionShots = project.screenshots
     .filter((item) => item.collectionId === screenshot.collectionId)
     .sort((a, b) => a.position - b.position);
@@ -398,6 +426,32 @@ async function restoreDeleteBaseline(
     );
 }
 
+async function ensureReferencedContent(
+  projectPath: string,
+  directory: string,
+  manifest: TrashManifest,
+  operations: ResolvedTrashOperations,
+): Promise<void> {
+  const failures: string[] = [];
+  for (const item of manifest.content) {
+    const target = resolveRelative(projectPath, item.relativePath);
+    try {
+      if ((await readOptional(target)) !== null) continue;
+      await applyStored(target, directory, item.bytes, operations);
+      if ((await classify(target, directory, item.bytes)) !== 'expected')
+        failures.push(`${item.relativePath} did not restore byte-exactly`);
+    } catch (error) {
+      failures.push(`${item.relativePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (failures.length)
+    throw new ScreenshotTrashError(
+      'rollback-failed',
+      `Screenshot delete recovery needs attention: ${failures.join('; ')}`,
+      manifest.token,
+    );
+}
+
 async function restoreDeletedState(
   projectPath: string,
   directory: string,
@@ -412,7 +466,8 @@ async function restoreDeletedState(
       if (current === null) continue;
       const expected = await backupBytes(directory, item.bytes);
       if (!equalBytes(current, expected)) {
-        failures.push(`${item.relativePath} is occupied by different bytes`);
+        // Different bytes are not ours. Preserve them; the original operation
+        // still surfaces the collision to the caller.
         continue;
       }
       await assertNoLinks(target);
@@ -423,7 +478,7 @@ async function restoreDeletedState(
   }
   if (failures.length)
     throw new ScreenshotTrashError(
-      failures.some((failure) => failure.includes('occupied')) ? 'baseline-changed' : 'rollback-failed',
+      'rollback-failed',
       `Screenshot Undo rollback needs attention: ${failures.join('; ')}`,
       manifest.token,
     );
@@ -460,6 +515,29 @@ async function cleanupUndo(
     await assertNoLinks(path.join(directory, entry.name));
   }
   await operations.removeDirectory(directory);
+}
+
+async function cleanupIncompleteUndo(
+  directory: string,
+  operations: ResolvedTrashOperations,
+): Promise<boolean> {
+  await assertNoLinks(directory);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  if (entries.some((entry) => entry.name === 'manifest.json')) return false;
+  for (const entry of entries) {
+    if (
+      !entry.isFile() ||
+      !/^(image|annotations|description|metadata-before|metadata-deleted)\.bin$/.test(entry.name)
+    )
+      throw new ScreenshotTrashError(
+        'invalid-manifest',
+        'Incomplete Undo cleanup stopped at an unknown path.',
+        path.basename(directory),
+      );
+    await assertNoLinks(path.join(directory, entry.name));
+  }
+  await operations.removeDirectory(directory);
+  return true;
 }
 
 async function finishUndo(
@@ -516,32 +594,50 @@ async function stageDelete(
   await fs.mkdir(root, { recursive: true });
   await assertNoLinks(root);
   const directory = undoDirectory(projectPath, token);
-  await assertNoLinks(directory);
-  await fs.mkdir(directory, { recursive: false });
-  await assertNoLinks(directory);
-
   const names = ['image.bin', 'annotations.bin', 'description.bin'];
   const content: ContentBackup[] = [];
-  for (const [index, value] of contentValues.entries()) {
-    if (value) await writeProtected(path.join(directory, names[index]), value, operations);
-    content.push({
-      relativePath: Object.values(relative)[index],
-      bytes: storedBytes(value ? names[index] : null, value),
-    });
+  let manifest: TrashManifest;
+  let directoryCreated = false;
+  try {
+    await assertNoLinks(directory);
+    await fs.mkdir(directory, { recursive: false });
+    directoryCreated = true;
+    await assertNoLinks(directory);
+
+    for (const [index, value] of contentValues.entries()) {
+      if (value) await writeProtected(path.join(directory, names[index]), value, operations);
+      content.push({
+        relativePath: Object.values(relative)[index],
+        bytes: storedBytes(value ? names[index] : null, value),
+      });
+    }
+    await writeProtected(path.join(directory, 'metadata-before.bin'), metadataBefore, operations);
+    await writeProtected(path.join(directory, 'metadata-deleted.bin'), metadataDeleted, operations);
+    manifest = {
+      version: 2,
+      token,
+      phase: 'prepared',
+      screenshot,
+      deletedAt: nowIso(),
+      content,
+      metadataBefore: storedBytes('metadata-before.bin', metadataBefore),
+      metadataDeleted: storedBytes('metadata-deleted.bin', metadataDeleted),
+    };
+    await writeManifest(directory, manifest, operations);
+  } catch (error) {
+    if (!directoryCreated) throw error;
+    try {
+      await cleanupIncompleteUndo(directory, operations);
+    } catch (cleanupError) {
+      throw new ScreenshotTrashError(
+        'rollback-failed',
+        `Undo staging failed and its incomplete journal could not be cleaned: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        token,
+        { cause: error },
+      );
+    }
+    throw error;
   }
-  await writeProtected(path.join(directory, 'metadata-before.bin'), metadataBefore, operations);
-  await writeProtected(path.join(directory, 'metadata-deleted.bin'), metadataDeleted, operations);
-  const manifest: TrashManifest = {
-    version: 2,
-    token,
-    phase: 'prepared',
-    screenshot,
-    deletedAt: nowIso(),
-    content,
-    metadataBefore: storedBytes('metadata-before.bin', metadataBefore),
-    metadataDeleted: storedBytes('metadata-deleted.bin', metadataDeleted),
-  };
-  await writeManifest(directory, manifest, operations);
   return { directory, manifest, deletedProject };
 }
 
@@ -576,7 +672,6 @@ export async function deleteScreenshotToTrash(
       if ((await readOptional(target)) !== null)
         throw new Error(`${item.relativePath} remained after the trash operation.`);
     }
-    manifest = await setPhase(directory, manifest, 'deleted', operations);
     if ((await classify(metadataPath, directory, manifest.metadataBefore)) !== 'expected')
       throw new ScreenshotTrashError(
         'baseline-changed',
@@ -587,7 +682,7 @@ export async function deleteScreenshotToTrash(
     if ((await classify(metadataPath, directory, manifest.metadataDeleted)) !== 'expected')
       throw new Error('project.json did not reach its deleted state.');
     try {
-      await setPhase(directory, manifest, 'deleted', operations);
+      manifest = await setPhase(directory, manifest, 'deleted', operations);
       return { project: deletedProject, undoToken: manifest.token };
     } catch (error) {
       return {
@@ -597,12 +692,18 @@ export async function deleteScreenshotToTrash(
       };
     }
   } catch (error) {
-    if ((await classify(metadataPath, directory, manifest.metadataDeleted)) === 'expected')
+    if ((await classify(metadataPath, directory, manifest.metadataDeleted)) === 'expected') {
+      try {
+        manifest = await setPhase(directory, manifest, 'deleted', operations);
+      } catch {
+        // The exact deleted metadata is still a recoverable commit point.
+      }
       return {
         project: deletedProject,
         undoToken: manifest.token,
         warning: `Deletion committed after a recoverable journal error: ${error instanceof Error ? error.message : String(error)}`,
       };
+    }
     try {
       if ((await classify(metadataPath, directory, manifest.metadataBefore)) !== 'expected')
         throw new ScreenshotTrashError(
@@ -611,7 +712,8 @@ export async function deleteScreenshotToTrash(
           manifest.token,
         );
       await restoreDeleteBaseline(root, directory, manifest, operations);
-      await setPhase(directory, manifest, 'prepared', operations);
+      manifest = await setPhase(directory, manifest, 'prepared', operations);
+      await cleanupUndo(directory, manifest, operations);
     } catch (rollbackError) {
       throw new ScreenshotTrashError(
         'rollback-failed',
@@ -620,11 +722,12 @@ export async function deleteScreenshotToTrash(
         { cause: error },
       );
     }
-    if (error instanceof ScreenshotTrashError) throw error;
+    if (error instanceof ScreenshotTrashError)
+      throw new ScreenshotTrashError(error.code, error.message, undefined, { cause: error });
     throw new ScreenshotTrashError(
       'delete-failed',
-      `Screenshot deletion failed; baseline files were restored and the Undo journal was preserved: ${error instanceof Error ? error.message : String(error)}`,
-      manifest.token,
+      `Screenshot deletion failed; baseline files were restored: ${error instanceof Error ? error.message : String(error)}`,
+      undefined,
       { cause: error },
     );
   }
@@ -643,27 +746,47 @@ export async function undoScreenshotDelete(
   const { directory } = loaded;
   const metadataPath = path.join(root, 'project.json');
 
+  const currentMetadata = await readOptional(metadataPath);
+  if (currentMetadata === null)
+    throw new ScreenshotTrashError('invalid-project', 'project.json is missing.', token);
+  const currentProject = parseCurrentProject(currentMetadata, token);
+  const originalProject = validateProject(
+    JSON.parse((await backupBytes(directory, manifest.metadataBefore))!.toString('utf8')),
+  );
+  validateProject(project);
+  if (currentProject.id !== project.id || currentProject.id !== originalProject.id)
+    throw new ScreenshotTrashError('baseline-changed', 'Undo belongs to a different project.', token);
+
+  if (manifest.phase === 'restored') return finishUndo(directory, manifest, currentProject, operations);
   if (manifest.undoAfter && (await classify(metadataPath, directory, manifest.undoAfter)) === 'expected') {
     const restored = validateProject(
       JSON.parse((await backupBytes(directory, manifest.undoAfter))!.toString('utf8')),
     );
     return finishUndo(directory, manifest, restored, operations);
   }
-  if ((await classify(metadataPath, directory, manifest.metadataDeleted)) !== 'expected')
+  if (manifest.phase === 'undoing') {
+    if (!manifest.undoBefore || !manifest.undoAfter)
+      throw new ScreenshotTrashError('invalid-manifest', 'Undo journal is missing its CAS images.', token);
+    if ((await classify(metadataPath, directory, manifest.undoBefore)) !== 'expected')
+      throw new ScreenshotTrashError(
+        'baseline-changed',
+        'project.json changed during the interrupted Undo; all backups were preserved.',
+        token,
+      );
+    await restoreDeletedState(root, directory, manifest, operations);
+    manifest = await setPhase(directory, manifest, 'deleted', operations);
+  }
+  if (manifest.phase !== 'deleted')
     throw new ScreenshotTrashError(
-      'baseline-changed',
-      'project.json changed since deletion; Undo preserved the backup without overwriting it.',
+      'undo-failed',
+      'The deletion must be recovered before Undo can run.',
       token,
     );
-  await restoreDeletedState(root, directory, manifest, operations);
-  validateProject(project);
-  const diskProject = validateProject(
-    JSON.parse((await backupBytes(directory, manifest.metadataDeleted))!.toString('utf8')),
-  );
-  if (diskProject.id !== project.id)
-    throw new ScreenshotTrashError('baseline-changed', 'Undo belongs to a different project.', token);
-  const restoredProject = withScreenshot(diskProject, manifest.screenshot);
-  const undoBefore = await readOptional(metadataPath);
+  if (currentProject.screenshots.some((item) => item.id === manifest.screenshot.id))
+    throw new ScreenshotTrashError('undo-failed', 'This screenshot has already been restored.', token);
+
+  const restoredProject = withScreenshot(currentProject, manifest.screenshot, token);
+  const undoBefore = currentMetadata;
   const undoAfter = Buffer.from(JSON.stringify(restoredProject, null, 2));
   const undoBeforeStored = storedBytes('undo-before.bin', undoBefore);
   const undoAfterStored = storedBytes('undo-after.bin', undoAfter);
@@ -707,12 +830,6 @@ export async function undoScreenshotDelete(
     if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected')
       return finishUndo(directory, manifest, restoredProject, operations);
     try {
-      if ((await classify(metadataPath, directory, undoBeforeStored)) !== 'expected')
-        throw new ScreenshotTrashError(
-          'baseline-changed',
-          'project.json changed externally; Undo recovery did not overwrite it.',
-          token,
-        );
       await restoreDeletedState(root, directory, manifest, operations);
       await setPhase(directory, manifest, 'deleted', operations);
     } catch (rollbackError) {
@@ -733,7 +850,10 @@ export async function undoScreenshotDelete(
   }
 }
 
-async function trashTokens(projectPath: string): Promise<string[]> {
+async function trashTokens(
+  projectPath: string,
+  operations: ResolvedTrashOperations = defaultOperations,
+): Promise<string[]> {
   const root = undoRoot(projectPath);
   await assertNoLinks(root);
   const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
@@ -756,6 +876,7 @@ async function trashTokens(projectPath: string): Promise<string[]> {
         'Undo manifest path is not a regular file.',
         entry.name,
       );
+    else await cleanupIncompleteUndo(path.join(root, entry.name), operations);
   }
   return tokens.sort();
 }
@@ -785,15 +906,44 @@ export async function recoverScreenshotTrashTransactions(
   const operations = operationsWithDefaults(suppliedOperations);
   const metadataPath = path.join(root, 'project.json');
   const results: ScreenshotTrashRecoveryResult[] = [];
-  for (const token of await trashTokens(root)) {
+  for (const token of await trashTokens(root, operations)) {
     const loaded = await loadManifest(root, token);
     let { manifest } = loaded;
     const { directory } = loaded;
-    if (manifest.undoAfter && (await classify(metadataPath, directory, manifest.undoAfter)) === 'expected') {
-      const restored = validateProject(
-        JSON.parse((await backupBytes(directory, manifest.undoAfter))!.toString('utf8')),
-      );
-      const finished = await finishUndo(directory, manifest, restored, operations);
+    if (manifest.phase === 'deleted') {
+      results.push({
+        undoToken: token,
+        screenshotId: manifest.screenshot.id,
+        status: 'deletion-committed',
+        undoAvailable: true,
+      });
+      continue;
+    }
+
+    if (manifest.phase === 'prepared') {
+      await cleanupUndo(directory, manifest, operations);
+      results.push({
+        undoToken: token,
+        screenshotId: manifest.screenshot.id,
+        status: 'baseline-restored',
+        undoAvailable: false,
+        cleanup: 'complete',
+      });
+      continue;
+    }
+
+    const metadata = await readOptional(metadataPath);
+    if (metadata === null)
+      throw new ScreenshotTrashError('invalid-project', 'project.json is missing.', token);
+    const currentProject = parseCurrentProject(metadata, token);
+    const originalProject = validateProject(
+      JSON.parse((await backupBytes(directory, manifest.metadataBefore))!.toString('utf8')),
+    );
+    if (currentProject.id !== originalProject.id)
+      throw new ScreenshotTrashError('baseline-changed', 'Undo belongs to a different project.', token);
+
+    if (manifest.phase === 'restored') {
+      const finished = await finishUndo(directory, manifest, currentProject, operations);
       results.push({
         undoToken: token,
         screenshotId: manifest.screenshot.id,
@@ -804,7 +954,32 @@ export async function recoverScreenshotTrashTransactions(
       });
       continue;
     }
-    if ((await classify(metadataPath, directory, manifest.metadataDeleted)) === 'expected') {
+
+    if (manifest.phase === 'undoing') {
+      if (!manifest.undoBefore || !manifest.undoAfter)
+        throw new ScreenshotTrashError('invalid-manifest', 'Undo journal is missing its CAS images.', token);
+      if ((await classify(metadataPath, directory, manifest.undoAfter)) === 'expected') {
+        const restored = validateProject(
+          JSON.parse((await backupBytes(directory, manifest.undoAfter))!.toString('utf8')),
+        );
+        const finished = await finishUndo(directory, manifest, restored, operations);
+        results.push({
+          undoToken: token,
+          screenshotId: manifest.screenshot.id,
+          status: 'undo-committed',
+          undoAvailable: false,
+          cleanup: finished.cleanup,
+          warning: finished.warning,
+        });
+        continue;
+      }
+      if (currentProject.screenshots.some((item) => item.id === manifest.screenshot.id)) {
+        throw new ScreenshotTrashError(
+          'baseline-changed',
+          'An interrupted Undo collided with a later screenshot record; all backups were preserved.',
+          token,
+        );
+      }
       await restoreDeletedState(root, directory, manifest, operations);
       manifest = await setPhase(directory, manifest, 'deleted', operations);
       results.push({
@@ -815,22 +990,39 @@ export async function recoverScreenshotTrashTransactions(
       });
       continue;
     }
-    if ((await classify(metadataPath, directory, manifest.metadataBefore)) === 'expected') {
-      await restoreDeleteBaseline(root, directory, manifest, operations);
+
+    if ((await classify(metadataPath, directory, manifest.metadataDeleted)) === 'expected') {
+      manifest = await setPhase(directory, manifest, 'deleted', operations);
+      results.push({
+        undoToken: token,
+        screenshotId: manifest.screenshot.id,
+        status: 'deletion-committed',
+        undoAvailable: true,
+      });
+      continue;
+    }
+
+    if (currentProject.screenshots.some((item) => item.id === manifest.screenshot.id)) {
+      await ensureReferencedContent(root, directory, manifest, operations);
       manifest = await setPhase(directory, manifest, 'prepared', operations);
+      await cleanupUndo(directory, manifest, operations);
       results.push({
         undoToken: token,
         screenshotId: manifest.screenshot.id,
         status: 'baseline-restored',
         undoAvailable: false,
+        cleanup: 'complete',
       });
       continue;
     }
-    throw new ScreenshotTrashError(
-      'baseline-changed',
-      'project.json does not match any known delete/Undo state; recovery preserved all backups.',
-      token,
-    );
+
+    manifest = await setPhase(directory, manifest, 'deleted', operations);
+    results.push({
+      undoToken: token,
+      screenshotId: manifest.screenshot.id,
+      status: 'deletion-committed',
+      undoAvailable: true,
+    });
   }
   return results;
 }

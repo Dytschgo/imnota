@@ -11,10 +11,12 @@ const PHASES = ['staged', 'applying', 'committed'] as const;
 export type ScreenshotTransactionKind = (typeof KINDS)[number];
 type TransactionPhase = (typeof PHASES)[number];
 
+export type ScreenshotTransactionBaseline = { state: 'absent' } | { state: 'present'; sha256: string };
+
 export interface ScreenshotTransactionWrite {
   relativePath: string;
   after: Uint8Array | null;
-  expectedBefore?: 'present' | 'absent';
+  expectedBefore: ScreenshotTransactionBaseline;
 }
 
 export interface StageScreenshotTransactionInput {
@@ -107,6 +109,26 @@ type LiveState = 'before' | 'after' | 'same' | 'other';
 
 function sha256(value: Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+export function screenshotTransactionBaseline(value: Uint8Array | null): ScreenshotTransactionBaseline {
+  return value === null ? { state: 'absent' } : { state: 'present', sha256: sha256(value) };
+}
+
+function isBaseline(value: unknown): value is ScreenshotTransactionBaseline {
+  if (!value || typeof value !== 'object') return false;
+  const baseline = value as Record<string, unknown>;
+  return (
+    (baseline.state === 'absent' && Object.keys(baseline).length === 1) ||
+    (baseline.state === 'present' &&
+      Object.keys(baseline).length === 2 &&
+      typeof baseline.sha256 === 'string' &&
+      /^[0-9a-f]{64}$/.test(baseline.sha256))
+  );
+}
+
+function matchesBaseline(value: Buffer | null, baseline: ScreenshotTransactionBaseline): boolean {
+  return baseline.state === 'absent' ? value === null : value !== null && sha256(value) === baseline.sha256;
 }
 
 function strictToken(token: string): string {
@@ -457,6 +479,54 @@ async function cleanupTransaction(
   await operations.removeDirectory(directory);
 }
 
+async function cleanupIncompleteTransaction(
+  directory: string,
+  operations: ScreenshotTransactionOperations,
+): Promise<boolean> {
+  await assertNoLinks(directory);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  if (entries.some((entry) => entry.name === 'manifest.json')) return false;
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^(before|after)-[0-9]{4}\.bin$/.test(entry.name))
+      throw new ScreenshotTransactionError(
+        'invalid-journal',
+        'Incomplete transaction cleanup stopped at an unknown path.',
+        path.basename(directory),
+        true,
+      );
+    await assertNoLinks(path.join(directory, entry.name));
+  }
+  await operations.removeDirectory(directory);
+  return true;
+}
+
+async function cleanupCommittedBeforeStage(
+  root: string,
+  operations: ScreenshotTransactionOperations,
+): Promise<void> {
+  for (const token of await transactionTokens(root, operations)) {
+    const { directory, manifest } = await loadManifest(root, token);
+    try {
+      if (manifest.phase === 'committed') {
+        await cleanupTransaction(directory, manifest, operations);
+        continue;
+      }
+      const commit = manifest.entries.find((entry) => entry.relativePath.toLowerCase() === 'project.json')!;
+      if ((await classifyLive(root, directory, commit)) !== 'after') continue;
+      const result = await finishCommitted(directory, manifest, operations);
+      if (result.cleanup === 'pending') throw new Error(result.warning);
+    } catch (error) {
+      throw new ScreenshotTransactionError(
+        'cleanup-failed',
+        `A committed transaction journal could not be cleaned before the next save: ${error instanceof Error ? error.message : String(error)}`,
+        token,
+        false,
+        { cause: error },
+      );
+    }
+  }
+}
+
 async function finishCommitted(
   directory: string,
   manifest: TransactionManifest,
@@ -487,6 +557,7 @@ export async function stageScreenshotTransaction(
   operations: ScreenshotTransactionOperations = defaultOperations,
 ): Promise<ScreenshotTransactionSummary> {
   const root = await projectRoot(projectPath);
+  await cleanupCommittedBeforeStage(root, operations);
   if (!KINDS.includes(input.kind) || input.writes.length < 2 || input.writes.length > 100)
     throw new ScreenshotTransactionError('invalid-journal', 'Transaction input is invalid.');
 
@@ -495,14 +566,7 @@ export async function stageScreenshotTransaction(
     after: write.after === null ? null : Buffer.from(write.after),
     expectedBefore: write.expectedBefore,
   }));
-  if (
-    normalized.some(
-      (write) =>
-        write.expectedBefore !== undefined &&
-        write.expectedBefore !== 'present' &&
-        write.expectedBefore !== 'absent',
-    )
-  )
+  if (normalized.some((write) => !isBaseline(write.expectedBefore)))
     throw new ScreenshotTransactionError('invalid-journal', 'Transaction precondition is invalid.');
   const keys = normalized.map((write) => write.relativePath.toLowerCase());
   if (new Set(keys).size !== keys.length)
@@ -523,13 +587,10 @@ export async function stageScreenshotTransaction(
   const snapshots: Array<{ write: (typeof ordered)[number]; before: Buffer | null }> = [];
   for (const write of ordered) {
     const before = await readOptional(livePath(root, write.relativePath));
-    if (
-      (write.expectedBefore === 'present' && before === null) ||
-      (write.expectedBefore === 'absent' && before !== null)
-    )
+    if (!matchesBaseline(before, write.expectedBefore))
       throw new ScreenshotTransactionError(
         'baseline-changed',
-        `${write.relativePath} did not satisfy the ${write.expectedBefore} baseline precondition.`,
+        `${write.relativePath} no longer matches the caller-observed baseline.`,
       );
     snapshots.push({ write, before });
   }
@@ -546,33 +607,52 @@ export async function stageScreenshotTransaction(
   await fs.mkdir(rootDirectory, { recursive: true });
   await assertNoLinks(rootDirectory);
   const directory = transactionDirectory(root, token);
-  await assertNoLinks(directory);
-  await fs.mkdir(directory, { recursive: false });
-  await assertNoLinks(directory);
-
   const entries: TransactionEntry[] = [];
-  for (const [index, { write, before }] of snapshots.entries()) {
-    const beforeBlob = before === null ? null : `before-${String(index).padStart(4, '0')}.bin`;
-    const afterBlob = write.after === null ? null : `after-${String(index).padStart(4, '0')}.bin`;
-    if (beforeBlob) await writeJournalFile(path.join(directory, beforeBlob), before!, operations);
-    if (afterBlob) await writeJournalFile(path.join(directory, afterBlob), write.after!, operations);
-    entries.push({
-      relativePath: write.relativePath,
-      before: storedImage(beforeBlob, before),
-      after: storedImage(afterBlob, write.after),
-    });
-  }
+  let manifest: TransactionManifest;
+  let directoryCreated = false;
+  try {
+    await assertNoLinks(directory);
+    await fs.mkdir(directory, { recursive: false });
+    directoryCreated = true;
+    await assertNoLinks(directory);
 
-  const manifest: TransactionManifest = {
-    version: 1,
-    token,
-    kind: input.kind,
-    phase: 'staged',
-    createdAt: new Date().toISOString(),
-    commitPath: 'project.json',
-    entries,
-  };
-  await writeManifest(directory, manifest, operations);
+    for (const [index, { write, before }] of snapshots.entries()) {
+      const beforeBlob = before === null ? null : `before-${String(index).padStart(4, '0')}.bin`;
+      const afterBlob = write.after === null ? null : `after-${String(index).padStart(4, '0')}.bin`;
+      if (beforeBlob) await writeJournalFile(path.join(directory, beforeBlob), before!, operations);
+      if (afterBlob) await writeJournalFile(path.join(directory, afterBlob), write.after!, operations);
+      entries.push({
+        relativePath: write.relativePath,
+        before: storedImage(beforeBlob, before),
+        after: storedImage(afterBlob, write.after),
+      });
+    }
+
+    manifest = {
+      version: 1,
+      token,
+      kind: input.kind,
+      phase: 'staged',
+      createdAt: new Date().toISOString(),
+      commitPath: 'project.json',
+      entries,
+    };
+    await writeManifest(directory, manifest, operations);
+  } catch (error) {
+    if (!directoryCreated) throw error;
+    try {
+      await cleanupIncompleteTransaction(directory, operations);
+    } catch (cleanupError) {
+      throw new ScreenshotTransactionError(
+        'cleanup-failed',
+        `Transaction staging failed and its incomplete journal could not be cleaned: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        token,
+        false,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   await assertExpectedState(root, directory, entries, ['before']);
   return {
     token,
@@ -594,6 +674,7 @@ export async function commitScreenshotTransaction(
   const { directory } = loaded;
   const commit = manifest.entries.find((entry) => entry.relativePath.toLowerCase() === 'project.json')!;
 
+  if (manifest.phase === 'committed') return finishCommitted(directory, manifest, operations);
   const initialCommitState = await classifyLive(root, directory, commit);
   if (initialCommitState === 'after') return finishCommitted(directory, manifest, operations);
   if (initialCommitState === 'same')
@@ -673,7 +754,10 @@ export async function commitScreenshotTransaction(
   }
 }
 
-async function transactionTokens(root: string): Promise<string[]> {
+async function transactionTokens(
+  root: string,
+  operations: ScreenshotTransactionOperations = defaultOperations,
+): Promise<string[]> {
   const directory = journalRoot(root);
   await assertNoLinks(directory);
   const entries = await fs
@@ -699,6 +783,7 @@ async function transactionTokens(root: string): Promise<string[]> {
         entry.name,
         true,
       );
+    else await cleanupIncompleteTransaction(path.join(directory, entry.name), operations);
   }
   return tokens.sort();
 }
@@ -727,9 +812,21 @@ export async function recoverScreenshotTransactions(
 ): Promise<ScreenshotTransactionRecoveryResult[]> {
   const root = await projectRoot(projectPath);
   const results: ScreenshotTransactionRecoveryResult[] = [];
-  for (const token of await transactionTokens(root)) {
+  for (const token of await transactionTokens(root, operations)) {
     const { directory, manifest } = await loadManifest(root, token);
     const commit = manifest.entries.find((entry) => entry.relativePath.toLowerCase() === 'project.json')!;
+    if (manifest.phase === 'committed') {
+      const result = await finishCommitted(directory, manifest, operations);
+      results.push({
+        token,
+        kind: manifest.kind,
+        status: 'committed',
+        candidateAvailable: false,
+        cleanup: result.cleanup,
+        warning: result.warning,
+      });
+      continue;
+    }
     const commitState = await classifyLive(root, directory, commit);
     if (commitState === 'after') {
       const result = await finishCommitted(directory, manifest, operations);

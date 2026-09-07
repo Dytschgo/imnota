@@ -85,14 +85,18 @@ async function screenshotCount(metadataPath: string): Promise<number> {
   return JSON.parse(await fs.readFile(metadataPath, 'utf8')).screenshots.length;
 }
 
+async function readProject(metadataPath: string) {
+  return JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+}
+
 describe('screenshot trash and Undo transactions', () => {
   it('does not expose an incomplete backup or call trash when staging fails', async () => {
     const { dir, project, targets } = await fixture();
     let trashCalls = 0;
     const operations: ScreenshotTrashOperations = {
       write: async (target, content) => {
-        if (path.basename(target) === 'description.bin') throw new Error('injected staging failure');
         await atomicWrite(target, content);
+        if (path.basename(target) === 'description.bin') throw new Error('injected staging failure');
       },
       removeDirectory: defaultRemove,
     };
@@ -110,7 +114,29 @@ describe('screenshot trash and Undo transactions', () => {
     expect(trashCalls).toBe(0);
     await expectPresent(targets);
     expect(await screenshotCount(targets.metadata)).toBe(1);
+    expect(await fs.readdir(path.join(dir, '.imnota-undo'))).toEqual([]);
     expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
+  });
+
+  it('sweeps only a strictly owned incomplete Undo directory during discovery', async () => {
+    const { dir } = await fixture();
+    const token = 'delete-00000000-0000-4000-8000-000000000001';
+    const incomplete = path.join(dir, '.imnota-undo', token);
+    await fs.mkdir(incomplete, { recursive: true });
+    await atomicWrite(path.join(incomplete, 'image.bin'), Buffer.from('sensitive-backup'));
+
+    expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
+    await expect(fs.stat(incomplete)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const unknownToken = 'delete-00000000-0000-4000-8000-000000000002';
+    const unknown = path.join(dir, '.imnota-undo', unknownToken);
+    await fs.mkdir(unknown, { recursive: true });
+    await atomicWrite(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
+    await expect(listScreenshotTrashTransactions(dir)).rejects.toMatchObject({
+      code: 'invalid-manifest',
+      undoToken: unknownToken,
+    });
+    expect(await fs.readFile(path.join(unknown, 'unowned.bin'), 'utf8')).toBe('preserve-me');
   });
 
   it.each(['image', 'annotations', 'description'] as const)(
@@ -130,7 +156,7 @@ describe('screenshot trash and Undo transactions', () => {
       });
       await expectPresent(targets);
       expect(await screenshotCount(targets.metadata)).toBe(1);
-      expect(await listScreenshotTrashTransactions(dir)).toMatchObject([{ phase: 'prepared' }]);
+      expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
     },
   );
 
@@ -148,6 +174,37 @@ describe('screenshot trash and Undo transactions', () => {
     );
     await expectPresent(targets);
     expect(await screenshotCount(targets.metadata)).toBe(1);
+  });
+
+  it('marks an exactly restored failed delete terminal and cleans it after later project edits', async () => {
+    const { dir, project, targets } = await fixture();
+    const operations: ScreenshotTrashOperations = {
+      write: atomicWrite,
+      removeDirectory: async () => {
+        throw new Error('injected cleanup failure');
+      },
+    };
+    await expect(
+      deleteScreenshotToTrash(
+        dir,
+        project,
+        'shot',
+        async () => {
+          throw new Error('injected trash failure');
+        },
+        operations,
+      ),
+    ).rejects.toMatchObject({ code: 'rollback-failed' });
+    expect(await listScreenshotTrashTransactions(dir)).toMatchObject([{ phase: 'prepared' }]);
+
+    const edited = await readProject(targets.metadata);
+    edited.name = 'Renamed after rollback';
+    await atomicWrite(targets.metadata, JSON.stringify(edited));
+    await expect(recoverScreenshotTrashTransactions(dir)).resolves.toMatchObject([
+      { status: 'baseline-restored', undoAvailable: false, cleanup: 'complete' },
+    ]);
+    expect((await readProject(targets.metadata)).name).toBe('Renamed after rollback');
+    expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
   });
 
   it('returns a usable Undo token when metadata committed before an injected post-write error', async () => {
@@ -226,7 +283,7 @@ describe('screenshot trash and Undo transactions', () => {
     ]);
     await expectPresent(targets);
     expect(await screenshotCount(targets.metadata)).toBe(1);
-    expect(await listScreenshotTrashTransactions(dir)).toMatchObject([{ phase: 'prepared' }]);
+    expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
   });
 
   it('recovers a committed deletion as an available Undo operation', async () => {
@@ -241,6 +298,50 @@ describe('screenshot trash and Undo transactions', () => {
     ]);
     await expectDeleted(targets);
     expect(await screenshotCount(targets.metadata)).toBe(0);
+  });
+
+  it('keeps two deletion journals historical and merges each Undo into later project edits', async () => {
+    const { dir, project, screenshot, targets, trashItem } = await fixture();
+    const second = {
+      ...screenshot,
+      id: 'shot-b',
+      storedFilename: '002-second.png',
+      originalFilename: 'second.png',
+      title: 'Second',
+      position: 1,
+      annotationFile: `collections/${screenshot.collectionId}/annotations/002-second.png.json`,
+      descriptionFile: `collections/${screenshot.collectionId}/descriptions/002-second.png.md`,
+    };
+    project.screenshots.push(second);
+    await atomicWrite(targets.metadata, JSON.stringify(project));
+    await atomicWrite(screenshotPath(dir, second), Buffer.from([4, 5, 6]));
+    await atomicWrite(path.join(dir, second.annotationFile), '[{"id":"second"}]');
+    await atomicWrite(path.join(dir, second.descriptionFile), 'Second description');
+
+    const deletedA = await deleteScreenshotToTrash(dir, project, screenshot.id, trashItem);
+    deletedA.project.name = 'Renamed between deletes';
+    await atomicWrite(targets.metadata, JSON.stringify(deletedA.project));
+    const deletedB = await deleteScreenshotToTrash(dir, deletedA.project, second.id, trashItem);
+    deletedB.project.description = 'Edited after both deletes';
+    await atomicWrite(targets.metadata, JSON.stringify(deletedB.project));
+
+    await expect(recoverScreenshotTrashTransactions(dir)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'deletion-committed', undoAvailable: true }),
+        expect.objectContaining({ status: 'deletion-committed', undoAvailable: true }),
+      ]),
+    );
+    const restoredA = await undoScreenshotDelete(dir, deletedB.project, deletedA.undoToken);
+    expect(restoredA.project.name).toBe('Renamed between deletes');
+    expect(restoredA.project.description).toBe('Edited after both deletes');
+    expect(restoredA.project.screenshots.map((item) => item.id)).toEqual([screenshot.id]);
+
+    restoredA.project.favourite = true;
+    await atomicWrite(targets.metadata, JSON.stringify(restoredA.project));
+    const restoredB = await undoScreenshotDelete(dir, restoredA.project, deletedB.undoToken);
+    expect(restoredB.project.favourite).toBe(true);
+    expect(restoredB.project.screenshots.map((item) => item.id).sort()).toEqual([screenshot.id, second.id]);
+    expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
   });
 
   it.each(['image', 'annotations', 'description', 'metadata'] as const)(
@@ -271,6 +372,36 @@ describe('screenshot trash and Undo transactions', () => {
       await expectPresent(targets);
     },
   );
+
+  it('CAS-aborts Undo on a concurrent project edit, removes only its writes, and permits retry', async () => {
+    const { dir, project, targets, trashItem } = await fixture();
+    const deleted = await deleteScreenshotToTrash(dir, project, 'shot', trashItem);
+    let edited = false;
+    const operations: ScreenshotTrashOperations = {
+      write: async (target, content) => {
+        await atomicWrite(target, content);
+        if (!edited && target === targets.image) {
+          edited = true;
+          const current = await readProject(targets.metadata);
+          current.name = 'Concurrent rename';
+          await atomicWrite(targets.metadata, JSON.stringify(current));
+        }
+      },
+      removeDirectory: defaultRemove,
+    };
+
+    await expect(
+      undoScreenshotDelete(dir, deleted.project, deleted.undoToken, operations),
+    ).rejects.toMatchObject({ code: 'baseline-changed' });
+    await expectDeleted(targets);
+    const concurrentlyEdited = await readProject(targets.metadata);
+    expect(concurrentlyEdited.name).toBe('Concurrent rename');
+    expect(concurrentlyEdited.screenshots).toHaveLength(0);
+
+    const restored = await undoScreenshotDelete(dir, concurrentlyEdited, deleted.undoToken);
+    expect(restored.project.name).toBe('Concurrent rename');
+    expect(restored.project.screenshots.map((item) => item.id)).toEqual(['shot']);
+  });
 
   it('recovers a rollback-failed partial Undo and permits retry', async () => {
     const { dir, project, targets, trashItem } = await fixture();

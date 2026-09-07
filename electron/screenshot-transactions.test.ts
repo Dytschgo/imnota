@@ -11,6 +11,7 @@ import {
   recoverScreenshotTransactions,
   replayScreenshotTransaction,
   ScreenshotTransactionError,
+  screenshotTransactionBaseline,
   stageScreenshotTransaction,
   type ScreenshotTransactionOperations,
 } from './screenshot-transactions.js';
@@ -43,6 +44,10 @@ afterEach(async () => {
 
 const defaultUnlink = (target: string) => fs.unlink(target);
 const defaultRemoveDirectory = (target: string) => fs.rm(target, { recursive: true, force: true });
+
+function transactionWrite(relativePath: string, after: Uint8Array | null, before: Uint8Array | null) {
+  return { relativePath, after, expectedBefore: screenshotTransactionBaseline(before) };
+}
 
 function faultingWrites(failTarget: string): ScreenshotTransactionOperations {
   let failed = false;
@@ -80,9 +85,9 @@ async function normalFixture() {
   const staged = await stageScreenshotTransaction(directory, {
     kind: 'save',
     writes: [
-      { relativePath: 'collections/001/annotations/screen.json', after: after.annotation },
-      { relativePath: 'collections/001/descriptions/screen.md', after: after.description },
-      { relativePath: 'project.json', after: after.metadata },
+      transactionWrite('collections/001/annotations/screen.json', after.annotation, before.annotation),
+      transactionWrite('collections/001/descriptions/screen.md', after.description, before.description),
+      transactionWrite('project.json', after.metadata, before.metadata),
     ],
   });
   return {
@@ -109,8 +114,8 @@ describe('screenshot multi-file transactions', () => {
     await atomicWrite(sidecarPath, Buffer.from('sidecar-A'));
     const operations: ScreenshotTransactionOperations = {
       write: async (target, content) => {
-        if (path.basename(target) === 'after-0000.bin') throw new Error('injected staging failure');
         await atomicWrite(target, content);
+        if (path.basename(target) === 'after-0000.bin') throw new Error('injected staging failure');
       },
       unlink: defaultUnlink,
       removeDirectory: defaultRemoveDirectory,
@@ -121,8 +126,12 @@ describe('screenshot multi-file transactions', () => {
         {
           kind: 'save',
           writes: [
-            { relativePath: 'collections/001/annotations/screen.json', after: Buffer.from('sidecar-B') },
-            { relativePath: 'project.json', after: Buffer.from('metadata-B') },
+            transactionWrite(
+              'collections/001/annotations/screen.json',
+              Buffer.from('sidecar-B'),
+              Buffer.from('sidecar-A'),
+            ),
+            transactionWrite('project.json', Buffer.from('metadata-B'), Buffer.from('metadata-A')),
           ],
         },
         operations,
@@ -130,7 +139,55 @@ describe('screenshot multi-file transactions', () => {
     ).rejects.toThrow('injected staging failure');
     await expectBytes(sidecarPath, Buffer.from('sidecar-A'));
     await expectBytes(metadataPath, Buffer.from('metadata-A'));
+    expect(await fs.readdir(path.join(directory, '.imnota-transactions'))).toEqual([]);
     expect(await listScreenshotTransactions(directory)).toEqual([]);
+  });
+
+  it('sweeps only a strictly owned incomplete transaction directory on startup discovery', async () => {
+    const directory = await temporaryProject();
+    const token = 'txn-00000000-0000-4000-8000-000000000001';
+    const incomplete = path.join(directory, '.imnota-transactions', token);
+    await fs.mkdir(incomplete, { recursive: true });
+    await atomicWrite(path.join(incomplete, 'before-0000.bin'), Buffer.from('sensitive-baseline'));
+
+    expect(await listScreenshotTransactions(directory)).toEqual([]);
+    await expect(fs.stat(incomplete)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const unknownToken = 'txn-00000000-0000-4000-8000-000000000002';
+    const unknown = path.join(directory, '.imnota-transactions', unknownToken);
+    await fs.mkdir(unknown, { recursive: true });
+    await atomicWrite(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
+    await expect(listScreenshotTransactions(directory)).rejects.toMatchObject({
+      code: 'invalid-journal',
+      token: unknownToken,
+    });
+    await expectBytes(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
+  });
+
+  it('rejects caller-observed digest drift before creating a journal', async () => {
+    const directory = await temporaryProject();
+    const sidecarPath = path.join(directory, 'collections/001/annotations/screen.json');
+    const metadataPath = path.join(directory, 'project.json');
+    await atomicWrite(sidecarPath, Buffer.from('sidecar-current'));
+    await atomicWrite(metadataPath, Buffer.from('metadata-A'));
+
+    await expect(
+      stageScreenshotTransaction(directory, {
+        kind: 'save',
+        writes: [
+          transactionWrite(
+            'collections/001/annotations/screen.json',
+            Buffer.from('sidecar-candidate'),
+            Buffer.from('sidecar-caller-observed'),
+          ),
+          transactionWrite('project.json', Buffer.from('metadata-B'), Buffer.from('metadata-A')),
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'baseline-changed', token: undefined });
+    await expect(fs.stat(path.join(directory, '.imnota-transactions'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expectBytes(sidecarPath, Buffer.from('sidecar-current'));
   });
 
   it('stages a complete candidate without changing live bytes and commits metadata last', async () => {
@@ -164,9 +221,17 @@ describe('screenshot multi-file transactions', () => {
     const staged = await stageScreenshotTransaction(directory, {
       kind: 'save',
       writes: [
-        { relativePath: 'collections/001/annotations/screen.json', after: Buffer.from('annotation-A') },
-        { relativePath: 'collections/001/descriptions/screen.md', after: Buffer.from('description-B') },
-        { relativePath: 'project.json', after: Buffer.from('{"revision":2}') },
+        transactionWrite(
+          'collections/001/annotations/screen.json',
+          Buffer.from('annotation-A'),
+          Buffer.from('annotation-A'),
+        ),
+        transactionWrite(
+          'collections/001/descriptions/screen.md',
+          Buffer.from('description-B'),
+          Buffer.from('description-A'),
+        ),
+        transactionWrite('project.json', Buffer.from('{"revision":2}'), Buffer.from('{"revision":1}')),
       ],
     });
 
@@ -190,9 +255,21 @@ describe('screenshot multi-file transactions', () => {
     const staged = await stageScreenshotTransaction(directory, {
       kind: 'save',
       writes: [
-        { relativePath: 'collections/001/annotations/screen.json', after: Buffer.from('annotation-A') },
-        { relativePath: 'collections/001/descriptions/screen.md', after: Buffer.from('description-A') },
-        { relativePath: 'project.json', after: Buffer.from('{"title":"B","revision":2}') },
+        transactionWrite(
+          'collections/001/annotations/screen.json',
+          Buffer.from('annotation-A'),
+          Buffer.from('annotation-A'),
+        ),
+        transactionWrite(
+          'collections/001/descriptions/screen.md',
+          Buffer.from('description-A'),
+          Buffer.from('description-A'),
+        ),
+        transactionWrite(
+          'project.json',
+          Buffer.from('{"title":"B","revision":2}'),
+          Buffer.from('{"title":"A","revision":1}'),
+        ),
       ],
     });
 
@@ -216,15 +293,17 @@ describe('screenshot multi-file transactions', () => {
     const staged = await stageScreenshotTransaction(directory, {
       kind: 'recovery-restore',
       writes: [
-        {
-          relativePath: 'collections/001/annotations/screen.json',
-          after: Buffer.from('annotation-recovered'),
-        },
-        {
-          relativePath: 'collections/001/descriptions/screen.md',
-          after: Buffer.from('description-same'),
-        },
-        { relativePath: 'project.json', after: Buffer.from('{"revision":8}') },
+        transactionWrite(
+          'collections/001/annotations/screen.json',
+          Buffer.from('annotation-recovered'),
+          Buffer.from('annotation-saved'),
+        ),
+        transactionWrite(
+          'collections/001/descriptions/screen.md',
+          Buffer.from('description-same'),
+          Buffer.from('description-same'),
+        ),
+        transactionWrite('project.json', Buffer.from('{"revision":8}'), Buffer.from('{"revision":7}')),
       ],
     });
 
@@ -258,11 +337,12 @@ describe('screenshot multi-file transactions', () => {
         {
           kind: 'recovery-restore',
           writes: [
-            {
-              relativePath: 'collections/001/annotations/screen.json',
-              after: Buffer.from('annotation-recovered'),
-            },
-            { relativePath: 'project.json', after: Buffer.from('{"revision":7}') },
+            transactionWrite(
+              'collections/001/annotations/screen.json',
+              Buffer.from('annotation-recovered'),
+              Buffer.from('annotation-saved'),
+            ),
+            transactionWrite('project.json', Buffer.from('{"revision":7}'), Buffer.from('{"revision":7}')),
           ],
         },
         operations,
@@ -323,25 +403,14 @@ describe('screenshot multi-file transactions', () => {
       const staged = await stageScreenshotTransaction(directory, {
         kind: 'conflict',
         writes: [
-          {
-            relativePath: 'collections/001/screenshots/conflict.png',
-            after: Buffer.from('candidate-image'),
-            expectedBefore: 'absent',
-          },
-          {
-            relativePath: 'collections/001/annotations/conflict.json',
-            after: Buffer.from('candidate-notes'),
-            expectedBefore: 'absent',
-          },
-          {
-            relativePath: 'collections/001/descriptions/conflict.md',
-            after: Buffer.from('candidate-text'),
-            expectedBefore: 'absent',
-          },
-          {
-            relativePath: 'project.json',
-            after: Buffer.from('{"screenshots":["conflict"]}'),
-          },
+          transactionWrite('collections/001/screenshots/conflict.png', Buffer.from('candidate-image'), null),
+          transactionWrite('collections/001/annotations/conflict.json', Buffer.from('candidate-notes'), null),
+          transactionWrite('collections/001/descriptions/conflict.md', Buffer.from('candidate-text'), null),
+          transactionWrite(
+            'project.json',
+            Buffer.from('{"screenshots":["conflict"]}'),
+            Buffer.from('{"screenshots":[]}'),
+          ),
         ],
       });
 
@@ -419,9 +488,53 @@ describe('screenshot multi-file transactions', () => {
     expect(await listScreenshotTransactions(fixture.directory)).toMatchObject([
       { token: fixture.staged.token, phase: 'committed' },
     ]);
+    const laterMetadata = Buffer.from('{"version":"later-save"}\n');
+    await atomicWrite(fixture.metadataPath, laterMetadata);
     await expect(recoverScreenshotTransactions(fixture.directory)).resolves.toMatchObject([
       { token: fixture.staged.token, status: 'committed', cleanup: 'complete' },
     ]);
+    await expectBytes(fixture.metadataPath, laterMetadata);
+    expect(await listScreenshotTransactions(fixture.directory)).toEqual([]);
+  });
+
+  it('cleans a committed journal before a later save without comparing stale metadata', async () => {
+    const fixture = await normalFixture();
+    const cleanupFailure: ScreenshotTransactionOperations = {
+      write: async (target, content) => {
+        if (
+          path.basename(target) === 'manifest.json' &&
+          Buffer.from(content).toString('utf8').includes('"phase": "committed"')
+        )
+          throw new Error('injected commit receipt failure');
+        await atomicWrite(target, content);
+      },
+      unlink: defaultUnlink,
+      removeDirectory: async () => {
+        throw new Error('injected cleanup failure');
+      },
+    };
+    await expect(
+      commitScreenshotTransaction(fixture.directory, fixture.staged.token, cleanupFailure),
+    ).resolves.toMatchObject({ status: 'committed', cleanup: 'pending' });
+    expect(await listScreenshotTransactions(fixture.directory)).toMatchObject([{ phase: 'applying' }]);
+
+    const secondMetadata = Buffer.from('{"version":"C"}\n');
+    const second = await stageScreenshotTransaction(fixture.directory, {
+      kind: 'save',
+      writes: [
+        transactionWrite(
+          'collections/001/annotations/screen.json',
+          fixture.after.annotation,
+          fixture.after.annotation,
+        ),
+        transactionWrite('project.json', secondMetadata, fixture.after.metadata),
+      ],
+    });
+    expect((await listScreenshotTransactions(fixture.directory)).map((item) => item.token)).toEqual([
+      second.token,
+    ]);
+    await commitScreenshotTransaction(fixture.directory, second.token);
+    await expectBytes(fixture.metadataPath, secondMetadata);
     expect(await listScreenshotTransactions(fixture.directory)).toEqual([]);
   });
 
@@ -475,12 +588,8 @@ describe('screenshot multi-file transactions', () => {
       stageScreenshotTransaction(directory, {
         kind: 'conflict',
         writes: [
-          {
-            relativePath: 'collections/001/screenshots/conflict.png',
-            after: Buffer.from('candidate'),
-            expectedBefore: 'absent',
-          },
-          { relativePath: 'project.json', after: Buffer.from('metadata-B') },
+          transactionWrite('collections/001/screenshots/conflict.png', Buffer.from('candidate'), null),
+          transactionWrite('project.json', Buffer.from('metadata-B'), Buffer.from('metadata-A')),
         ],
       }),
     ).rejects.toMatchObject({ code: 'baseline-changed', candidateAvailable: false });
@@ -497,12 +606,8 @@ describe('screenshot multi-file transactions', () => {
     const staged = await stageScreenshotTransaction(directory, {
       kind: 'conflict',
       writes: [
-        {
-          relativePath: 'collections/001/screenshots/conflict.png',
-          after: Buffer.from('candidate'),
-          expectedBefore: 'absent',
-        },
-        { relativePath: 'project.json', after: Buffer.from('metadata-B') },
+        transactionWrite('collections/001/screenshots/conflict.png', Buffer.from('candidate'), null),
+        transactionWrite('project.json', Buffer.from('metadata-B'), Buffer.from('metadata-A')),
       ],
     });
     await atomicWrite(allocatedPath, Buffer.from('external'));
@@ -542,8 +647,8 @@ describe('screenshot multi-file transactions', () => {
         stageScreenshotTransaction(directory, {
           kind: 'save',
           writes: [
-            { relativePath, after: Buffer.from('candidate') },
-            { relativePath: 'project.json', after: Buffer.from('B') },
+            transactionWrite(relativePath, Buffer.from('candidate'), null),
+            transactionWrite('project.json', Buffer.from('B'), Buffer.from('A')),
           ],
         }),
       ).rejects.toMatchObject({ code: 'invalid-path' });
@@ -552,9 +657,9 @@ describe('screenshot multi-file transactions', () => {
       stageScreenshotTransaction(directory, {
         kind: 'save',
         writes: [
-          { relativePath: 'collections/Case/file', after: Buffer.from('one') },
-          { relativePath: 'collections/case/file', after: Buffer.from('two') },
-          { relativePath: 'project.json', after: Buffer.from('B') },
+          transactionWrite('collections/Case/file', Buffer.from('one'), null),
+          transactionWrite('collections/case/file', Buffer.from('two'), null),
+          transactionWrite('project.json', Buffer.from('B'), Buffer.from('A')),
         ],
       }),
     ).rejects.toMatchObject({ code: 'invalid-path' });
@@ -566,8 +671,8 @@ describe('screenshot multi-file transactions', () => {
         stageScreenshotTransaction(alias, {
           kind: 'save',
           writes: [
-            { relativePath: 'sidecar', after: Buffer.from('candidate') },
-            { relativePath: 'project.json', after: Buffer.from('B') },
+            transactionWrite('sidecar', Buffer.from('candidate'), null),
+            transactionWrite('project.json', Buffer.from('B'), Buffer.from('A')),
           ],
         }),
       ).rejects.toThrow('Linked');
@@ -583,8 +688,8 @@ describe('screenshot multi-file transactions', () => {
       stageScreenshotTransaction(directory, {
         kind: 'save',
         writes: [
-          { relativePath: 'collections/linked/candidate', after: Buffer.from('candidate') },
-          { relativePath: 'project.json', after: Buffer.from('B') },
+          transactionWrite('collections/linked/candidate', Buffer.from('candidate'), null),
+          transactionWrite('project.json', Buffer.from('B'), Buffer.from('A')),
         ],
       }),
     ).rejects.toThrow('Linked');
