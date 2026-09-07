@@ -52,7 +52,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-export function normalizePng(buffer, limits) {
+export function preflightPng(buffer, limits) {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   if (buffer.length < 33 || !buffer.subarray(0, 8).equals(signature)) {
     throw new Error('The image is not a PNG file.');
@@ -100,7 +100,7 @@ export function normalizePng(buffer, limits) {
       if (!Number.isSafeInteger(inflatedBytes) || inflatedBytes > limits.maxInflatedBytes) {
         throw new Error('The decoded PNG exceeds the memory limit.');
       }
-      header = { width, height, inflatedBytes };
+      header = { width, height, pixels, inflatedBytes };
     } else if (type === 'IDAT') {
       if (idatEnded) throw new Error('PNG IDAT chunks must be consecutive.');
       sawIdat = true;
@@ -118,13 +118,19 @@ export function normalizePng(buffer, limits) {
     offset = chunkEnd;
   }
   if (!header || !sawIdat || !sawIend) throw new Error('The PNG is incomplete.');
+  return { ...header, compressedParts };
+}
+
+export function normalizePng(buffer, limits, inspected = preflightPng(buffer, limits)) {
   let inflated;
   try {
-    inflated = zlib.inflateSync(Buffer.concat(compressedParts), { maxOutputLength: header.inflatedBytes });
+    inflated = zlib.inflateSync(Buffer.concat(inspected.compressedParts), {
+      maxOutputLength: inspected.inflatedBytes,
+    });
   } catch {
     throw new Error('The PNG compressed data is invalid or exceeds its decoded size.');
   }
-  if (inflated.length !== header.inflatedBytes)
+  if (inflated.length !== inspected.inflatedBytes)
     throw new Error('The PNG decoded data has an invalid length.');
   let decoded;
   try {

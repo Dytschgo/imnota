@@ -41,12 +41,12 @@ function pngChunk(type, data = Buffer.alloc(0)) {
   return result;
 }
 
-function craftedPng(width, height, inflatedData) {
+function craftedPng(width, height, inflatedData, { depth = 8, colorType = 6 } = {}) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
-  header[8] = 8;
-  header[9] = 6;
+  header[8] = depth;
+  header[9] = colorType;
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     pngChunk('IHDR', header),
@@ -227,6 +227,55 @@ test('fully validates, bounds, and re-encodes PNGs before private storage', asyn
   assert.ok(stored.length > 40);
   const token = normalized.body.url.split('/').at(-1);
   await instance.api.get(`/s/${token}/assets/native-export.png`).expect(200);
+});
+
+test('rejects aggregate PNG work before decoding an excessive bundle', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const scanlineBytes = (Math.ceil(4_000 / 8) + 1) * 4_000;
+  const validSixteenMegapixelPng = craftedPng(4_000, 4_000, Buffer.alloc(scanlineBytes), {
+    depth: 1,
+    colorType: 0,
+  });
+  const uploadToken = await pair(instance);
+  await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${uploadToken}`)
+    .send({
+      requestId: randomUUID(),
+      title: 'Too many large images',
+      markdown: '',
+      images: Array.from({ length: 5 }, (_, index) => ({
+        filename: `large-${index}.png`,
+        dataBase64: validSixteenMegapixelPng.toString('base64'),
+      })),
+    })
+    .expect(413)
+    .expect(({ body }) => {
+      assert.equal(body.error.code, 'payload_too_large');
+      assert.match(body.error.message, /64000000 pixel/);
+    });
+
+  const inflatedLimited = await fixture({ maxBundleInflatedPngBytes: 5 });
+  t.after(() => inflatedLimited.destroy());
+  const secondToken = await pair(inflatedLimited);
+  await inflatedLimited.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${secondToken}`)
+    .send({
+      requestId: randomUUID(),
+      title: 'Too much scanline data',
+      markdown: '',
+      images: [0, 1].map((index) => ({
+        filename: `pixel-${index}.png`,
+        dataBase64: onePixelPng.toString('base64'),
+      })),
+    })
+    .expect(413)
+    .expect(({ body }) => {
+      assert.equal(body.error.code, 'payload_too_large');
+      assert.match(body.error.message, /inflated PNG memory/);
+    });
 });
 
 test('a server-only receipt secret prevents offline token derivation from an expired pairing bearer', async (t) => {

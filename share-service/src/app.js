@@ -17,6 +17,7 @@ import {
   escapeHtml,
   isSafePngFilename,
   normalizePng,
+  preflightPng,
   randomToken,
   safeHashEqual,
   tokenHash,
@@ -112,7 +113,14 @@ function validateUpload(body, config) {
   }
   const filenames = new Set();
   let uploadedBytes = markdown.length;
-  const images = body.images.map((image) => {
+  let totalImagePixels = 0;
+  let totalInflatedPngBytes = 0;
+  const pngLimits = {
+    maxDimension: config.maxImageDimension,
+    maxPixels: config.maxImagePixels,
+    maxInflatedBytes: config.maxInflatedPngBytes,
+  };
+  const imageCandidates = body.images.map((image) => {
     if (!image || typeof image !== 'object' || !isSafePngFilename(image.filename)) {
       throw new ApiError(400, 'invalid_request', 'Each image needs a safe .png filename without a path.');
     }
@@ -137,24 +145,37 @@ function validateUpload(body, config) {
     if (uploadedBytes > config.maxBundleBytes) {
       throw new ApiError(413, 'payload_too_large', 'The decoded upload bundle exceeds the size limit.');
     }
-    let normalized;
+    let inspected;
     try {
-      normalized = normalizePng(uploadedData, {
-        maxDimension: config.maxImageDimension,
-        maxPixels: config.maxImagePixels,
-        maxInflatedBytes: config.maxInflatedPngBytes,
-      });
+      inspected = preflightPng(uploadedData, pngLimits);
     } catch (error) {
       throw new ApiError(400, 'invalid_request', `${image.filename}: ${error.message}`);
     }
-    if (normalized.data.length > config.maxImageBytes) {
-      throw new ApiError(
-        413,
-        'payload_too_large',
-        `Normalized image ${image.filename} exceeds the size limit.`,
-      );
+    totalImagePixels += inspected.pixels;
+    totalInflatedPngBytes += inspected.inflatedBytes;
+    return { filename: image.filename, uploadedData, inspected };
+  });
+  if (totalImagePixels > config.maxBundleImagePixels) {
+    throw new ApiError(
+      413,
+      'payload_too_large',
+      `The bundle exceeds the ${config.maxBundleImagePixels} pixel image limit.`,
+    );
+  }
+  if (totalInflatedPngBytes > config.maxBundleInflatedPngBytes) {
+    throw new ApiError(413, 'payload_too_large', 'The bundle exceeds the inflated PNG memory limit.');
+  }
+  const images = imageCandidates.map(({ filename, uploadedData, inspected }) => {
+    let normalized;
+    try {
+      normalized = normalizePng(uploadedData, pngLimits, inspected);
+    } catch (error) {
+      throw new ApiError(400, 'invalid_request', `${filename}: ${error.message}`);
     }
-    return { filename: image.filename, ...normalized };
+    if (normalized.data.length > config.maxImageBytes) {
+      throw new ApiError(413, 'payload_too_large', `Normalized image ${filename} exceeds the size limit.`);
+    }
+    return { filename, ...normalized };
   });
   const decodedBytes = markdown.length + images.reduce((sum, image) => sum + image.data.length, 0);
   if (decodedBytes > config.maxBundleBytes) {
