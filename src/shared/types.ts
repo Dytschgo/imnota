@@ -108,6 +108,8 @@ export interface ProjectSnapshot {
   /** Revision of project.json used for compare-and-swap metadata saves. */
   projectRevision?: string;
   warnings?: string[];
+  /** Delete journals recovered during open that still carry a valid Undo grant. */
+  recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
 }
 
 export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };

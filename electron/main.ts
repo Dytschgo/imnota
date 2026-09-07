@@ -44,7 +44,24 @@ import {
 } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
 import { ensureCollection, addEmptyCollection, migrateProject, screenshotPath } from './collections.js';
-import { deleteScreenshotToTrash, undoScreenshotDelete } from './screenshot-trash.js';
+import {
+  deleteScreenshotToTrash,
+  recoverScreenshotTrashTransactions,
+  undoScreenshotDelete,
+  type ScreenshotTrashOperations,
+} from './screenshot-trash.js';
+import {
+  discardScreenshotTransaction,
+  recoverScreenshotTransactions,
+  replayScreenshotTransaction,
+  type ScreenshotTransactionKind,
+  type ScreenshotTransactionOperations,
+  type ScreenshotTransactionWrite,
+} from './screenshot-transactions.js';
+import {
+  commitScreenshotFileTransaction,
+  nextProjectMutationTimestamp,
+} from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
 import {
   clipboardContextHtml,
@@ -95,6 +112,23 @@ async function copyFile(filePath: string, targetPath: string): Promise<void> {
   projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
 }
 
+async function unlinkTracked(filePath: string): Promise<void> {
+  await fs.unlink(filePath);
+  projectWatchManager?.recordSelfDelete(filePath);
+}
+
+const screenshotTransactionOperations: ScreenshotTransactionOperations = {
+  write: atomicWrite,
+  unlink: unlinkTracked,
+  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+};
+
+const screenshotTrashOperations: ScreenshotTrashOperations = {
+  write: atomicWrite,
+  unlink: unlinkTracked,
+  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+};
+
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
 async function persistApplicationSettings(
@@ -139,7 +173,9 @@ async function assertProjectPath(projectPath: string): Promise<string> {
     'rounds',
     'collections',
     '.imnota-undo',
+    '.imnota-transactions',
     '.imnota-recovery.json',
+    '.imnota-recovery-backup.json',
   ])
     await assertNoLinks(path.join(resolved, name));
   return resolved;
@@ -177,6 +213,98 @@ async function readProject(projectPath: string): Promise<ProjectData> {
   };
 }
 
+async function readProjectMutationBaseline(projectPath: string): Promise<{
+  project: ProjectData;
+  projectRevision: string;
+}> {
+  const projectFile = path.join(projectPath, 'project.json');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = await fs.readFile(projectFile, 'utf8');
+    const project = await readProject(projectPath);
+    const after = await fs.readFile(projectFile, 'utf8');
+    const beforeRevision = projectRevisionForSource(before);
+    const projectRevision = projectRevisionForSource(after);
+    if (beforeRevision === projectRevision) return { project, projectRevision };
+  }
+  throw new Error('The project kept changing while the save was prepared. Wait for changes to settle.');
+}
+
+async function assertProjectRevision(projectPath: string, expectedRevision: string): Promise<void> {
+  const currentRevision = projectRevisionForSource(
+    await fs.readFile(path.join(projectPath, 'project.json'), 'utf8'),
+  );
+  if (currentRevision !== expectedRevision)
+    throw new Error('The project changed while the save was prepared. Reload it before saving again.');
+}
+
+function withSnapshotWarnings(snapshot: ProjectSnapshot, warnings: readonly string[]): ProjectSnapshot {
+  const combined = [...(snapshot.warnings ?? []), ...warnings].filter(
+    (warning, index, values) => values.indexOf(warning) === index,
+  );
+  return combined.length ? { ...snapshot, warnings: combined } : snapshot;
+}
+
+async function commitFileTransaction(
+  projectPath: string,
+  kind: ScreenshotTransactionKind,
+  writes: ScreenshotTransactionWrite[],
+  assertBaseline: () => Promise<void>,
+): Promise<string[]> {
+  const committed = await commitScreenshotFileTransaction(projectPath, {
+    kind,
+    writes,
+    assertBaseline,
+    operations: screenshotTransactionOperations,
+  });
+  return committed.warning ? [committed.warning] : [];
+}
+
+async function recoverNativeProjectTransactions(projectPath: string): Promise<{
+  warnings: string[];
+  recoveredDeletes: Array<{ undoToken: string; screenshotId: string }>;
+}> {
+  const warnings: string[] = [];
+  const recoveredDeletes: Array<{ undoToken: string; screenshotId: string }> = [];
+  const transactions = await recoverScreenshotTransactions(projectPath, screenshotTransactionOperations);
+  for (const transaction of transactions) {
+    if (transaction.warning) warnings.push(transaction.warning);
+    if (!transaction.candidateAvailable) continue;
+    const choice = await dialog.showMessageBox(mainWindow!, {
+      type: 'question',
+      title: 'Recover interrupted save',
+      message: 'An interrupted screenshot save was restored to its previous safe state.',
+      detail:
+        'Restore replays the saved candidate. Keep saved project discards that candidate without replacing the current files.',
+      buttons: ['Restore', 'Keep saved project', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (choice.response === 2)
+      throw new Error('Opening cancelled. The interrupted save remains recoverable.');
+    if (choice.response === 0) {
+      const replayed = await replayScreenshotTransaction(
+        projectPath,
+        transaction.token,
+        screenshotTransactionOperations,
+      );
+      if (replayed.warning) warnings.push(replayed.warning);
+    } else {
+      await discardScreenshotTransaction(projectPath, transaction.token, screenshotTransactionOperations);
+    }
+  }
+
+  const trash = await recoverScreenshotTrashTransactions(projectPath, screenshotTrashOperations);
+  for (const transaction of trash) {
+    if (transaction.warning) warnings.push(transaction.warning);
+    if (transaction.undoAvailable)
+      recoveredDeletes.push({
+        undoToken: transaction.undoToken,
+        screenshotId: transaction.screenshotId,
+      });
+  }
+  return { warnings, recoveredDeletes };
+}
+
 function imageType(filename: string): string {
   const ext = path.extname(filename).toLowerCase();
   return ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
@@ -187,7 +315,7 @@ function dataUrlFromBuffer(buffer: Uint8Array, mime: string): string {
 }
 
 const thumbnailCache = new Map<string, { mtime: number; dataUrl: string }>();
-async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
+async function makeSnapshotAttempt(projectPath: string): Promise<ProjectSnapshot> {
   const project = await readProject(projectPath);
   const thumbnails: Record<string, string> = {};
   const warnings: string[] = [];
@@ -215,21 +343,37 @@ async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
   );
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   const recoveryStat = await fs.stat(recoveryPath).catch(() => null);
-  const projectRevision = projectRevisionForSource(
-    await fs.readFile(path.join(projectPath, 'project.json'), 'utf8'),
-  );
   return {
     projectPath,
     project,
     thumbnails,
     recoveryFound: Boolean(recoveryStat),
-    projectRevision,
     warnings: warnings.length ? warnings : undefined,
   };
 }
 
+async function makeSnapshot(projectPath: string): Promise<ProjectSnapshot> {
+  const projectFile = path.join(projectPath, 'project.json');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = await fs.readFile(projectFile, 'utf8');
+    const snapshot = await makeSnapshotAttempt(projectPath);
+    const after = await fs.readFile(projectFile, 'utf8');
+    const beforeRevision = projectRevisionForSource(before);
+    const projectRevision = projectRevisionForSource(after);
+    if (beforeRevision === projectRevision) return { ...snapshot, projectRevision };
+  }
+  throw new Error('The project kept changing while its snapshot was prepared. Wait and try again.');
+}
+
 async function openWithRecovery(projectPath: string): Promise<ProjectSnapshot> {
-  const snapshot = await makeSnapshot(projectPath);
+  const nativeRecovery = await recoverNativeProjectTransactions(projectPath);
+  const decorateSnapshot = (snapshot: ProjectSnapshot, warnings: readonly string[] = []) => {
+    const withWarnings = withSnapshotWarnings(snapshot, [...nativeRecovery.warnings, ...warnings]);
+    return nativeRecovery.recoveredDeletes.length
+      ? { ...withWarnings, recoveredDeletes: nativeRecovery.recoveredDeletes }
+      : withWarnings;
+  };
+  const snapshot = decorateSnapshot(await makeSnapshot(projectPath));
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   if (!snapshot.recoveryFound) return snapshot;
   await assertNoLinks(recoveryPath);
@@ -257,25 +401,57 @@ async function openWithRecovery(projectPath: string): Promise<ProjectSnapshot> {
   if (choice.response === 2) throw new Error('Opening cancelled. Recovery data is unchanged.');
   const recoveryBackupPath = path.join(projectPath, '.imnota-recovery-backup.json');
   await assertNoLinks(recoveryBackupPath);
-  await atomicWrite(recoveryBackupPath, recoverySource);
+  const warnings: string[] = [];
   if (choice.response === 0) {
     const recoveredProject = validateProject({
       ...normalizeRecoveredProject(snapshot.project, recoveryProject, recovery.notes),
-      updatedAt: nowIso(),
+      updatedAt: nextProjectMutationTimestamp(snapshot.project.updatedAt),
     });
+    const currentById = new Map(snapshot.project.screenshots.map((shot) => [shot.id, shot]));
+    const writes: ScreenshotTransactionWrite[] = [
+      {
+        relativePath: '.imnota-recovery-backup.json',
+        after: Buffer.from(recoverySource),
+      },
+      {
+        relativePath: '.imnota-recovery.json',
+        after: null,
+        expectedBefore: 'present',
+      },
+    ];
     // Use trusted current file references, not file references from recovery data.
     for (const shot of recoveredProject.screenshots) {
       if (recovery.annotations[shot.id])
-        await atomicWrite(
-          path.join(projectPath, shot.annotationFile),
-          JSON.stringify(recovery.annotations[shot.id], null, 2),
-        );
-      await atomicWrite(path.join(projectPath, shot.descriptionFile), shot.description);
+        writes.push({
+          relativePath: shot.annotationFile,
+          after: Buffer.from(JSON.stringify(recovery.annotations[shot.id], null, 2)),
+        });
+      if (currentById.get(shot.id)?.description !== shot.description)
+        writes.push({ relativePath: shot.descriptionFile, after: Buffer.from(shot.description) });
     }
-    await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(recoveredProject, null, 2));
+    writes.push({
+      relativePath: 'project.json',
+      after: Buffer.from(JSON.stringify(recoveredProject, null, 2)),
+      expectedBefore: 'present',
+    });
+    const expectedProjectRevision = snapshot.projectRevision;
+    if (!expectedProjectRevision) throw new Error('Recovery snapshot has no project revision.');
+    const expectedRecoveryRevision = projectRevisionForSource(recoverySource);
+    warnings.push(
+      ...(await commitFileTransaction(projectPath, 'recovery-restore', writes, async () => {
+        await assertProjectRevision(projectPath, expectedProjectRevision);
+        const currentRecovery = await fs.readFile(recoveryPath, 'utf8');
+        if (projectRevisionForSource(currentRecovery) !== expectedRecoveryRevision)
+          throw new Error(
+            'Recovery data changed while restore was prepared. Reopen the project and try again.',
+          );
+      })),
+    );
+  } else {
+    await atomicWrite(recoveryBackupPath, recoverySource);
+    await unlinkTracked(recoveryPath);
   }
-  await fs.unlink(recoveryPath);
-  return makeSnapshot(projectPath);
+  return decorateSnapshot(await makeSnapshot(projectPath), warnings);
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
@@ -835,7 +1011,8 @@ function registerIpc(): void {
   });
   handle('projects:save-screenshot', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
+    const baseline = await readProjectMutationBaseline(safePath);
+    const project = baseline.project;
     const trustedShot = project.screenshots.find((s) => s.id === input.screenshot.id);
     if (!trustedShot) throw new Error('Screenshot does not belong to this project.');
     const currentContent = await readScreenshotFiles(safePath, trustedShot);
@@ -845,7 +1022,7 @@ function registerIpc(): void {
         safePath,
         `${path.basename(trustedShot.storedFilename, ext)}-copy-conflict${ext}`,
       );
-      const timestamp = nowIso();
+      const timestamp = nextProjectMutationTimestamp(project.updatedAt);
       const conflict: ScreenshotRecord = {
         ...input.screenshot,
         id: `shot_${crypto.randomUUID()}`,
@@ -861,26 +1038,51 @@ function registerIpc(): void {
         includeInExport: false,
         conflict: true,
       };
-      await atomicWrite(
-        screenshotPath(safePath, conflict),
-        await fs.readFile(screenshotPath(safePath, trustedShot)),
-      );
+      const trustedImagePath = screenshotPath(safePath, trustedShot);
+      await assertNoLinks(trustedImagePath);
+      const conflictImage = await fs.readFile(trustedImagePath);
       const conflictAnnotations = JSON.stringify(input.annotations, null, 2);
-      await atomicWrite(path.join(safePath, conflict.annotationFile), conflictAnnotations);
-      await atomicWrite(path.join(safePath, conflict.descriptionFile), conflict.description);
       project.screenshots.push(conflict);
       project.updatedAt = timestamp;
-      const projectSource = JSON.stringify(project, null, 2);
-      await atomicWrite(path.join(safePath, 'project.json'), projectSource);
+      const savedProject = validateProject(project);
+      const projectSource = JSON.stringify(savedProject, null, 2);
+      const warnings = await commitFileTransaction(
+        safePath,
+        'conflict',
+        [
+          {
+            relativePath: `collections/${conflict.collectionId}/screenshots/${conflict.storedFilename}`,
+            after: conflictImage,
+            expectedBefore: 'absent',
+          },
+          {
+            relativePath: conflict.annotationFile,
+            after: Buffer.from(conflictAnnotations),
+            expectedBefore: 'absent',
+          },
+          {
+            relativePath: conflict.descriptionFile,
+            after: Buffer.from(conflict.description),
+            expectedBefore: 'absent',
+          },
+          {
+            relativePath: 'project.json',
+            after: Buffer.from(projectSource),
+            expectedBefore: 'present',
+          },
+        ],
+        () => assertProjectRevision(safePath, baseline.projectRevision),
+      );
       return {
-        project,
+        project: savedProject,
         savedScreenshotId: conflict.id,
         conflictCreated: true,
         contentRevision: contentRevision(conflict.description, conflictAnnotations),
         projectRevision: projectRevisionForSource(projectSource),
+        warnings: warnings.length ? warnings : undefined,
       };
     }
-    const timestamp = nowIso();
+    const timestamp = nextProjectMutationTimestamp(project.updatedAt);
     const screenshot: ScreenshotRecord = {
       ...input.screenshot,
       id: trustedShot.id,
@@ -894,30 +1096,29 @@ function registerIpc(): void {
     project.screenshots = project.screenshots.map((shot) => (shot.id === screenshot.id ? screenshot : shot));
     project.updatedAt = timestamp;
     const annotationsJson = JSON.stringify(input.annotations, null, 2);
-    await atomicWrite(
-      path.join(safePath, '.imnota-recovery.json'),
-      JSON.stringify(
+    const savedProject = validateProject(project);
+    const projectSource = JSON.stringify(savedProject, null, 2);
+    const warnings = await commitFileTransaction(
+      safePath,
+      'save',
+      [
+        { relativePath: screenshot.annotationFile, after: Buffer.from(annotationsJson) },
+        { relativePath: screenshot.descriptionFile, after: Buffer.from(screenshot.description) },
+        { relativePath: '.imnota-recovery.json', after: null },
         {
-          project,
-          annotations: { [screenshot.id]: input.annotations },
+          relativePath: 'project.json',
+          after: Buffer.from(projectSource),
+          expectedBefore: 'present',
         },
-        null,
-        2,
-      ),
+      ],
+      async () => {
+        await assertProjectRevision(safePath, baseline.projectRevision);
+        if ((await readScreenshotFiles(safePath, trustedShot)).revision !== input.contentRevision)
+          throw new Error('Screenshot content changed while the save was prepared. Reload it and try again.');
+      },
     );
-    await atomicWrite(path.join(safePath, screenshot.annotationFile), annotationsJson);
-    await atomicWrite(path.join(safePath, screenshot.descriptionFile), screenshot.description);
-    const projectSource = JSON.stringify(project, null, 2);
-    await atomicWrite(path.join(safePath, 'project.json'), projectSource);
-    const warnings: string[] = [];
-    await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT')
-        warnings.push(
-          'The screenshot was saved, but its recovery journal could not be removed. It will be reconciled on the next open.',
-        );
-    });
     return {
-      project,
+      project: savedProject,
       savedScreenshotId: screenshot.id,
       conflictCreated: false,
       contentRevision: contentRevision(screenshot.description, annotationsJson),
@@ -1007,19 +1208,29 @@ function registerIpc(): void {
   handle('screenshots:delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
-    const result = await deleteScreenshotToTrash(safePath, project, input.screenshotId, async (target) => {
-      await shell.trashItem(target);
-      projectWatchManager?.recordSelfDelete(target);
-    });
+    const result = await deleteScreenshotToTrash(
+      safePath,
+      project,
+      input.screenshotId,
+      async (target) => {
+        await shell.trashItem(target);
+        projectWatchManager?.recordSelfDelete(target);
+      },
+      screenshotTrashOperations,
+    );
     const projectFile = path.join(safePath, 'project.json');
     projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
-    return { snapshot: await makeSnapshot(safePath), undoToken: result.undoToken };
+    const snapshot = withSnapshotWarnings(
+      await makeSnapshot(safePath),
+      result.warning ? [result.warning] : [],
+    );
+    return { snapshot, undoToken: result.undoToken };
   });
   handle('screenshots:undo-delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const before = await readProject(safePath);
-    const restoredProject = await undoScreenshotDelete(safePath, before, input.undoToken);
-    const restored = restoredProject.screenshots.find(
+    const undo = await undoScreenshotDelete(safePath, before, input.undoToken, screenshotTrashOperations);
+    const restored = undo.project.screenshots.find(
       (candidate) => !before.screenshots.some((existing) => existing.id === candidate.id),
     );
     if (restored)
@@ -1031,7 +1242,7 @@ function registerIpc(): void {
         projectWatchManager?.recordSelfWrite(target, await fs.readFile(target));
     const projectFile = path.join(safePath, 'project.json');
     projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
-    return makeSnapshot(safePath);
+    return withSnapshotWarnings(await makeSnapshot(safePath), undo.warning ? [undo.warning] : []);
   });
   handle('collections:edit', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
