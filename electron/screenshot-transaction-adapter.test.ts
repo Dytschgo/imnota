@@ -38,7 +38,7 @@ const operations = {
 };
 
 async function recoveryFixture(count: number, changeDescriptions: boolean) {
-  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-recovery-adapter-'));
+  const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-recovery-adapter-')));
   temporary.push(projectPath);
   const currentProject = emptyProject('Recovery', '');
   currentProject.id = 'project_recovery_fixture';
@@ -97,7 +97,9 @@ describe('screenshot transaction baseline adapter', () => {
   });
 
   it('does not overwrite an external project change inserted between read and stage', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-transaction-adapter-'));
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-transaction-adapter-')),
+    );
     temporary.push(projectPath);
     const projectFile = path.join(projectPath, 'project.json');
     const sidecarFile = path.join(projectPath, 'sidecar.md');

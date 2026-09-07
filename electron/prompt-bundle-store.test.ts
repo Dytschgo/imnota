@@ -17,7 +17,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 async function fixture(collectionId = '001-collection') {
-  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-prompt-store-'));
+  const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-prompt-store-')));
   temporaryDirectories.push(projectPath);
   await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
   return { projectPath, collectionId };
