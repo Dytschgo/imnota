@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.2.3
+## 0.2.4
+
+- Corrected macOS temporary test paths so release checks exercise regular folders without bypassing symlink protection. The v0.2.3 tag did not publish a release because these checks failed.
 
 - Added collection-based PNG prompt bundles with corresponding Markdown, screenshot references, and export exclusions.
 - Added traditional non-destructive crop controls with Apply, Cancel, Reset, and resize handles.

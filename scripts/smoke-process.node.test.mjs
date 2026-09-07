@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -11,6 +11,7 @@ import {
 } from './smoke-process.mjs';
 
 const temporary = [];
+const temporaryRoot = realpathSync(tmpdir());
 afterEach(() => {
   for (const target of temporary.splice(0)) rmSync(target, { recursive: true, force: true });
 });
@@ -27,7 +28,7 @@ describe('native smoke process safety', () => {
     assert.equal(inherited.VITE_DEV_SERVER_URL, 'http://localhost:5173');
   });
   it('accepts a dedicated newly created artifact directory and rejects broad names', () => {
-    const parent = mkdtempSync(join(tmpdir(), 'imnota-smoke-script-test-'));
+    const parent = mkdtempSync(join(temporaryRoot, 'imnota-smoke-script-test-'));
     temporary.push(parent);
     const target = join(parent, 'imnota-verification-artifacts-ci');
     assert.equal(prepareArtifactDirectory(target), resolve(target));
@@ -37,7 +38,7 @@ describe('native smoke process safety', () => {
   });
 
   it('rejects artifact aliases and existing reports', () => {
-    const parent = mkdtempSync(join(tmpdir(), 'imnota-smoke-script-test-'));
+    const parent = mkdtempSync(join(temporaryRoot, 'imnota-smoke-script-test-'));
     temporary.push(parent);
     const real = join(parent, 'real-artifacts');
     const alias = join(parent, 'imnota-smoke-artifacts-link');
@@ -57,13 +58,13 @@ describe('native smoke process safety', () => {
   });
 
   it('refuses cleanup outside its exact temporary result namespace', () => {
-    const parent = mkdtempSync(join(tmpdir(), 'imnota-smoke-script-test-'));
+    const parent = mkdtempSync(join(temporaryRoot, 'imnota-smoke-script-test-'));
     temporary.push(parent);
     assert.throws(() => removeRunDirectory(parent), /Refusing/);
-    const matchingButUnowned = join(tmpdir(), 'imnota-smoke-result-unowned-test');
+    const matchingButUnowned = join(temporaryRoot, 'imnota-smoke-result-unowned-test');
     mkdirSync(matchingButUnowned, { recursive: true });
     temporary.push(matchingButUnowned);
     assert.throws(() => removeRunDirectory(matchingButUnowned), /ownership marker/);
-    assert.doesNotThrow(() => removeRunDirectory(resolve(tmpdir(), 'imnota-smoke-result-not-created')));
+    assert.doesNotThrow(() => removeRunDirectory(resolve(temporaryRoot, 'imnota-smoke-result-not-created')));
   });
 });
