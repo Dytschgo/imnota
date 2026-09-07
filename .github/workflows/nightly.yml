@@ -57,6 +57,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix share-service
+      - run: npm test --prefix share-service
+      - run: npm audit --prefix share-service --omit=dev --audit-level=high
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck

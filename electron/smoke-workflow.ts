@@ -1510,6 +1510,13 @@ export async function runSmokeWorkflow(
   const onboardingPresent = await exerciseOnboarding(driver, artifactDirectory, artifacts);
   if (onboardingPresent) assertions.push('onboarding sample and native clipboard action');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', onboardingPresent);
+  // Use a stable user-facing name while retaining random, isolated filesystem paths.
+  // This keeps approved visual captures independent of the temporary workspace name.
+  await driver.click({ selector: 'button[aria-label="Rename"]' });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Rename collection' });
+  await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
+  await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
+  await driver.waitFor({ selector: '[role="dialog"]' }, { absent: true });
   await importImages(driver, projectPath, sources, 10);
   assertions.push('real new-project prompt and collection import');
 
