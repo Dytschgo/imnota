@@ -1,4 +1,5 @@
 .imnota-preference-section {
+  min-width: 0;
   width: 100%;
   border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
   color: var(--ink, #f4f5f7);
@@ -145,7 +146,7 @@
 
 .imnota-accent-options {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -193,7 +194,7 @@
 
 .imnota-glass-options {
   display: grid;
-  grid-template-columns: repeat(4, minmax(128px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -525,5 +526,64 @@
 
   .imnota-shortcut-row {
     grid-template-columns: minmax(190px, 1fr) 170px;
+  }
+}
+
+@container settings-content (max-width: 720px) {
+  .imnota-preference-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  .imnota-shortcut-group {
+    grid-template-columns: 132px minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-row {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 170px);
+    gap: 14px;
+  }
+}
+
+@container settings-content (max-width: 520px) {
+  .imnota-preference-heading {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .imnota-accent-options,
+  .imnota-glass-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .imnota-shortcut-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-group h3,
+  .imnota-shortcut-row {
+    grid-column: 1;
+  }
+
+  .imnota-shortcut-group h3 {
+    padding-bottom: 8px;
+  }
+}
+
+@container settings-content (max-width: 400px) {
+  .imnota-accent-options,
+  .imnota-glass-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 10px 0 12px;
+  }
+
+  .imnota-shortcut-recorder {
+    width: 100%;
   }
 }

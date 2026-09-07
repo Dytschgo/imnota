@@ -1065,14 +1065,17 @@ button:disabled {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  container-name: canvas-column;
+  container-type: inline-size;
 }
 .workspace-toolbar {
   min-height: 56px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 0 12px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1106,6 +1109,7 @@ button:disabled {
 }
 .canvas-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
 }
@@ -1205,7 +1209,6 @@ button:disabled {
   pointer-events: none;
 }
 .workspace-toolbar {
-  flex-wrap: wrap;
   flex-shrink: 0;
 }
 .canvas-text-editor {
@@ -1536,8 +1539,12 @@ button:disabled {
 .settings-grid {
   display: grid;
   max-width: 940px;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
-  column-gap: 42px;
+  grid-template-columns: minmax(0, 1fr);
+  container-name: settings-content;
+  container-type: inline-size;
+}
+.settings-grid > * {
+  min-width: 0;
 }
 .settings-section {
   padding: 24px 0;

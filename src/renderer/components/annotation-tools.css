@@ -1,14 +1,22 @@
 .annotation-toolbar.toolbar {
   position: relative;
-  flex-wrap: nowrap;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+  align-content: center;
   gap: 4px;
+  min-width: 0;
   max-width: 100%;
   overflow: visible;
 }
 
 .annotation-primary-tools.tool-group,
 .annotation-view-tools.tool-group {
+  flex: 0 0 auto;
   flex-wrap: nowrap;
+}
+
+.annotation-toolbar > .toolbar-divider {
+  flex: none;
 }
 
 .annotation-toolbar .icon-button {
@@ -75,6 +83,16 @@
   opacity: 1;
   transform: translate(-50%, 0);
   transition-delay: 320ms;
+}
+
+.annotation-primary-tools > .annotation-tooltip-anchor:first-child > .annotation-tooltip {
+  left: 0;
+  transform: translateY(-3px);
+}
+
+.annotation-primary-tools > .annotation-tooltip-anchor:first-child:hover > .annotation-tooltip,
+.annotation-primary-tools > .annotation-tooltip-anchor:first-child:focus-within > .annotation-tooltip {
+  transform: translateY(0);
 }
 
 .annotation-more {
@@ -205,6 +223,13 @@
 }
 
 @media (max-width: 1200px) {
+  .annotation-view-tools .icon-button:nth-of-type(3),
+  .annotation-view-tools .icon-button:nth-of-type(4) {
+    display: none;
+  }
+}
+
+@container canvas-column (max-width: 560px) {
   .annotation-view-tools .icon-button:nth-of-type(3),
   .annotation-view-tools .icon-button:nth-of-type(4) {
     display: none;
