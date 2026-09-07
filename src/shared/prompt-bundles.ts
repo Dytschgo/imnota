@@ -1,10 +1,10 @@
 export type PromptPriority = 'low' | 'medium' | 'high';
+export type PromptVisualKind = 'screenshot' | 'drawing';
 
 export interface PromptAnnotationInput {
   kind: string;
   text?: string;
 }
-
 export interface PromptScreenshotInput {
   id: string;
   position: number;
@@ -17,53 +17,78 @@ export interface PromptScreenshotInput {
   nativeHeight: number;
   contentRevision: string;
   annotations: readonly PromptAnnotationInput[];
+  kind?: 'screenshot';
 }
-
+export interface PromptDrawingInput {
+  id: string;
+  kind: 'drawing';
+  position: number;
+  title: string;
+  originalFilename: string;
+  includeInExport: boolean;
+  nativeWidth: number;
+  nativeHeight: number;
+  contentRevision: string;
+  sourceFilename: string;
+}
+export interface PromptTextInput {
+  id: string;
+  kind: 'text';
+  position: number;
+  includeInExport: boolean;
+  markdown: string;
+  contentRevision: string;
+}
+export type PromptCollectionItemInput = PromptScreenshotInput | PromptDrawingInput | PromptTextInput;
 export interface PromptCollectionInput {
   collectionId: string;
   collectionName: string;
   overallContext: string;
+  /** Kept for existing callers; mixed callers must provide items. */
   screenshots: readonly PromptScreenshotInput[];
+  items?: readonly PromptCollectionItemInput[];
 }
-
 export interface MeasuredPromptScreenshot {
   screenshotId: string;
   width: number;
   height: number;
-  /** Optional preflight estimate; actual composed size remains authoritative. */
   estimatedPngCharacters?: number;
-  /** Convenience only. Production integration should resolve PNGs per bundle on demand. */
   dataUrl?: string;
 }
-
 export interface PromptTextNote {
   number: number;
   text: string;
 }
-
 export interface PromptBundlePicture {
   screenshotId: string;
   pictureNumber: number;
+  kind: PromptVisualKind;
   title: string;
   originalFilename: string;
   description: string;
   priority: PromptPriority;
   contentRevision: string;
   notes: PromptTextNote[];
+  sourceFilename?: string;
   estimatedPngCharacters?: number;
-  /** Convenience only; omit to keep the collection plan metadata-only. */
   dataUrl?: string;
   width: number;
   height: number;
 }
-
+export interface PromptBundleText {
+  itemId: string;
+  markdown: string;
+  contentRevision: string;
+}
+export type PromptBundleEntry =
+  | { kind: 'visual'; itemId: string }
+  | { kind: 'text'; itemId: string; markdown: string; contentRevision: string };
 export interface PromptBundleLayoutOptions {
   outerMargin: number;
   labelHeight: number;
   labelGap: number;
   pictureGap: number;
 }
-
 export interface PromptBundleLayoutItem {
   screenshotId: string;
   pictureNumber: number;
@@ -73,29 +98,29 @@ export interface PromptBundleLayoutItem {
   width: number;
   height: number;
 }
-
 export interface PromptBundleLayout {
   width: number;
   height: number;
   items: PromptBundleLayoutItem[];
 }
-
 export interface PromptBundleLimits {
   maxEdge: number;
   maxPixels: number;
   maxEstimatedPngCharacters: number;
   encodedSizeHeadroom: number;
 }
-
 export type PromptBundleDelivery = 'clipboard' | 'file-only';
-
 export interface PromptBundle {
   number: number;
   total: number;
   pictures: PromptBundlePicture[];
+  textItems: PromptBundleText[];
+  entries: PromptBundleEntry[];
   pictureNumbers: number[];
   excludedPictureNumbers: number[];
   excludedCount: number;
+  excludedVisuals: Array<{ number: number; kind: PromptVisualKind }>;
+  excludedTextCount: number;
   markdown: string;
   layout: PromptBundleLayout;
   estimatedPngCharacters: number;
@@ -103,7 +128,6 @@ export interface PromptBundle {
   warning?: string;
   reference?: string;
 }
-
 export interface PromptBundlePlan {
   kind: 'ready';
   collectionId: string;
@@ -111,51 +135,38 @@ export interface PromptBundlePlan {
   overallContext: string;
   bundles: PromptBundle[];
 }
-
 export interface PromptBundleNoContent {
   kind: 'no-content';
   message: string;
 }
-
 export type PromptBundlePlanResult = PromptBundlePlan | PromptBundleNoContent;
-
 export interface PromptBundleProgress {
   phase: 'planning' | 'rendering' | 'writing' | 'copying' | 'complete' | 'cancelled' | 'error';
   bundleNumber?: number;
   totalBundles?: number;
   message?: string;
 }
-
 export interface PlanPromptBundleOptions {
   limits?: Partial<PromptBundleLimits>;
   layout?: Partial<PromptBundleLayoutOptions>;
-  /**
-   * Integration may add a break and re-plan when an encoded composed PNG exceeds
-   * the estimate. IDs mean "start a new bundle with this screenshot".
-   */
   breakBeforeScreenshotIds?: ReadonlySet<string>;
   markdownIdentity?: PromptBundleMarkdownIdentity;
 }
-
 export interface PromptBundleMarkdownIdentity {
-  /** Server-reserved set name, for example "Collection 02 - 260907-184205". */
   setName: string;
 }
-
 export const DEFAULT_PROMPT_BUNDLE_LIMITS: PromptBundleLimits = {
   maxEdge: 8192,
   maxPixels: 16_000_000,
   maxEstimatedPngCharacters: 32_000_000,
   encodedSizeHeadroom: 1.15,
 };
-
 export const DEFAULT_PROMPT_BUNDLE_LAYOUT: PromptBundleLayoutOptions = {
   outerMargin: 32,
   labelHeight: 36,
   labelGap: 12,
   pictureGap: 32,
 };
-
 const FILE_ONLY_WARNING =
   'This full-resolution prompt exceeds safe clipboard limits. Use the saved PNG and Markdown files instead.';
 
@@ -163,30 +174,23 @@ function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive integer.`);
   return value;
 }
-
 function nonnegativeInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer.`);
   return value;
 }
-
 function cleanHeading(value: string, fallback: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim() || fallback;
 }
+function normalized(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
 
-/**
- * Input annotations must be in original creation/array order. Do not sort by
- * zIndex. Once src/shared/annotation-order.ts lands, integration must pass the
- * order produced by that shared helper into this mapper.
- */
-export function mapPromptTextNotes(
-  annotationsInCreationOrder: readonly PromptAnnotationInput[],
-): PromptTextNote[] {
+export function mapPromptTextNotes(annotations: readonly PromptAnnotationInput[]): PromptTextNote[] {
   const notes: PromptTextNote[] = [];
-  for (const annotation of annotationsInCreationOrder) {
+  for (const annotation of annotations) {
     if (annotation.kind !== 'text' && annotation.kind !== 'callout') continue;
-    const text = annotation.text?.replace(/\r\n?/g, '\n');
-    if (!text?.trim()) continue;
-    notes.push({ number: notes.length + 1, text });
+    const text = annotation.text && normalized(annotation.text);
+    if (text?.trim()) notes.push({ number: notes.length + 1, text });
   }
   return notes;
 }
@@ -195,13 +199,12 @@ export function calculatePromptBundleLayout(
   pictures: readonly Pick<PromptBundlePicture, 'screenshotId' | 'pictureNumber' | 'width' | 'height'>[],
   overrides: Partial<PromptBundleLayoutOptions> = {},
 ): PromptBundleLayout {
-  if (!pictures.length) throw new Error('A visual prompt bundle needs at least one screenshot.');
   const options = { ...DEFAULT_PROMPT_BUNDLE_LAYOUT, ...overrides };
   nonnegativeInteger(options.outerMargin, 'Outer margin');
   positiveInteger(options.labelHeight, 'Label height');
   nonnegativeInteger(options.labelGap, 'Label gap');
   nonnegativeInteger(options.pictureGap, 'Picture gap');
-
+  if (!pictures.length) return { width: 0, height: 0, items: [] };
   const widest = Math.max(...pictures.map((picture) => positiveInteger(picture.width, 'Picture width')));
   const width = widest + options.outerMargin * 2;
   let y = options.outerMargin;
@@ -236,200 +239,214 @@ function estimatePngCharacters(pictures: readonly PromptBundlePicture[], headroo
       0,
     ) *
       headroom +
-      4096,
+      (pictures.length ? 4096 : 0),
   );
 }
-
-function fitsClipboard(
-  layout: PromptBundleLayout,
-  estimatedPngCharacters: number,
-  limits: PromptBundleLimits,
-): boolean {
+function fitsClipboard(layout: PromptBundleLayout, estimate: number, limits: PromptBundleLimits): boolean {
   return (
     layout.width <= limits.maxEdge &&
     layout.height <= limits.maxEdge &&
     layout.width * layout.height <= limits.maxPixels &&
-    estimatedPngCharacters <= limits.maxEstimatedPngCharacters
+    estimate <= limits.maxEstimatedPngCharacters
   );
+}
+function visualLabel(picture: PromptBundlePicture): string {
+  return `${picture.kind === 'drawing' ? 'Drawing' : 'Picture'} ${picture.pictureNumber}`;
 }
 
 function markdownForBundle(
   collection: PromptCollectionInput,
-  pictures: readonly PromptBundlePicture[],
-  excludedPictureNumbers: readonly number[],
-  bundleNumber: number,
-  bundleCount: number,
+  bundle: Pick<
+    PromptBundle,
+    'pictures' | 'entries' | 'excludedVisuals' | 'excludedTextCount' | 'number' | 'total'
+  >,
   identity?: PromptBundleMarkdownIdentity,
 ): string {
   const lines = [
     `# ${cleanHeading(collection.collectionName, 'Untitled collection')}`,
     '',
-    `Prompt ${bundleNumber} of ${bundleCount}`,
+    `Prompt ${bundle.number} of ${bundle.total}`,
     '',
   ];
-  if (identity) {
-    lines.push(`Export set: ${cleanHeading(identity.setName, 'Prompt export')}`);
+  if (identity)
     lines.push(
-      `Bundle reference: ${cleanHeading(identity.setName, 'Prompt export')} - ${String(bundleNumber).padStart(2, '0')}`,
+      `Export set: ${cleanHeading(identity.setName, 'Prompt export')}`,
+      `Bundle reference: ${cleanHeading(identity.setName, 'Prompt export')} - ${String(bundle.number).padStart(2, '0')}`,
       '',
     );
-  }
-  const context = collection.overallContext.replace(/\r\n?/g, '\n');
-  if (context.trim() && bundleNumber === 1) lines.push('## Overall context', '', context, '');
+  const context = normalized(collection.overallContext);
+  if (context.trim() && bundle.number === 1) lines.push('## Overall context', '', context, '');
   else if (context.trim()) lines.push('Shared collection context is included in Prompt 1.', '');
-
-  for (const picture of pictures) {
+  const visualById = new Map(bundle.pictures.map((picture) => [picture.screenshotId, picture]));
+  for (const entry of bundle.entries) {
+    if (entry.kind === 'text') {
+      if (entry.markdown.trim()) lines.push(normalized(entry.markdown), '');
+      continue;
+    }
+    const picture = visualById.get(entry.itemId);
+    if (!picture) continue;
+    lines.push(`## ${visualLabel(picture)} — ${cleanHeading(picture.title, picture.originalFilename)}`, '');
+    if (picture.kind === 'screenshot') {
+      lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
+      if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
+      for (const note of picture.notes)
+        lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
+    }
+  }
+  for (const visual of bundle.excludedVisuals)
     lines.push(
-      `## Picture ${picture.pictureNumber} — ${cleanHeading(picture.title, picture.originalFilename)}`,
-      '',
-      `Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`,
+      `${visual.kind === 'drawing' ? 'Drawing' : 'Picture'} ${visual.number} was intentionally excluded from this prompt bundle.`,
       '',
     );
-    const description = picture.description.replace(/\r\n?/g, '\n');
-    if (description.trim()) lines.push(description, '');
-    for (const note of picture.notes)
-      lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
-  }
-
-  for (const pictureNumber of excludedPictureNumbers)
-    lines.push(`Picture ${pictureNumber} was intentionally excluded from this prompt bundle.`, '');
+  if (bundle.excludedTextCount)
+    lines.push(
+      `${bundle.excludedTextCount === 1 ? 'A text block was' : `${bundle.excludedTextCount} text blocks were`} intentionally excluded from this prompt bundle.`,
+      '',
+    );
   return `${lines.join('\n').replace(/\n+$/g, '')}\n`;
 }
 
-function orderedScreenshots(screenshots: readonly PromptScreenshotInput[]): PromptScreenshotInput[] {
-  return screenshots
-    .map((screenshot, sourceIndex) => ({ screenshot, sourceIndex }))
-    .sort(
-      (left, right) =>
-        left.screenshot.position - right.screenshot.position || left.sourceIndex - right.sourceIndex,
-    )
-    .map(({ screenshot }) => screenshot);
+function orderedItems(collection: PromptCollectionInput): PromptCollectionItemInput[] {
+  const items =
+    collection.items ?? collection.screenshots.map((item) => ({ ...item, kind: 'screenshot' as const }));
+  return items
+    .map((item, sourceIndex) => ({ item, sourceIndex }))
+    .sort((a, b) => a.item.position - b.item.position || a.sourceIndex - b.sourceIndex)
+    .map(({ item }) => item);
 }
-
 function resolveRendered(
-  screenshot: PromptScreenshotInput,
-  pictureNumber: number,
-  measuredById: ReadonlyMap<string, MeasuredPromptScreenshot>,
+  item: Extract<PromptCollectionItemInput, { kind?: 'screenshot' } | { kind: 'drawing' }>,
+  number: number,
+  measured: ReadonlyMap<string, MeasuredPromptScreenshot>,
 ): PromptBundlePicture {
-  const measured = measuredById.get(screenshot.id);
-  if (!measured) throw new Error(`Measured screenshot is missing for Picture ${pictureNumber}.`);
-  if (measured.dataUrl !== undefined && !measured.dataUrl.startsWith('data:image/png;base64,'))
-    throw new Error(`Rendered screenshot for Picture ${pictureNumber} is not a PNG data URL.`);
-  positiveInteger(measured.width, `Picture ${pictureNumber} width`);
-  positiveInteger(measured.height, `Picture ${pictureNumber} height`);
+  const rendered = measured.get(item.id);
+  const label = item.kind === 'drawing' ? `Drawing ${number}` : `Picture ${number}`;
+  if (!rendered) throw new Error(`Measured visual is missing for ${label}.`);
+  if (rendered.dataUrl !== undefined && !rendered.dataUrl.startsWith('data:image/png;base64,'))
+    throw new Error(`Rendered visual for ${label} is not a PNG data URL.`);
+  positiveInteger(rendered.width, `${label} width`);
+  positiveInteger(rendered.height, `${label} height`);
   if (
-    measured.estimatedPngCharacters !== undefined &&
-    (!Number.isSafeInteger(measured.estimatedPngCharacters) || measured.estimatedPngCharacters < 0)
+    rendered.estimatedPngCharacters !== undefined &&
+    (!Number.isSafeInteger(rendered.estimatedPngCharacters) || rendered.estimatedPngCharacters < 0)
   )
-    throw new Error(`Estimated PNG size is invalid for Picture ${pictureNumber}.`);
+    throw new Error(`Estimated PNG size is invalid for ${label}.`);
+  const drawing = item.kind === 'drawing';
   return {
-    screenshotId: screenshot.id,
-    pictureNumber,
-    title: screenshot.title,
-    originalFilename: screenshot.originalFilename,
-    description: screenshot.description,
-    priority: screenshot.priority,
-    contentRevision: screenshot.contentRevision,
-    notes: mapPromptTextNotes(screenshot.annotations),
-    estimatedPngCharacters: measured.estimatedPngCharacters,
-    dataUrl: measured.dataUrl,
-    width: measured.width,
-    height: measured.height,
+    screenshotId: item.id,
+    pictureNumber: number,
+    kind: drawing ? 'drawing' : 'screenshot',
+    title: item.title,
+    originalFilename: item.originalFilename,
+    description: drawing ? '' : item.description,
+    priority: drawing ? 'medium' : item.priority,
+    contentRevision: item.contentRevision,
+    notes: drawing ? [] : mapPromptTextNotes(item.annotations),
+    sourceFilename: drawing ? item.sourceFilename : undefined,
+    estimatedPngCharacters: rendered.estimatedPngCharacters,
+    dataUrl: rendered.dataUrl,
+    width: rendered.width,
+    height: rendered.height,
   };
 }
 
 export function planPromptBundles(
   collection: PromptCollectionInput,
-  measuredScreenshots: readonly MeasuredPromptScreenshot[],
+  measuredVisuals: readonly MeasuredPromptScreenshot[],
   options: PlanPromptBundleOptions = {},
 ): PromptBundlePlanResult {
-  const ordered = orderedScreenshots(collection.screenshots);
-  const included = ordered.filter((screenshot) => screenshot.includeInExport);
+  const ordered = orderedItems(collection);
+  if (new Set(ordered.map((item) => item.id)).size !== ordered.length)
+    throw new Error('Collection contains duplicate content item IDs.');
+  const included = ordered.filter((item) => item.includeInExport);
   if (!included.length)
     return {
       kind: 'no-content',
-      message: ordered.length
-        ? 'No screenshots are included. Turn on at least one screenshot to create a prompt bundle.'
-        : 'This collection has no screenshots yet. Add a screenshot to create a prompt bundle.',
+      message: collection.items
+        ? ordered.length
+          ? 'No content is included. Turn on at least one item to create a prompt bundle.'
+          : 'This collection has no content yet. Add a screenshot, drawing, or text block to create a prompt bundle.'
+        : ordered.length
+          ? 'No screenshots are included. Turn on at least one screenshot to create a prompt bundle.'
+          : 'This collection has no screenshots yet. Add a screenshot to create a prompt bundle.',
     };
-
   const limits = { ...DEFAULT_PROMPT_BUNDLE_LIMITS, ...options.limits };
   positiveInteger(limits.maxEdge, 'Maximum edge');
   positiveInteger(limits.maxPixels, 'Maximum pixels');
   positiveInteger(limits.maxEstimatedPngCharacters, 'Maximum estimated PNG characters');
-  const measuredById = new Map(measuredScreenshots.map((measured) => [measured.screenshotId, measured]));
-  if (measuredById.size !== measuredScreenshots.length)
-    throw new Error('Measured screenshots contain duplicate screenshot IDs.');
-
-  const numberById = new Map(ordered.map((screenshot, index) => [screenshot.id, index + 1]));
-  if (numberById.size !== ordered.length) throw new Error('Collection contains duplicate screenshot IDs.');
+  const measured = new Map(measuredVisuals.map((value) => [value.screenshotId, value]));
+  if (measured.size !== measuredVisuals.length) throw new Error('Measured visuals contain duplicate IDs.');
+  const visualNumbers = new Map<string, number>();
+  let visualCount = 0;
+  for (const item of ordered) if (item.kind !== 'text') visualNumbers.set(item.id, ++visualCount);
   const excludedPictureNumbers = ordered
-    .map((screenshot, index) => ({ screenshot, pictureNumber: index + 1 }))
-    .filter(({ screenshot }) => !screenshot.includeInExport)
-    .map(({ pictureNumber }) => pictureNumber);
-  const pictures = included.map((screenshot) =>
-    resolveRendered(screenshot, numberById.get(screenshot.id)!, measuredById),
-  );
-
-  const groups: Array<{
-    pictures: PromptBundlePicture[];
-    layout: PromptBundleLayout;
-    estimatedPngCharacters: number;
-    delivery: PromptBundleDelivery;
-    warning?: string;
-  }> = [];
-  let current: PromptBundlePicture[] = [];
-
-  const finalizeCurrent = () => {
-    if (!current.length) return;
-    const layout = calculatePromptBundleLayout(current, options.layout);
-    const estimatedPngCharacters = estimatePngCharacters(current, limits.encodedSizeHeadroom);
-    const clipboardSafe = fitsClipboard(layout, estimatedPngCharacters, limits);
-    groups.push({
-      pictures: current,
+    .filter((item) => item.kind !== 'text' && !item.includeInExport)
+    .map((item) => visualNumbers.get(item.id)!);
+  const excludedVisuals = ordered
+    .filter((item) => item.kind !== 'text' && !item.includeInExport)
+    .map((item) => ({
+      number: visualNumbers.get(item.id)!,
+      kind: item.kind === 'drawing' ? ('drawing' as const) : ('screenshot' as const),
+    }));
+  const excludedTextCount = ordered.filter((item) => item.kind === 'text' && !item.includeInExport).length;
+  const groups: Array<{ pictures: PromptBundlePicture[]; entries: PromptBundleEntry[] }> = [];
+  let current = { pictures: [] as PromptBundlePicture[], entries: [] as PromptBundleEntry[] };
+  const finalize = () => {
+    if (current.entries.length) groups.push(current);
+    current = { pictures: [], entries: [] };
+  };
+  for (const item of included) {
+    if (item.kind === 'text') {
+      current.entries.push({
+        kind: 'text',
+        itemId: item.id,
+        markdown: item.markdown,
+        contentRevision: item.contentRevision,
+      });
+      continue;
+    }
+    if (current.pictures.length && options.breakBeforeScreenshotIds?.has(item.id)) finalize();
+    const picture = resolveRendered(item, visualNumbers.get(item.id)!, measured);
+    const candidate = [...current.pictures, picture];
+    const layout = calculatePromptBundleLayout(candidate, options.layout);
+    const estimate = estimatePngCharacters(candidate, limits.encodedSizeHeadroom);
+    if (current.pictures.length && !fitsClipboard(layout, estimate, limits)) {
+      finalize();
+    }
+    current.pictures.push(picture);
+    current.entries.push({ kind: 'visual', itemId: item.id });
+  }
+  finalize();
+  const bundles = groups.map((group, index): PromptBundle => {
+    const layout = calculatePromptBundleLayout(group.pictures, options.layout);
+    const estimatedPngCharacters = estimatePngCharacters(group.pictures, limits.encodedSizeHeadroom);
+    const clipboardSafe = !group.pictures.length || fitsClipboard(layout, estimatedPngCharacters, limits);
+    const bundle: PromptBundle = {
+      number: index + 1,
+      total: groups.length,
+      pictures: group.pictures,
+      textItems: group.entries
+        .filter((entry): entry is Extract<PromptBundleEntry, { kind: 'text' }> => entry.kind === 'text')
+        .map((entry) => ({
+          itemId: entry.itemId,
+          markdown: entry.markdown,
+          contentRevision: entry.contentRevision,
+        })),
+      entries: group.entries,
+      pictureNumbers: group.pictures.map((picture) => picture.pictureNumber),
+      excludedPictureNumbers,
+      excludedCount: excludedPictureNumbers.length,
+      excludedVisuals,
+      excludedTextCount,
+      markdown: '',
       layout,
       estimatedPngCharacters,
       delivery: clipboardSafe ? 'clipboard' : 'file-only',
       warning: clipboardSafe ? undefined : FILE_ONLY_WARNING,
-    });
-    current = [];
-  };
-
-  for (const picture of pictures) {
-    if (current.length && options.breakBeforeScreenshotIds?.has(picture.screenshotId)) finalizeCurrent();
-    const candidate = [...current, picture];
-    const layout = calculatePromptBundleLayout(candidate, options.layout);
-    const estimatedPngCharacters = estimatePngCharacters(candidate, limits.encodedSizeHeadroom);
-    if (current.length && !fitsClipboard(layout, estimatedPngCharacters, limits)) {
-      finalizeCurrent();
-      current = [picture];
-    } else current = candidate;
-  }
-  finalizeCurrent();
-
-  const bundles = groups.map((group, index): PromptBundle => ({
-    number: index + 1,
-    total: groups.length,
-    pictures: group.pictures,
-    pictureNumbers: group.pictures.map((picture) => picture.pictureNumber),
-    excludedPictureNumbers,
-    excludedCount: excludedPictureNumbers.length,
-    markdown: markdownForBundle(
-      collection,
-      group.pictures,
-      excludedPictureNumbers,
-      index + 1,
-      groups.length,
-      options.markdownIdentity,
-    ),
-    layout: group.layout,
-    estimatedPngCharacters: group.estimatedPngCharacters,
-    delivery: group.delivery,
-    warning: group.warning,
-    reference: options.markdownIdentity
-      ? `${options.markdownIdentity.setName} - ${String(index + 1).padStart(2, '0')}`
-      : undefined,
-  }));
+    };
+    bundle.markdown = markdownForBundle(collection, bundle, options.markdownIdentity);
+    return bundle;
+  });
   return {
     kind: 'ready',
     collectionId: collection.collectionId,
@@ -439,7 +456,6 @@ export function planPromptBundles(
   };
 }
 
-/** Stamp an existing metadata-only plan after the main process reserves its collision-free set name. */
 export function applyPromptBundleMarkdownIdentity(
   plan: PromptBundlePlan,
   identity: PromptBundleMarkdownIdentity,
@@ -455,20 +471,12 @@ export function applyPromptBundleMarkdownIdentity(
     bundles: plan.bundles.map((bundle) => ({
       ...bundle,
       reference: `${identity.setName} - ${String(bundle.number).padStart(2, '0')}`,
-      markdown: markdownForBundle(
-        collection,
-        bundle.pictures,
-        bundle.excludedPictureNumbers,
-        bundle.number,
-        bundle.total,
-        identity,
-      ),
+      markdown: markdownForBundle(collection, bundle, identity),
     })),
   };
 }
-
-/** Return the first screenshot ID that should move into a new bundle after an actual encoded overflow. */
 export function encodedOverflowBreak(bundle: PromptBundle): string | null {
-  if (bundle.pictures.length < 2) return null;
-  return bundle.pictures[Math.ceil(bundle.pictures.length / 2)].screenshotId;
+  return bundle.pictures.length < 2
+    ? null
+    : bundle.pictures[Math.ceil(bundle.pictures.length / 2)].screenshotId;
 }

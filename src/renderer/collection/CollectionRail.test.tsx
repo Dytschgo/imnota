@@ -124,6 +124,125 @@ afterEach(() => {
 });
 
 describe('CollectionRail', () => {
+  it('applies visibility to the selected conflict copy after flushing', async () => {
+    const current = projectSnapshot();
+    const text = {
+      id: 'text',
+      kind: 'text' as const,
+      collectionId: 'collection-a',
+      position: 4,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      markdownFilename: 'text.md',
+    };
+    current.project.contentItems = [text];
+    useAppStore.setState({ snapshot: current, activeScreenshotId: text.id });
+    const onFlush = vi.fn(async () => {
+      useAppStore.setState({
+        snapshot: {
+          ...current,
+          project: {
+            ...current.project,
+            contentItems: [
+              text,
+              {
+                ...text,
+                id: 'conflict',
+                position: 5,
+                markdownFilename: 'conflict.md',
+                includeInExport: false,
+              },
+            ],
+          },
+        },
+        activeScreenshotId: 'conflict',
+      });
+      return true;
+    });
+    const onSaveProject = vi.fn(async () => true);
+    render(<CollectionRail {...props({ onFlush, onSaveProject })} />);
+    fireEvent.click(screen.getByTestId('screenshot-export-toggle-text'));
+    await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
+    const saved = useAppStore.getState().snapshot!.project.contentItems!;
+    expect(saved.find((item) => item.id === 'text')?.includeInExport).toBe(true);
+    expect(saved.find((item) => item.id === 'conflict')?.includeInExport).toBe(true);
+  });
+  it('orders text and drawings with screenshots and reorders them by keyboard', async () => {
+    const current = projectSnapshot();
+    current.project.contentItems = [
+      {
+        id: 'text',
+        kind: 'text',
+        collectionId: 'collection-a',
+        position: 0.5,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        markdownFilename: 'text.md',
+        preview: 'Architecture overview',
+      },
+      {
+        id: 'drawing',
+        kind: 'drawing',
+        collectionId: 'collection-a',
+        position: 1.5,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        title: 'Services',
+        sourceFilename: 'drawing.json',
+        imageFilename: 'drawing.png',
+        originalWidth: 100,
+        originalHeight: 100,
+      },
+    ];
+    useAppStore.setState({ snapshot: current });
+    const onSaveProject = vi.fn(async () => true);
+    render(<CollectionRail {...props({ onSaveProject, onAddContent: vi.fn() })} />);
+    const ids = () =>
+      [...screen.getByLabelText('Content sequence').querySelectorAll('.shot-select')].map((element) =>
+        element.getAttribute('data-testid'),
+      );
+    expect(ids()).toEqual([
+      'screenshot-alpha',
+      'screenshot-text',
+      'screenshot-beta',
+      'screenshot-drawing',
+      'screenshot-gamma',
+    ]);
+    fireEvent.keyDown(screen.getByTestId('screenshot-text'), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
+    expect(ids()[0]).toBe('screenshot-text');
+    expect(
+      useAppStore.getState().snapshot?.project.contentItems?.find((item) => item.id === 'text')?.position,
+    ).toBe(0);
+    expect(screen.getByRole('button', { name: 'Add drawing' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add text' })).toBeVisible();
+  });
+
+  it('excludes a text block without altering screenshots', async () => {
+    const current = projectSnapshot();
+    current.project.contentItems = [
+      {
+        id: 'text',
+        kind: 'text',
+        collectionId: 'collection-a',
+        position: 4,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        markdownFilename: 'text.md',
+      },
+    ];
+    useAppStore.setState({ snapshot: current });
+    const onSaveProject = vi.fn(async () => true);
+    render(<CollectionRail {...props({ onSaveProject })} />);
+    fireEvent.click(screen.getByTestId('screenshot-export-toggle-text'));
+    await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
+    expect(useAppStore.getState().snapshot?.project.contentItems?.[0].includeInExport).toBe(false);
+    expect(useAppStore.getState().snapshot?.project.screenshots).toEqual(current.project.screenshots);
+  });
   it('archives and restores the current collection through snapshot adoption', async () => {
     const editCollection = vi.fn<ImnotaBridge['editCollection']>(async (input) => {
       const current = useAppStore.getState().snapshot!;

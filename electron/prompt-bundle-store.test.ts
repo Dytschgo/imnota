@@ -176,6 +176,30 @@ describe('prompt bundle store', () => {
     ).rejects.toThrow(/not found|closed/);
   });
 
+  it('publishes a text-only Markdown bundle and preserves drawing source JSON without a fake PNG', async () => {
+    const input = await fixture();
+    const store = promptStore({ randomId: () => 'text-source-session' });
+    const session = await store.startSession({
+      ...startInput(input, 'Mixed'),
+      bundles: [{ bundleNumber: 1, hasImage: false, width: 0, height: 0 }],
+    });
+    await store.commitBundle({
+      sessionId: session.sessionId,
+      bundleNumber: 1,
+      markdown: '# Text only\n',
+      sourceAssets: [{ filename: 'drawing-flow.json', source: '{"type":"excalidraw"}' }],
+    });
+    const result = await store.finishSession(session.sessionId);
+    expect(result.bundles[0]).toMatchObject({
+      pngFilename: '',
+      markdownFilename: expect.stringMatching(/\.md$/),
+    });
+    expect(await fs.readdir(result.folderPath!)).toEqual([expect.stringMatching(/\.md$/), 'sources']);
+    expect(await fs.readFile(path.join(result.folderPath!, 'sources', 'drawing-flow.json'), 'utf8')).toBe(
+      '{"type":"excalidraw"}',
+    );
+  });
+
   it('publishes complete pairs when the optional master overview fails', async () => {
     const input = await fixture();
     const store = promptStore({
@@ -310,6 +334,40 @@ describe('prompt bundle store', () => {
 });
 
 describe('prompt export names', () => {
+  it('rolls back sources from a failed bundle without touching sources in completed bundles', async () => {
+    const input = await fixture();
+    const store = promptStore({
+      writeAtomically: async (target, content) => {
+        if (target.endsWith('broken.json')) throw new Error('source write failed');
+        await atomicWrite(target, content);
+      },
+    });
+    const session = await store.startSession(startInput(input, 'Source rollback', 2));
+    await store.commitBundle({
+      sessionId: session.sessionId,
+      bundleNumber: 1,
+      png: png(),
+      markdown: '# First',
+      sourceAssets: [{ filename: 'kept.json', source: '{"kept":true}' }],
+    });
+    await expect(
+      store.commitBundle({
+        sessionId: session.sessionId,
+        bundleNumber: 2,
+        png: png(),
+        markdown: '# Second',
+        sourceAssets: [
+          { filename: 'kept.json', source: '{"kept":true}' },
+          { filename: 'partial.json', source: '{}' },
+          { filename: 'broken.json', source: '{}' },
+        ],
+      }),
+    ).rejects.toThrow(/source write failed/);
+    const result = await store.cancelSession(session.sessionId);
+    expect(result.published).toBe(true);
+    expect(result.bundles).toHaveLength(1);
+    expect(await fs.readdir(path.join(result.folderPath!, 'sources'))).toEqual(['kept.json']);
+  });
   it('formats local timestamps and sanitizes Windows names without losing Unicode', () => {
     expect(formatPromptTimestamp(new Date(2026, 8, 7, 18, 42, 5))).toBe('260907-184205');
     expect(sanitizePromptCollectionName('UX / Zürich: checkout. ')).toBe('UX - Zürich- checkout');

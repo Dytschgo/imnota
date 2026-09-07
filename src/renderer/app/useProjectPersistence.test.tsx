@@ -404,7 +404,7 @@ describe('useProjectPersistence', () => {
     await act(async () => {
       await result.current.saveProjectMetadata({ ...mutation.project, name: 'After import' });
     });
-    expect(onSnapshot).toHaveBeenCalledWith(mutation);
+    expect(onSnapshot).toHaveBeenCalledWith(mutation, 'two');
     expect(onSelectScreenshot).toHaveBeenCalledWith('two');
     expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
       expect.objectContaining({ expectedRevision: 'project-after-import' }),

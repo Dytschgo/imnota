@@ -17,6 +17,8 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import { nowIso } from '../shared/utils';
+import { orderedCollectionItems } from '../shared/content-items';
+import { useContentPersistence } from './content/useContentPersistence';
 import { AppDialogs, type AppDialog, type NewProjectDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
@@ -41,11 +43,13 @@ interface SnapshotNotice {
   projectPath: string;
   warnings: string[];
   recoveredDeletes: Array<{ undoToken: string; screenshotId: string }>;
+  recoveredContentDeletes: Array<{ undoToken: string; itemId: string }>;
 }
 
 interface SnapshotExtras {
   warnings?: string[];
   recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
+  recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
 export default function App() {
@@ -82,8 +86,7 @@ export default function App() {
 
   const activeShot = store.activeScreenshot();
   const adoptSnapshot = useCallback((snapshot: ProjectSnapshot, selectScreenshotId?: string) => {
-    useAppStore.getState().setProject(snapshot);
-    if (selectScreenshotId) useAppStore.getState().set({ activeScreenshotId: selectScreenshotId });
+    useAppStore.getState().setProject(snapshot, selectScreenshotId);
     const extras = snapshot as ProjectSnapshot & SnapshotExtras;
     setSnapshotNotice((current) => {
       const sameProject = current?.projectPath === snapshot.projectPath;
@@ -95,8 +98,16 @@ export default function App() {
         ]),
       );
       const recoveredDeletes = [...recoveredByToken.values()];
-      return warnings.length || recoveredDeletes.length
-        ? { projectPath: snapshot.projectPath, warnings, recoveredDeletes }
+      const recoveredContentDeletes = [
+        ...new Map(
+          [
+            ...(sameProject ? current.recoveredContentDeletes : []),
+            ...(extras.recoveredContentDeletes ?? []),
+          ].map((entry) => [entry.undoToken, entry]),
+        ).values(),
+      ];
+      return warnings.length || recoveredDeletes.length || recoveredContentDeletes.length
+        ? { projectPath: snapshot.projectPath, warnings, recoveredDeletes, recoveredContentDeletes }
         : null;
     });
     setError('');
@@ -108,10 +119,22 @@ export default function App() {
     onSnapshot: adoptSnapshot,
     onSelectScreenshot: useCallback((id) => useAppStore.getState().set({ activeScreenshotId: id }), []),
   });
-  const getSavedPromptContext = useCallback(
-    () => persistence.getSavedContext(useAppStore.getState().activeCollectionId),
-    [persistence],
-  );
+  const contentPersistence = useContentPersistence({
+    snapshot: store.snapshot,
+    itemId: store.activeScreenshotId,
+    beforeSave: async () => {
+      if (!(await persistence.flush())) return false;
+      return !persistence.hasPendingProjectMetadata() || persistence.flushProjectMetadata();
+    },
+    beginMutation: persistence.beginNativeMutation,
+    acceptSnapshot: (snapshot, id, token) => persistence.acceptMutationSnapshot(snapshot, id, token),
+    cancelMutation: persistence.cancelNativeMutation,
+  });
+  const getSavedPromptContext = useCallback(async () => {
+    if (!(await contentPersistence.flush()))
+      throw new Error('Save the current drawing or text before preparing the prompt.');
+    return persistence.getSavedContext(useAppStore.getState().activeCollectionId);
+  }, [persistence, contentPersistence]);
   const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
@@ -191,14 +214,16 @@ export default function App() {
       window.clearTimeout(metadataTimer.current);
       metadataTimer.current = null;
     }
+    if (!(await contentPersistence.flush())) return false;
     if (!(await persistence.flush())) return false;
     if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
     return true;
-  }, [persistence]);
+  }, [persistence, contentPersistence]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (allowClose.current || !persistence.hasUnsavedChanges) return;
+      if (allowClose.current || (!persistence.hasUnsavedChanges && !contentPersistence.hasUnsavedChanges))
+        return;
       event.preventDefault();
       event.returnValue = '';
       void flushAll().then((saved) => {
@@ -210,7 +235,7 @@ export default function App() {
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
-  }, [flushAll, persistence.hasUnsavedChanges]);
+  }, [flushAll, persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
 
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {
@@ -448,6 +473,89 @@ export default function App() {
     if (id !== store.activeScreenshotId && (await flushAll()))
       useAppStore.getState().set({ activeScreenshotId: id });
   }
+  async function addContent(kind: 'drawing' | 'text') {
+    const token = await beginCurrentProjectMutation();
+    if (token === null) return;
+    try {
+      const current = useAppStore.getState();
+      if (!current.snapshot) {
+        await persistence.cancelNativeMutation(token);
+        return;
+      }
+      const existing = new Set(current.snapshot.project.contentItems?.map((item) => item.id));
+      const snapshot = await window.imnota.createContentItem({
+        projectPath: current.snapshot.projectPath,
+        collectionId: current.activeCollectionId,
+        kind,
+      });
+      const created = snapshot.project.contentItems?.find((item) => !existing.has(item.id));
+      if (!(await persistence.acceptMutationSnapshot(snapshot, created?.id, token))) return;
+    } catch (reason) {
+      await persistence.cancelNativeMutation(token);
+      setError(reason instanceof Error ? reason.message : 'The item could not be created.');
+    }
+  }
+  async function mutateContent(action: 'duplicate' | 'delete') {
+    const token = await beginCurrentProjectMutation();
+    if (token === null) return;
+    try {
+      const current = useAppStore.getState();
+      const item = current.snapshot?.project.contentItems?.find(
+        (entry) => entry.id === current.activeScreenshotId,
+      );
+      if (!current.snapshot || !item) {
+        await persistence.cancelNativeMutation(token);
+        return;
+      }
+      const input = { projectPath: current.snapshot.projectPath, itemId: item.id };
+      if (action === 'duplicate') {
+        const existing = new Set(current.snapshot.project.contentItems?.map((entry) => entry.id));
+        const snapshot = await window.imnota.duplicateContentItem(input);
+        const copy = snapshot.project.contentItems?.find((entry) => !existing.has(entry.id));
+        if (!(await persistence.acceptMutationSnapshot(snapshot, copy?.id, token))) return;
+      } else {
+        const result = await window.imnota.deleteContentItem(input);
+        if (!(await persistence.acceptMutationSnapshot(result.snapshot, undefined, token))) return;
+        setToast({
+          message: `${item.kind === 'drawing' ? 'Drawing' : 'Text block'} moved to trash.`,
+          action: {
+            label: 'Undo',
+            run: () => {
+              void undoContent(input.projectPath, result.undoToken, item.id);
+            },
+          },
+        });
+      }
+    } catch (reason) {
+      await persistence.cancelNativeMutation(token);
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : `The item could not be ${action === 'delete' ? 'deleted' : 'duplicated'}.`,
+      );
+    }
+  }
+  async function undoContent(projectPath: string, undoToken: string, itemId: string) {
+    const token = await beginCurrentProjectMutation();
+    if (token === null) return;
+    try {
+      const snapshot = await window.imnota.undoDeleteContentItem({ projectPath, undoToken });
+      if (!(await persistence.acceptMutationSnapshot(snapshot, itemId, token))) return;
+      setSnapshotNotice((notice) =>
+        notice
+          ? {
+              ...notice,
+              recoveredContentDeletes: notice.recoveredContentDeletes.filter(
+                (entry) => entry.undoToken !== undoToken,
+              ),
+            }
+          : null,
+      );
+    } catch (reason) {
+      await persistence.cancelNativeMutation(token);
+      setError(reason instanceof Error ? reason.message : 'The item could not be restored.');
+    }
+  }
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
     if (navigationIdentityAtStart !== undefined && navigationIdentityAtStart !== navigationIdentity.current)
       return;
@@ -593,10 +701,7 @@ export default function App() {
     [platform, resolvedShortcuts],
   );
   const orderedShots = useMemo(
-    () =>
-      store.snapshot?.project.screenshots
-        .filter((item) => item.collectionId === store.activeCollectionId)
-        .sort((left, right) => left.position - right.position) ?? [],
+    () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
   );
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
@@ -661,6 +766,7 @@ export default function App() {
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Overall context"]')?.focus();
     },
   };
+  // The drawing editor owns its canvas shortcuts; global navigation remains available elsewhere.
   useKeyboardShortcuts({ bindings: preferences.settings.shortcuts.bindings, handlers });
 
   if (booting || preferences.loading)
@@ -670,7 +776,7 @@ export default function App() {
         <span>Preparing your workspace…</span>
       </div>
     );
-  const visibleError = error || persistence.error || preferences.error;
+  const visibleError = error || contentPersistence.error || persistence.error || preferences.error;
   const creationColorTool: ToolChoice = tool === 'select' ? 'text' : tool;
   const creationKind: Annotation['kind'] = creationColorTool === 'eraser' ? 'arrow' : creationColorTool;
   const annotationColor =
@@ -741,6 +847,19 @@ export default function App() {
                   </Button>
                 </div>
               ))}
+              {snapshotNotice.recoveredContentDeletes.map((recovered) => (
+                <div className="recovered-delete" key={recovered.undoToken}>
+                  <span>A previously deleted drawing or text block can still be restored.</span>
+                  <Button
+                    variant="soft"
+                    onClick={() =>
+                      void undoContent(snapshotNotice.projectPath, recovered.undoToken, recovered.itemId)
+                    }
+                  >
+                    Undo delete
+                  </Button>
+                </div>
+              ))}
             </div>
             <IconButton label="Dismiss project notices" onClick={() => setSnapshotNotice(null)}>
               <X size={16} aria-hidden="true" />
@@ -759,7 +878,11 @@ export default function App() {
                     if (metadataTimer.current !== null) window.clearTimeout(metadataTimer.current);
                     metadataTimer.current = null;
                   }
-                  void persistence.reloadExternal({ discardLocalChanges });
+                  void contentPersistence.flush().then(async (saved) => {
+                    if (!saved) return;
+                    contentPersistence.reset();
+                    await persistence.reloadExternal({ discardLocalChanges });
+                  });
                 }}
               >
                 {persistence.hasUnsavedChanges ? 'Discard local edits & reload' : 'Reload project'}
@@ -854,6 +977,24 @@ export default function App() {
           />
         ) : (
           <Workspace
+            content={contentPersistence.content}
+            contentLoading={contentPersistence.loading}
+            contentSaveState={contentPersistence.saveState}
+            onContentChange={contentPersistence.change}
+            onContentRetry={contentPersistence.retry}
+            onAddContent={addContent}
+            onDuplicateContent={() => mutateContent('duplicate')}
+            onDeleteContent={() => mutateContent('delete')}
+            onDrawingTitle={(title) => {
+              const current = useAppStore.getState().snapshot?.project;
+              if (!current) return;
+              queueProjectSave({
+                ...current,
+                contentItems: current.contentItems?.map((item) =>
+                  item.id === store.activeScreenshotId && item.kind === 'drawing' ? { ...item, title } : item,
+                ),
+              });
+            }}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}

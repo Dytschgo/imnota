@@ -178,6 +178,73 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).toBeNull();
   });
 
+  it('deletes the conflict copy selected by a preceding text flush, preserving the external original', async () => {
+    const text = {
+      id: 'text',
+      kind: 'text' as const,
+      collectionId: '001-collection',
+      position: 0,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      markdownFilename: 'text.md',
+    };
+    const conflict = {
+      ...text,
+      id: 'text-conflict',
+      position: 1,
+      includeInExport: false,
+      markdownFilename: 'conflict.md',
+    };
+    let persisted: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, schemaVersion: 4, contentItems: [text] },
+    };
+    const deleteContentItem = vi.fn<ImnotaBridge['deleteContentItem']>(async ({ itemId }) => {
+      persisted = {
+        ...persisted,
+        project: {
+          ...persisted.project,
+          contentItems: persisted.project.contentItems?.filter((item) => item.id !== itemId),
+        },
+      };
+      return { snapshot: persisted, undoToken: 'undo' };
+    });
+    renderApp({
+      loadContentItem: async ({ itemId }) => ({
+        item: itemId === conflict.id ? conflict : text,
+        markdown: 'Original',
+        contentRevision: 'revision',
+      }),
+      saveContentItem: async () => {
+        persisted = { ...persisted, project: { ...persisted.project, contentItems: [text, conflict] } };
+        return {
+          snapshot: persisted,
+          itemId: conflict.id,
+          contentRevision: 'revision-2',
+          conflictCreated: true,
+        };
+      },
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'updated' },
+      }),
+      deleteContentItem,
+    });
+    await screen.findByRole('textbox', { name: 'Search projects' });
+    act(() => useAppStore.getState().setProject(persisted));
+    const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+    fireEvent.change(editor, { target: { value: 'Local edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
+    await waitFor(() =>
+      expect(deleteContentItem).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        itemId: conflict.id,
+      }),
+    );
+    expect(persisted.project.contentItems?.map((item) => item.id)).toEqual([text.id]);
+  });
+
   it('keeps the project and notes open when saving before search fails', async () => {
     const { save, note, editingSnapshot } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Unsaved note' } });

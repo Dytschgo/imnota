@@ -15,6 +15,7 @@ import {
   MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS,
   MAX_PROMPT_BUNDLE_PNG_BYTES,
   PromptBundleStore,
+  type PromptBundleSourceAsset,
   type FinalizedPromptBundleSession,
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
@@ -146,16 +147,18 @@ export class PromptBundleWorkflow {
   async write(
     sessionId: string,
     bundleNumber: number,
-    pngDataUrl: string,
+    pngDataUrl: string | undefined,
     markdown: string,
+    sourceAssets?: readonly PromptBundleSourceAsset[],
   ): Promise<PromptExportBundleGrant> {
     await this.validateActiveGrant(sessionId);
     return publicBundle(
       await this.store.commitBundle({
         sessionId,
         bundleNumber,
-        png: decodePngDataUrl(pngDataUrl),
+        png: pngDataUrl === undefined ? undefined : decodePngDataUrl(pngDataUrl),
         markdown,
+        sourceAssets,
       }),
     );
   }
@@ -176,7 +179,7 @@ export class PromptBundleWorkflow {
     const bundle = this.bundleGrant(sessionId, bundleNumber);
     const grant = this.finalGrant(sessionId);
     const markdown = await this.readMarkdown(grant, bundle);
-    const imageDataUrl = await this.readPng(grant, bundle);
+    const imageDataUrl = bundle.pngFilename ? await this.readPng(grant, bundle) : undefined;
     return {
       ...publicBundle(bundle),
       markdown,
@@ -188,6 +191,12 @@ export class PromptBundleWorkflow {
     const bundle = this.bundleGrant(sessionId, bundleNumber);
     const grant = this.finalGrant(sessionId);
     if (target === 'markdown') {
+      await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
+      return;
+    }
+    if (!bundle.pngFilename) {
+      if (target === 'image')
+        throw new NativeWorkflowError('bundle-not-found', 'This text-only prompt has no image to copy.');
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
       return;
     }
@@ -206,7 +215,9 @@ export class PromptBundleWorkflow {
       target === 'folder'
         ? grant.folderPath
         : target === 'png'
-          ? bundle.pngPath
+          ? bundle.pngFilename
+            ? bundle.pngPath
+            : undefined
           : target === 'markdown'
             ? bundle.markdownPath
             : grant.masterMarkdownPath;

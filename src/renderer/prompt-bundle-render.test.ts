@@ -230,4 +230,39 @@ describe('prompt bundle composition', () => {
     ).rejects.toThrow(/canvas safety limits/);
     expect(testEnvironment.events).toEqual([]);
   });
+
+  it('returns a Markdown-only composition without allocating a fake text PNG', async () => {
+    const result = planPromptBundles(
+      {
+        collectionId: 'collection',
+        collectionName: 'Collection',
+        overallContext: '',
+        screenshots: [],
+        items: [
+          {
+            id: 'text',
+            kind: 'text',
+            position: 0,
+            includeInExport: true,
+            markdown: 'Only text.',
+            contentRevision: 'text-1',
+          },
+        ],
+      },
+      [],
+    );
+    if (result.kind !== 'ready') throw new Error(result.message);
+    const testEnvironment = environment();
+    await expect(
+      composePromptBundle(result.bundles[0], { environment: testEnvironment.renderEnvironment }),
+    ).resolves.toEqual({
+      kind: 'composed',
+      dataUrl: undefined,
+      width: 0,
+      height: 0,
+      encodedCharacters: 0,
+      delivery: 'clipboard',
+    });
+    expect(testEnvironment.events).toEqual([]);
+  });
 });

@@ -38,6 +38,7 @@ export function useKeyboardShortcuts({
     if (!enabled || !target) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (shouldIgnoreShortcutEvent(event)) return;
+      if (event.target instanceof Element && event.target.closest('[data-content-editor="drawing"]')) return;
       const action = SHORTCUT_ACTIONS.find(
         ({ id }) =>
           !conflictingActions.has(id) &&

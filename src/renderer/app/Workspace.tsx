@@ -1,4 +1,6 @@
-import { ImagePlus, PanelRight, Upload } from 'lucide-react';
+import { Copy, ImagePlus, PanelRight, Trash2, Upload } from 'lucide-react';
+import { lazy, Suspense } from 'react';
+import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
 import type {
   Annotation,
@@ -14,8 +16,22 @@ import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
 import { useAppStore } from '../store';
+import { TextBlockEditor } from '../content/TextBlockEditor';
+
+const DrawingEditor = lazy(() =>
+  import('../content/DrawingEditor').then((module) => ({ default: module.DrawingEditor })),
+);
 
 export interface WorkspaceProps {
+  content?: ContentItemContent | null;
+  contentLoading?: boolean;
+  contentSaveState?: 'saved' | 'saving' | 'error';
+  onContentChange?(patch: { source?: string; markdown?: string }): void;
+  onContentRetry?(): void;
+  onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
+  onDuplicateContent?(): void | Promise<void>;
+  onDeleteContent?(): void | Promise<void>;
+  onDrawingTitle?(title: string): void;
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
@@ -58,6 +74,8 @@ export interface WorkspaceProps {
 export function Workspace(props: WorkspaceProps) {
   const store = useAppStore();
   const shot = store.activeScreenshot();
+  const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
+  const saveState = item ? (props.contentSaveState ?? 'saved') : props.saveState;
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
@@ -81,32 +99,40 @@ export function Workspace(props: WorkspaceProps) {
         onPaste={props.onPaste}
         onMessage={props.onMessage}
         onSnapshot={props.onSnapshot}
+        onAddContent={props.onAddContent}
       />
       <div className="canvas-column">
         <div className="workspace-toolbar">
-          <Toolbar
-            tool={props.tool}
-            setTool={props.onTool}
-            onUndo={props.onUndo}
-            onRedo={props.onRedo}
-            canUndo={props.canUndo}
-            canRedo={props.canRedo}
-            onZoom={props.onZoom}
-            onFit={props.onFit}
-            onActualSize={props.onActualSize}
-            onColorSelect={props.onColor}
-            selectedColor={props.paletteColor}
-            shortcutLabels={props.shortcutLabels}
-          />
+          {item ? (
+            <strong className="content-editor-heading">
+              {item.kind === 'drawing' ? 'Drawing' : 'Text block'}
+            </strong>
+          ) : (
+            <Toolbar
+              tool={props.tool}
+              setTool={props.onTool}
+              onUndo={props.onUndo}
+              onRedo={props.onRedo}
+              canUndo={props.canUndo}
+              canRedo={props.canRedo}
+              onZoom={props.onZoom}
+              onFit={props.onFit}
+              onActualSize={props.onActualSize}
+              onColorSelect={props.onColor}
+              selectedColor={props.paletteColor}
+              shortcutLabels={props.shortcutLabels}
+            />
+          )}
           <div className="canvas-actions">
-            <span className={`save-state ${props.saveState}`} data-testid="save-state" role="status">
+            <span className={`save-state ${saveState}`} data-testid="save-state" role="status">
               <span className="save-dot" />
-              {props.saveState === 'saving'
-                ? 'Saving…'
-                : props.saveState === 'error'
-                  ? 'Save failed'
-                  : 'Saved'}
+              {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}
             </span>
+            {item && saveState === 'error' && (
+              <Button variant="ghost" onClick={props.onContentRetry}>
+                Retry save
+              </Button>
+            )}
             <IconButton
               label={store.rightPanelOpen ? 'Collapse inspector' : 'Expand inspector'}
               onClick={() => store.set({ rightPanelOpen: !store.rightPanelOpen })}
@@ -115,7 +141,34 @@ export function Workspace(props: WorkspaceProps) {
             </IconButton>
           </div>
         </div>
-        {shot ? (
+        {item ? (
+          props.contentLoading || !props.content || props.content.item.id !== item.id ? (
+            <div role="status" className="content-loading">
+              {props.contentLoading ? 'Loading content…' : 'Content could not be loaded.'}
+            </div>
+          ) : item.kind === 'drawing' ? (
+            <Suspense
+              fallback={
+                <div role="status" className="content-loading">
+                  Loading drawing tools…
+                </div>
+              }
+            >
+              <DrawingEditor
+                key={item.id}
+                source={props.content.source ?? ''}
+                theme={props.resolvedTheme}
+                onChange={(source) => props.onContentChange?.({ source })}
+              />
+            </Suspense>
+          ) : (
+            <TextBlockEditor
+              key={item.id}
+              value={props.content.markdown ?? ''}
+              onChange={(markdown) => props.onContentChange?.({ markdown })}
+            />
+          )
+        ) : shot ? (
           <AnnotationCanvas
             image={props.image}
             annotations={props.annotations}
@@ -132,8 +185,8 @@ export function Workspace(props: WorkspaceProps) {
         ) : (
           <EmptyState
             icon={<ImagePlus size={22} aria-hidden="true" />}
-            title="Add a screenshot to start"
-            description="Paste an image, drag files here, or choose Add screenshots."
+            title="Start your collection"
+            description="Add a drawing, write some text, or drop a screenshot here."
             action={
               <Button variant="primary" onClick={props.onImport}>
                 <Upload size={16} aria-hidden="true" />
@@ -143,27 +196,57 @@ export function Workspace(props: WorkspaceProps) {
           />
         )}
       </div>
-      {store.rightPanelOpen && (
-        <ScreenshotInspector
-          shot={shot}
-          selectedAnnotation={selectedAnnotation}
-          onUpdateShot={props.onUpdateShot}
-          onDescriptionChange={props.onDescriptionChange}
-          onUndoDescription={props.onUndoDescription}
-          canUndoDescription={props.canUndoDescription}
-          onChangeAnnotation={(patch) => {
-            if (!props.selectedAnnotationId) return;
-            props.onChangeAnnotations(
-              props.annotations.map((item) =>
-                item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
-              ),
-            );
-          }}
-          onDuplicate={props.onDuplicate}
-          onDeleteScreenshot={props.onDeleteScreenshot}
-          onDeleteProject={props.onDeleteProject}
-        />
-      )}
+      {store.rightPanelOpen &&
+        (item ? (
+          <aside className="inspector content-inspector" aria-label="Content details">
+            {item.kind === 'drawing' ? (
+              <label className="field">
+                <span className="field-label">Drawing title</span>
+                <input
+                  className="input"
+                  aria-label="Drawing title"
+                  value={item.title}
+                  onChange={(event) => props.onDrawingTitle?.(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p>Write Markdown directly. Your text appears at this position in the agent prompt.</p>
+            )}
+            <p className="content-hint">
+              {item.kind === 'drawing'
+                ? 'Explain this diagram in a text block before or after it.'
+                : 'Use headings, lists, and code blocks to describe the task.'}
+            </p>
+            <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>
+              <Copy size={15} aria-hidden="true" />
+              Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
+            </Button>
+            <Button variant="ghost" onClick={() => void props.onDeleteContent?.()}>
+              <Trash2 size={15} aria-hidden="true" />
+              Delete {item.kind === 'text' ? 'text' : 'drawing'}
+            </Button>
+          </aside>
+        ) : (
+          <ScreenshotInspector
+            shot={shot}
+            selectedAnnotation={selectedAnnotation}
+            onUpdateShot={props.onUpdateShot}
+            onDescriptionChange={props.onDescriptionChange}
+            onUndoDescription={props.onUndoDescription}
+            canUndoDescription={props.canUndoDescription}
+            onChangeAnnotation={(patch) => {
+              if (!props.selectedAnnotationId) return;
+              props.onChangeAnnotations(
+                props.annotations.map((item) =>
+                  item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
+                ),
+              );
+            }}
+            onDuplicate={props.onDuplicate}
+            onDeleteScreenshot={props.onDeleteScreenshot}
+            onDeleteProject={props.onDeleteProject}
+          />
+        ))}
     </section>
   );
 }

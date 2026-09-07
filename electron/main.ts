@@ -92,6 +92,10 @@ import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundl
 import { nativePerformanceProfile } from './native-performance.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
+import { ContentPersistenceService } from './content-persistence.js';
+import { contentItemRelativePaths } from './content-paths.js';
+import { preserveMixedProjectMetadata } from './content-project-metadata.js';
+import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
 import { runSmokeWorkflow } from './smoke-workflow.js';
 import { pathIsWithin, validateCreatedSmokeDirectory } from './smoke-native-driver.js';
 
@@ -146,6 +150,12 @@ const screenshotTrashOperations: ScreenshotTrashOperations = {
   removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
 };
 
+const contentTrashOperations: ContentTrashOperations = {
+  write: atomicWrite,
+  unlink: unlinkTracked,
+  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+};
+
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
 async function persistApplicationSettings(
@@ -191,6 +201,7 @@ async function assertProjectPath(projectPath: string): Promise<string> {
     'collections',
     '.imnota-undo',
     '.imnota-transactions',
+    '.imnota-content-undo',
     '.imnota-recovery.json',
     '.imnota-recovery-backup.json',
   ])
@@ -204,7 +215,6 @@ async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
   const parsed = await migrateProject(projectPath, parseProjectFile(JSON.parse(raw)));
   return {
     ...parsed,
-    schemaVersion: 3,
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
   };
 }
@@ -224,7 +234,6 @@ async function readProject(projectPath: string): Promise<ProjectData> {
   );
   return {
     ...parsed,
-    schemaVersion: 3,
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
     screenshots,
   };
@@ -288,17 +297,20 @@ async function commitFileTransaction(
 async function recoverNativeProjectTransactions(projectPath: string): Promise<{
   warnings: string[];
   recoveredDeletes: Array<{ undoToken: string; screenshotId: string }>;
+  recoveredContentDeletes: Array<{ undoToken: string; itemId: string }>;
 }> {
   const warnings: string[] = [];
   const recoveredDeletes: Array<{ undoToken: string; screenshotId: string }> = [];
+  const recoveredContentDeletes: Array<{ undoToken: string; itemId: string }> = [];
   const transactions = await recoverScreenshotTransactions(projectPath, screenshotTransactionOperations);
   for (const transaction of transactions) {
     if (transaction.warning) warnings.push(transaction.warning);
     if (!transaction.candidateAvailable) continue;
+    const contentTransaction = transaction.kind.startsWith('content-');
     const choice = await dialog.showMessageBox(mainWindow!, {
       type: 'question',
       title: 'Recover interrupted save',
-      message: 'An interrupted screenshot save was restored to its previous safe state.',
+      message: `An interrupted ${contentTransaction ? 'content' : 'screenshot'} save was restored to its previous safe state.`,
       detail:
         'Restore replays the saved candidate. Keep saved project discards that candidate without replacing the current files.',
       buttons: ['Restore', 'Keep saved project', 'Cancel'],
@@ -328,7 +340,16 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
         screenshotId: transaction.screenshotId,
       });
   }
-  return { warnings, recoveredDeletes };
+  const contentTrash = await recoverContentTrashTransactions(projectPath, contentTrashOperations);
+  for (const transaction of contentTrash) {
+    if (transaction.warning) warnings.push(transaction.warning);
+    if (transaction.undoAvailable)
+      recoveredContentDeletes.push({
+        undoToken: transaction.undoToken,
+        itemId: transaction.itemId,
+      });
+  }
+  return { warnings, recoveredDeletes, recoveredContentDeletes };
 }
 
 function imageType(filename: string): string {
@@ -367,6 +388,30 @@ async function makeSnapshotAttempt(projectPath: string): Promise<ProjectSnapshot
       }
     }),
   );
+  await Promise.all(
+    (project.contentItems ?? [])
+      .filter((item) => item.kind === 'drawing')
+      .map(async (item) => {
+        try {
+          const relative = contentItemRelativePaths(item).image!;
+          const filePath = path.join(projectPath, relative);
+          await assertNoLinks(filePath);
+          const stat = await fs.stat(filePath);
+          const cached = thumbnailCache.get(filePath);
+          if (cached?.mtime === stat.mtimeMs) thumbnails[item.id] = cached.dataUrl;
+          else {
+            const image = nativeImage.createFromPath(filePath);
+            if (image.isEmpty()) throw new Error('Drawing preview is invalid.');
+            const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
+            thumbnails[item.id] = dataUrl;
+            if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
+            thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
+          }
+        } catch {
+          warnings.push(`Preview unavailable for ${item.title}.`);
+        }
+      }),
+  );
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   const recoveryStat = await fs.stat(recoveryPath).catch(() => null);
   return {
@@ -395,9 +440,15 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
   const nativeRecovery = await recoverNativeProjectTransactions(projectPath);
   const decorateSnapshot = (snapshot: ProjectSnapshot, warnings: readonly string[] = []) => {
     const withWarnings = withSnapshotWarnings(snapshot, [...nativeRecovery.warnings, ...warnings]);
-    return nativeRecovery.recoveredDeletes.length
-      ? { ...withWarnings, recoveredDeletes: nativeRecovery.recoveredDeletes }
-      : withWarnings;
+    return {
+      ...withWarnings,
+      ...(nativeRecovery.recoveredDeletes.length
+        ? { recoveredDeletes: nativeRecovery.recoveredDeletes }
+        : {}),
+      ...(nativeRecovery.recoveredContentDeletes.length
+        ? { recoveredContentDeletes: nativeRecovery.recoveredContentDeletes }
+        : {}),
+    };
   };
   const snapshot = decorateSnapshot(await makeSnapshot(projectPath));
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
@@ -499,6 +550,9 @@ function nextScreenshotPosition(project: ProjectData, collectionId: string): num
       ...project.screenshots
         .filter((screenshot) => screenshot.collectionId === collectionId)
         .map((screenshot) => screenshot.position),
+      ...(project.contentItems ?? [])
+        .filter((item) => item.collectionId === collectionId)
+        .map((item) => item.position),
     ) + 1
   );
 }
@@ -625,6 +679,14 @@ function registerIpc(): void {
     .string()
     .max(100_000_000)
     .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
+  const contentImage = z
+    .object({
+      filename: filenameSchema,
+      dataUrl: png,
+      width: z.number().int().min(1).max(16_384),
+      height: z.number().int().min(1).max(16_384),
+    })
+    .strict();
   const imageExport = z.object({ filename: filenameSchema, dataUrl: png });
   const workflowSessionId = z
     .string()
@@ -636,10 +698,24 @@ function registerIpc(): void {
       z
         .object({
           bundleNumber: workflowBundleNumber,
-          width: z.number().int().min(1).max(16_384),
-          height: z.number().int().min(1).max(16_384),
+          hasImage: z.boolean().optional(),
+          width: z.number().int().min(0).max(16_384),
+          height: z.number().int().min(0).max(16_384),
         })
-        .strict(),
+        .strict()
+        .superRefine((item, context) => {
+          const textOnly = item.hasImage === false;
+          if (
+            (textOnly && (item.width !== 0 || item.height !== 0)) ||
+            (!textOnly && (item.width < 1 || item.height < 1))
+          )
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: textOnly
+                ? 'Text-only bundles require zero dimensions.'
+                : 'Visual bundles require positive dimensions.',
+            });
+        }),
     )
     .min(1)
     .max(999);
@@ -679,6 +755,40 @@ function registerIpc(): void {
       z.object({ projectPath: pathInput, screenshotId: z.string().min(1).max(200) }),
     ]),
     'screenshots:undo-delete': z.tuple([z.object({ projectPath: pathInput, undoToken: filenameSchema })]),
+    'content:create': z.tuple([
+      z
+        .object({
+          projectPath: pathInput,
+          collectionId: filenameSchema,
+          kind: z.enum(['drawing', 'text']),
+          afterItemId: z.string().min(1).max(200).optional(),
+        })
+        .strict(),
+    ]),
+    'content:load': z.tuple([
+      z.object({ projectPath: pathInput, itemId: z.string().min(1).max(200) }).strict(),
+    ]),
+    'content:save': z.tuple([
+      z
+        .object({
+          projectPath: pathInput,
+          itemId: z.string().min(1).max(200),
+          contentRevision: z.string().regex(/^[a-f0-9]{64}$/),
+          markdown: z.string().max(2_000_000).optional(),
+          source: z.string().max(20_000_000).optional(),
+          image: contentImage.optional(),
+        })
+        .strict(),
+    ]),
+    'content:duplicate': z.tuple([
+      z.object({ projectPath: pathInput, itemId: z.string().min(1).max(200) }).strict(),
+    ]),
+    'content:delete': z.tuple([
+      z.object({ projectPath: pathInput, itemId: z.string().min(1).max(200) }).strict(),
+    ]),
+    'content:undo-delete': z.tuple([
+      z.object({ projectPath: pathInput, undoToken: filenameSchema }).strict(),
+    ]),
     'exports:annotated-image': z.tuple([
       imageExport.extend({ projectPath: pathInput, collectionId: filenameSchema.optional() }),
     ]),
@@ -746,13 +856,32 @@ function registerIpc(): void {
     saveProject: async (projectPath, project) => {
       const current = await readProject(projectPath);
       if (current.id !== project.id) throw new Error('Project identity does not match its watch grant.');
-      const next = validateProject({ ...project, id: current.id, schemaVersion: 3, updatedAt: nowIso() });
+      const next = preserveMixedProjectMetadata(current, {
+        ...project,
+        id: current.id,
+        updatedAt: nowIso(),
+      });
       await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(next, null, 2));
       return makeSnapshot(projectPath);
     },
     emit: (event: ProjectWatchEvent) => {
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('workflow:project-watch-event', event);
+    },
+  });
+  const contentPersistence = new ContentPersistenceService({
+    snapshot: makeSnapshot,
+    transactionOperations: screenshotTransactionOperations,
+    trashOperations: contentTrashOperations,
+    trashItem: async (target) => {
+      await shell.trashItem(target);
+      projectWatchManager?.recordSelfDelete(target);
+    },
+    validatePng: (png, expected) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(png));
+      const actual = image.getSize();
+      if (image.isEmpty() || actual.width !== expected.width || actual.height !== expected.height)
+        throw new Error('Drawing PNG could not be decoded at its declared dimensions.');
     },
   });
   promptBundleWorkflow = new PromptBundleWorkflow(
@@ -882,17 +1011,41 @@ function registerIpc(): void {
               pngDataUrl: z
                 .string()
                 .max(134_000_000)
-                .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/),
+                .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+                .optional(),
               markdown: z.string().min(1).max(2_000_000),
+              sourceAssets: z
+                .array(
+                  z
+                    .object({
+                      filename: filenameSchema.refine((value) => value.endsWith('.json'), {
+                        message: 'Drawing source filename must end in .json.',
+                      }),
+                      source: z.string().max(20_000_000),
+                    })
+                    .strict(),
+                )
+                .max(10_000)
+                .optional(),
             })
             .strict(),
         ])
         .parse(args);
-      return promptBundleWorkflow!.write(
+      // The export worker owns this method's optional fifth argument; keep this worktree
+      // compatible with the pre-integration class type while forwarding the validated assets.
+      const writeWithSources = promptBundleWorkflow!.write.bind(promptBundleWorkflow!) as (
+        sessionId: string,
+        bundleNumber: number,
+        pngDataUrl: string | undefined,
+        markdown: string,
+        sourceAssets?: readonly { filename: string; source: string }[],
+      ) => Promise<unknown>;
+      return writeWithSources(
         input.sessionId,
         input.bundleNumber,
         input.pngDataUrl,
         input.markdown,
+        input.sourceAssets,
       );
     },
     true,
@@ -1004,6 +1157,8 @@ function registerIpc(): void {
           for (const shot of project.screenshots) {
             searchable.push(shot.title, shot.description, shot.priority);
           }
+          for (const item of project.contentItems ?? [])
+            searchable.push(item.kind === 'drawing' ? item.title : (item.preview ?? ''));
           projects.push({ ...project, projectPath, searchText: searchable.join(' ').toLowerCase() });
         }
       } catch {
@@ -1021,7 +1176,15 @@ function registerIpc(): void {
     await ensureCollection(folder, '001-collection');
     await atomicWrite(
       path.join(folder, 'project.json'),
-      JSON.stringify(emptyProject(input.name, input.description, path.basename(workspace)), null, 2),
+      JSON.stringify(
+        {
+          ...emptyProject(input.name, input.description, path.basename(workspace)),
+          schemaVersion: 4,
+          contentItems: [],
+        },
+        null,
+        2,
+      ),
     );
     return makeSnapshot(folder);
   });
@@ -1039,11 +1202,13 @@ function registerIpc(): void {
   );
   handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
     const safePath = await assertProjectPath(projectPath);
-    validateProject(project);
-    await atomicWrite(
-      path.join(safePath, 'project.json'),
-      JSON.stringify({ ...project, schemaVersion: 3, updatedAt: nowIso() }, null, 2),
-    );
+    const current = await readProject(safePath);
+    const next = preserveMixedProjectMetadata(current, {
+      ...project,
+      id: current.id,
+      updatedAt: nowIso(),
+    });
+    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
   });
   handle('projects:save-screenshot', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -1283,6 +1448,40 @@ function registerIpc(): void {
     projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
     return withSnapshotWarnings(await makeSnapshot(safePath), undo.warning ? [undo.warning] : []);
   });
+  handle('content:create', async (_event, input) =>
+    contentPersistence.create({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
+  );
+  handle('content:load', async (_event, input) =>
+    contentPersistence.load({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
+  );
+  handle('content:save', async (_event, input) =>
+    contentPersistence.save({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
+  );
+  handle('content:duplicate', async (_event, input) =>
+    contentPersistence.duplicate({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
+  );
+  handle('content:delete', async (_event, input) => {
+    const projectPath = await assertProjectPath(input.projectPath);
+    if (settings.confirmBeforeDeletion && process.env.IMNOTA_SMOKE !== '1') {
+      const project = await readProject(projectPath);
+      const item = (project.contentItems ?? []).find((entry) => entry.id === input.itemId);
+      if (!item) throw new Error('Content item does not belong to this project.');
+      const label = item.kind === 'drawing' ? item.title : item.preview || 'Text block';
+      const answer = await dialog.showMessageBox(mainWindow!, {
+        type: 'warning',
+        buttons: ['Cancel', 'Move to trash'],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete ${item.kind === 'drawing' ? 'this drawing' : 'this text block'}?`,
+        detail: `${label} and its local content files will be moved to the system trash.`,
+      });
+      if (answer.response !== 1) throw new Error('Content deletion cancelled.');
+    }
+    return contentPersistence.delete({ ...input, projectPath });
+  });
+  handle('content:undo-delete', async (_event, input) =>
+    contentPersistence.undoDelete({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
+  );
   handle('collections:edit', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const project = await readProject(safePath);
@@ -1370,6 +1569,9 @@ function registerIpc(): void {
     const included = project.screenshots.filter(
       (s) => s.includeInExport && (!input.collectionId || s.collectionId === input.collectionId),
     );
+    const includedContent = project.contentItems?.filter(
+      (item) => item.includeInExport && (!input.collectionId || item.collectionId === input.collectionId),
+    );
     const briefPath = path.join(exportDir, 'context.md');
     await atomicWrite(briefPath, input.markdown);
     const zip = new JSZip();
@@ -1380,6 +1582,7 @@ function registerIpc(): void {
         {
           ...project,
           screenshots: included,
+          ...(includedContent ? { contentItems: includedContent } : {}),
           collections: input.collectionId
             ? project.collections.filter((collection) => collection.id === input.collectionId)
             : project.collections,
@@ -1407,6 +1610,20 @@ function registerIpc(): void {
         zip.file(shot.annotationFile, json);
       }
     for (const shot of included) zip.file(shot.descriptionFile, shot.description);
+    for (const item of includedContent ?? []) {
+      const content = await contentPersistence.load({ projectPath: safePath, itemId: item.id });
+      const folder = `collections/${item.collectionId}`;
+      if (item.kind === 'text') {
+        zip.file(`${folder}/text/${item.markdownFilename}`, content.markdown ?? '');
+      } else {
+        if (!content.source || !content.image) throw new Error('Drawing export files are missing.');
+        zip.file(`${folder}/drawings/${item.sourceFilename}`, content.source);
+        zip.file(
+          `${folder}/drawings/${item.imageFilename}`,
+          Buffer.from(content.image.dataUrl.split(',')[1], 'base64'),
+        );
+      }
+    }
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const zipPath = path.join(exportDir, `${sanitizeFilename(project.name, 'imnota-project')}-package.zip`);
     await atomicWrite(zipPath, zipBuffer);
