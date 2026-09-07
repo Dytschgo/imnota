@@ -1165,6 +1165,19 @@ export async function runSmokeWorkflow(
     pixelPrompt.latestSet.directory,
     deterministic.annotations,
   );
+  if (artifactDirectory) {
+    const exportedFiles = await fs.readdir(pixelPrompt.latestSet.directory);
+    for (const extension of ['.png', '.md']) {
+      const name = exportedFiles.find(
+        (entry) => entry.endsWith(extension) && !entry.endsWith(' - overview.md'),
+      );
+      if (!name) throw new Error(`Verified pixel bundle lost its ${extension} artifact.`);
+      await fs.copyFile(
+        path.join(pixelPrompt.latestSet.directory, name),
+        path.join(artifactDirectory, `verified-pixel-prompt${extension}`),
+      );
+    }
+  }
   assertions.push(
     'one-image prompt header/margins, expanded crop/outside bounds, cropped-source privacy, opaque redaction pixels, and one PNG/Markdown pair',
   );
