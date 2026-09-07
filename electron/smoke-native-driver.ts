@@ -95,7 +95,7 @@ export function safeArtifactPath(directory: string, filename: string): string {
   return target;
 }
 
-function locatorScript(locator: SmokeLocator): string {
+function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
   return `(() => {
     const locator = ${JSON.stringify(locator)};
     const visible = (element) => {
@@ -115,6 +115,7 @@ function locatorScript(locator: SmokeLocator): string {
       return locator.exact ? value === expected : value.includes(expected);
     });
     if (!found) return null;
+    if (${scrollIntoView}) found.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
     const rect = found.getBoundingClientRect();
     return {
       x: rect.x,
@@ -197,6 +198,8 @@ export class NativeUiDriver {
   }
 
   async click(locator: SmokeLocator, clickCount = 1): Promise<SmokePoint> {
+    await this.waitFor(locator);
+    await this.evaluate(locatorScript(locator, true));
     const bounds = await this.waitFor(locator);
     if (bounds.disabled) throw new Error(`Cannot click disabled control ${JSON.stringify(locator)}.`);
     const point = {

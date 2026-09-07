@@ -68,6 +68,10 @@ describe('native smoke driver', () => {
     } as unknown as BrowserWindow;
     const driver = new NativeUiDriver(window, 100);
     await driver.click({ text: 'Target' });
+    expect(window.webContents.executeJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('if (true) found.scrollIntoView'),
+      true,
+    );
     await driver.drag({ x: 1, y: 2 }, { x: 9, y: 10 }, 2);
     await driver.wheel({ x: 5, y: 6 }, 20, -10);
     await driver.press('ENTER');
