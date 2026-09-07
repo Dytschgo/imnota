@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useAppearance } from '../app/useAppearance';
-import { DEFAULT_APPEARANCE } from './preferences';
+import { cssBackgroundImage, useAppearance } from '../app/useAppearance';
+import { DEFAULT_APPEARANCE, type GlassLevel } from './preferences';
 
 afterEach(() => {
   document.documentElement.removeAttribute('data-theme');
@@ -37,5 +37,30 @@ describe('useAppearance', () => {
     act(() => listeners.get('(prefers-color-scheme: light)')?.forEach((listener) => listener()));
     expect(result.current.theme).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('resolves only local uploaded data and allowlisted bundled backdrops', () => {
+    expect(cssBackgroundImage('preset:emerald')).toMatch(/^url\("https?:\/\/.*backdrops\/emerald\.png"\)$/);
+    expect(cssBackgroundImage('https://example.com/backdrop.png')).toBe('none');
+    expect(cssBackgroundImage('data:image/png;base64,AA==')).toContain('data:image/png;base64,AA==');
+  });
+
+  it('removes the backdrop URL before paint when glass is off or falls back to solid', () => {
+    const root = document.createElement('div');
+    const { rerender } = renderHook(
+      ({ glassLevel, performanceConstrained }: { glassLevel: GlassLevel; performanceConstrained: boolean }) =>
+        useAppearance(
+          { ...DEFAULT_APPEARANCE, glassLevel, backgroundImage: 'preset:graphite', backgroundOpacity: 0.5 },
+          { root, performanceConstrained },
+        ),
+      { initialProps: { glassLevel: 'off' as GlassLevel, performanceConstrained: false } },
+    );
+    expect(root.dataset.background).toBe('none');
+    expect(root.style.getPropertyValue('--imnota-background-image')).toBe('none');
+    expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0');
+
+    rerender({ glassLevel: 'balanced', performanceConstrained: true });
+    expect(root.dataset.background).toBe('none');
+    expect(root.style.getPropertyValue('--imnota-background-image')).toBe('none');
   });
 });

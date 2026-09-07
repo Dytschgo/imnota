@@ -837,6 +837,8 @@ async function captureWorkspaceMatrix(
       throw new Error(`Settings UI displayed ${theme}, but native preferences retained ${persistedTheme}.`);
 
     driver.setWindow(await host.reopenWindow());
+    driver.browserWindow.show();
+    driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
     for (const viewport of SMOKE_VIEWPORTS) {
@@ -854,7 +856,16 @@ async function captureWorkspaceMatrix(
   artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png'));
 }
 
-async function exercisePreferencesAndChannel(driver: NativeUiDriver, host: SmokeWorkflowHost): Promise<void> {
+async function exercisePreferencesAndChannel(
+  driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
+  artifactDirectory?: string,
+  artifacts: SmokeCapture[] = [],
+): Promise<void> {
+  // Reopened local smoke windows may be hidden. Present this isolated fixture so
+  // native focus and screenshot paint reflect the same settings state as the DOM.
+  driver.browserWindow.show();
+  driver.browserWindow.focus();
   const profile = await driver.evaluate<{
     performanceClass: string;
     platform: string;
@@ -875,6 +886,51 @@ async function exercisePreferencesAndChannel(driver: NativeUiDriver, host: Smoke
   if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
+  for (const preset of ['graphite', 'indigo', 'emerald', 'amber']) {
+    await driver.click({ selector: `[data-testid="backdrop-preset-${preset}"]` });
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = async () => {
+        try {
+          ${bridgePrelude()}
+          const settings = unwrap(await workflow.getPreferenceSettings()).settings;
+          const button = document.querySelector('[data-testid="backdrop-preset-${preset}"]');
+          const image = button?.querySelector('img');
+          if (settings.appearance.backgroundImage === 'preset:${preset}' &&
+              button?.getAttribute('aria-pressed') === 'true' && !button.disabled &&
+              image?.complete && image.naturalWidth > 0) return resolve(true);
+          if (Date.now() - started > 10000) throw new Error('Backdrop ${preset} did not load and persist');
+          setTimeout(check, 50);
+        } catch (error) { reject(error); }
+      };
+      check();
+    })`);
+  }
+  await driver.click({ selector: 'label:has(input[name="glass-level"][value="balanced"])' });
+  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
+  await driver.evaluate(`(async () => {
+    if (document.documentElement.dataset.glassLevel === 'off') return;
+    const cssImage = getComputedStyle(document.querySelector('.app-shell'), '::after').backgroundImage;
+    if (!cssImage.startsWith('url("')) throw new Error('Backdrop surface did not receive its image');
+    const image = new Image();
+    image.src = cssImage.slice(5, -2);
+    await image.decode();
+    if (!image.naturalWidth) throw new Error('Backdrop surface URL did not load');
+  })()`);
+  if (artifactDirectory) {
+    await driver.evaluate(
+      `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    );
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
+  }
+  await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
+  await driver.waitFor({ selector: ':root[data-glass-level="off"]' });
+  const solidBackdrop = await driver.evaluate<string>(
+    `getComputedStyle(document.documentElement).getPropertyValue('--imnota-background-image').trim()`,
+  );
+  if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
+  await driver.click({ selector: '[data-testid="backdrop-remove"]' });
+  await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   const chooseNightly = async () => {
     await driver.waitFor(channelSelect);
@@ -1368,8 +1424,41 @@ export async function runSmokeWorkflow(
   const excludedPicture = await excludeScreenshotThroughUi(driver, host, projectPath);
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' });
+  await driver.press('End');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (document.activeElement?.getAttribute('role') === 'option') return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection option did not receive focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+  const focusedCollection = await driver.evaluate<boolean>(
+    `document.activeElement?.getAttribute('role') === 'option'`,
+  );
+  if (!focusedCollection) throw new Error('Collection picker did not focus an option with native keys.');
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' }, { absent: true });
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (document.activeElement?.getAttribute('data-testid') === 'collection-picker') return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection trigger did not regain focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+  const pickerFocusRestored = await driver.evaluate<boolean>(
+    `document.activeElement?.getAttribute('data-testid') === 'collection-picker'`,
+  );
+  if (!pickerFocusRestored) throw new Error('Collection picker did not restore focus after Escape.');
+  assertions.push('native collection picker keyboard focus and Escape restoration');
+
   await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
-  await exercisePreferencesAndChannel(driver, host);
+  await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);

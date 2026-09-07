@@ -1,6 +1,6 @@
 # Stable and nightly builds
 
-Imnota has two update channels in the same public GitHub repository. Stable is the default. Nightly is an opt-in preview. Both use the same application and workspace format; switching channels does not move or migrate your project files.
+Imnota has two update channels in the same public GitHub repository. Stable is the default. Nightly is an opt-in preview. Both use the same application identity; changing the channel preference alone does not move or migrate project files. Opening a project with a newer installed version can migrate its data format.
 
 ## Choose a channel
 
@@ -12,9 +12,13 @@ Channel switching is disabled while checking, downloading or awaiting native ins
 
 Switching back to Stable never automatically downgrades. If the installed nightly is newer, Imnota explains that and offers the selected stable release page. Back up before manually replacing a newer app; an older version may not understand a future project's schema.
 
+Current collection-based nightlies migrate schema 1/2 projects to schema 3 when opened. Back up the whole workspace folder before trying them. Reinstalling an older app does not reverse that migration; see the [migration and rollback procedure](data-format.md) before returning to an older stable version.
+
 ## Build a nightly after merge
 
 The **Build nightly prerelease** workflow is manual only. There is no nightly schedule yet, and a normal main push does not publish a release.
+
+Current branch protection enforces an up-to-date `quality` check, but does not enforce approving reviews or every platform job. For this release process, the release owner must also obtain an independent review and verify all PR platform package and security checks for the exact head before merging. Do not use an administrator bypass. The nightly workflow separately gates publication on quality and all three platform builds. Stronger remote enforcement is a separate repository-policy change, not part of publishing a nightly.
 
 After this implementation is merged into main, an authorised maintainer can dispatch a build for an exact reviewed main commit:
 

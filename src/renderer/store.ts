@@ -63,6 +63,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   rightPanelOpen: localValue('imnota:right-panel') !== 'closed',
   set: (patch) => set(patch),
   setProject: (snapshot) => {
+    const previous = get().snapshot;
+    const sameProject = Boolean(previous && snapshot && previous.project.id === snapshot.project.id);
     const remembered = snapshot ? localValue(`imnota:last-collection:${snapshot.project.id}`) : null;
     const collectionId =
       snapshot?.project.collections.find(
@@ -81,7 +83,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeScreenshotId:
         snapshot?.project.screenshots
           .filter((shot) => shot.collectionId === collectionId)
-          .sort((a, b) => a.position - b.position)[0]?.id ?? null,
+          .sort((a, b) => a.position - b.position)
+          .find((shot) => sameProject && shot.id === get().activeScreenshotId)?.id ??
+        snapshot?.project.screenshots
+          .filter((shot) => shot.collectionId === collectionId)
+          .sort((a, b) => a.position - b.position)[0]?.id ??
+        null,
       view: snapshot ? 'workspace' : 'projects',
     });
   },

@@ -4,11 +4,38 @@ export type AppearanceMode = 'system' | 'light' | 'dark';
 export type AccentPreset = 'graphite' | 'indigo' | 'emerald' | 'amber';
 export type GlassLevel = 'off' | 'subtle' | 'balanced' | 'strong';
 
+export const BACKDROP_PRESETS = ['graphite', 'indigo', 'emerald', 'amber'] as const;
+export type BackdropPreset = (typeof BACKDROP_PRESETS)[number];
+export const BACKGROUND_IMAGE_MAX_BYTES = 5_500_000;
+// Base64 expands binary data by roughly a third. The additional allowance covers the data URL header.
+export const BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH = Math.ceil(BACKGROUND_IMAGE_MAX_BYTES / 3) * 4 + 128;
+export const BACKGROUND_IMAGE_MAX_DIMENSION = 3_840;
+export const BACKGROUND_IMAGE_MAX_PIXELS = 12_000_000;
+
+export function backdropPresetValue(preset: BackdropPreset): `preset:${BackdropPreset}` {
+  return `preset:${preset}`;
+}
+
+export function isBackdropPreset(value: string): value is `preset:${BackdropPreset}` {
+  return BACKDROP_PRESETS.some((preset) => value === backdropPresetValue(preset));
+}
+
+export function isAllowedBackgroundImage(value: string): boolean {
+  return (
+    value === '' ||
+    isBackdropPreset(value) ||
+    (value.length <= BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH &&
+      /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(value))
+  );
+}
+
 export interface AppearancePreferences {
   mode: AppearanceMode;
   accent: AccentPreset;
   glassLevel: GlassLevel;
   allowPerformanceFallback: boolean;
+  backgroundImage: string;
+  backgroundOpacity: number;
 }
 
 export interface ShortcutPreferences {
@@ -44,6 +71,8 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   accent: 'indigo',
   glassLevel: 'off',
   allowPerformanceFallback: true,
+  backgroundImage: '',
+  backgroundOpacity: 0.42,
 };
 
 export const DEFAULT_ONBOARDING: OnboardingPreferences = {

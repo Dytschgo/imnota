@@ -58,4 +58,24 @@ describe('profile-aware preference settings', () => {
     });
     expect(shouldShowOnboarding(restarted.settings.onboarding, restarted.profile)).toBe(true);
   });
+
+  it('keeps supported local backdrops while clearing legacy remote backdrop URLs', () => {
+    const base = resolvePreferenceSettings(undefined, false).settings;
+    const remote = resolvePreferenceSettings(
+      {
+        preferences: {
+          ...base,
+          appearance: { ...base.appearance, backgroundImage: 'https://example.com/a.png' },
+        },
+      },
+      true,
+    );
+    expect(remote.settings.appearance.backgroundImage).toBe('');
+
+    const preset = resolvePreferenceSettings(
+      { preferences: { ...base, appearance: { ...base.appearance, backgroundImage: 'preset:amber' } } },
+      true,
+    );
+    expect(preset.settings.appearance.backgroundImage).toBe('preset:amber');
+  });
 });

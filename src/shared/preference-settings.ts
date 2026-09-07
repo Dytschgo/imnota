@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
+  BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH,
   DEFAULT_PREFERENCE_SETTINGS,
+  isAllowedBackgroundImage,
   type PreferenceSettings,
   type PreferenceSettingsResult,
 } from './preferences.js';
@@ -26,6 +28,12 @@ export const preferenceSettingsSchema = z
         accent: z.enum(['graphite', 'indigo', 'emerald', 'amber']),
         glassLevel: z.enum(['off', 'subtle', 'balanced', 'strong']),
         allowPerformanceFallback: z.boolean(),
+        backgroundImage: z
+          .string()
+          .max(BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH)
+          .refine(isAllowedBackgroundImage, 'Choose a bundled backdrop or a local image file.')
+          .default(''),
+        backgroundOpacity: z.number().min(0).max(1).default(0.42),
       })
       .strict(),
     shortcuts: z.object({ bindings: shortcutBindingsSchema }).strict(),
@@ -57,6 +65,15 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Remove only legacy external background URLs while retaining compatible local preferences. */
+function normalizePersistedPreferences(value: unknown): Record<string, unknown> {
+  const preferences = record(value);
+  const appearance = record(preferences.appearance);
+  if (typeof appearance.backgroundImage !== 'string' || isAllowedBackgroundImage(appearance.backgroundImage))
+    return preferences;
+  return { ...preferences, appearance: { ...appearance, backgroundImage: '' } };
+}
+
 /** Resolve profile provenance before any caller persists defaults. */
 export function resolvePreferenceSettings(
   persistedValue: unknown,
@@ -76,7 +93,7 @@ export function resolvePreferenceSettings(
   if ('preferences' in persisted) {
     const profileKind = z.enum(['new', 'migrated']).safeParse(persisted.preferenceProfile);
     return {
-      settings: preferenceSettingsSchema.parse(persisted.preferences),
+      settings: preferenceSettingsSchema.parse(normalizePersistedPreferences(persisted.preferences)),
       profile: {
         settingsFileExists: true,
         migratedFromLegacyProfile: profileKind.success && profileKind.data === 'migrated',
