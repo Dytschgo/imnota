@@ -92,7 +92,7 @@ const MORE_TOOLS: ToolDefinition[] = [
   {
     id: 'crop',
     label: 'Crop',
-    description: 'Limit source pixels in exports while preserving the original.',
+    description: 'Drag or resize a crop box, then Apply or Cancel. The original is preserved.',
     icon: Crop,
   },
   { id: 'pen', label: 'Freehand', description: 'Draw a freehand mark.', icon: Pencil },

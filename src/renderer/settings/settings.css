@@ -4,6 +4,45 @@
   border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
   color: var(--ink, #f4f5f7);
 }
+.imnota-background-modes {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+.imnota-background-modes button,
+.imnota-uploaded-backdrop > button {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink-2);
+}
+.imnota-background-modes button[aria-pressed='true'],
+.imnota-backdrop-preset[aria-pressed='true'] {
+  border-color: var(--imnota-accent);
+  background: var(--imnota-accent-soft);
+  color: var(--ink);
+}
+.imnota-uploaded-backdrop {
+  min-width: 0;
+}
+.imnota-uploaded-backdrop .imnota-backdrop-preset {
+  width: 100%;
+}
+.imnota-uploaded-backdrop .imnota-backdrop-preset span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imnota-uploaded-backdrop > button {
+  margin-top: 6px;
+  font-size: 11px;
+}
+.imnota-background-hint {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .imnota-preference-heading {
   display: flex;

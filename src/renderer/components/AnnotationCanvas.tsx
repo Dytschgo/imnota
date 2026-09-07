@@ -20,6 +20,7 @@ import {
   Transformer,
 } from 'react-konva';
 import type Konva from 'konva';
+import { exportBounds } from '../../shared/crop';
 import { textAnnotationNoteNumbers } from '../../shared/annotation-order';
 import {
   NOTE_BADGE_GAP,
@@ -193,6 +194,18 @@ export function AnnotationCanvas({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [draft, setDraft] = useState<Annotation | null>(null);
+  const [cropBox, setCropBox] = useState<Annotation | null>(null);
+  const cropTransformerRef = useRef<Konva.Transformer>(null);
+  const cropping = tool === 'crop';
+  const sourceBounds = image
+    ? exportBounds(image.width, image.height, cropping ? [] : annotations)
+    : { x: 0, y: 0, width: 1, height: 1 };
+  const cropBounds =
+    image && (draft?.kind === 'crop' || cropBox)
+      ? exportBounds(image.width, image.height, [
+          normalizeAnnotationBounds(draft?.kind === 'crop' ? draft : cropBox!),
+        ])
+      : sourceBounds;
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
@@ -207,6 +220,62 @@ export function AnnotationCanvas({
   const finalizePointerInteractionRef = useRef<(event?: Event) => void>(() => undefined);
   const explicitEditorResize = useRef<{ id: string; size: AnnotationEditorResize } | null>(null);
   const editorResizeListenerCleanup = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!cropping || !image) {
+      setCropBox(null);
+      setDraft(null);
+      return;
+    }
+    const bounds = exportBounds(image.width, image.height, annotations);
+    setCropBox(
+      annotations.some((annotation) => annotation.kind === 'crop')
+        ? { id: 'crop-preview', kind: 'crop', ...bounds, zIndex: annotations.length }
+        : null,
+    );
+    onSelect(null);
+    // A crop session snapshots the current bounds; edits are committed only by Apply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropping, image?.dataUrl]);
+
+  function finishCrop(apply: boolean) {
+    if (apply && image && cropBox) {
+      onChange([
+        ...annotations.filter((annotation) => annotation.kind !== 'crop'),
+        { ...cropBox, ...cropBounds, id: createId(), kind: 'crop', rotation: 0 },
+      ]);
+      onMessage?.('Crop applied. The original image is preserved; Undo restores the previous crop.');
+    }
+    setCropBox(null);
+    setDraft(null);
+    onTool?.('select');
+    onSelect(null);
+  }
+
+  useEffect(() => {
+    if (!cropping) return;
+    const key = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('input, textarea, select, [contenteditable="true"]')
+      )
+        return;
+      if (event.key === 'Enter' || event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        finishCrop(event.key === 'Enter');
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  });
+
+  useEffect(() => {
+    const transformer = cropTransformerRef.current;
+    const node = transformer?.getStage()?.findOne('#crop-preview');
+    transformer?.nodes(node && !draft ? [node] : []);
+    transformer?.getLayer()?.batchDraw();
+  }, [cropping, cropBox, draft, imageObj]);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -344,16 +413,16 @@ export function AnnotationCanvas({
     if (!image) return;
     const fit = Math.max(
       0.02,
-      Math.min((size.width - 64) / image.width, (size.height - 64) / image.height, 1),
+      Math.min((size.width - 64) / sourceBounds.width, (size.height - 96) / sourceBounds.height, 1),
     );
     const next = {
-      x: (size.width - image.width * fit) / 2,
-      y: (size.height - image.height * fit) / 2,
+      x: (size.width - sourceBounds.width * fit) / 2 - sourceBounds.x * fit,
+      y: (size.height - sourceBounds.height * fit) / 2 - sourceBounds.y * fit,
       scale: fit,
     };
     viewportRef.current = next;
     setViewport(next);
-  }, [image, size]);
+  }, [image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
@@ -361,11 +430,28 @@ export function AnnotationCanvas({
     const handleCommand = (event: Event) => {
       const command = canvasCommandFromEvent(event);
       if (!command) return;
-      setViewport((current) => viewportForCanvasCommand(current, command, size, image));
+      setViewport((current) => {
+        const next = viewportForCanvasCommand(current, command, size, {
+          width: sourceBounds.width,
+          height: sourceBounds.height,
+        });
+        return command === 'fit' || command === 'actual-size'
+          ? { ...next, x: next.x - sourceBounds.x * next.scale, y: next.y - sourceBounds.y * next.scale }
+          : next;
+      });
     };
     container.addEventListener(CANVAS_COMMAND_EVENT, handleCommand);
     return () => container.removeEventListener(CANVAS_COMMAND_EVENT, handleCommand);
-  }, [image, imageObj, size, stageRef]);
+  }, [
+    image,
+    imageObj,
+    size,
+    stageRef,
+    sourceBounds.x,
+    sourceBounds.y,
+    sourceBounds.width,
+    sourceBounds.height,
+  ]);
 
   const pixelated = useMemo(
     () =>
@@ -405,7 +491,11 @@ export function AnnotationCanvas({
 
   function pointerIsOnImage(point: { x: number; y: number }): boolean {
     return Boolean(
-      image && point.x >= 0 && point.y >= 0 && point.x <= image.width && point.y <= image.height,
+      image &&
+      point.x >= sourceBounds.x &&
+      point.y >= sourceBounds.y &&
+      point.x <= sourceBounds.x + sourceBounds.width &&
+      point.y <= sourceBounds.y + sourceBounds.height,
     );
   }
 
@@ -556,6 +646,11 @@ export function AnnotationCanvas({
   }
 
   function beginPointer(event: Konva.KonvaEventObject<PointerEvent>) {
+    if (
+      cropping &&
+      (event.target.id() === 'crop-preview' || event.target.getParent()?.className === 'Transformer')
+    )
+      return;
     capturePointer(event);
     const pointer = localPointer(event.evt);
     if (pointer) pointerPosition.current = pointer;
@@ -645,6 +740,11 @@ export function AnnotationCanvas({
       return;
     }
     const completed = normalizeAnnotationBounds(draft);
+    if (completed.kind === 'crop') {
+      setCropBox({ ...completed, id: 'crop-preview' });
+      setDraft(null);
+      return;
+    }
     onChange([...annotations, completed]);
     onSelect(completed.id);
     if (completed.kind === 'callout') beginTextEditing(completed, true);
@@ -924,6 +1024,10 @@ export function AnnotationCanvas({
       data-image-x={viewport.x}
       data-image-y={viewport.y}
       data-image-scale={viewport.scale}
+      data-source-x={sourceBounds.x}
+      data-source-y={sourceBounds.y}
+      data-source-width={sourceBounds.width}
+      data-source-height={sourceBounds.height}
     >
       <div className="canvas-meta">
         <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
@@ -965,9 +1069,120 @@ export function AnnotationCanvas({
         >
           <Layer>
             <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
-              <KonvaImage image={imageObj} width={image?.width} height={image?.height} listening={false} />
-              {[...annotations].sort((left, right) => left.zIndex - right.zIndex).map(renderAnnotation)}
-              {draft && renderAnnotation(normalizeAnnotationBounds(draft))}
+              <KonvaImage image={imageObj} {...sourceBounds} crop={sourceBounds} listening={false} />
+              <Group listening={!cropping}>
+                {[...annotations]
+                  .filter((annotation) => annotation.kind !== 'crop')
+                  .sort((left, right) => left.zIndex - right.zIndex)
+                  .map(renderAnnotation)}
+              </Group>
+              {draft && draft.kind !== 'crop' && renderAnnotation(normalizeAnnotationBounds(draft))}
+              {cropping && image && (cropBox || draft?.kind === 'crop') && (
+                <>
+                  <Rect
+                    x={0}
+                    y={0}
+                    width={image.width}
+                    height={cropBounds.y}
+                    fill="rgba(0,0,0,0.6)"
+                    listening={false}
+                  />
+                  <Rect
+                    x={0}
+                    y={cropBounds.y + cropBounds.height}
+                    width={image.width}
+                    height={image.height - cropBounds.y - cropBounds.height}
+                    fill="rgba(0,0,0,0.6)"
+                    listening={false}
+                  />
+                  <Rect
+                    x={0}
+                    y={cropBounds.y}
+                    width={cropBounds.x}
+                    height={cropBounds.height}
+                    fill="rgba(0,0,0,0.6)"
+                    listening={false}
+                  />
+                  <Rect
+                    x={cropBounds.x + cropBounds.width}
+                    y={cropBounds.y}
+                    width={image.width - cropBounds.x - cropBounds.width}
+                    height={cropBounds.height}
+                    fill="rgba(0,0,0,0.6)"
+                    listening={false}
+                  />
+                  <Rect
+                    id="crop-preview"
+                    {...cropBounds}
+                    stroke="#ffffff"
+                    strokeWidth={1 / viewport.scale}
+                    hitStrokeWidth={12 / viewport.scale}
+                    draggable={!draft}
+                    onDragEnd={(event) => {
+                      setCropBox({
+                        ...(cropBox ?? draft!),
+                        x: Math.max(0, Math.min(image.width - cropBounds.width, event.target.x())),
+                        y: Math.max(0, Math.min(image.height - cropBounds.height, event.target.y())),
+                        width: cropBounds.width,
+                        height: cropBounds.height,
+                      });
+                    }}
+                    onTransformEnd={(event) => {
+                      const node = event.target;
+                      setCropBox({
+                        ...(cropBox ?? draft!),
+                        x: node.x(),
+                        y: node.y(),
+                        width: node.width() * node.scaleX(),
+                        height: node.height() * node.scaleY(),
+                      });
+                      node.scale({ x: 1, y: 1 });
+                    }}
+                  />
+                  {[1, 2].map((part) => (
+                    <Group key={part} listening={false}>
+                      <Line
+                        points={[
+                          cropBounds.x + (cropBounds.width * part) / 3,
+                          cropBounds.y,
+                          cropBounds.x + (cropBounds.width * part) / 3,
+                          cropBounds.y + cropBounds.height,
+                        ]}
+                        stroke="rgba(255,255,255,0.45)"
+                        strokeWidth={1 / viewport.scale}
+                      />
+                      <Line
+                        points={[
+                          cropBounds.x,
+                          cropBounds.y + (cropBounds.height * part) / 3,
+                          cropBounds.x + cropBounds.width,
+                          cropBounds.y + (cropBounds.height * part) / 3,
+                        ]}
+                        stroke="rgba(255,255,255,0.45)"
+                        strokeWidth={1 / viewport.scale}
+                      />
+                    </Group>
+                  ))}
+                  <Transformer
+                    ref={cropTransformerRef}
+                    rotateEnabled={false}
+                    keepRatio={false}
+                    flipEnabled={false}
+                    anchorSize={10}
+                    borderStroke="#ffffff"
+                    boundBoxFunc={(previous, next) =>
+                      next.width < 2 ||
+                      next.height < 2 ||
+                      next.x < viewport.x ||
+                      next.y < viewport.y ||
+                      next.x + next.width > viewport.x + image.width * viewport.scale ||
+                      next.y + next.height > viewport.y + image.height * viewport.scale
+                        ? previous
+                        : next
+                    }
+                  />
+                </>
+              )}
               <Transformer
                 ref={transformerRef}
                 rotateEnabled={
@@ -1049,7 +1264,45 @@ export function AnnotationCanvas({
           onBlur={() => finishEditing(true)}
         />
       )}
-      <div className="canvas-hint">
+      {cropping && image && (
+        <div className="crop-actions" role="group" aria-label="Crop controls">
+          <span>
+            {cropBounds.width} × {cropBounds.height}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setCropBox(null);
+              setDraft(null);
+            }}
+          >
+            Draw new crop
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setCropBox({
+                id: 'crop-preview',
+                kind: 'crop',
+                x: 0,
+                y: 0,
+                width: image.width,
+                height: image.height,
+                zIndex: 0,
+              })
+            }
+          >
+            Reset to full image
+          </button>
+          <button type="button" onClick={() => finishCrop(false)}>
+            Cancel crop
+          </button>
+          <button type="button" disabled={!cropBox || Boolean(draft)} onClick={() => finishCrop(true)}>
+            Apply crop
+          </button>
+        </div>
+      )}
+      <div className="canvas-hint" hidden={cropping}>
         Drag empty space to pan · Double-click screenshot for text · Shift+Enter for a new line · 0 fit · 1
         actual size
       </div>

@@ -1,4 +1,16 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  nativeTheme,
+  shell,
+  session,
+} from 'electron';
+import os from 'node:os';
+import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -812,6 +824,32 @@ function registerIpc(): void {
   handleWorkflow('workflow:performance:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
+  });
+  handleWorkflow('workflow:appearance:desktop', (event, ...args) => {
+    const [input] = z.tuple([z.object({ enabled: z.boolean() }).strict()]).parse(args);
+    const target = BrowserWindow.fromWebContents(event.sender);
+    if (!target) return { active: false };
+    const material = desktopMaterial(process.platform, os.release());
+    const appearance = preferenceSettingsResult.settings.appearance;
+    const active = Boolean(
+      input.enabled &&
+      material &&
+      appearance.desktopGlass &&
+      !appearance.backgroundImage &&
+      appearance.glassLevel !== 'off' &&
+      !nativeTheme.shouldUseHighContrastColors &&
+      !nativeTheme.prefersReducedTransparency &&
+      !(appearance.allowPerformanceFallback && nativePerformanceProfile().reducedEffectsRecommended),
+    );
+    try {
+      if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
+      if (material === 'acrylic') target.setBackgroundMaterial(active ? 'acrylic' : 'none');
+      target.setBackgroundColor(active ? '#00000000' : appearance.mode === 'light' ? '#f5f6f8' : '#0b0d12');
+      return { active };
+    } catch {
+      target.setBackgroundColor('#0b0d12');
+      return { active: false };
+    }
   });
   handleWorkflow(
     'workflow:prompt-export:start',

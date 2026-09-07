@@ -34,6 +34,7 @@ export const preferenceSettingsSchema = z
           .refine(isAllowedBackgroundImage, 'Choose a bundled backdrop or a local image file.')
           .default(''),
         backgroundOpacity: z.number().min(0).max(1).default(0.42),
+        desktopGlass: z.boolean().optional(),
       })
       .strict(),
     shortcuts: z.object({ bindings: shortcutBindingsSchema }).strict(),

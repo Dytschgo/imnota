@@ -404,14 +404,14 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
     if (!wrap || !stage) throw new Error('Annotation canvas geometry is unavailable');
     const bounds = stage.getBoundingClientRect();
     const scale = Number(wrap.dataset.imageScale);
-    const x = bounds.x + Number(wrap.dataset.imageX);
-    const y = bounds.y + Number(wrap.dataset.imageY);
+    const x = bounds.x + Number(wrap.dataset.imageX) + Number(wrap.dataset.sourceX ?? 0) * scale;
+    const y = bounds.y + Number(wrap.dataset.imageY) + Number(wrap.dataset.sourceY ?? 0) * scale;
     const meta = document.querySelector('.canvas-meta > span:first-child')?.textContent ?? '';
     const dimensions = meta.match(/(\\d+)\\s*[×x]\\s*(\\d+)/);
     if (!dimensions || !Number.isFinite(scale)) throw new Error('Canvas dimensions are unavailable');
     return {
       stage: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
-      image: { x, y, width: Number(dimensions[1]) * scale, height: Number(dimensions[2]) * scale, scale }
+      image: { x, y, width: Number(wrap.dataset.sourceWidth ?? dimensions[1]) * scale, height: Number(wrap.dataset.sourceHeight ?? dimensions[2]) * scale, scale }
     };
   })()`);
 }
@@ -450,7 +450,11 @@ async function waitForStableCanvas(driver: NativeUiDriver): Promise<void> {
   throw new Error('Canvas layout did not settle before native interaction.');
 }
 
-async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
+async function exerciseNativeCanvas(
+  driver: NativeUiDriver,
+  artifactDirectory?: string,
+  artifacts: SmokeCapture[] = [],
+): Promise<void> {
   // Reopening creates a hidden local smoke window. Present the disposable window
   // so Konva's hit canvas is repainted before successive native double-clicks.
   driver.browserWindow.show();
@@ -588,6 +592,33 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
       y: Math.round(geometry.image.y + geometry.image.height * 0.72),
     },
   );
+  await driver.waitFor({ selector: '[aria-label="Crop controls"]' });
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-preview.png'));
+  await driver.click({ text: 'Apply crop', exact: true });
+  await driver.waitFor({ selector: '[aria-label="Crop controls"]' }, { absent: true });
+  await waitForStableCanvas(driver);
+  const croppedWidth = await driver.evaluate<number>(
+    `Number(document.querySelector('.canvas-wrap').dataset.sourceWidth)`,
+  );
+  if (!(croppedWidth > 0 && croppedWidth < 1920))
+    throw new Error('Apply crop did not change visible source bounds.');
+  await selectTool(driver, 'Crop');
+  await driver.click({ text: 'Reset to full image', exact: true });
+  const cancelUnobstructed = await driver.evaluate<boolean>(`(() => {
+    const button = [...document.querySelectorAll('.crop-actions button')]
+      .find((element) => element.textContent.trim() === 'Cancel crop');
+    const rect = button.getBoundingClientRect();
+    return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  })()`);
+  if (!cancelUnobstructed) throw new Error('Crop Cancel is covered by another surface.');
+  await driver.click({ text: 'Cancel crop', exact: true });
+  await driver.waitFor({ selector: '[aria-label="Crop controls"]' }, { absent: true });
+  const cancelledWidth = await driver.evaluate<number>(
+    `Number(document.querySelector('.canvas-wrap').dataset.sourceWidth)`,
+  );
+  if (cancelledWidth !== croppedWidth) throw new Error('Cancel crop changed committed bounds.');
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
+  geometry = await canvasGeometry(driver);
   await selectTool(driver, 'Redaction mask');
   await driver.drag(
     {
@@ -911,6 +942,35 @@ async function exercisePreferencesAndChannel(
       check();
     })`);
   }
+  await driver.evaluate(`(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180;
+    const context = canvas.getContext('2d'); context.fillStyle = '#3284bd'; context.fillRect(0, 0, 320, 180);
+    context.fillStyle = '#eda737'; context.fillRect(160, 0, 160, 180);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'Verification backdrop.png', { type: 'image/png' }));
+    const input = document.querySelector('.imnota-background-settings input[type="file"]');
+    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  const uploaded = { selector: '[aria-label="Uploaded backdrops"] .imnota-backdrop-preset' };
+  await driver.waitFor({
+    selector: '[aria-label="Uploaded backdrops"] .imnota-backdrop-preset[aria-pressed="true"]:not(:disabled)',
+  });
+  await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
+  await driver.waitFor({
+    selector: '[data-testid="backdrop-preset-emerald"][aria-pressed="true"]:not(:disabled)',
+  });
+  await driver.click(uploaded);
+  await driver.waitFor({
+    selector: '[aria-label="Uploaded backdrops"] .imnota-backdrop-preset[aria-pressed="true"]:not(:disabled)',
+  });
+  await driver.click({ selector: '.nav-submenu-item' });
+  await driver.waitFor({ selector: '.workspace' });
+  await driver.click({ selector: '[data-testid="settings-button"]' });
+  await driver.waitFor(uploaded);
+  await driver.click({ selector: '[data-testid="backdrop-preset-amber"]' });
+  await driver.waitFor({
+    selector: '[data-testid="backdrop-preset-amber"][aria-pressed="true"]:not(:disabled)',
+  });
   await driver.click({ selector: 'label:has(input[name="glass-level"][value="balanced"])' });
   await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
   await driver.evaluate(`(async () => {
@@ -947,6 +1007,17 @@ async function exercisePreferencesAndChannel(
   if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
+  await driver.click({ text: 'Desktop glass', exact: true });
+  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
+  const desktopResult = await driver.evaluate<{ ok: boolean; value?: { active: boolean } }>(
+    `window.imnota.setDesktopGlass({ enabled: true })`,
+  );
+  if (!desktopResult.ok) throw new Error('Native desktop material bridge rejected its validated request.');
+  await driver.waitFor({
+    selector: ':root[data-desktop-glass="' + (desktopResult.value?.active ? 'active' : 'fallback') + '"]',
+  });
+  await driver.click({ text: 'No image', exact: true });
+  await driver.waitFor({ selector: ':root[data-desktop-glass="off"][data-background="none"]' });
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   await driver.click({ text: 'Updates & help', exact: true });
   const chooseNightly = async () => {
@@ -1434,7 +1505,7 @@ export async function runSmokeWorkflow(
   let activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
-  await exerciseNativeCanvas(driver);
+  await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
   assertions.push(
     'trusted pan, crop, redaction, outside-bound arrow creation, double-click, Enter and Escape',
   );

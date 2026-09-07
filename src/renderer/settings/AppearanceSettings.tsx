@@ -13,6 +13,12 @@ import { backdropPresetUrl, type EffectiveAppearance } from '../app/useAppearanc
 import { Button } from '../components/ui';
 import type { AccentPreset, AppearanceMode, AppearancePreferences, GlassLevel } from './preferences';
 import './settings.css';
+import {
+  savedBackgrounds,
+  saveBackground,
+  removeBackground,
+  type SavedBackground,
+} from './background-library';
 
 export interface AppearanceSettingsProps {
   value: AppearancePreferences;
@@ -101,6 +107,29 @@ export function AppearanceSettings({
 }: AppearanceSettingsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [library, setLibrary] = useState<SavedBackground[]>([]);
+  const initialBackground = useRef(value.backgroundImage);
+  useEffect(() => {
+    let active = true;
+    savedBackgrounds()
+      .then(async (images) => {
+        if (active) setLibrary(images);
+        const current = initialBackground.current;
+        if (current.startsWith('data:') && !images.some((image) => image.dataUrl === current)) {
+          await saveBackground('Previous uploaded image', current);
+          if (active) setLibrary(await savedBackgrounds());
+        }
+      })
+      .catch(() => {
+        if (active)
+          setError(
+            'Your saved backdrop library could not be opened. Existing appearance settings are unchanged.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const readGeneration = useRef(0);
   const busyRef = useRef(false);
@@ -132,7 +161,11 @@ export function AppearanceSettings({
     setBusy(true);
     setError('');
     try {
-      await onChange({ ...valueRef.current, ...patch });
+      await onChange({
+        ...valueRef.current,
+        ...patch,
+        ...('backgroundImage' in patch && !('desktopGlass' in patch) ? { desktopGlass: false } : {}),
+      });
     } catch {
       setError('Appearance could not be saved. Your previous preference is still active.');
     } finally {
@@ -302,13 +335,24 @@ export function AppearanceSettings({
                 reader.onload = () => {
                   if (generation !== readGeneration.current || typeof reader.result !== 'string') return;
                   void normalizeBackdrop(reader.result)
-                    .then((normalized) => {
-                      if (generation === readGeneration.current)
-                        void update({ backgroundImage: normalized }, { invalidateUpload: false });
-                    })
                     .catch(() => {
+                      throw new Error('decode-failed');
+                    })
+                    .then(async (normalized) => {
+                      if (generation !== readGeneration.current) return;
+                      await saveBackground(file.name, normalized);
+                      if (generation !== readGeneration.current) return;
+                      setLibrary(await savedBackgrounds());
                       if (generation === readGeneration.current)
-                        setError('That image could not be normalized. Choose a smaller image.');
+                        await update({ backgroundImage: normalized }, { invalidateUpload: false });
+                    })
+                    .catch((failure: unknown) => {
+                      if (generation === readGeneration.current)
+                        setError(
+                          failure instanceof Error && failure.message === 'decode-failed'
+                            ? 'That image could not be normalized. Choose a smaller image.'
+                            : 'That image could not be saved. Check available disk space and remove an unused library image if all 12 slots are full.',
+                        );
                     });
                 };
                 reader.onerror = () => {
@@ -320,10 +364,47 @@ export function AppearanceSettings({
             />
           </div>
         </div>
+        <div className="imnota-background-modes" role="group" aria-label="Backdrop source">
+          <button
+            type="button"
+            disabled={controlsDisabled}
+            aria-pressed={!value.backgroundImage && !value.desktopGlass}
+            onClick={() => void update({ backgroundImage: '', desktopGlass: false })}
+          >
+            No image
+          </button>
+          <button
+            type="button"
+            disabled={controlsDisabled}
+            aria-pressed={!value.backgroundImage && Boolean(value.desktopGlass)}
+            onClick={() =>
+              void update({
+                backgroundImage: '',
+                desktopGlass: true,
+                glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+              })
+            }
+          >
+            Desktop glass
+          </button>
+        </div>
+        {value.desktopGlass && (
+          <p className="imnota-background-hint" role="status">
+            {effectiveAppearance?.desktopGlassStatus === 'active'
+              ? 'Desktop glass is active. '
+              : 'Solid fallback is active on this configuration. '}
+            Uses native desktop material on macOS and supported Windows 11 systems. Other systems, reduced
+            transparency, and constrained-performance mode use solid surfaces.
+          </p>
+        )}
         <label className="imnota-range-row">
           <span>
-            <strong>Background opacity</strong>
-            <small>Lower the image when it competes with screenshot details.</small>
+            <strong>{value.desktopGlass ? 'Glass tint' : 'Background opacity'}</strong>
+            <small>
+              {value.desktopGlass
+                ? 'Lower the tint to reveal more of the desktop material.'
+                : 'Lower the image when it competes with screenshot details.'}
+            </small>
           </span>
           <span className="imnota-range-control">
             <input
@@ -332,7 +413,7 @@ export function AppearanceSettings({
               max="1"
               step="0.05"
               value={value.backgroundOpacity}
-              disabled={controlsDisabled || !value.backgroundImage}
+              disabled={controlsDisabled || (!value.backgroundImage && !value.desktopGlass)}
               onChange={(event) => void update({ backgroundOpacity: Number(event.target.value) })}
             />
             <output>{Math.round(value.backgroundOpacity * 100)}%</output>
@@ -359,6 +440,62 @@ export function AppearanceSettings({
               );
             })}
           </div>
+        </div>
+        <div className="imnota-backdrop-presets" role="group" aria-label="Uploaded backdrops">
+          <span>Your images</span>
+          <div>
+            {library.map((entry) => (
+              <div key={entry.id} className="imnota-uploaded-backdrop">
+                <button
+                  type="button"
+                  className="imnota-backdrop-preset"
+                  disabled={controlsDisabled}
+                  aria-pressed={value.backgroundImage === entry.dataUrl}
+                  onClick={() => void update({ backgroundImage: entry.dataUrl })}
+                >
+                  <img src={entry.preview ?? entry.dataUrl} alt="" loading="lazy" />
+                  <span title={entry.name}>{entry.name}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={controlsDisabled}
+                  aria-label={`Remove ${entry.name} from library`}
+                  onClick={async () => {
+                    try {
+                      await removeBackground(entry.id);
+                      setLibrary(await savedBackgrounds());
+                    } catch {
+                      setError('The image could not be removed from your library. Try again.');
+                    }
+                  }}
+                >
+                  Remove from library
+                </button>
+              </div>
+            ))}
+          </div>
+          {!library.length && (
+            <p>Uploaded images stay on this device so you can select them again. Up to 12 images.</p>
+          )}
+          {value.backgroundImage.startsWith('data:') &&
+            !library.some((entry) => entry.dataUrl === value.backgroundImage) && (
+              <Button
+                variant="soft"
+                disabled={controlsDisabled}
+                onClick={async () => {
+                  try {
+                    await saveBackground('Previous uploaded image', value.backgroundImage);
+                    setLibrary(await savedBackgrounds());
+                  } catch {
+                    setError(
+                      'The current image could not be added. Check disk space or remove an unused library image.',
+                    );
+                  }
+                }}
+              >
+                Keep current image in library
+              </Button>
+            )}
         </div>
       </section>
 
