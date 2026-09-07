@@ -153,6 +153,12 @@ export interface PromptBundleControllerError {
 export type PromptBundleControllerActionResult =
   { ok: true; sessionId?: string; bundleNumber?: number } | { ok: false; error: PromptBundleControllerError };
 
+export interface HostedShareArtifacts {
+  title: string;
+  markdown: string;
+  images: readonly { filename: string; dataBase64: string }[];
+}
+
 export interface PromptBundleLargePreview {
   bundleNumber: number;
   dataUrl: string;
@@ -1083,6 +1089,48 @@ export class PromptBundleControllerEngine {
 
   async prepareFreshFiles(selection?: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
     return this.fresh(selectionNumber(selection), false);
+  }
+
+  /** Creates a new local finalized export, then reads only Markdown and rendered PNG bytes for opt-in sharing. */
+  async prepareHostedShare(): Promise<
+    { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
+  > {
+    const prepared = await this.fresh(undefined, false);
+    if (!prepared.ok || !prepared.sessionId)
+      return prepared as { ok: false; error: PromptBundleControllerError };
+    try {
+      const artifact = this.latestArtifact;
+      const plan = this.latestPlan;
+      if (!artifact || !plan)
+        throw failure('native-failure', 'The finalized local export is unavailable. Prepare it again.', true);
+      const contents = await Promise.all(
+        [...artifact.grants.keys()]
+          .sort((a, b) => a - b)
+          .map((bundleNumber) =>
+            this.bridge.readPromptExportBundle({ sessionId: artifact.sessionId, bundleNumber }),
+          ),
+      );
+      const bundles = contents.map((result) => unwrap(result));
+      return {
+        ok: true,
+        value: {
+          title: plan.plan.collectionName || 'Imnota prompt',
+          markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
+          images: bundles.flatMap((bundle) =>
+            bundle.imageDataUrl
+              ? [
+                  {
+                    filename: `prompt-${String(bundle.bundleNumber).padStart(3, '0')}.png`,
+                    dataBase64: bundle.imageDataUrl.replace(/^data:image\/png;base64,/, ''),
+                  },
+                ]
+              : [],
+          ),
+        },
+      };
+    } catch (error) {
+      return this.resultError(error) as { ok: false; error: PromptBundleControllerError };
+    }
   }
 
   private async fresh(

@@ -2,6 +2,10 @@ import type { PromptBundleProgress } from '../../shared/prompt-bundles';
 import { Modal } from '../components/ui';
 import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptBundleCard';
 import { PromptSharingDialog } from './PromptSharingDialog';
+import { HostedShareDialog } from './HostedShareDialog';
+import { useState } from 'react';
+import type { HostedShareArtifacts } from './prompt-export-controller-core';
+import type { PromptBundleControllerError } from './prompt-export-controller-core';
 
 interface PromptActionError {
   message: string;
@@ -28,6 +32,9 @@ export interface PromptBundleUiController {
   loadPreview(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   clearPreview(): void;
   retryCleanup(): Promise<PromptActionResult>;
+  prepareHostedShare(): Promise<
+    { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
+  >;
 }
 
 export function PromptBundleDialogHost({
@@ -37,6 +44,7 @@ export function PromptBundleDialogHost({
   controller: PromptBundleUiController;
   onError(message: string): void;
 }) {
+  const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
   const run = async (action: Promise<PromptActionResult>) => {
     const result = await action;
     if (!result.ok) onError(result.error.message);
@@ -44,7 +52,7 @@ export function PromptBundleDialogHost({
   if (!controller.isOpen) return null;
   return (
     <>
-      {!controller.preview && (
+      {!controller.preview && !hostedArtifacts && (
         <PromptSharingDialog
           bundles={controller.cards}
           progress={controller.progress}
@@ -60,7 +68,19 @@ export function PromptBundleDialogHost({
           onOpenExportFolder={() => run(controller.openFolder())}
           onCancel={() => run(controller.cancel())}
           onRetryCleanup={() => run(controller.retryCleanup())}
+          onShareHosted={async () => {
+            const result = await controller.prepareHostedShare();
+            if (result.ok) setHostedArtifacts(result.value);
+            else onError(result.error.message);
+          }}
           onLoadPreview={(selection) => run(controller.loadPreview(selection))}
+        />
+      )}
+      {hostedArtifacts && (
+        <HostedShareDialog
+          artifacts={hostedArtifacts}
+          onClose={() => setHostedArtifacts(undefined)}
+          onError={onError}
         />
       )}
       {controller.preview && (
