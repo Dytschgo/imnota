@@ -1017,7 +1017,7 @@ async function exercisePreferencesAndChannel(
   if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
-  await driver.click({ text: 'Desktop glass', exact: true });
+  await driver.click({ text: 'Desktop glass (Beta)', exact: true });
   await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
   const desktopResult = await driver.evaluate<{ ok: boolean; value?: { active: boolean } }>(
     `window.imnota.setDesktopGlass({ enabled: true })`,

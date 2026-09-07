@@ -84,7 +84,7 @@ describe('AppearanceSettings backdrop upload ownership', () => {
     const onChange = vi.fn();
     renderSettings(onChange);
     await screen.findByRole('button', { name: 'My image' });
-    fireEvent.click(screen.getByRole('button', { name: 'Desktop glass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop glass (Beta)' }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ desktopGlass: true, backgroundImage: '', glassLevel: 'balanced' }),
     );

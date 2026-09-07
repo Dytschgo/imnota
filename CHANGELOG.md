@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Added collection-based PNG prompt bundles with corresponding Markdown, screenshot references, and export exclusions.
+- Added traditional non-destructive crop controls with Apply, Cancel, Reset, and resize handles.
+- Improved annotation selection, resizing, Mac deletion shortcuts, and collapsible workspace navigation.
+- Grouped Settings and added one app-wide backdrop with a local uploaded-image library.
+- Desktop glass remains optional and is labelled Beta. Scrolling and transparency can still show rendering glitches; select No image or Solid surfaces to turn it off.
+- macOS downloads remain ad-hoc signed, not Apple-notarised. Back up workspaces before upgrading; older app versions may not support newer project data.
+
 ## 0.2.2
 
 - Added a macOS Terminal update button and copyable command with verified downloads, graceful shutdown, rollback and retained app backups.
