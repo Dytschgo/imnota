@@ -36,6 +36,8 @@ Create the data directory as the application user with mode `0700`. The service 
 5. Verify `curl --fail --silent --show-error https://app.imnota.xyz/health`, TLS validity, HSTS, CSP, `X-Robots-Tag` on `/new` and share paths, correct `X-Forwarded-Proto`, a full manual share flow, and a 404 after revoke.
 6. Keep the prior release directory and compatible backup until the observation window closes.
 
+Hostinger's CDN currently rewrites the application `Content-Security-Policy` response header to `upgrade-insecure-requests`. Helmet still emits the complete header for direct and future-compatible hosting, and every HTML document places the equivalent resource policy immediately after its charset declaration as a browser fallback. Because `frame-ancestors` is not supported in a CSP meta element, the preserved `X-Frame-Options: DENY` header supplies framing protection behind the CDN. Recheck this behavior after provider or CDN configuration changes.
+
 The health response exposes only service state plus actual, recorded, and reserved aggregate storage bytes. Monitor non-2xx rates, process restarts, disk free space, SQLite write and backup errors, cleanup failures, upload rate-limit volume, certificate expiry, and health latency. Alert before disk usage reaches the configured 2 GiB quota or the hosting account's own limit. Monitor the private backup directory separately because backups do not count toward the upload quota.
 
 ## Cleanup and retention
