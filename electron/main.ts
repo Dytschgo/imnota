@@ -1501,6 +1501,13 @@ async function createWindow(): Promise<BrowserWindow> {
   return createdWindow;
 }
 
+async function removeSmokeFixture(temporaryRoot: string, fixture: string): Promise<void> {
+  const verifiedFixture = await validateCreatedSmokeDirectory(fixture, 'fixture');
+  if (!pathIsWithin(temporaryRoot, verifiedFixture))
+    throw new Error('Refusing to remove a smoke fixture outside the verified temporary directory.');
+  await fs.rm(verifiedFixture, { recursive: true, force: true });
+}
+
 app.whenReady().then(async () => {
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
@@ -1584,10 +1591,7 @@ app.whenReady().then(async () => {
       if (process.env.IMNOTA_SMOKE_RESULT)
         await fs.writeFile(process.env.IMNOTA_SMOKE_RESULT, JSON.stringify(result, null, 2), { flag: 'wx' });
     } finally {
-      const verifiedFixture = await validateCreatedSmokeDirectory(fixture, 'fixture');
-      if (!pathIsWithin(temporaryRoot, verifiedFixture))
-        throw new Error('Refusing to remove a smoke fixture outside the verified temporary directory.');
-      await fs.rm(verifiedFixture, { recursive: true, force: true });
+      await removeSmokeFixture(temporaryRoot, fixture);
     }
     app.exit(exitCode);
     return;
