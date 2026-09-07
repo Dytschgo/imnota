@@ -2,6 +2,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_IMAGE_MAX_BYTES, DEFAULT_APPEARANCE } from '../../shared/preferences';
 import { AppearanceSettings } from './AppearanceSettings';
+import { savedBackgrounds } from './background-library';
+vi.mock('./background-library', () => ({
+  savedBackgrounds: vi.fn(async () => []),
+  saveBackground: vi.fn(async () => {}),
+  removeBackground: vi.fn(async () => {}),
+}));
 
 type Deferred<T> = { promise: Promise<T>; resolve(value: T): void; reject(reason?: unknown): void };
 
@@ -71,6 +77,18 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('offers native desktop glass without forgetting uploaded thumbnails', async () => {
+    vi.mocked(savedBackgrounds).mockResolvedValueOnce([
+      { id: 'one', name: 'My image', dataUrl: 'data:image/png;base64,AA==', addedAt: 1 },
+    ]);
+    const onChange = vi.fn();
+    renderSettings(onChange);
+    await screen.findByRole('button', { name: 'My image' });
+    fireEvent.click(screen.getByRole('button', { name: 'Desktop glass' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ desktopGlass: true, backgroundImage: '', glassLevel: 'balanced' }),
+    );
+  });
   it('does not let a delayed FileReader completion overwrite a later bundled preset', async () => {
     const onChange = vi.fn();
     renderSettings(onChange);

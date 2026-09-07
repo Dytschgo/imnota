@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImnotaBridge } from '../src/shared/types.js';
 
 const bridge: ImnotaBridge = {
+  setDesktopGlass: (input) => ipcRenderer.invoke('workflow:appearance:desktop', input),
   getPreferenceSettings: () => ipcRenderer.invoke('workflow:preferences:get'),
   setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
   getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),

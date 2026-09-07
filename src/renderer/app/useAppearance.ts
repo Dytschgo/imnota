@@ -18,6 +18,7 @@ export interface AppearanceEnvironment {
 }
 
 export interface EffectiveAppearance {
+  desktopGlassStatus?: 'active' | 'fallback' | 'off';
   theme: ResolvedTheme;
   accent: AccentPreset;
   requestedGlassLevel: GlassLevel;
@@ -161,6 +162,7 @@ export function useAppearance(
   const [reducedTransparency, setReducedTransparency] = useState(() =>
     mediaMatches('(prefers-reduced-transparency: reduce)'),
   );
+  const [desktopActive, setDesktopActive] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -189,6 +191,27 @@ export function useAppearance(
   );
 
   useEffect(() => {
+    let current = true;
+    setDesktopActive(false);
+    const enabled = Boolean(
+      preferences.desktopGlass && !preferences.backgroundImage && effective.glassLevel !== 'off',
+    );
+    if (typeof window.imnota?.setDesktopGlass === 'function') {
+      void window.imnota
+        .setDesktopGlass({ enabled })
+        .then((result) => {
+          if (current) setDesktopActive(result.ok && result.value.active);
+        })
+        .catch(() => {
+          if (current) setDesktopActive(false);
+        });
+    }
+    return () => {
+      current = false;
+    };
+  }, [preferences.desktopGlass, preferences.backgroundImage, effective.glassLevel]);
+
+  useEffect(() => {
     const root = options.root ?? (typeof document === 'undefined' ? null : document.documentElement);
     if (!root) return;
     const accent = ACCENTS[effective.accent];
@@ -212,6 +235,12 @@ export function useAppearance(
     root.style.setProperty('--imnota-glass-saturation', glass.saturation);
     const backdropActive = effective.glassLevel !== 'off' && Boolean(preferences.backgroundImage);
     root.dataset.background = backdropActive ? 'active' : 'none';
+    root.dataset.desktopGlass = desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off';
+    root.style.setProperty(
+      '--imnota-backdrop-position',
+      isBackdropPreset(preferences.backgroundImage) ? '75% center' : 'center',
+    );
+    root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, preferences.backgroundOpacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',
       backdropActive ? cssBackgroundImage(preferences.backgroundImage) : 'none',
@@ -223,7 +252,17 @@ export function useAppearance(
     // Compatibility aliases let the current indigo-named shell adopt presets before its global tokens are renamed.
     root.style.setProperty('--indigo', accent.base);
     root.style.setProperty('--indigo-light', accent.hover);
-  }, [effective, options.root, preferences.backgroundImage, preferences.backgroundOpacity]);
+  }, [
+    effective,
+    options.root,
+    preferences.backgroundImage,
+    preferences.backgroundOpacity,
+    preferences.desktopGlass,
+    desktopActive,
+  ]);
 
-  return effective;
+  return {
+    ...effective,
+    desktopGlassStatus: desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off',
+  };
 }

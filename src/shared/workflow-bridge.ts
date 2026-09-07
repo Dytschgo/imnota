@@ -94,6 +94,7 @@ export interface ProjectWatchEvent {
 }
 
 export interface WorkflowBridge {
+  setDesktopGlass(input: { enabled: boolean }): Promise<WorkflowResult<{ active: boolean }>>;
   getPreferenceSettings(): Promise<WorkflowResult<PreferenceSettingsResult>>;
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;

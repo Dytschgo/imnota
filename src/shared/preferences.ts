@@ -36,6 +36,7 @@ export interface AppearancePreferences {
   allowPerformanceFallback: boolean;
   backgroundImage: string;
   backgroundOpacity: number;
+  desktopGlass?: boolean;
 }
 
 export interface ShortcutPreferences {
