@@ -78,6 +78,7 @@ If health or the manual flow fails, remove traffic from the candidate, stop it, 
 
 - Browser pairing is anonymous and protected by origin checks plus rate limits; it does not prove user identity. Abuse monitoring and quota headroom are operational requirements.
 - Uploads are bounded JSON envelopes and therefore buffered in memory by Express. Rate limiting and a four-upload concurrency gate run before parsing, but the 36 MiB body limit still must fit the Hostinger process memory budget and proxy request limit.
+- PNG work is capped at 16 megapixels/64 MiB inflated per image and 64 megapixels/256 MiB inflated per bundle. The server completes structural preflight for the manifest and enforces both aggregate limits before beginning pixel decoding.
 - PNG normalization deliberately rejects interlaced files and converts accepted files to 8-bit RGBA. This is compatible with the current desktop canvas exporter but should be retested if the exporter changes.
 - Receipt recovery requires the desktop to protect the pending upload bearer and UUID for up to 24 hours. They are a sensitive capability during that window and should be removed immediately after the receipt is committed locally.
 - The default in-memory rate-limit counters assume one Node process. Multiple instances require a shared rate-limit store before traffic is distributed across them.

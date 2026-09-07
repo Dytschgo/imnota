@@ -92,6 +92,14 @@ export function loadConfig(overrides = {}) {
       overrides.maxInflatedPngBytes ?? process.env.IMNOTA_SHARE_MAX_INFLATED_PNG_BYTES,
       64 * 1024 * 1024,
     ),
+    maxBundleImagePixels: integer(
+      overrides.maxBundleImagePixels ?? process.env.IMNOTA_SHARE_MAX_BUNDLE_IMAGE_PIXELS,
+      64_000_000,
+    ),
+    maxBundleInflatedPngBytes: integer(
+      overrides.maxBundleInflatedPngBytes ?? process.env.IMNOTA_SHARE_MAX_BUNDLE_INFLATED_PNG_BYTES,
+      256 * 1024 * 1024,
+    ),
     maxStorageBytes: integer(
       overrides.maxStorageBytes ?? process.env.IMNOTA_SHARE_MAX_STORAGE_BYTES,
       2 * 1024 * 1024 * 1024,
