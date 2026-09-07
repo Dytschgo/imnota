@@ -25,6 +25,7 @@ afterEach(() => {
     activeScreenshotId: null,
     view: 'projects',
     search: '',
+    rightPanelOpen: true,
   });
 });
 
@@ -61,7 +62,7 @@ const snapshot: ProjectSnapshot = {
 };
 
 describe('feedback controls', () => {
-  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
+  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}, narrowViewport = false) {
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
@@ -107,11 +108,14 @@ describe('feedback controls', () => {
       reloadWatchedProject: async () => ({ ok: true, value: { snapshot, projectRevision: 'project-2' } }),
       ...overrides,
     } as unknown as ImnotaBridge;
-    window.matchMedia = vi.fn(() => ({ matches: false })) as unknown as typeof window.matchMedia;
+    window.matchMedia = vi.fn(() => ({ matches: narrowViewport })) as unknown as typeof window.matchMedia;
     return render(<App />);
   }
 
-  async function renderEditingProject(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
+  async function renderEditingProject(
+    overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
+    narrowViewport = false,
+  ) {
     const editingSnapshot: ProjectSnapshot = {
       ...snapshot,
       project: {
@@ -149,16 +153,19 @@ describe('feedback controls', () => {
       contentRevision: 'b'.repeat(64),
       projectRevision: 'project-content-2',
     }));
-    renderApp({
-      saveScreenshotContent: save,
-      loadScreenshotContent: async () => ({
-        image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
-        annotations: [],
-        description: 'Original note',
-        contentRevision: 'a'.repeat(64),
-      }),
-      ...overrides,
-    });
+    renderApp(
+      {
+        saveScreenshotContent: save,
+        loadScreenshotContent: async () => ({
+          image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+          annotations: [],
+          description: 'Original note',
+          contentRevision: 'a'.repeat(64),
+        }),
+        ...overrides,
+      },
+      narrowViewport,
+    );
     await screen.findByRole('textbox', { name: 'Search projects' });
     act(() => useAppStore.getState().setProject(editingSnapshot));
     const note = await screen.findByRole('textbox', { name: 'Description' });
@@ -236,6 +243,8 @@ describe('feedback controls', () => {
     const editor = await screen.findByRole('textbox', { name: 'Markdown' });
     fireEvent.change(editor, { target: { value: 'Local edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete this item?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
     await waitFor(() =>
       expect(deleteContentItem).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -243,6 +252,62 @@ describe('feedback controls', () => {
       }),
     );
     expect(persisted.project.contentItems?.map((item) => item.id)).toEqual([text.id]);
+  });
+
+  it('cancels and confirms screenshot deletion when confirmation is enabled', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('deletes immediately when confirmation is disabled', async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    await waitFor(() => expect(deleteScreenshot).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
+  it('opens the inspector as a focusable narrow-window drawer and dismisses it with Escape', async () => {
+    await renderEditingProject({}, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+
+    const trigger = screen.getByRole('button', { name: 'Expand inspector' });
+    fireEvent.click(trigger);
+    const dismiss = await screen.findByRole('button', { name: 'Close inspector' });
+    expect(dismiss).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
   });
 
   it('keeps the project and notes open when saving before search fails', async () => {

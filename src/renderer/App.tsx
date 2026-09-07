@@ -29,7 +29,7 @@ import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layo
 import { dispatchCanvasCommand } from './canvas/commands';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
-import { Button, EmptyState, IconButton } from './components/ui';
+import { Button, EmptyState, IconButton, Modal } from './components/ui';
 import { OnboardingDemo } from './onboarding';
 import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
 import { usePromptBundleController } from './export/usePromptBundleController';
@@ -52,6 +52,8 @@ interface SnapshotExtras {
   recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
+type PendingDeletion = 'content' | 'screenshot' | null;
+
 export default function App() {
   const store = useAppStore();
   const preferences = usePreferences();
@@ -62,6 +64,7 @@ export default function App() {
   const [dialog, setDialog] = useState<AppDialog>(null);
   const [newProject, setNewProject] = useState<NewProjectDraft>({ name: '', description: '' });
   const [dialogBusy, setDialogBusy] = useState(false);
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -495,7 +498,11 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The item could not be created.');
     }
   }
-  async function mutateContent(action: 'duplicate' | 'delete') {
+  async function mutateContent(action: 'duplicate' | 'delete', confirmed = false) {
+    if (action === 'delete' && !confirmed && store.settings.confirmBeforeDeletion) {
+      setPendingDeletion('content');
+      return;
+    }
     const token = await beginCurrentProjectMutation();
     if (token === null) return;
     try {
@@ -598,6 +605,13 @@ export default function App() {
     }
   }
   async function deleteScreenshot() {
+    if (store.settings.confirmBeforeDeletion) {
+      setPendingDeletion('screenshot');
+      return;
+    }
+    await deleteScreenshotNow();
+  }
+  async function deleteScreenshotNow() {
     const current = useAppStore.getState();
     const shot = current.activeScreenshot();
     if (!current.snapshot || !shot) return;
@@ -1107,6 +1121,35 @@ export default function App() {
         onShortcutChange={preferences.saveShortcuts}
         onClose={() => setDialog(null)}
       />
+      {pendingDeletion && (
+        <Modal
+          title={pendingDeletion === 'content' ? 'Delete this item?' : 'Delete this screenshot?'}
+          description={
+            pendingDeletion === 'content'
+              ? 'This moves the item to the project trash. You can undo it immediately after deletion.'
+              : 'This moves the screenshot to the project trash. You can undo it immediately after deletion.'
+          }
+          onClose={() => setPendingDeletion(null)}
+        >
+          <div className="modal-actions">
+            <Button variant="ghost" onClick={() => setPendingDeletion(null)}>
+              Keep it
+            </Button>
+            <Button
+              data-autofocus
+              variant="danger"
+              onClick={() => {
+                const target = pendingDeletion;
+                setPendingDeletion(null);
+                if (target === 'content') void mutateContent('delete', true);
+                else void deleteScreenshotNow();
+              }}
+            >
+              Move to trash
+            </Button>
+          </div>
+        </Modal>
+      )}
       <PromptBundleDialogHost controller={promptBundles} onError={setError} />
       {showOnboarding && (
         <OnboardingDemo

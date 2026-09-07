@@ -1091,6 +1091,7 @@ button.icon-button.new-collection-button svg {
 }
 
 .workspace {
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1;
@@ -1540,6 +1541,13 @@ button.icon-button.new-collection-button svg {
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--line);
+}
+.inspector-drawer-layer,
+.inspector-drawer {
+  display: contents;
+}
+.inspector-drawer-close {
+  display: none;
 }
 .inspector-heading {
   min-height: 67px;
@@ -2304,8 +2312,35 @@ kbd {
   .workspace {
     grid-template-columns: 190px minmax(0, 1fr);
   }
-  .inspector {
-    display: none;
+  .inspector-drawer-layer {
+    position: absolute;
+    z-index: 6;
+    inset: 0;
+    display: block;
+    background: color-mix(in srgb, var(--bg) 42%, transparent);
+  }
+  .inspector-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    width: min(360px, calc(100% - 56px));
+    min-width: 256px;
+    box-shadow: var(--shadow);
+  }
+  .inspector-drawer > .inspector {
+    width: 100%;
+    min-width: 0;
+    border-left: 1px solid var(--line-strong);
+  }
+  .inspector-drawer-close {
+    position: absolute;
+    z-index: 1;
+    top: 13px;
+    right: 12px;
+    display: grid;
+    background: var(--surface-2);
   }
   .context-builder {
     grid-template-columns: 300px minmax(0, 1fr);
