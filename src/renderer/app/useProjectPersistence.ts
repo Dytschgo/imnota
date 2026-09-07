@@ -6,7 +6,13 @@ import type {
   ProjectSnapshot,
   ScreenshotRecord,
 } from '../../shared/types';
-import { getRendererBridge, workflowMessage, workflowValue, WorkflowRequestError } from './workflow';
+import {
+  getRendererBridge,
+  screenshotSaveError,
+  workflowMessage,
+  workflowValue,
+  WorkflowRequestError,
+} from './workflow';
 
 export type SaveState = 'saved' | 'saving' | 'error';
 
@@ -564,10 +570,7 @@ export function useProjectPersistence({
           } catch (reason) {
             if (activeKeyRef.current === key) setSaveState('error');
             setError(
-              workflowMessage(
-                reason,
-                `Could not save ${source.screenshot.title || source.screenshot.originalFilename}. Keep Imnota open and check the workspace.`,
-              ),
+              screenshotSaveError(source.screenshot, snapshotRef.current?.project.screenshots ?? [], reason),
             );
             return false;
           }

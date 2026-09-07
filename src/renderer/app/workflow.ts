@@ -1,5 +1,5 @@
 import type { WorkflowBridge, WorkflowError, WorkflowResult } from '../../shared/workflow-bridge';
-import type { ImnotaBridge } from '../../shared/types';
+import type { ImnotaBridge, ScreenshotRecord } from '../../shared/types';
 
 export type RendererBridge = ImnotaBridge & WorkflowBridge;
 
@@ -24,4 +24,20 @@ export function workflowValue<T>(result: WorkflowResult<T>): T {
 
 export function workflowMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+export function screenshotSaveError(
+  screenshot: ScreenshotRecord,
+  screenshots: readonly ScreenshotRecord[],
+  error: unknown,
+): string {
+  const index = screenshots
+    .filter((item) => item.collectionId === screenshot.collectionId)
+    .sort((left, right) => left.position - right.position)
+    .findIndex((item) => item.id === screenshot.id);
+  const reference = index < 0 ? 'Screenshot' : `Picture ${index + 1}`;
+  const title = screenshot.title.trim();
+  const filename = screenshot.originalFilename;
+  const identity = title && title !== filename ? `${title} (${filename})` : filename;
+  return `Could not save ${reference} — ${identity}. ${workflowMessage(error, 'The save failed.')} Keep Imnota open; your edits are still in memory. Check the workspace and try again.`;
 }
