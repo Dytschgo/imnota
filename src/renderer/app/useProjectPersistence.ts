@@ -897,7 +897,9 @@ export function useProjectPersistence({
 
       let next = authoritativeSnapshot;
       let revision = authoritativeSnapshot.projectRevision ?? null;
-      if (sameProject && !revision) {
+      // The open response predates the flush above. Even a revision-bearing response may
+      // now be stale, so same-project adoption always starts from a fresh disk snapshot.
+      if (sameProject) {
         const ready = await watchReady.current;
         const id = watchId.current;
         if (!ready || !id) {

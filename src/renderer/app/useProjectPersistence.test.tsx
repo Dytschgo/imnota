@@ -605,7 +605,11 @@ describe('useProjectPersistence', () => {
       recoveryFound: true,
       projectRevision: 'project-recovered-S2',
     };
-    const mock = bridge();
+    const mock = bridge({
+      reloadWatchedProject: vi.fn(async () =>
+        ok({ snapshot: recovered, projectRevision: 'project-recovered-S2' }),
+      ),
+    });
     window.imnota = mock.value as never;
     const onSnapshot = vi.fn();
     const { result } = renderHook(() =>
@@ -635,6 +639,66 @@ describe('useProjectPersistence', () => {
       }),
     );
     expect(onSnapshot.mock.calls.at(-1)?.[0].project.description).toBe('Recovered S2');
+  });
+
+  it('reloads S3 after adoption saves a screenshot draft instead of trusting revision-bearing S2', async () => {
+    const source = snapshot();
+    const staleOpen = { ...source, projectRevision: 'project-S2' };
+    const edited = {
+      ...source.project.screenshots[0]!,
+      title: 'Saved during open',
+      priority: 'high' as const,
+    };
+    const latest = {
+      ...source,
+      project: { ...source.project, screenshots: [edited] },
+      projectRevision: 'project-S3',
+    };
+    let didSave = false;
+    const mock = bridge({
+      saveScreenshotContent: vi.fn(async () => {
+        didSave = true;
+        return {
+          project: latest.project,
+          savedScreenshotId: edited.id,
+          conflictCreated: false,
+          contentRevision: 'content-S3',
+          projectRevision: 'project-S3',
+        };
+      }),
+      reloadWatchedProject: vi.fn(async () => {
+        expect(didSave).toBe(true);
+        return ok({ snapshot: latest, projectRevision: 'project-S3' });
+      }),
+    });
+    window.imnota = mock.value as never;
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+    const token = result.current.beginNativeMutation();
+    act(() => result.current.markScreenshotDirty(edited));
+    await act(async () =>
+      expect(await result.current.adoptAuthoritativeSnapshot(staleOpen, token)).toBe(true),
+    );
+    expect(result.current.projectRevision).toBe('project-S3');
+    expect(onSnapshot.mock.calls.at(-1)?.[0].project.screenshots[0]).toMatchObject({
+      title: 'Saved during open',
+      priority: 'high',
+    });
+    const exported = await result.current.getSavedContext('collection');
+    expect(exported.snapshot.project.screenshots[0]).toMatchObject({
+      title: 'Saved during open',
+      priority: 'high',
+    });
+    expect(mock.value.reloadWatchedProject).toHaveBeenCalledOnce();
   });
 
   it('holds debounced metadata behind a native mutation and saves it against the new revision', async () => {
