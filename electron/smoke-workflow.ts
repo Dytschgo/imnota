@@ -916,6 +916,22 @@ async function exerciseWatchAndConflict(
       throw new Error('Watched description reload stayed stale');
     }
   })()`);
+
+  const projectFile = path.join(projectPath, 'project.json');
+  const externalMetadata = JSON.parse(await fs.readFile(projectFile, 'utf8')) as ProjectData;
+  externalMetadata.description = 'External project metadata edit for stale CAS';
+  await fs.writeFile(projectFile, JSON.stringify(externalMetadata, null, 2), 'utf8');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if ((window.__imnotaSmokeWatchEvents ?? []).some((event) =>
+        event.changedPaths?.some((changedPath) => changedPath.toLowerCase() === 'project.json')
+      )) return resolve(true);
+      if (Date.now() - started > 15000) return reject(new Error('Project metadata watch event timed out'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
   await assertWorkflowFailure(
     driver,
     `workflow.saveProjectCompareAndSwap({
