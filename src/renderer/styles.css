@@ -2242,6 +2242,10 @@ kbd {
 .toast svg {
   color: var(--success);
 }
+.app-shell:has(.crop-actions) ~ .toast {
+  bottom: 96px;
+  max-width: min(420px, calc(100vw - 48px));
+}
 .toast button {
   min-height: 30px;
   margin-left: 4px;

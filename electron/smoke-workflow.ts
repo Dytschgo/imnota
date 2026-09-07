@@ -604,6 +604,13 @@ async function exerciseNativeCanvas(
     throw new Error('Apply crop did not change visible source bounds.');
   await selectTool(driver, 'Crop');
   await driver.click({ text: 'Reset to full image', exact: true });
+  const cancelUnobstructed = await driver.evaluate<boolean>(`(() => {
+    const button = [...document.querySelectorAll('.crop-actions button')]
+      .find((element) => element.textContent.trim() === 'Cancel crop');
+    const rect = button.getBoundingClientRect();
+    return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  })()`);
+  if (!cancelUnobstructed) throw new Error('Crop Cancel is covered by another surface.');
   await driver.click({ text: 'Cancel crop', exact: true });
   await driver.waitFor({ selector: '[aria-label="Crop controls"]' }, { absent: true });
   const cancelledWidth = await driver.evaluate<number>(
