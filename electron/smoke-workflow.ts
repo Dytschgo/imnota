@@ -559,19 +559,52 @@ async function excludeScreenshotThroughUi(
 
 async function captureWorkspaceMatrix(
   driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<void> {
   if (!artifactDirectory) return;
   for (const theme of ['light', 'dark'] as const) {
-    await driver.evaluate(`(async () => {
-      ${bridgePrelude()}
-      unwrap(await workflow.setPreferenceSettings({ appearance: { mode: ${JSON.stringify(theme)} } }));
+    if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
+      await clickAny(driver, SMOKE_UI_CONTRACT.settings);
+    await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
+    await driver.click({
+      selector: `[role="radiogroup"][aria-label="Application theme"] label:has(input[name="appearance-mode"][value="${theme}"])`,
+    });
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const theme = ${JSON.stringify(theme)};
       const started = Date.now();
-      while (document.documentElement.dataset.theme !== ${JSON.stringify(theme)}) {
-        if (Date.now() - started > 5000) throw new Error('Theme did not apply to the real document');
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
+      const check = () => {
+        const input = document.querySelector(
+          '[role="radiogroup"][aria-label="Application theme"] input[name="appearance-mode"][value="' + theme + '"]'
+        );
+        if (input?.checked && !input.disabled && document.documentElement.dataset.theme === theme)
+          return resolve(true);
+        if (Date.now() - started > 10000)
+          return reject(new Error('Theme UI did not save and apply ' + theme));
+        setTimeout(check, 50);
+      };
+      check();
+    })`);
+    const persistedTheme = await driver.evaluate<string>(`(async () => {
+      ${bridgePrelude()}
+      return unwrap(await workflow.getPreferenceSettings()).settings.appearance.mode;
+    })()`);
+    if (persistedTheme !== theme)
+      throw new Error(`Settings UI displayed ${theme}, but native preferences retained ${persistedTheme}.`);
+
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        if (document.documentElement.dataset.theme === ${JSON.stringify(theme)})
+          return resolve(true);
+        if (Date.now() - started > 10000)
+          return reject(new Error('Reopened renderer did not load the saved ${theme} theme'));
+        setTimeout(check, 25);
+      };
+      check();
     })()`);
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
@@ -999,9 +1032,12 @@ export async function runSmokeWorkflow(
   const excludedPicture = await excludeScreenshotThroughUi(driver, host, projectPath);
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
-  await captureWorkspaceMatrix(driver, artifactDirectory, artifacts);
+  await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
+  activeWindow = await host.reopenWindow();
+  driver.setWindow(activeWindow);
+  await driver.waitFor({ selector: '.konvajs-content' });
   const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
     artifactDirectory,
     artifacts,
