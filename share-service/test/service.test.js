@@ -143,6 +143,10 @@ test('creates, renders and downloads only controlled finalized artifacts', async
     markdown: '# Heading\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(2))',
   });
   assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.title, '<img src=x onerror=alert(1)>');
+  assert.equal(new Date(created.body.createdAt).toISOString(), created.body.createdAt);
+  assert.ok(Date.parse(created.body.expiresAt) > Date.parse(created.body.createdAt));
+  assert.ok(Number.isSafeInteger(created.body.byteSize) && created.body.byteSize > 0);
   assert.match(created.body.url, /^https:\/\/app\.imnota\.xyz\/s\/[A-Za-z0-9_-]{43}$/);
   assert.match(created.body.managementToken, /^[A-Za-z0-9_-]{43}$/);
   assert.notEqual(created.body.managementToken, created.body.url.split('/').at(-1));

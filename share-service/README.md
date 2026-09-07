@@ -56,7 +56,10 @@ The response is:
 {
   "id": "625c0b65-94a6-42ef-a34a-e5e52479319f",
   "url": "https://app.imnota.xyz/s/<public-token>",
+  "title": "Checkout prompt",
+  "createdAt": "2026-09-08T12:00:00.000Z",
   "expiresAt": "2026-10-08T12:00:00.000Z",
+  "byteSize": 12345,
   "managementToken": "separate-43-character-base64url-token",
   "recovered": false,
   "artifacts": {

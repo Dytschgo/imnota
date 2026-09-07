@@ -215,7 +215,10 @@ function shareReceipt(record, uploadToken, config, assets, recovered = false) {
   return {
     id: record.id,
     url,
+    title: record.title,
+    createdAt: new Date(record.created_at).toISOString(),
     expiresAt: new Date(record.expires_at).toISOString(),
+    byteSize: record.byte_size,
     managementToken,
     recovered,
     artifacts: {
