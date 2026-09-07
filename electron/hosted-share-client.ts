@@ -7,6 +7,7 @@ import { NativeWorkflowError } from './workflow-errors.js';
 const PRODUCTION_ORIGIN = 'https://app.imnota.xyz';
 const TOKEN = /^[A-Za-z0-9_-]{32,512}$/;
 const SAFE_PNG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.png$/;
+const MAX_RESPONSE_BYTES = 65_536;
 
 type StoredShare = HostedShareRecord & { managementToken: string };
 type ShareResponse = HostedShareRecord & { managementToken: string };
@@ -71,6 +72,32 @@ function validateReceipt(body: Partial<ShareResponse>): asserts body is ShareRes
       'The share service returned an unexpected share URL.',
       true,
     );
+}
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  const reader = response.body?.getReader();
+  if (!reader)
+    throw new NativeWorkflowError('network-failure', 'The share service returned no response body.', true);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    total += next.value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new NativeWorkflowError(
+        'network-failure',
+        'The share service returned an oversized response.',
+        true,
+      );
+    }
+    chunks.push(next.value);
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks))) as Record<string, unknown>;
+  } catch {
+    throw new NativeWorkflowError('network-failure', 'The share service returned invalid JSON.', true);
+  }
 }
 
 export class HostedShareClient {
@@ -142,14 +169,7 @@ export class HostedShareClient {
         signal: controller.signal,
         redirect: 'error',
       });
-      const raw = await response.text();
-      if (Buffer.byteLength(raw, 'utf8') > 65_536)
-        throw new NativeWorkflowError(
-          'network-failure',
-          'The share service returned an oversized response.',
-          true,
-        );
-      const body = JSON.parse(raw) as unknown as {
+      const body = (await readJson(response)) as {
         error?: { code?: string; message?: string };
       } & Partial<ShareResponse>;
       if (!response.ok)
@@ -190,7 +210,7 @@ export class HostedShareClient {
     this.active.get(requestId)?.abort();
   }
   async list(): Promise<readonly HostedShareRecord[]> {
-    await this.recoverPending().catch(() => undefined);
+    await this.recoverPending();
     return (await this.read()).map(publicRecord);
   }
   async revoke(id: string): Promise<HostedShareRecord> {
@@ -200,8 +220,10 @@ export class HostedShareClient {
     const response = await fetch(`${originForTests()}/api/shares/${encodeURIComponent(id)}/revoke`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${stored.managementToken}`, Accept: 'application/json' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
     });
-    const body = (await response.json().catch(() => ({}))) as {
+    const body = (await readJson(response)) as {
       revokedAt?: string;
       error?: { code?: string; message?: string };
     };
@@ -227,48 +249,69 @@ export class HostedShareClient {
       throw error;
     });
     if (!raw) return;
-    const pending = JSON.parse(raw) as { requestId?: unknown; pairingToken?: unknown };
-    if (typeof pending.requestId !== 'string' || typeof pending.pairingToken !== 'string') return;
-    const response = await fetch(
-      `${originForTests()}/api/shares/receipt/${encodeURIComponent(pending.requestId)}`,
-      {
-        headers: { Authorization: `Bearer ${pending.pairingToken}`, Accept: 'application/json' },
-        redirect: 'error',
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-    if (response.status === 404) return;
-    if (response.status === 410) {
+    const all = JSON.parse(raw) as Record<string, { requestId?: unknown; pairingToken?: unknown }>;
+    for (const pending of Object.values(all)) {
+      if (typeof pending.requestId !== 'string' || typeof pending.pairingToken !== 'string') continue;
+      const response = await fetch(
+        `${originForTests()}/api/shares/receipt/${encodeURIComponent(pending.requestId)}`,
+        {
+          headers: { Authorization: `Bearer ${pending.pairingToken}`, Accept: 'application/json' },
+          redirect: 'error',
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+      if (response.status === 404) continue;
+      if (response.status === 410) {
+        await this.clearPending(pending.requestId);
+        throw new NativeWorkflowError(
+          'pairing-expired',
+          'A previous share upload could not be recovered because its receipt expired.',
+          false,
+        );
+      }
+      const body = (await readJson(response)) as Partial<ShareResponse>;
+      if (!response.ok) return;
+      validateReceipt(body);
+      await this.save({
+        id: body.id,
+        url: body.url,
+        title: body.title ?? 'Imnota prompt',
+        createdAt: body.createdAt ?? new Date().toISOString(),
+        expiresAt: body.expiresAt,
+        byteSize: body.byteSize,
+        managementToken: body.managementToken,
+      });
       await this.clearPending(pending.requestId);
-      return;
     }
-    const body = (await response.json()) as Partial<ShareResponse>;
-    if (!response.ok) return;
-    validateReceipt(body);
-    await this.save({
-      id: body.id,
-      url: body.url,
-      title: body.title ?? 'Imnota prompt',
-      createdAt: body.createdAt ?? new Date().toISOString(),
-      expiresAt: body.expiresAt,
-      byteSize: body.byteSize,
-      managementToken: body.managementToken,
-    });
-    await this.clearPending(pending.requestId);
   }
   private async savePending(input: HostedShareUpload): Promise<void> {
-    await fs.mkdir(this.userDataPath, { recursive: true });
-    await fs.writeFile(
-      this.pendingFile(),
-      JSON.stringify({ requestId: input.requestId, pairingToken: input.pairingToken }),
-      { mode: 0o600 },
-    );
+    const all = await this.pending();
+    all[input.requestId] = { requestId: input.requestId, pairingToken: input.pairingToken };
+    await this.writePending(all);
   }
   private async clearPending(requestId: string): Promise<void> {
-    const raw = await fs
-      .readFile(this.pendingFile(), 'utf8')
-      .catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : Promise.reject(error)));
-    if (raw.includes(requestId)) await fs.unlink(this.pendingFile());
+    const all = await this.pending();
+    delete all[requestId];
+    await this.writePending(all);
+  }
+  private async pending(): Promise<Record<string, { requestId: string; pairingToken: string }>> {
+    const raw = await fs.readFile(this.pendingFile(), 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return '{}';
+      throw error;
+    });
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new NativeWorkflowError('io-failure', 'Hosted-share recovery metadata is invalid.', false);
+    return value as Record<string, { requestId: string; pairingToken: string }>;
+  }
+  private async writePending(
+    value: Record<string, { requestId: string; pairingToken: string }>,
+  ): Promise<void> {
+    await fs.mkdir(this.userDataPath, { recursive: true });
+    const target = this.pendingFile();
+    const temp = `${target}.${randomUUID()}.tmp`;
+    await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 });
+    await fs.rename(temp, target);
   }
   private async read(): Promise<StoredShare[]> {
     const raw = await fs.readFile(this.file(), 'utf8').catch((error: NodeJS.ErrnoException) => {

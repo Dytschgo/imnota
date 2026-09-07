@@ -88,6 +88,19 @@
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
   color: var(--danger) !important;
 }
+.hosted-share-progress {
+  color: var(--ink-2) !important;
+}
+.hosted-share-history-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.hosted-share-history-row p {
+  flex: 1;
+  min-width: 180px;
+}
 .hosted-share-success {
   text-align: left;
 }

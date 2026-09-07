@@ -65,16 +65,16 @@ export function HostedShareDialog({
   const cancel = async () => {
     if (request) await window.imnota.cancelHostedShare({ requestId: request });
   };
-  const revoke = async () => {
-    if (!record) return;
+  const revoke = async (id = record?.id) => {
+    if (!id) return;
     setBusy(true);
-    const result = await window.imnota.revokeHostedShare({ id: record.id });
+    const result = await window.imnota.revokeHostedShare({ id });
     setBusy(false);
     if (!result.ok) {
       setError(result.error.message);
       return;
     }
-    setRecord(result.value);
+    if (record?.id === result.value.id) setRecord(result.value);
     setHistory((items) => items.map((item) => (item.id === result.value.id ? result.value : item)));
   };
   return (
@@ -180,6 +180,11 @@ export function HostedShareDialog({
                 {error}
               </p>
             )}
+            {busy && (
+              <p className="hosted-share-progress" role="status">
+                Uploading approved artifacts securely…
+              </p>
+            )}
             <footer className="hosted-share-actions">
               <Button variant="ghost" onClick={onClose}>
                 Back
@@ -229,10 +234,25 @@ export function HostedShareDialog({
         {history.length > 0 && (
           <details className="hosted-share-history">
             <summary>Local share history ({history.length})</summary>
-            {history.slice(0, 5).map((item) => (
-              <p key={item.id}>
-                {item.title} · {item.revokedAt ? 'revoked' : `expires ${formatExpiry(item.expiresAt)}`}
-              </p>
+            {history.map((item) => (
+              <div key={item.id} className="hosted-share-history-row">
+                <p>
+                  {item.title} · {item.revokedAt ? 'revoked' : `expires ${formatExpiry(item.expiresAt)}`}
+                </p>
+                <Button variant="ghost" onClick={() => void window.imnota.copyText(item.url)}>
+                  Copy
+                </Button>
+                <a className="btn btn-ghost" href={item.url} target="_blank" rel="noreferrer">
+                  Open
+                </a>
+                <Button
+                  variant="ghost"
+                  disabled={Boolean(item.revokedAt) || busy}
+                  onClick={() => void revoke(item.id)}
+                >
+                  Revoke
+                </Button>
+              </div>
             ))}
           </details>
         )}
