@@ -6,7 +6,9 @@ const service = createService();
 await reconcileArtifacts({ db: service.db, config: service.config, aggressive: true });
 await backupMetadata({ db: service.db, config: service.config });
 const server = service.app.listen(service.config.port, () => {
-  console.log(`Imnota share service listening on port ${service.config.port}`);
+  console.log(
+    `Imnota share service listening on port ${service.config.port} with Node ${process.version}; private storage and metadata backup initialized`,
+  );
 });
 
 const cleanupTimer = setInterval(() => {

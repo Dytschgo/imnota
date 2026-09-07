@@ -4,12 +4,12 @@
   "private": true,
   "description": "Private static sharing service for finalized Imnota prompt bundles",
   "type": "module",
-  "main": "src/server.js",
+  "main": "src/hostinger.cjs",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "build": "node --check src/server.js && node --check src/app.js",
+    "build": "node --check src/hostinger.cjs && node --check src/server.js && node --check src/app.js",
     "backup": "node src/backup.js",
     "start": "node src/server.js",
     "cleanup": "node src/cleanup.js",

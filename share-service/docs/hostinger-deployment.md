@@ -5,7 +5,7 @@ This is a deployment plan, not evidence of a live deployment. No Hostinger setti
 ## Prerequisites
 
 - Configure `app.imnota.xyz` as its own Node.js application in Hostinger. Do not change the existing parent `imnota.xyz` Node application.
-- Use Node 22.13+ or Node 24 LTS, run `npm ci --omit=dev`, and use `npm start` as the start command. There is no build step.
+- Use Node 22.13+ or Node 24 LTS and run `npm ci --omit=dev`. Set Hostinger's Express entry file to `src/hostinger.cjs`; its synchronous loader cannot directly require an ESM entry with top-level await. The wrapper imports the server and waits for private-storage preparation before listening. `npm start` runs the same server directly outside Hostinger. The build script performs syntax checks.
 - Keep the deployed package at `/home/u644068606/domains/imnota.xyz/public_html/app`, but set `IMNOTA_SHARE_DATA_DIR=/home/u644068606/.imnota-shares`. The SQLite database and uploads must remain outside `public_html`, the repository, and all static document roots.
 - Set the application origin to `https://app.imnota.xyz`, route the Hostinger-assigned application port through its HTTPS proxy, preserve `Host` and `X-Forwarded-Proto`, and set `IMNOTA_SHARE_TRUST_PROXY=loopback` unless Hostinger documents a different trusted proxy range.
 - Generate `IMNOTA_SHARE_RECEIPT_SECRET` once with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`. Store it only in Hostinger's secret environment settings and the encrypted operational backup. Losing or rotating it prevents receipt recovery and changes derived capabilities for retried uploads; do not rotate it as an ordinary deployment step.
