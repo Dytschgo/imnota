@@ -44,6 +44,8 @@ The [product roadmap](docs/product-roadmap.md) consolidates still-relevant propo
 
 ## Maintenance and review
 
+Post-nightly source maintenance restores save-before-close protection after failed updates and prevents duplicate collection actions during pending saves. These changes follow the published baseline above; they do not alter its binaries. The repository review records their regression coverage and any subsequent fixes.
+
 Use [the current repository review](docs/repository-review-2026-09-08.md) for the disposition of older plans and open dependency PRs. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.
 
 For each subsequent change, preserve user work, use an isolated branch, verify meaningful behavior, obtain independent review where risk warrants it and pass the applicable CI checks. Merge through the normal PR process. A merge alone does not publish a new nightly or promote stable.

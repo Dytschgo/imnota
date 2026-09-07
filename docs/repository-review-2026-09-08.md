@@ -43,6 +43,8 @@ The review found a data-loss path in `App.tsx`: both update entry points set the
 
 Both entry points now share an install callback. A rejected handoff restores the guard immediately; native rollback status and newly dirty screenshot/content state also revoke the bypass. A successful handoff without new edits retains permission to quit, because Electron can schedule that quit after the IPC call returns. Regression coverage exercises rejection, asynchronous rollback, an abandoned resolved handoff followed by edits, and successful close without new edits. This correction is subsequent source work and is not in the already published nightly binaries.
 
+The review also found that collection mutations acquired their busy state after awaiting the save preflight. Rapid actions could enter twice and create duplicate collections. The operation now takes a synchronous lock before saving and releases it on every success, failure or blocked save. Regression tests verify single admission during a deferred save and retry after blocked or rejected saves.
+
 ## Scope and remaining checks
 
 The repository-wide review concentrates on data loss, persistence/recovery, export/resource handling, IPC boundaries, renderer async behavior and updates. The preceding sharing review covered the service/client security boundary in detail. Neither review substitutes for external editor paste trials, private-browser recipient visual QA, user sessions, photographic/high-entropy stress fixtures or long-running memory profiling.
