@@ -1128,6 +1128,31 @@ export async function runSmokeWorkflow(
       reopenMs: Math.round(benchmark.reopenMs),
       ...memory,
     });
+    if (mode === 'stress' && count === 20) {
+      activeWindow = await host.reopenWindow();
+      driver.setWindow(activeWindow);
+      await driver.waitFor({ selector: '.konvajs-content' });
+      const openedTitle = await driver.evaluate<string>(
+        `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
+      );
+      if (!openedTitle.includes('Verification 020'))
+        throw new Error('Stress reopen did not activate the latest 20-image fixture.');
+      const promptRender = await exercisePromptWorkflow(driver, host, benchmark.projectPath, {
+        artifacts,
+        freshActions: 1,
+        requireSplit: true,
+      });
+      const promptMemory = await memoryMegabytes(driver.browserWindow);
+      timings.push({
+        scenario: 'mixed-native-20-prompt-render',
+        screenshotCount: 20,
+        importMs: 0,
+        reopenMs: 0,
+        ...promptRender,
+        ...promptMemory,
+      });
+      await closePromptDialog(driver);
+    }
   }
   if (mode === 'stress') {
     const stressProject = benchmarkProjects.get(100)!;
@@ -1154,7 +1179,9 @@ export async function runSmokeWorkflow(
       ...stressMemory,
     });
     await closePromptDialog(driver);
-    assertions.push('mixed-resolution 1/10/20/100 fixtures and one complete 100-image prompt render action');
+    assertions.push(
+      'mixed-resolution 1/10/20/100 fixtures with one complete 20-image and one complete 100-image prompt render action',
+    );
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
 
   const report: SmokeWorkflowReport = {
