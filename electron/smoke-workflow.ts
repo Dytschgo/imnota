@@ -811,13 +811,14 @@ async function waitForNewPromptSet(
   host: SmokeWorkflowHost,
   projectPath: string,
   previousNames: ReadonlySet<string>,
+  timeoutMs = 30_000,
 ): Promise<PromptSet> {
   const started = Date.now();
   do {
     const added = (await promptSets(host, projectPath, true)).find((set) => !previousNames.has(set.name));
     if (added) return added;
     await delay(50);
-  } while (Date.now() - started < 30_000);
+  } while (Date.now() - started < timeoutMs);
   throw new Error('Fresh prompt action did not publish a new export set.');
 }
 
@@ -884,7 +885,14 @@ async function exercisePromptWorkflow(
   let latestSet: PromptSet | undefined;
   for (let action = 0; action < options.freshActions; action += 1) {
     await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
-    latestSet = await waitForNewPromptSet(host, projectPath, existingNames);
+    // A stress collection renders every native-resolution bundle twice (preflight and publication).
+    // Keep a bounded deadline proportional to work, rather than the small-fixture UI timeout.
+    latestSet = await waitForNewPromptSet(
+      host,
+      projectPath,
+      existingNames,
+      Math.max(30_000, cards.length * 3_000),
+    );
     existingNames.add(latestSet.name);
     await waitForPromptGrants(driver, cards.length);
     await promptSets(host, projectPath);
