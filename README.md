@@ -2,7 +2,7 @@
 
 Screenshots that AI understands.
 
-Imnota is a local-first desktop tool for turning annotated screenshots into prompt bundles for AI assistants and coding agents. Add screenshots to a collection, mark what matters, add an optional description, and copy the generated Markdown and high-resolution prompt image into the tool you already use.
+Imnota is a local-first desktop tool for turning visual evidence into prompt bundles for AI assistants and coding agents. Add screenshots, Markdown text blocks and drawings to a collection, arrange what matters, and copy the generated Markdown and high-resolution visual assets into the tool you already use.
 
 ```text
 Paste or import screenshots → Annotate → Describe → Copy prompt bundle
@@ -10,18 +10,21 @@ Paste or import screenshots → Annotate → Describe → Copy prompt bundle
 
 ## Why local-first
 
-Projects are plain folders containing JSON, Markdown and image files. There is no account, backend, cloud storage dependency, runtime AI service or telemetry by default. Your files stay on the device and can be copied, backed up or version-controlled directly.
+Projects are plain folders containing JSON, Markdown and image files. Local editing, copy and export need no account, backend or runtime AI service. There is no telemetry by default. Your project files stay on the device. Optional hosted sharing uploads only the finalized artifacts you review and approve, and provides an expiring, revocable link.
 
 ## Features
 
 - Electron, React and TypeScript desktop application
 - Screenshot import, paste and drag-and-drop for PNG, JPEG and WebP
+- Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
+- Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
 - Collections with archive/restore controls and a single optional overall context
 - One optional Markdown description and Low, Medium or High agent priority per screenshot
 - Direct include/exclude controls without deleting screenshots
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection
+- Opt-in hosted prompt links with expiry, revocation and local sharing history
 - Automatic splitting for readable, clipboard-safe exports on a white background
 - Screenshot deletion through the operating-system trash with Imnota-managed Undo recovery
 - Light, dark, system and curated appearance settings
@@ -62,7 +65,7 @@ corepack pnpm package:linux # Linux
 
 ## Development
 
-Requirements: Node.js 20+, Corepack and a platform-supported Electron environment.
+Requirements: Node.js 22.13+, Corepack and a platform-supported Electron environment. CI uses Node.js 22 for the desktop and Node.js 24 for service security checks.
 
 ```bash
 corepack enable
@@ -72,7 +75,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-The collection/prompt workflow is implemented and locally verified on Windows, but has not been published by this implementation task. See the [implementation verification record](docs/implementation-verification.md) for test results, measured performance, and remaining platform checks.
+Stable [v0.2.5](https://github.com/Dytschgo/imnota/releases/tag/v0.2.5) includes mixed content. The [September 8 nightly](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806) adds hosted sharing and workflow fixes, with Windows, macOS and Linux package checks and verified public downloads. See the [implementation plan](implementation%20plan.md) for current status and remaining manual QA.
 
 Quality checks:
 
@@ -130,12 +133,15 @@ My Project/
     001-collection/
       screenshots/
       annotations/
+      descriptions/
+      drawings/
+      text/
       exports/
 ```
 
-`project.json` is versioned with `schemaVersion`. Screenshot identity and order are stored separately from the editable title, description, priority and export visibility. Annotations remain JSON and source screenshots are never overwritten. See [the data format](docs/data-format.md).
+`project.json` is versioned with `schemaVersion`. Schema 4 adds ordered text blocks and drawings while preserving screenshot identity and source filenames. Annotations remain JSON and source screenshots are never overwritten. See [the data format](docs/data-format.md).
 
-Collections keep related screenshots together. New collections start empty, the newest collection remains active after export, and older collections can be archived and restored. Copy and export always use the current collection; there is no all-collection export mode.
+Collections keep related screenshots, text blocks and drawings together. New collections start empty, the newest collection remains active after export, and older collections can be archived and restored. Copy and export always use the current collection; there is no all-collection export mode. See the [mixed-content model](docs/mixed-content-model.md).
 
 Pan with Select on the image, Space-drag, middle-drag or trackpad scrolling. Pinch or Ctrl/Command-wheel zooms at the cursor. Use `0` to fit and `1` for actual size. Double-click text to edit; Enter saves, Shift+Enter adds a line, Escape cancels.
 
@@ -146,6 +152,12 @@ Combined clipboard copy offers the matching Markdown and PNG together, but the r
 ## Privacy and security
 
 Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+Hosted links are accessible to anyone who has the URL until revoked or expired. Review the upload manifest before sharing sensitive content. The service receives the approved PNG/Markdown artifacts; it does not receive the editable project folder. See [sharing instructions](docs/user-guide.md#share-a-hosted-link) and the [service operations guide](share-service/docs/hostinger-deployment.md).
+
+## Roadmap
+
+The [implementation plan](implementation%20plan.md) records shipped work and remaining acceptance checks. The [product roadmap](docs/product-roadmap.md) contains future proposals, including screen capture, PDF export and full Excalidraw interchange. These are separate from the current release.
 
 ## Contributing
 

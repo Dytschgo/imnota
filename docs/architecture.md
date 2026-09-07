@@ -8,12 +8,15 @@ Imnota is a local-first Electron desktop application with a narrow, typed securi
 - `electron/preload.cts` exposes the typed `window.imnota` bridge with context isolation enabled.
 - `src/renderer/` owns the React shell, collection rail, screenshot inspector, Konva canvas, sharing UI, settings and onboarding.
 - `src/shared/` owns versioned domain types, validation and pure Markdown/export helpers used by both processes and tests.
+- `share-service/` is an optional, separately deployed HTTP service for finalized artifacts. It has no access to the local project workspace.
 
 Every main-process operation resolves paths from the selected workspace and rejects traversal and link-based escapes. Imported project data is untrusted even though it is local.
 
 ## Domain boundaries
 
 Projects contain ordered collections. Collection IDs and screenshot IDs are immutable; editable names and export-time Picture numbers are presentation concerns. A screenshot has one Markdown-capable description, one Low/Medium/High priority, an include-in-export flag and independently persisted annotations.
+
+Schema 4 also stores drawing and Markdown records in `contentItems`. `orderedCollectionItems` combines them with screenshots into one deterministic order. Native content persistence treats drawing JSON and Markdown as editable sources, with a rendered PNG for drawing exports; see the [mixed-content contract](mixed-content-model.md).
 
 Collection creation, archive/restore rules and ordering belong behind one collection update boundary. Screenshot persistence, recovery and external-change detection belong behind a filesystem adapter rather than React components. This keeps a future asynchronous sync adapter possible without introducing cloud behavior now.
 
@@ -34,6 +37,12 @@ Export is scoped to the current collection. The renderer produces annotated, exp
 Prompt PNGs use a neutral white background and export-only contrast correction. Source screenshots and saved annotation colors are never rewritten. Excluded screenshots are absent from PNGs but retained as explicit Markdown exclusions with their original export-time Picture numbers.
 
 The clipboard bridge can write Markdown and an image representation together. This confirms only that Imnota prepared clipboard formats. The receiving application decides which formats to accept, so separate text, image and file/folder fallbacks remain part of the product contract.
+
+## Hosted sharing boundary
+
+The renderer requests finalized prompt bundles by session and bundle identity. The main process reads and validates the committed artifacts, displays an exact manifest through the sharing flow, and uploads only after explicit confirmation and one-use browser pairing. Native transport validates origins and bounded responses, refuses redirects and preserves local recovery/history state for ambiguous network outcomes.
+
+The service canonicalizes bounded PNGs, sanitizes Markdown, stores artifacts outside the public web root and serves them through expiring public tokens. Management credentials support revocation. Quotas, rate limits, idempotent receipts, cleanup and metadata backups belong to the service, not project persistence. There is no project sync or background content upload. See [service architecture and operations](../share-service/README.md).
 
 ## Local settings
 

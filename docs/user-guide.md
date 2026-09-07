@@ -1,6 +1,6 @@
 # User guide
 
-Imnota turns the screenshots in one collection into local Markdown + PNG prompt bundles. It does not upload projects, call an AI provider or synchronize through a cloud service.
+Imnota turns screenshots, Markdown text blocks and drawings in one collection into local Markdown + PNG prompt bundles. Local copy/export works offline. Optional hosted links upload approved final artifacts; Imnota does not synchronize editable projects or call an AI provider.
 
 ## Start a project and collection
 
@@ -28,6 +28,12 @@ Each screenshot has:
 Drag screenshot rows to change their order. Internal IDs remain stable; `Picture 1`, `Picture 2` and so on are assigned from the current order only when exporting.
 
 Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+
+## Add text blocks and drawings
+
+Text blocks contain Markdown and can be edited or previewed. Drawings use the embedded Excalidraw editor and save an editable local JSON source together with a rendered PNG used by exports. Both item types can be reordered with screenshots, included or excluded, duplicated, deleted with Undo and autosaved.
+
+The mixed collection order is authoritative for Markdown and visual export. Text blocks do not create image assets; included screenshots and drawings do. The current drawing editor intentionally supports a focused toolset. Full `.excalidraw` import/export compatibility is planned separately.
 
 ## Annotate
 
@@ -59,6 +65,16 @@ Picture 3 was intentionally excluded from this prompt bundle.
 A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
 
 The combined Copy action writes Markdown and a PNG to the clipboard together. Operating systems and receiving editors negotiate clipboard formats differently, so a successful copy does not prove that the target accepted both. If only one arrives, use Copy Markdown only and Copy image only, or open the generated files/folder and attach the PNG manually.
+
+## Share a hosted link
+
+In the prompt sharing dialog, choose **Share online**. Review the exact generated PNG/Markdown files, choose 7, 14 or 30 days, and optionally include a downloadable ZIP. Confirm that anyone with the link may read the approved files.
+
+Choose **Open pairing page**, obtain a one-use code in the browser, and paste it into Imnota. The code expires after about 10 minutes. **Publish HTTPS link** uploads the approved artifacts and returns a link you can copy or open. Local copy and export remain available without pairing or internet access.
+
+Use **Revoke link** on the result or in local share history to stop access. Expired and revoked links cannot be reopened through the service. Revocation cannot remove files a recipient has already downloaded. The app retains pending-upload information to recover a response interrupted by a network failure; a reported recovery problem remains visible rather than silently creating a second share.
+
+Editable drawing sources, original project folders, local paths and recovery journals are not uploaded. Inspect the generated content itself before sharing: annotations, screenshot pixels and Markdown can contain sensitive information even when project metadata is excluded. The hosting provider may retain access logs; see the [service privacy and operations notes](../share-service/docs/hostinger-deployment.md).
 
 ## Appearance, settings and onboarding
 

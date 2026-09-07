@@ -1,6 +1,6 @@
 # Stable and nightly builds
 
-Status: implemented locally; awaiting merge and the first authorised nightly workflow run. See [nightly build instructions](nightly-builds.md) for current behaviour. The original proposal below was prepared on 2026-09-05 with Luna (`gpt-5.6-luna`), Terra (`gpt-5.6-terra`) and Astra review. No nightly release or GitHub protection change has been published as part of implementation.
+Historical channel design proposal from 2026-09-05. The manual workflow is implemented and has published verified nightly releases, including [v0.2.6-nightly.20260907.34169995806](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806). See [nightly build instructions](nightly-builds.md) for the current process and [the implementation plan](../implementation%20plan.md) for release evidence. The proposal below records the original decisions; unimplemented scheduling and policy changes are not implied by publication.
 
 Implementation adjustment: native Windows/Linux checks now use a generic feed pinned to the exact discovered GitHub release, avoiding the GitHub provider's missing-channel fallback. Channel changes are locked during checks as well as downloads, preventing stale native operations from crossing channels. Automatic downloads and install-on-quit are disabled. The schedule remains off until the manual publication path is proven.
 
