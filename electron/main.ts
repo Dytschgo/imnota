@@ -1461,7 +1461,9 @@ function configureAutoUpdates(): void {
 
 async function createWindow(): Promise<BrowserWindow> {
   mainWindow = new BrowserWindow({
-    show: process.env.IMNOTA_SMOKE !== '1',
+    // Native-input CI needs an actively presented window for canvas paint/hit testing.
+    // Its profile and workspace remain disposable; local background smoke stays hidden.
+    show: process.env.IMNOTA_SMOKE !== '1' || process.env.CI === 'true',
     // macOS CI displays can be smaller than the desktop viewport under test.
     enableLargerThanScreen: process.env.IMNOTA_SMOKE === '1',
     width: 1440,
