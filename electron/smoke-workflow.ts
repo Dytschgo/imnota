@@ -1,4 +1,5 @@
 import { app, clipboard, nativeImage, type BrowserWindow } from 'electron';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
@@ -37,15 +38,28 @@ export interface SmokeWorkflowOptions {
   mode?: SmokeWorkflowMode;
 }
 
-export interface SmokeTiming {
+export interface SmokeMemoryReading {
+  mainResidentMegabytes: number;
+  rendererResidentMegabytes: number;
+  gpuResidentMegabytes: number;
+}
+
+export interface SmokeMemoryProfile {
+  baseline: SmokeMemoryReading;
+  peak: SmokeMemoryReading;
+  post: SmokeMemoryReading;
+  sampleCount: number;
+  sampleIntervalMilliseconds: number;
+}
+
+export interface SmokeTiming extends SmokeMemoryReading {
   scenario: string;
   screenshotCount: number;
   importMs: number;
   reopenMs: number;
   renderMs?: number;
   bundleCount?: number;
-  mainResidentMegabytes: number;
-  rendererResidentMegabytes: number;
+  memoryProfile?: SmokeMemoryProfile;
 }
 
 export interface SmokeWorkflowReport {
@@ -287,17 +301,75 @@ async function importImages(
   }
 }
 
-async function memoryMegabytes(window: BrowserWindow): Promise<{
-  mainResidentMegabytes: number;
-  rendererResidentMegabytes: number;
-}> {
+function memoryMegabytes(window: BrowserWindow): SmokeMemoryReading {
   const main = process.memoryUsage().rss / (1024 * 1024);
   const rendererPid = window.webContents.getOSProcessId();
-  const metric = app.getAppMetrics().find((item) => item.pid === rendererPid);
+  const metrics = app.getAppMetrics();
+  const renderer = metrics.find((item) => item.pid === rendererPid);
+  const gpu = metrics
+    .filter((item) => item.type === 'GPU')
+    .reduce((total, item) => total + item.memory.workingSetSize / 1024, 0);
   return {
     mainResidentMegabytes: Math.round(main * 10) / 10,
-    rendererResidentMegabytes: Math.round(((metric?.memory.workingSetSize ?? 0) / 1024) * 10) / 10,
+    rendererResidentMegabytes: Math.round(((renderer?.memory.workingSetSize ?? 0) / 1024) * 10) / 10,
+    gpuResidentMegabytes: Math.round(gpu * 10) / 10,
   };
+}
+
+function maximumMemory(left: SmokeMemoryReading, right: SmokeMemoryReading): SmokeMemoryReading {
+  return {
+    mainResidentMegabytes: Math.max(left.mainResidentMegabytes, right.mainResidentMegabytes),
+    rendererResidentMegabytes: Math.max(left.rendererResidentMegabytes, right.rendererResidentMegabytes),
+    gpuResidentMegabytes: Math.max(left.gpuResidentMegabytes, right.gpuResidentMegabytes),
+  };
+}
+
+function startMemorySampler(window: BrowserWindow, sampleIntervalMilliseconds = 200) {
+  const baseline = memoryMegabytes(window);
+  let peak = baseline;
+  let sampleCount = 1;
+  let disposed = false;
+  let samplingError: unknown;
+  const sample = () => {
+    const reading = memoryMegabytes(window);
+    peak = maximumMemory(peak, reading);
+    sampleCount += 1;
+    return reading;
+  };
+  const timer = setInterval(() => {
+    if (disposed || samplingError) return;
+    try {
+      sample();
+    } catch (error) {
+      samplingError = error;
+    }
+  }, sampleIntervalMilliseconds);
+  return {
+    finish(): SmokeMemoryProfile {
+      if (disposed) throw new Error('Smoke memory sampler is already disposed.');
+      if (samplingError) throw samplingError;
+      const post = sample();
+      return { baseline, peak, post, sampleCount, sampleIntervalMilliseconds };
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      clearInterval(timer);
+    },
+  };
+}
+
+async function profileMemoryDuring<T>(
+  window: BrowserWindow,
+  action: () => Promise<T>,
+): Promise<{ result: T; memoryProfile: SmokeMemoryProfile }> {
+  const sampler = startMemorySampler(window);
+  try {
+    const result = await action();
+    return { result, memoryProfile: sampler.finish() };
+  } finally {
+    sampler.dispose();
+  }
 }
 
 async function createBenchmarkProject(
@@ -518,6 +590,76 @@ async function installDeterministicExportAnnotations(
     if (saved.conflictCreated) throw new Error('Deterministic fixture unexpectedly conflicted');
     return { screenshotId: screenshot.id, annotations };
   })()`);
+}
+
+const DENSE_SCREENSHOT_COUNT = 20;
+const DENSE_NOTES_PER_SCREENSHOT = 10;
+
+async function installDenseTextAnnotations(driver: NativeUiDriver, projectPath: string): Promise<void> {
+  const installed = await driver.evaluate<{
+    screenshots: number;
+    notes: number;
+    outsideNotes: number;
+  }>(`(async () => {
+    const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+    const collection = snapshot.project.collections.find((item) => !item.archived)
+      ?? snapshot.project.collections.at(-1);
+    if (!collection) throw new Error('Dense fixture has no collection');
+    const screenshots = snapshot.project.screenshots
+      .filter((item) => item.collectionId === collection.id)
+      .sort((left, right) => left.position - right.position);
+    if (screenshots.length !== ${DENSE_SCREENSHOT_COUNT})
+      throw new Error('Dense fixture screenshot count changed');
+    let noteCount = 0;
+    let outsideNoteCount = 0;
+    for (let pictureIndex = 0; pictureIndex < screenshots.length; pictureIndex += 1) {
+      const screenshot = screenshots[pictureIndex];
+      const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot });
+      const annotations = Array.from({ length: ${DENSE_NOTES_PER_SCREENSHOT} }, (_, noteIndex) => {
+        const pictureNumber = pictureIndex + 1;
+        const noteNumber = noteIndex + 1;
+        const marker = 'DENSE_P' + String(pictureNumber).padStart(2, '0')
+          + '_N' + String(noteNumber).padStart(2, '0');
+        const inside = noteIndex < 8;
+        if (!inside) outsideNoteCount += 1;
+        const x = inside
+          ? 120 + (noteIndex % 4) * Math.max(400, Math.floor((content.image.width - 600) / 4))
+          : noteIndex === 8 ? -400 : content.image.width + 96;
+        const y = inside
+          ? 100 + Math.floor(noteIndex / 4) * 240
+          : noteIndex === 8 ? 96 : content.image.height + 96;
+        return {
+          id: 'dense-' + pictureNumber + '-' + noteNumber,
+          kind: 'text',
+          x,
+          y,
+          width: 360,
+          height: 72,
+          text: marker + '\\nSynthetic dense export note ' + noteNumber + ' for Picture ' + pictureNumber + '.',
+          stroke: '#111827',
+          fontSize: 24,
+          zIndex: noteIndex
+        };
+      });
+      const saved = await window.imnota.saveScreenshotContent({
+        projectPath: snapshot.projectPath,
+        screenshot,
+        annotations,
+        contentRevision: content.contentRevision
+      });
+      if (saved.conflictCreated) throw new Error('Dense fixture unexpectedly created a conflict copy');
+      noteCount += annotations.length;
+    }
+    return { screenshots: screenshots.length, notes: noteCount, outsideNotes: outsideNoteCount };
+  })()`);
+  if (
+    installed.screenshots !== DENSE_SCREENSHOT_COUNT ||
+    installed.notes !== DENSE_SCREENSHOT_COUNT * DENSE_NOTES_PER_SCREENSHOT ||
+    installed.outsideNotes !== DENSE_SCREENSHOT_COUNT * 2
+  )
+    throw new Error(
+      `Dense fixture installed ${installed.notes} notes (${installed.outsideNotes} outside) across ${installed.screenshots} screenshots.`,
+    );
 }
 
 function pixelAt(image: Electron.NativeImage, x: number, y: number): Buffer {
@@ -843,6 +985,60 @@ async function verifyPromptSet(projectPath: string, set: PromptSet, bundleCount:
     throw new Error('Prompt PNG and Markdown grants are not complete matching pairs.');
 }
 
+async function verifyDensePromptMarkdown(set: PromptSet): Promise<void> {
+  const markdownFiles = (await fs.readdir(set.directory))
+    .filter((name) => name.endsWith('.md') && !name.endsWith(' - overview.md'))
+    .sort();
+  const markdown = (
+    await Promise.all(markdownFiles.map((name) => fs.readFile(path.join(set.directory, name), 'utf8')))
+  ).join('\n');
+  const markerOccurrences = markdown.match(/DENSE_P\d{2}_N\d{2}/g) ?? [];
+  const markerCounts = new Map<string, number>();
+  for (const marker of markerOccurrences) markerCounts.set(marker, (markerCounts.get(marker) ?? 0) + 1);
+  const headingCounts = new Map<string, number>();
+  for (const match of markdown.matchAll(/^### Picture (\d+) \/ Note (\d+)\s*$/gm)) {
+    const heading = `${match[1]}/${match[2]}`;
+    headingCounts.set(heading, (headingCounts.get(heading) ?? 0) + 1);
+  }
+  for (let pictureNumber = 1; pictureNumber <= DENSE_SCREENSHOT_COUNT; pictureNumber += 1) {
+    for (let noteNumber = 1; noteNumber <= DENSE_NOTES_PER_SCREENSHOT; noteNumber += 1) {
+      const marker = `DENSE_P${String(pictureNumber).padStart(2, '0')}_N${String(noteNumber).padStart(2, '0')}`;
+      if (markerCounts.get(marker) !== 1)
+        throw new Error(
+          `Dense prompt Markdown contains ${markerCounts.get(marker) ?? 0} copies of ${marker}.`,
+        );
+      const heading = `${pictureNumber}/${noteNumber}`;
+      if (headingCounts.get(heading) !== 1)
+        throw new Error(
+          `Dense prompt Markdown contains ${headingCounts.get(heading) ?? 0} Picture ${pictureNumber} / Note ${noteNumber} references.`,
+        );
+    }
+  }
+  if (markerOccurrences.length !== DENSE_SCREENSHOT_COUNT * DENSE_NOTES_PER_SCREENSHOT)
+    throw new Error(
+      `Dense prompt Markdown contains ${markerOccurrences.length} note markers instead of 200.`,
+    );
+}
+
+async function preserveFirstDensePromptPair(set: PromptSet, artifactDirectory: string): Promise<void> {
+  const files = await fs.readdir(set.directory);
+  const pngFilename = files.filter((name) => name.endsWith('.png')).sort()[0];
+  const markdownFilename = pngFilename ? `${path.basename(pngFilename, '.png')}.md` : undefined;
+  if (!pngFilename || !markdownFilename || !files.includes(markdownFilename))
+    throw new Error('Dense prompt artifact does not contain a matching first PNG/Markdown pair.');
+  const copies = [
+    [pngFilename, 'verified-dense-prompt1.png'],
+    [markdownFilename, 'verified-dense-prompt1.md'],
+  ] as const;
+  for (const [sourceName, targetName] of copies) {
+    const source = path.join(set.directory, sourceName);
+    const target = path.join(artifactDirectory, targetName);
+    if (!pathIsWithin(set.directory, source) || !pathIsWithin(artifactDirectory, target))
+      throw new Error('Dense prompt inspection artifact escaped its verified directory.');
+    await fs.copyFile(source, target, fsConstants.COPYFILE_EXCL);
+  }
+}
+
 interface PromptWorkflowOptions {
   artifactDirectory?: string;
   artifacts: SmokeCapture[];
@@ -1117,7 +1313,9 @@ export async function runSmokeWorkflow(
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver);
-  assertions.push('trusted pan, crop, redaction, outside-bound drag, double-click, Enter and Escape');
+  assertions.push(
+    'trusted pan, crop, redaction, outside-bound arrow creation, double-click, Enter and Escape',
+  );
   const excludedPicture = await excludeScreenshotThroughUi(driver, host, projectPath);
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
@@ -1242,6 +1440,7 @@ export async function runSmokeWorkflow(
   }
   if (mode === 'stress') {
     const stressProject = benchmarkProjects.get(100)!;
+    await driver.evaluate(`window.imnota.loadProject(${JSON.stringify(stressProject)}).then(() => true)`);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
     await driver.waitFor({ selector: '.konvajs-content' });
@@ -1265,6 +1464,45 @@ export async function runSmokeWorkflow(
       ...stressMemory,
     });
     await closePromptDialog(driver);
+
+    const denseBenchmark = await createBenchmarkProject(
+      driver,
+      sources,
+      DENSE_SCREENSHOT_COUNT,
+      'Verification Dense 020',
+    );
+    await installDenseTextAnnotations(driver, denseBenchmark.projectPath);
+    activeWindow = await host.reopenWindow();
+    driver.setWindow(activeWindow);
+    await driver.waitFor({ selector: '.konvajs-content' });
+    const denseTitle = await driver.evaluate<string>(
+      `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
+    );
+    if (!denseTitle.includes('Verification Dense 020'))
+      throw new Error('Stress reopen did not activate the dense 20-image fixture.');
+    const denseProfile = await profileMemoryDuring(driver.browserWindow, () =>
+      exercisePromptWorkflow(driver, host, denseBenchmark.projectPath, {
+        artifacts,
+        freshActions: 1,
+        requireSplit: true,
+      }),
+    );
+    await verifyDensePromptMarkdown(denseProfile.result.latestSet);
+    if (artifactDirectory)
+      await preserveFirstDensePromptPair(denseProfile.result.latestSet, artifactDirectory);
+    timings.push({
+      scenario: 'dense-native-20-prompt-render',
+      screenshotCount: DENSE_SCREENSHOT_COUNT,
+      importMs: Math.round(denseBenchmark.importMs),
+      reopenMs: Math.round(denseBenchmark.reopenMs),
+      ...denseProfile.result,
+      ...denseProfile.memoryProfile.post,
+      memoryProfile: denseProfile.memoryProfile,
+    });
+    await closePromptDialog(driver);
+    assertions.push(
+      'one fresh dense 20-image prompt action with 200 unique Markdown notes, outside-source bounds, complete pairs, and sampled main/renderer/GPU memory',
+    );
     assertions.push(
       'mixed-resolution 1/10/20/100 fixtures with one complete 20-image and one complete 100-image prompt render action',
     );
