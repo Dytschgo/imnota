@@ -21,11 +21,11 @@ Renderer responsibilities should remain separated into application/bootstrap, co
 
 ## Persistence and recovery
 
-`project.json` stores versioned metadata while original screenshots, annotation JSON and description Markdown remain ordinary files. Writes use a temporary sibling followed by rename. Recovery data is local to the project and can restore interrupted edits.
+`project.json` stores versioned metadata while original screenshots, annotation JSON and description Markdown remain ordinary files. Individual writes use a temporary sibling followed by rename. Multi-file screenshot saves keep before/after recovery data in `.imnota-transactions`, validate their baseline, and write changed project metadata last as the commit point. Recovery data is local to the project.
 
 Project file watching is debounced. Safe external changes can be reloaded; unsaved local changes require confirmation. If concurrent edits cannot be reconciled, Imnota preserves a same-collection Copy conflict, marks it visibly and excludes it from prompt export by default.
 
-Deleting an individual screenshot sends its source, annotations and description to the operating-system trash. A bounded local undo record supports the immediate Undo action. The original project metadata is committed only after the deletion operation is safe to present.
+Deleting an individual screenshot sends its source, annotations and description to the operating-system trash. Imnota retains its own recovery snapshot for Undo; it does not depend on a portable OS-trash restore API. Undo can therefore leave the original trashed copy in the system trash. Recovery journals must remain available until their operation has safely completed or been resolved.
 
 ## Prompt export
 

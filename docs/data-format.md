@@ -7,10 +7,12 @@ project.json
 collections/001-collection/screenshots/001-login-screen.png
 collections/001-collection/annotations/001-login-screen.png.json
 collections/001-collection/descriptions/001-login-screen.png.md
-collections/001-collection/exports/Collection 01 - 260907-184205 - 01.png
-collections/001-collection/exports/Collection 01 - 260907-184205 - 01.md
+collections/001-collection/exports/Collection 01 - 260907-184205/
+  Collection 01 - 260907-184205 - 01.png
+  Collection 01 - 260907-184205 - 01.md
 .imnota-recovery.json       # present only when recovery is needed
-.imnota-undo/               # bounded immediate-delete recovery data
+.imnota-transactions/      # interrupted multi-file save recovery
+.imnota-undo/               # local deletion recovery snapshots and journals
 ```
 
 `project.json` contains project identity and timestamps, ordered collections, ordered screenshot records and local export preferences. A collection has an immutable ID, editable name, creation/update timestamps, archived state and optional Overall context. A new collection starts empty. Renaming it never changes its folder ID.
@@ -31,7 +33,9 @@ Annotation JSON contains editable records in original-image coordinates. Canvas 
 
 ## Prompt exports
 
-Exports live only under the active collection. Every copy/export action creates a new local timestamped set and does not overwrite older sets. The sanitized collection name, local `YYMMDD-HHmmss` timestamp and final two-digit bundle number form each matching PNG/Markdown filename.
+Exports live only under the active collection. Each primary Copy Prompt or fresh-files action creates a new local timestamped set and does not overwrite older sets. Separate image/Markdown fallback actions reuse that committed set so both pastes match. The sanitized collection name, local `YYMMDD-HHmmss` timestamp and final bundle number (at least two digits) form each matching PNG/Markdown filename. Names are shortened when necessary to stay within the Windows-compatible path budget; an already excessive workspace path produces an actionable error.
+
+Each set has its own timestamped directory. PNG/Markdown pairs are staged together and published after finalization. Cancellation keeps completed pairs and removes incomplete outputs. An optional ` - overview.md` file is for reviewing the full collection, not the primary copy action.
 
 Automatic splitting may produce several pairs. Original Picture numbers continue across pairs. Excluded screenshots stay in project data, do not appear in PNGs and are explicitly recorded in generated Markdown. Prompt outputs are sharing artifacts, not editable project backups; back up the full project folder to retain sources, annotations, descriptions, recovery data and exclusions.
 
