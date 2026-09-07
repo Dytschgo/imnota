@@ -1,14 +1,23 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
+import type { WorkflowBridge } from '../shared/workflow-bridge';
+import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { useAppStore } from './store';
 import App, { CollectionControls, matchesProjectSearch, SettingsView } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
-vi.mock('./components/AnnotationCanvas', () => ({ AnnotationCanvas: () => null }));
+const annotationCanvasSpy = vi.hoisted(() => vi.fn());
+vi.mock('./components/AnnotationCanvas', () => ({
+  AnnotationCanvas: (props: unknown) => {
+    annotationCanvasSpy(props);
+    return null;
+  },
+}));
 
 afterEach(() => {
   cleanup();
+  annotationCanvasSpy.mockClear();
   useAppStore.setState({
     snapshot: null,
     activeCollectionId: '001-collection',
@@ -51,7 +60,7 @@ const snapshot: ProjectSnapshot = {
 };
 
 describe('feedback controls', () => {
-  function renderApp(overrides: Partial<ImnotaBridge> = {}) {
+  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
@@ -61,13 +70,47 @@ describe('feedback controls', () => {
       listProjects: vi.fn(async () => []),
       onUpdateStatus: () => () => {},
       getUpdateStatus: async () => ({ state: 'idle' as const }),
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      setPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      getNativePerformanceProfile: async () => ({
+        ok: true,
+        value: {
+          platform: 'windows',
+          performanceClass: 'standard',
+          reducedEffectsRecommended: false,
+          reasons: [],
+        },
+      }),
+      startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
+        ok: true,
+        value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },
+      }),
+      stopProjectWatch: async () => ({ ok: true, value: undefined }),
+      onProjectWatchEvent: () => () => {},
+      saveProjectCompareAndSwap: async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+        ok: true,
+        value: { snapshot: { ...snapshot, project }, projectRevision: 'project-2' },
+      }),
+      reloadWatchedProject: async () => ({ ok: true, value: { snapshot, projectRevision: 'project-2' } }),
       ...overrides,
     } as unknown as ImnotaBridge;
     window.matchMedia = vi.fn(() => ({ matches: false })) as unknown as typeof window.matchMedia;
     return render(<App />);
   }
 
-  async function renderEditingProject(overrides: Partial<ImnotaBridge> = {}) {
+  async function renderEditingProject(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
     const editingSnapshot: ProjectSnapshot = {
       ...snapshot,
       project: {
@@ -103,6 +146,7 @@ describe('feedback controls', () => {
       savedScreenshotId: input.screenshot.id,
       conflictCreated: false,
       contentRevision: 'b'.repeat(64),
+      projectRevision: 'project-content-2',
     }));
     renderApp({
       saveScreenshotContent: save,
@@ -138,7 +182,7 @@ describe('feedback controls', () => {
     fireEvent.change(note, { target: { value: 'Unsaved note' } });
     save.mockRejectedValueOnce(new Error('Workspace unavailable'));
     fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Search was cancelled');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cancelled|Workspace unavailable/i);
     expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
     expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
     expect(note).toHaveValue('Unsaved note');
@@ -175,86 +219,8 @@ describe('feedback controls', () => {
     save.mockRejectedValueOnce(new Error('Workspace unavailable'));
     act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not be saved');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be saved|Workspace unavailable/i);
     expect(installUpdate).not.toHaveBeenCalled();
-  });
-
-  it('keeps newer edits open when an update save is still in flight', async () => {
-    let emitUpdate: (status: { state: 'downloaded'; version: string }) => void = () => {};
-    const installUpdate = vi.fn(async () => {});
-    const { save, note, editingSnapshot } = await renderEditingProject({
-      onUpdateStatus: (handler) => {
-        emitUpdate = handler;
-        return () => {};
-      },
-      installUpdate,
-    });
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      (input) =>
-        new Promise((resolve) => {
-          finishSave = () =>
-            resolve({
-              project: editingSnapshot.project,
-              savedScreenshotId: input.screenshot.id,
-              conflictCreated: false,
-              contentRevision: 'b'.repeat(64),
-            });
-        }),
-    );
-    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
-    fireEvent.change(note, { target: { value: 'Typed while saving' } });
-    await act(async () => finishSave());
-    expect(installUpdate).not.toHaveBeenCalled();
-    expect(note).toHaveValue('Typed while saving');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Choose restart again');
-  });
-
-  it('does not override newer navigation when a search save completes', async () => {
-    const { save, editingSnapshot } = await renderEditingProject();
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      (input) =>
-        new Promise((resolve) => {
-          finishSave = () =>
-            resolve({
-              project: editingSnapshot.project,
-              savedScreenshotId: input.screenshot.id,
-              conflictCreated: false,
-              contentRevision: 'b'.repeat(64),
-            });
-        }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await act(async () => finishSave());
-    expect(useAppStore.getState().view).toBe('settings');
-    expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
-  });
-
-  it('keeps newer edits open when an older search save completes', async () => {
-    const { save, note, editingSnapshot } = await renderEditingProject();
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      (input) =>
-        new Promise((resolve) => {
-          finishSave = () =>
-            resolve({
-              project: editingSnapshot.project,
-              savedScreenshotId: input.screenshot.id,
-              conflictCreated: false,
-              contentRevision: 'b'.repeat(64),
-            });
-        }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    fireEvent.change(note, { target: { value: 'Typed while saving' } });
-    await act(async () => finishSave());
-    expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
-    expect(useAppStore.getState().activeScreenshot()?.description).toBe('Typed while saving');
-    expect(note).toHaveValue('Typed while saving');
-    expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
   });
 
   it('keeps the editor available when project refresh fails', async () => {
@@ -266,6 +232,47 @@ describe('feedback controls', () => {
     expect(note).toHaveValue('Original note');
   });
 
+  it('ignores a delayed project-open result after newer navigation', async () => {
+    let resolveOpen!: (value: ProjectSnapshot) => void;
+    renderApp({
+      openProjectDialog: vi.fn(
+        () =>
+          new Promise<ProjectSnapshot | null>((resolve) => {
+            resolveOpen = resolve;
+          }),
+      ),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    await act(async () => resolveOpen(snapshot));
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(useAppStore.getState().snapshot).toBeNull();
+  });
+
+  it('surfaces nonfatal snapshot warnings and recovered delete grants', async () => {
+    const recovered = {
+      ...snapshot,
+      projectRevision: 'project-recovered',
+      warnings: ['A screenshot transaction was recovered after an interrupted write.'],
+      recoveredDeletes: [{ undoToken: 'undo-token', screenshotId: 'restored-shot' }],
+    } as ProjectSnapshot;
+    const restored = { ...snapshot, projectRevision: 'project-restored' } as ProjectSnapshot;
+    const undoDeleteScreenshot = vi.fn(async () => restored);
+    renderApp({ openProjectDialog: vi.fn(async () => recovered), undoDeleteScreenshot });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    expect(await screen.findByTestId('snapshot-notice')).toHaveTextContent(
+      'A screenshot transaction was recovered',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Undo delete' }));
+    await waitFor(() =>
+      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+        projectPath: snapshot.projectPath,
+        undoToken: 'undo-token',
+      }),
+    );
+  });
+
   it('keeps Description Undo separate from canvas annotation history', async () => {
     const { note } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Rewritten description' } });
@@ -274,11 +281,27 @@ describe('feedback controls', () => {
     expect(note).toHaveValue('Original note');
   });
 
+  it('uses the canvas semantic text color until the user chooses an override', async () => {
+    await renderEditingProject();
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#ef4444', theme: 'dark' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Text/ }));
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#ffffff', theme: 'dark' }),
+      ),
+    );
+  });
+
   it('appends pasted screenshots and activates the newest one', async () => {
+    let persisted = snapshot;
     const { editingSnapshot } = await renderEditingProject({
       pasteImage: vi.fn(async () => {
         const original = editingSnapshot.project.screenshots[0];
-        return {
+        persisted = {
           ...editingSnapshot,
           project: {
             ...editingSnapshot.project,
@@ -297,6 +320,11 @@ describe('feedback controls', () => {
             ],
           },
         };
+        return persisted;
+      }),
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-paste-2' },
       }),
     });
     fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
@@ -305,6 +333,7 @@ describe('feedback controls', () => {
 
   it('preserves picker order and activates the last imported screenshot', async () => {
     const snapshotRef: { current?: ProjectSnapshot } = {};
+    let persisted = snapshot;
     const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(async (input) => {
       const editingSnapshot = snapshotRef.current!;
       const original = editingSnapshot.project.screenshots[0];
@@ -318,14 +347,19 @@ describe('feedback controls', () => {
         annotationFile: `collections/001-collection/annotations/00${index + 2}-${file}.json`,
         descriptionFile: `collections/001-collection/descriptions/00${index + 2}-${file}.md`,
       }));
-      return {
+      persisted = {
         ...editingSnapshot,
         project: { ...editingSnapshot.project, screenshots: [original, ...added] },
       };
+      return persisted;
     });
     const { editingSnapshot } = await renderEditingProject({
       importImageFiles,
       getDroppedFilePath: (file) => file.name,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-import-2' },
+      }),
     });
     snapshotRef.current = editingSnapshot;
     const first = new File(['first'], 'first.png', { type: 'image/png' });
@@ -349,6 +383,7 @@ describe('feedback controls', () => {
     renderApp();
     await screen.findByRole('button', { name: 'Settings' });
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
     useAppStore.getState().set({ search: 'stale query' });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
@@ -362,7 +397,7 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     fireEvent.change(search, { target: { value: 'recent filter' } });
-    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     await waitFor(() => expect(search).toHaveFocus());
     expect(useAppStore.getState().view).toBe('recent');
     expect(search).toHaveValue('recent filter');

@@ -73,6 +73,7 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
       <label className="field">
         <span className="field-label">Update channel</span>
         <select
+          data-testid="update-channel"
           value={channel}
           disabled={locked}
           onChange={(event) => {

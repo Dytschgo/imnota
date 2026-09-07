@@ -206,6 +206,7 @@ export function OnboardingDemo({
   return (
     <div className="imnota-onboarding-backdrop">
       <section
+        data-testid="onboarding-dialog"
         className="imnota-onboarding"
         role="dialog"
         aria-modal="true"
@@ -265,6 +266,7 @@ export function OnboardingDemo({
                   interface locally so you can practice without choosing a file.
                 </p>
                 <button
+                  data-testid="onboarding-use-sample"
                   type="button"
                   className="imnota-onboarding-primary"
                   onClick={loadSample}
@@ -300,6 +302,7 @@ export function OnboardingDemo({
                   ))}
                 </div>
                 <button
+                  data-testid="onboarding-guided-note"
                   type="button"
                   className="imnota-onboarding-secondary"
                   onClick={() => {
@@ -388,6 +391,7 @@ export function OnboardingDemo({
             </button>
             {step === 1 ? (
               <button
+                data-testid="onboarding-continue"
                 type="button"
                 className="imnota-onboarding-primary"
                 disabled={annotations.length === 0 || busy}

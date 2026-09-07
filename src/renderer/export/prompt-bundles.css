@@ -33,6 +33,15 @@
   border-right: 1px solid var(--line);
   background: var(--input);
   color: var(--ink-4);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: zoom-in;
+}
+
+.prompt-bundle-preview:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .prompt-bundle-preview img {
@@ -229,6 +238,21 @@
   color: var(--warning);
 }
 
+.prompt-sharing-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+  color: var(--ink-2);
+}
+
+.prompt-sharing-error span {
+  flex: 1;
+}
+
 .prompt-sharing-footer {
   display: flex;
   flex-direction: column;
@@ -242,6 +266,18 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.prompt-large-preview {
+  max-width: min(84vw, 1400px);
+  max-height: 76vh;
+  overflow: auto;
+  background: #fff;
+}
+
+.prompt-large-preview img {
+  display: block;
+  max-width: none;
 }
 
 @media (max-width: 520px) {

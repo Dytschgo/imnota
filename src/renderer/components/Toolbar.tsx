@@ -132,6 +132,7 @@ function ToolButton({
   return (
     <span className="annotation-tooltip-anchor">
       <IconButton
+        data-testid={`tool-${definition.id}`}
         label={`${definition.label}${definition.shortcut ? ` (${definition.shortcut})` : ''}`}
         aria-describedby={tooltipId}
         className={active ? 'is-active' : ''}
@@ -158,9 +159,11 @@ export interface ToolbarProps {
   canRedo: boolean;
   onZoom: (delta: number) => void;
   onFit: () => void;
+  onActualSize?: () => void;
   /** Enables the compact quick palette when supplied. */
   onColorSelect?: (color: string) => void;
   selectedColor?: string;
+  shortcutLabels?: Partial<Record<ToolChoice | 'undo' | 'redo' | 'fit' | 'actualSize', string>>;
 }
 
 export function Toolbar({
@@ -172,8 +175,10 @@ export function Toolbar({
   canRedo,
   onZoom,
   onFit,
+  onActualSize,
   onColorSelect,
   selectedColor,
+  shortcutLabels = {},
 }: ToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -201,7 +206,7 @@ export function Toolbar({
         {PRIMARY_TOOLS.map((definition) => (
           <ToolButton
             key={definition.id}
-            definition={definition}
+            definition={{ ...definition, shortcut: shortcutLabels[definition.id] }}
             active={tool === definition.id}
             onClick={() => setTool(definition.id)}
           />
@@ -209,6 +214,7 @@ export function Toolbar({
         <div className="annotation-more" ref={moreRef}>
           <span className="annotation-tooltip-anchor">
             <IconButton
+              data-testid="more-annotation-tools"
               label="More annotation tools"
               className={moreActive ? 'is-active' : ''}
               aria-expanded={moreOpen}
@@ -277,10 +283,18 @@ export function Toolbar({
 
       <div className="toolbar-divider" />
       <div className="tool-group annotation-view-tools">
-        <IconButton label="Undo (Ctrl+Z)" disabled={!canUndo} onClick={onUndo}>
+        <IconButton
+          label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}
+          disabled={!canUndo}
+          onClick={onUndo}
+        >
           <Undo2 size={17} />
         </IconButton>
-        <IconButton label="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={onRedo}>
+        <IconButton
+          label={`Redo${shortcutLabels.redo ? ` (${shortcutLabels.redo})` : ''}`}
+          disabled={!canRedo}
+          onClick={onRedo}
+        >
           <Redo2 size={17} />
         </IconButton>
         <span className="toolbar-divider" />
@@ -290,12 +304,15 @@ export function Toolbar({
         <IconButton label="Zoom in" onClick={() => onZoom(0.1)}>
           <ZoomIn size={17} />
         </IconButton>
-        <IconButton label="Fit screenshot (0)" onClick={onFit}>
+        <IconButton
+          label={`Fit screenshot${shortcutLabels.fit ? ` (${shortcutLabels.fit})` : ''}`}
+          onClick={onFit}
+        >
           <Maximize2 size={17} />
         </IconButton>
         <IconButton
-          label="Actual size (1)"
-          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }))}
+          label={`Actual size${shortcutLabels.actualSize ? ` (${shortcutLabels.actualSize})` : ''}`}
+          onClick={onActualSize ?? (() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' })))}
         >
           <span className="actual-size-label">1:1</span>
         </IconButton>

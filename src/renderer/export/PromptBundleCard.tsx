@@ -41,6 +41,7 @@ export interface PromptBundleCardProps {
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
+  onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
 function requestFor(bundle: PromptBundleCardModel): PromptBundleActionRequest {
@@ -71,17 +72,26 @@ export function PromptBundleCard({
   onCopyMarkdown,
   onCopyImage,
   onOpenFiles,
+  onLoadPreview,
 }: PromptBundleCardProps) {
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
   const request = requestFor(bundle);
   const fallbacksReady = Boolean(bundle.artifactSessionId) && !busy && !disabled;
   return (
     <article
+      data-testid="prompt-bundle-card"
+      data-bundle-number={bundle.bundleNumber}
       className="prompt-bundle-card"
       aria-labelledby={`prompt-bundle-${bundle.bundleNumber}`}
       aria-busy={busy}
     >
-      <div className="prompt-bundle-preview">
+      <button
+        type="button"
+        className="prompt-bundle-preview"
+        aria-label={`Open full-resolution preview for Prompt ${bundle.bundleNumber}`}
+        disabled={!onLoadPreview || busy}
+        onClick={() => void onLoadPreview?.(request)}
+      >
         {bundle.previewDataUrl ? (
           <img src={bundle.previewDataUrl} alt={`Preview of Prompt ${bundle.bundleNumber}`} />
         ) : (
@@ -90,7 +100,7 @@ export function PromptBundleCard({
         <span className="prompt-bundle-index" aria-hidden="true">
           {String(bundle.bundleNumber).padStart(2, '0')}
         </span>
-      </div>
+      </button>
       <div className="prompt-bundle-body">
         <div className="prompt-bundle-heading">
           <div>
@@ -137,6 +147,7 @@ export function PromptBundleCard({
         <div className="prompt-bundle-primary">
           {bundle.delivery === 'clipboard' ? (
             <Button
+              data-testid={`copy-prompt-${bundle.bundleNumber}`}
               variant="primary"
               busy={busy}
               disabled={disabled}

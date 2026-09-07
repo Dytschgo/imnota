@@ -7,6 +7,8 @@ import type {
   WorkspaceSettings,
 } from '../shared/types';
 
+export type AppView = 'projects' | 'recent' | 'favourites' | 'workspace' | 'context' | 'settings';
+
 interface AppState {
   settings: WorkspaceSettings;
   projects: ProjectListItem[];
@@ -14,7 +16,7 @@ interface AppState {
   activeScreenshotId: string | null;
   activeCollectionId: string;
   navigationOpen: boolean;
-  view: 'projects' | 'recent' | 'favourites' | 'workspace' | 'context' | 'settings';
+  view: AppView;
   search: string;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;

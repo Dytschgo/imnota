@@ -11,6 +11,8 @@ import './prompt-bundles.css';
 export interface PromptSharingDialogProps {
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
+  error?: { message: string };
+  cleanupPending?: boolean;
   noContentMessage?: string;
   onClose(): void;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
@@ -18,8 +20,10 @@ export interface PromptSharingDialogProps {
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
+  onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
+  onRetryCleanup?(): void | Promise<void>;
 }
 
 function progressLabel(progress: PromptBundleProgress): string {
@@ -32,6 +36,8 @@ function progressLabel(progress: PromptBundleProgress): string {
 export function PromptSharingDialog({
   bundles,
   progress,
+  error,
+  cleanupPending = false,
   noContentMessage,
   onClose,
   onCopyFresh,
@@ -39,8 +45,10 @@ export function PromptSharingDialog({
   onCopyMarkdown,
   onCopyImage,
   onOpenFiles,
+  onLoadPreview,
   onOpenExportFolder,
   onCancel,
+  onRetryCleanup,
 }: PromptSharingDialogProps) {
   const busy = progress ? ['planning', 'rendering', 'writing', 'copying'].includes(progress.phase) : false;
   const current = progress?.bundleNumber ?? 0;
@@ -49,10 +57,11 @@ export function PromptSharingDialog({
   return (
     <Modal
       title="Share prompt bundles"
-      description="Each action creates a fresh export from saved collection state. Some apps may paste only the text or only the image."
+      description="Each primary Copy Prompt action creates a fresh export from saved collection state. Some apps may paste only the text or only the image."
       onClose={onClose}
+      closeTestId="prompt-sharing-close"
     >
-      <section className="prompt-sharing-dialog" aria-busy={busy}>
+      <section className="prompt-sharing-dialog" aria-busy={busy} data-testid="prompt-sharing-dialog">
         {progress && (
           <div className={`prompt-sharing-progress prompt-sharing-progress-${progress.phase}`} role="status">
             <div>
@@ -61,6 +70,17 @@ export function PromptSharingDialog({
             </div>
             {progressValue !== undefined && (
               <progress value={progressValue} max={100} aria-label="Prompt export progress" />
+            )}
+          </div>
+        )}
+        {error && (
+          <div className="prompt-sharing-error" role="alert">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{error.message}</span>
+            {cleanupPending && onRetryCleanup && (
+              <Button variant="soft" onClick={() => void onRetryCleanup()}>
+                Retry cleanup
+              </Button>
             )}
           </div>
         )}
@@ -87,6 +107,7 @@ export function PromptSharingDialog({
                 onCopyMarkdown={onCopyMarkdown}
                 onCopyImage={onCopyImage}
                 onOpenFiles={onOpenFiles}
+                onLoadPreview={onLoadPreview}
               />
             ))}
           </div>

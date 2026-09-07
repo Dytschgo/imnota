@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -19,7 +20,12 @@ export function Button({
   busy?: boolean;
 }) {
   return (
-    <button className={`btn btn-${variant} ${className}`} disabled={busy || props.disabled} {...props}>
+    <button
+      {...props}
+      className={`btn btn-${variant} ${className}`}
+      disabled={Boolean(busy || props.disabled)}
+      aria-busy={busy || undefined}
+    >
       {busy && <LoaderCircle size={15} className="spin" />}
       {children}
     </button>
@@ -70,12 +76,16 @@ export function Modal({
   description,
   children,
   onClose,
+  closeTestId,
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   onClose: () => void;
+  closeTestId?: string;
 }) {
+  const titleId = `${useId().replace(/:/g, '')}-title`;
+  const descriptionId = `${useId().replace(/:/g, '')}-description`;
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -90,6 +100,11 @@ export function Modal({
       );
     (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus();
     const keydown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        (event.target as HTMLElement | null)?.closest('[role="dialog"]') !== dialog
+      )
+        return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -128,14 +143,15 @@ export function Modal({
         className="modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
       >
         <div className="modal-header">
           <div>
-            <h2 id="modal-title">{title}</h2>
-            {description && <p>{description}</p>}
+            <h2 id={titleId}>{title}</h2>
+            {description && <p id={descriptionId}>{description}</p>}
           </div>
-          <IconButton label="Close" onClick={onClose}>
+          <IconButton label="Close" data-testid={closeTestId} onClick={onClose}>
             ×
           </IconButton>
         </div>
