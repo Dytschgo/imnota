@@ -1,0 +1,37 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0b0d12;
+  color: #ebedf5;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: #0b0d12; }
+main { width: min(900px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0 96px; }
+.pairing { width: min(620px, calc(100% - 32px)); }
+.eyebrow { color: #99a5c6; font-size: .78rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+h1 { margin: .3em 0; font-size: clamp(2rem, 7vw, 4rem); letter-spacing: -.045em; }
+h2 { margin-top: 2.5rem; }
+p, li { line-height: 1.65; color: #c9cede; }
+.expiry { color: #99a5c6; }
+nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 42px; }
+.button { appearance: none; display: inline-block; border: 1px solid #b8c7ff; border-radius: 999px; padding: 10px 17px; background: #dce4ff; color: #111522; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+.button.secondary { background: transparent; color: #dce4ff; }
+.button:disabled { cursor: wait; opacity: .6; }
+article { padding: 24px; border: 1px solid #262c3b; border-radius: 14px; background: #11141c; overflow-wrap: anywhere; }
+article pre { padding: 16px; overflow: auto; border-radius: 8px; background: #080a0e; }
+article code { font-family: "SFMono-Regular", Consolas, monospace; }
+article a { color: #b8c7ff; }
+.images { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+figure { margin: 0; padding: 12px; border: 1px solid #262c3b; border-radius: 12px; }
+figure img { display: block; width: 100%; height: auto; border-radius: 7px; }
+figcaption { margin-top: 9px; color: #99a5c6; font-size: .85rem; }
+footer { margin-top: 48px; color: #737d9a; font-size: .82rem; }
+label { display: block; margin: 28px 0 8px; color: #c9cede; font-weight: 700; }
+textarea { width: 100%; resize: none; padding: 12px; border: 1px solid #3c4660; border-radius: 8px; background: #080a0e; color: #f1f3f9; font-family: monospace; }
+.error { color: #ff9c9c; }
+
+@media (max-width: 520px) {
+  main { padding-top: 36px; }
+  article { padding: 17px; }
+}
