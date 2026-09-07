@@ -744,7 +744,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     const buttons = [...card.querySelectorAll('button')];
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
-      text: card.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      text: card.innerText?.replace(/\\s+/g, ' ').trim() ?? '',
       copyLabel: buttons.find((button) => /Copy (?:fresh prompt|Prompt \\d+)/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
