@@ -327,6 +327,24 @@ describe('prompt export controller orchestration', () => {
     expect(native.finishes[0].masterMarkdown).not.toContain('opaque-project-grant');
   });
 
+  test('preserves indented Markdown in master context and descriptions while normalizing line endings', async () => {
+    const context = savedContext([screenshot(0)]);
+    context.snapshot.project.collections[0].overallContext =
+      '    const enabled = true;\r\n        return enabled;\r\n';
+    context.snapshot.project.screenshots[0].description =
+      'Run this command:\r\n\r\n    corepack pnpm test\r\n';
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+
+    await controller.prepareFreshFiles();
+
+    const overview = native.finishes[0].masterMarkdown;
+    expect(overview).toContain('## Overall context\n\n    const enabled = true;\n        return enabled;\n');
+    expect(overview).toContain('Run this command:\n\n    corepack pnpm test\n');
+    expect(overview).not.toContain('\r');
+  });
+
   test('copy fresh ignores an open-time plan and exports the latest saved state with reserved identity', async () => {
     const older = savedContext([screenshot(0)]);
     const newerShot = { ...screenshot(0), title: 'Latest saved title' };
@@ -448,6 +466,38 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().progress?.phase).toBe('cancelled');
     expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
     expect(controller.getState().cards[1].artifactSessionId).toBeUndefined();
+  });
+
+  test('cancels a session that resolves after cancellation during startPromptExport', async () => {
+    let releaseStart!: () => void;
+    let reportStartEntered!: () => void;
+    const startEntered = new Promise<void>((resolve) => {
+      reportStartEntered = resolve;
+    });
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const native = fakeBridge();
+    const originalStart = native.bridge.startPromptExport;
+    native.bridge.startPromptExport = async (input) => {
+      const result = await originalStart(input);
+      reportStartEntered();
+      await startGate;
+      return result;
+    };
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+
+    const exportPromise = controller.prepareFreshFiles();
+    await startEntered;
+    const cancelResult = await controller.cancel();
+    releaseStart();
+    const exportResult = await exportPromise;
+
+    expect(cancelResult.ok).toBe(true);
+    expect(exportResult).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(native.cancellations).toEqual(['session-1']);
+    expect(native.finishes).toHaveLength(0);
   });
 
   test.each([1, 10, 20, 100])(
@@ -579,6 +629,32 @@ describe('prompt export controller orchestration', () => {
     });
     expect(native.finishes).toHaveLength(1);
     expect(native.cancellations).toEqual(['session-1']);
+  });
+
+  test('keeps failed finish cleanup retryable when native cancellation transport rejects', async () => {
+    const native = fakeBridge({ failFinish: true });
+    const originalCancel = native.bridge.cancelPromptExport;
+    let cancelAttempts = 0;
+    native.bridge.cancelPromptExport = async (input) => {
+      cancelAttempts += 1;
+      if (cancelAttempts === 1) throw new Error('IPC transport disconnected');
+      return originalCancel(input);
+    };
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+
+    const exportResult = await controller.prepareFreshFiles();
+
+    expect(exportResult).toMatchObject({ ok: false, error: { code: 'cleanup-pending' } });
+    expect(controller.getState().cleanupPending).toBe(true);
+    expect(cancelAttempts).toBe(1);
+
+    const retryResult = await controller.retryCleanup();
+
+    expect(retryResult).toEqual({ ok: true, sessionId: 'session-1' });
+    expect(cancelAttempts).toBe(2);
+    expect(controller.getState().cleanupPending).toBe(false);
+    expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
   });
 
   test('reports the hard 16384px/64MP render cap without suggesting an unavailable file escape', async () => {

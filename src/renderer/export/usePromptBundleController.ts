@@ -23,6 +23,7 @@ export interface PromptBundleController {
   progress?: ReturnType<PromptBundleControllerEngine['getState']>['progress'];
   error?: ReturnType<PromptBundleControllerEngine['getState']>['error'];
   isOpen: boolean;
+  cleanupPending: boolean;
   noContentMessage?: ReturnType<PromptBundleControllerEngine['getState']>['noContentMessage'];
   preview?: ReturnType<PromptBundleControllerEngine['getState']>['preview'];
   open(): Promise<PromptBundleControllerActionResult>;
@@ -35,6 +36,7 @@ export interface PromptBundleController {
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   openFolder(): Promise<PromptBundleControllerActionResult>;
   cancel(): Promise<PromptBundleControllerActionResult>;
+  retryCleanup(): Promise<PromptBundleControllerActionResult>;
   loadPreview(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
 }
 
@@ -81,6 +83,7 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
       openFiles: (selection: PromptBundleSelection) => engine.openFiles(selection),
       openFolder: () => engine.openFolder(),
       cancel: () => engine.cancel(),
+      retryCleanup: () => engine.retryCleanup(),
       loadPreview: (selection: PromptBundleSelection) => engine.loadPreview(selection),
     }),
     [engine, state],

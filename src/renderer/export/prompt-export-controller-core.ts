@@ -113,6 +113,7 @@ export interface PromptBundleControllerRendering {
 export type PromptBundleControllerErrorCode =
   | 'busy'
   | 'cancelled'
+  | 'cleanup-pending'
   | 'content-changed'
   | 'disposed'
   | 'invalid-bundle'
@@ -145,6 +146,7 @@ export interface PromptBundleControllerState {
   progress?: PromptBundleProgress;
   error?: PromptBundleControllerError;
   isOpen: boolean;
+  cleanupPending: boolean;
   noContentMessage?: string;
   preview?: PromptBundleLargePreview;
 }
@@ -188,6 +190,7 @@ interface ActiveRun {
   plan?: PreparedPromptPlan;
   terminalKind?: 'finish' | 'cancel';
   terminal?: Promise<WorkflowResult<PromptExportFinalized>>;
+  finalized?: PromptExportFinalized;
 }
 
 class ControllerFailure extends Error {
@@ -239,6 +242,17 @@ function actionableMessage(error: unknown, fallback: string): string {
 
 function nativeFailure(error: WorkflowError, fallbackAvailable = false): ControllerFailure {
   return failure('native-failure', error.message, error.retryable, fallbackAvailable, error.code);
+}
+
+function cleanupPendingFailure(error: unknown): ControllerFailure {
+  const detail = publicError(error);
+  return failure(
+    'cleanup-pending',
+    `The export session could not be finalized safely. Retry export cleanup before starting another export. ${detail.message}`,
+    true,
+    false,
+    detail.nativeCode,
+  );
 }
 
 function unwrap<T>(result: WorkflowResult<T>, fallbackAvailable = false): T {
@@ -317,6 +331,10 @@ function plainHeading(value: string, fallback: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim() || fallback;
 }
 
+function normalizedMarkdown(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
+
 function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, setName: string): string {
   const lines = [
     `# ${plainHeading(plan.collectionName, 'Untitled collection')}`,
@@ -324,7 +342,8 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
     `Export set: ${plainHeading(setName, 'Prompt export')}`,
     '',
   ];
-  if (plan.overallContext.trim()) lines.push('## Overall context', '', plan.overallContext.trim(), '');
+  const context = normalizedMarkdown(plan.overallContext);
+  if (context.trim()) lines.push('## Overall context', '', context, '');
   lines.push('## Prompt bundles', '');
   for (const bundle of plan.bundles)
     lines.push(
@@ -351,7 +370,8 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
       `Priority for agent: ${screenshot.priority[0].toUpperCase()}${screenshot.priority.slice(1)}`,
       '',
     );
-    if (screenshot.description.trim()) lines.push(screenshot.description.trim(), '');
+    const description = normalizedMarkdown(screenshot.description);
+    if (description.trim()) lines.push(description, '');
     if (!screenshot.includeInExport) {
       lines.push(`Picture ${pictureNumber} was intentionally excluded from this export.`, '');
       continue;
@@ -359,7 +379,7 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
     for (const note of includedById.get(screenshot.id)?.notes ?? [])
       lines.push(`#### Picture ${pictureNumber} / Note ${note.number}`, '', note.text, '');
   }
-  return `${lines.join('\n').trim()}\n`;
+  return `${lines.join('\n').replace(/\n+$/g, '')}\n`;
 }
 
 function cardsForPlan(
@@ -393,7 +413,7 @@ function publicError(error: unknown): PromptBundleControllerError {
 }
 
 export class PromptBundleControllerEngine {
-  private state: PromptBundleControllerState = { cards: [], isOpen: false };
+  private state: PromptBundleControllerState = { cards: [], isOpen: false, cleanupPending: false };
   private readonly listeners = new Set<() => void>();
   private readonly bridge: PromptBundleControllerBridge;
   private readonly rendering: PromptBundleControllerRendering;
@@ -405,6 +425,7 @@ export class PromptBundleControllerEngine {
   private runSequence = 0;
   private previewSequence = 0;
   private previewAbort?: AbortController;
+  private pendingCleanup?: ActiveRun;
   private disposed = false;
 
   constructor(options: PromptBundleControllerEngineOptions) {
@@ -668,12 +689,50 @@ export class PromptBundleControllerEngine {
       });
     if (!run.terminal) {
       run.terminalKind = kind;
-      run.terminal =
+      const operation = Promise.resolve().then(() =>
         kind === 'finish'
-          ? this.bridge.finishPromptExport({ sessionId: run.session.sessionId, masterMarkdown: master })
-          : this.bridge.cancelPromptExport({ sessionId: run.session.sessionId });
+          ? this.bridge.finishPromptExport({ sessionId: run.session!.sessionId, masterMarkdown: master })
+          : this.bridge.cancelPromptExport({ sessionId: run.session!.sessionId }),
+      );
+      const tracked: Promise<WorkflowResult<PromptExportFinalized>> = operation.catch((error) => {
+        if (run.terminal === tracked) {
+          run.terminal = undefined;
+          run.terminalKind = undefined;
+        }
+        throw error;
+      });
+      run.terminal = tracked;
     }
     return run.terminal;
+  }
+
+  private rememberPendingCleanup(run: ActiveRun): void {
+    this.pendingCleanup = run;
+    this.emit({ cleanupPending: true });
+  }
+
+  private async cleanupRun(run: ActiveRun): Promise<PromptExportFinalized | undefined> {
+    if (!run.session || run.finalized) return run.finalized;
+    try {
+      const result = await this.terminate(run, 'cancel');
+      if (!result.ok) {
+        run.terminal = undefined;
+        run.terminalKind = undefined;
+        throw nativeFailure(result.error);
+      }
+      run.finalized = result.value;
+      if (run.plan) this.applyArtifact(run.plan, run.session, result.value, new Map());
+      if (this.pendingCleanup === run) {
+        this.pendingCleanup = undefined;
+        this.emit({ cleanupPending: false });
+      }
+      return result.value;
+    } catch (error) {
+      run.terminal = undefined;
+      run.terminalKind = undefined;
+      this.rememberPendingCleanup(run);
+      throw cleanupPendingFailure(error);
+    }
   }
 
   private applyArtifact(
@@ -761,7 +820,11 @@ export class PromptBundleControllerEngine {
       throw nativeFailure(finishResult.error);
     }
     const finalized = finishResult.value;
-    if (run.terminalKind !== 'finish' || finalized.status !== 'completed') throw cancelledFailure();
+    run.finalized = finalized;
+    if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
+      this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
+      throw cancelledFailure();
+    }
     this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
     return { prepared, session, finalized };
   }
@@ -814,6 +877,10 @@ export class PromptBundleControllerEngine {
     requestedBundleNumber: number | undefined,
     copyAfterExport: boolean,
   ): Promise<PromptBundleControllerActionResult> {
+    if (this.pendingCleanup) {
+      const cleanup = await this.retryCleanup();
+      if (!cleanup.ok) return cleanup;
+    }
     let run: ActiveRun | undefined;
     try {
       run = this.beginRun();
@@ -866,11 +933,15 @@ export class PromptBundleControllerEngine {
       this.activeRun = undefined;
       return { ok: true, sessionId: session.sessionId, bundleNumber };
     } catch (error) {
-      if (run?.session && !run.terminal) {
-        const cancelled = await this.terminate(run, 'cancel');
-        if (cancelled.ok && run.plan) this.applyArtifact(run.plan, run.session, cancelled.value, new Map());
+      let reportedError = error;
+      if (run?.session && !run.finalized) {
+        try {
+          await this.cleanupRun(run);
+        } catch (cleanupError) {
+          reportedError = cleanupError;
+        }
       }
-      return this.resultError(error, run);
+      return this.resultError(reportedError, run);
     }
   }
 
@@ -902,6 +973,10 @@ export class PromptBundleControllerEngine {
     selection: PromptBundleSelection,
     action: (sessionId: string, bundleNumber: number) => Promise<WorkflowResult<void>>,
   ): Promise<PromptBundleControllerActionResult> {
+    if (this.activeRun) {
+      const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
+      return { ok: false, error: detail };
+    }
     try {
       if (this.disposed)
         throw failure('disposed', 'The prompt export controller is no longer available.', false);
@@ -951,6 +1026,10 @@ export class PromptBundleControllerEngine {
   }
 
   async loadPreview(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    if (this.activeRun) {
+      const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
+      return { ok: false, error: detail };
+    }
     const bundleNumber = selectionNumber(selection);
     if (bundleNumber === undefined)
       return this.resultError(failure('invalid-bundle', 'Choose a prompt to preview.', true));
@@ -1020,6 +1099,7 @@ export class PromptBundleControllerEngine {
     try {
       const result = await this.terminate(run, 'cancel');
       const finalized = unwrap(result);
+      if (run.session) run.finalized = finalized;
       if (run.session && run.plan) this.applyArtifact(run.plan, run.session, finalized, new Map());
       if (this.activeRun === run) {
         this.activeRun = undefined;
@@ -1035,7 +1115,42 @@ export class PromptBundleControllerEngine {
       }
       return { ok: true, sessionId: run.session?.sessionId };
     } catch (error) {
-      return this.resultError(error, run);
+      let reportedError = error;
+      if (run.session) {
+        run.terminal = undefined;
+        run.terminalKind = undefined;
+        this.rememberPendingCleanup(run);
+        reportedError = cleanupPendingFailure(error);
+      }
+      return this.resultError(reportedError, run);
+    }
+  }
+
+  async retryCleanup(): Promise<PromptBundleControllerActionResult> {
+    if (this.disposed)
+      return {
+        ok: false,
+        error: failure('disposed', 'The prompt export controller is no longer available.', false).detail,
+      };
+    if (this.activeRun) {
+      const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
+      return { ok: false, error: detail };
+    }
+    const run = this.pendingCleanup;
+    if (!run) return { ok: true };
+    try {
+      await this.cleanupRun(run);
+      this.emit({
+        cleanupPending: false,
+        error: undefined,
+        progress: {
+          phase: 'cancelled',
+          message: 'Export cleanup completed. Any complete file pairs were kept.',
+        },
+      });
+      return { ok: true, sessionId: run.session?.sessionId };
+    } catch (error) {
+      return this.resultError(error);
     }
   }
 
@@ -1044,14 +1159,16 @@ export class PromptBundleControllerEngine {
     this.disposed = true;
     this.previewSequence += 1;
     this.previewAbort?.abort();
-    if (this.activeRun) {
-      const run = this.activeRun;
+    const cleanupRuns = new Set(
+      [this.activeRun, this.pendingCleanup].filter((run): run is ActiveRun => Boolean(run)),
+    );
+    for (const run of cleanupRuns) {
       run.controller.abort();
-      if (run.session) void this.terminate(run, 'cancel');
+      if (run.session && !run.finalized) void this.cleanupRun(run).catch(() => undefined);
     }
     this.activeRun = undefined;
     this.latestPlan = undefined;
-    this.state = { cards: [], isOpen: false };
+    this.state = { cards: [], isOpen: false, cleanupPending: false };
     this.listeners.clear();
   }
 }
