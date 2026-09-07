@@ -34,6 +34,8 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
     />,
   );
   expect(screen.getByRole('status')).toHaveTextContent('Preparing Prompt 2 of 4');
+  expect(screen.queryByText('No prompt bundle to share')).not.toBeInTheDocument();
+  expect(screen.getByText(/Reading the saved collection/)).toBeInTheDocument();
   expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
   fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();

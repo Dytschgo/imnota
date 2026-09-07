@@ -855,6 +855,12 @@ async function exercisePromptWorkflow(
     await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
   await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
   await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
+  await driver.waitFor(
+    {
+      selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="prompt-bundle-card"]',
+    },
+    { timeoutMs: 60_000 },
+  );
   const cards = await promptCards(driver);
   if (!cards.length) throw new Error('Share prompt bundles dialog contains no real bundle cards.');
   if (options.requireSplit && cards.length < 2)

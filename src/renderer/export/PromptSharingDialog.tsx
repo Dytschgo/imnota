@@ -84,7 +84,9 @@ export function PromptSharingDialog({
             )}
           </div>
         )}
-        {!bundles.length ? (
+        {!bundles.length && busy ? (
+          <p className="prompt-sharing-empty">Reading the saved collection and preparing prompt cards…</p>
+        ) : !bundles.length ? (
           <div className="prompt-sharing-empty">
             <AlertTriangle size={20} aria-hidden="true" />
             <div>
