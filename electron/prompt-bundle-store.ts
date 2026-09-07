@@ -3,10 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
-const MAX_PNG_BYTES = 100_000_000;
-const MAX_PNG_EDGE = 16_384;
-const MAX_PNG_PIXELS = 64_000_000;
-const MAX_MARKDOWN_CHARACTERS = 2_000_000;
+export const MAX_PROMPT_BUNDLE_PNG_BYTES = 100_000_000;
+export const MAX_PROMPT_BUNDLE_PNG_EDGE = 16_384;
+export const MAX_PROMPT_BUNDLE_PNG_PIXELS = 64_000_000;
+export const MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS = 2_000_000;
+export const MAX_PROMPT_BUNDLE_MARKDOWN_BYTES = 8_000_000;
 const MAX_TIMESTAMP_ATTEMPTS = 86_400;
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -41,6 +42,8 @@ export interface CommitPromptBundleInput {
 
 export interface StoredPromptBundle {
   bundleNumber: number;
+  width: number;
+  height: number;
   pngFilename: string;
   markdownFilename: string;
   pngPath: string;
@@ -65,7 +68,15 @@ export interface PromptBundleStoreDependencies {
   now(): Date;
   randomId(): string;
   writeAtomically(filePath: string, content: string | Uint8Array): Promise<void>;
+  /** Must fully decode the structurally bounded PNG, not merely inspect its header. */
+  validateDecodedPng(
+    png: Uint8Array,
+    expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
+  ): Promise<void> | void;
 }
+
+type PromptBundleStoreOptions = Pick<PromptBundleStoreDependencies, 'validateDecodedPng'> &
+  Partial<Omit<PromptBundleStoreDependencies, 'validateDecodedPng'>>;
 
 interface StoredSession {
   sessionId: string;
@@ -177,7 +188,7 @@ export function validatePromptBundlePng(
   png: Uint8Array,
   expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
 ): void {
-  if (!(png instanceof Uint8Array) || png.length < 57 || png.length > MAX_PNG_BYTES)
+  if (!(png instanceof Uint8Array) || png.length < 57 || png.length > MAX_PROMPT_BUNDLE_PNG_BYTES)
     throw new Error('Prompt PNG is empty, damaged, or too large to store.');
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (signature.some((byte, index) => png[index] !== byte))
@@ -208,9 +219,9 @@ export function validatePromptBundlePng(
       if (
         width < 1 ||
         height < 1 ||
-        width > MAX_PNG_EDGE ||
-        height > MAX_PNG_EDGE ||
-        width * height > MAX_PNG_PIXELS
+        width > MAX_PROMPT_BUNDLE_PNG_EDGE ||
+        height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
+        width * height > MAX_PROMPT_BUNDLE_PNG_PIXELS
       )
         throw new Error('Prompt PNG dimensions exceed safe full-resolution storage limits.');
       if (width !== expected.width || height !== expected.height)
@@ -240,9 +251,9 @@ function validateManifest(items: readonly PromptBundleManifestItem[]): Map<numbe
       !Number.isSafeInteger(item.height) ||
       item.width < 1 ||
       item.height < 1 ||
-      item.width > MAX_PNG_EDGE ||
-      item.height > MAX_PNG_EDGE ||
-      item.width * item.height > MAX_PNG_PIXELS
+      item.width > MAX_PROMPT_BUNDLE_PNG_EDGE ||
+      item.height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
+      item.width * item.height > MAX_PROMPT_BUNDLE_PNG_PIXELS
     )
       throw new Error(`Prompt ${item.bundleNumber} dimensions exceed safe storage limits.`);
     manifest.set(item.bundleNumber, { ...item });
@@ -273,12 +284,21 @@ export class PromptBundleStore {
   private readonly finalizations = new Map<string, Promise<FinalizedPromptBundleSession>>();
   private readonly dependencies: PromptBundleStoreDependencies;
 
-  constructor(dependencies: Partial<PromptBundleStoreDependencies> = {}) {
+  constructor(dependencies: PromptBundleStoreOptions) {
     this.dependencies = {
       now: dependencies.now ?? (() => new Date()),
       randomId: dependencies.randomId ?? (() => randomUUID()),
       writeAtomically: dependencies.writeAtomically ?? atomicWrite,
+      validateDecodedPng: dependencies.validateDecodedPng,
     };
+  }
+
+  async validatePng(
+    png: Uint8Array,
+    expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
+  ): Promise<void> {
+    validatePromptBundlePng(png, expected);
+    await this.dependencies.validateDecodedPng(png, expected);
   }
 
   async startSession(input: StartPromptBundleSessionInput): Promise<PromptBundleSessionInfo> {
@@ -371,13 +391,16 @@ export class PromptBundleStore {
     if (
       typeof input.markdown !== 'string' ||
       !input.markdown.trim() ||
-      input.markdown.length > MAX_MARKDOWN_CHARACTERS
+      input.markdown.length > MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS ||
+      Buffer.byteLength(input.markdown, 'utf8') > MAX_PROMPT_BUNDLE_MARKDOWN_BYTES
     )
       throw new Error('Prompt Markdown is empty or too large to store.');
     const suffix = bundleSuffix(input.bundleNumber);
     return await this.enqueue(session, async () => {
       if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
       if (session.finalizing) throw new Error('Prompt export is already finishing.');
+      await this.dependencies.validateDecodedPng(input.png, expected);
+      if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
       if (session.completed.has(input.bundleNumber))
         throw new Error(`Prompt ${input.bundleNumber} is already stored.`);
       const base = `${session.setName} - ${suffix}`;
@@ -403,6 +426,8 @@ export class PromptBundleStore {
         if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
         const stored = {
           bundleNumber: input.bundleNumber,
+          width: expected.width,
+          height: expected.height,
           pngFilename,
           markdownFilename,
           pngPath,
@@ -504,7 +529,8 @@ export class PromptBundleStore {
         if (
           typeof options.masterMarkdown !== 'string' ||
           !options.masterMarkdown.trim() ||
-          options.masterMarkdown.length > MAX_MARKDOWN_CHARACTERS
+          options.masterMarkdown.length > MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS ||
+          Buffer.byteLength(options.masterMarkdown, 'utf8') > MAX_PROMPT_BUNDLE_MARKDOWN_BYTES
         )
           warnings.push('Master overview was not stored because it was empty or too large.');
         else {

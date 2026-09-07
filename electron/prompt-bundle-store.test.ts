@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { atomicWrite } from './files.js';
 import {
@@ -9,6 +10,8 @@ import {
   PromptBundleStore,
   formatPromptTimestamp,
   sanitizePromptCollectionName,
+  validatePromptBundlePng,
+  type PromptBundleStoreDependencies,
 } from './prompt-bundle-store.js';
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +28,56 @@ function png(): Uint8Array {
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   );
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function validateDecodedPngForTest(value: Uint8Array): void {
+  const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
+  const chunks: Uint8Array[] = [];
+  let offset = 8;
+  while (offset < value.length) {
+    const length = view.getUint32(offset);
+    const type = Buffer.from(value.subarray(offset + 4, offset + 8)).toString('ascii');
+    if (type === 'IDAT') chunks.push(value.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const scanlines = inflateSync(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
+  if (scanlines.length !== 3 || scanlines[0] > 4) throw new Error('Prompt PNG scanlines are invalid.');
+}
+
+function promptStore(dependencies: Partial<PromptBundleStoreDependencies> = {}): PromptBundleStore {
+  return new PromptBundleStore({
+    ...dependencies,
+    validateDecodedPng: dependencies.validateDecodedPng ?? validateDecodedPngForTest,
+  });
+}
+
+function pngWithInvalidIdatAndValidCrc(): Uint8Array {
+  const corrupt = png().slice();
+  const view = new DataView(corrupt.buffer, corrupt.byteOffset, corrupt.byteLength);
+  let offset = 8;
+  while (offset < corrupt.length) {
+    const length = view.getUint32(offset);
+    const typeOffset = offset + 4;
+    const dataOffset = typeOffset + 4;
+    const type = Buffer.from(corrupt.subarray(typeOffset, dataOffset)).toString('ascii');
+    if (type === 'IDAT') {
+      corrupt[dataOffset] ^= 0xff;
+      const crcOffset = dataOffset + length;
+      view.setUint32(crcOffset, crc32(corrupt.subarray(typeOffset, crcOffset)));
+      return corrupt;
+    }
+    offset += 12 + length;
+  }
+  throw new Error('PNG fixture has no IDAT chunk.');
 }
 
 function startInput(input: Awaited<ReturnType<typeof fixture>>, collectionName: string, count = 1) {
@@ -50,7 +103,7 @@ describe('prompt bundle store', () => {
     const input = await fixture();
     const ids = ['session-one', 'session-two'];
     const now = new Date(2026, 8, 7, 18, 42, 5);
-    const store = new PromptBundleStore({ now: () => now, randomId: () => ids.shift()! });
+    const store = promptStore({ now: () => now, randomId: () => ids.shift()! });
     const first = await store.startSession(startInput(input, 'Collection 02'));
     const second = await store.startSession(startInput(input, 'Collection 02'));
     expect(first.timestamp).toBe('260907-184205');
@@ -82,7 +135,7 @@ describe('prompt bundle store', () => {
   it('removes a partial pair when its second atomic write fails', async () => {
     const input = await fixture();
     let writes = 0;
-    const store = new PromptBundleStore({
+    const store = promptStore({
       randomId: () => 'failure-session',
       writeAtomically: async (target: string, content: string | Uint8Array) => {
         writes++;
@@ -107,7 +160,7 @@ describe('prompt bundle store', () => {
 
   it('publishes completed pairs on cancellation and rejects later commits', async () => {
     const input = await fixture();
-    const store = new PromptBundleStore({ randomId: () => 'cancel-session' });
+    const store = promptStore({ randomId: () => 'cancel-session' });
     const session = await store.startSession(startInput(input, 'Cancel test', 2));
     await store.commitBundle({
       sessionId: session.sessionId,
@@ -125,7 +178,7 @@ describe('prompt bundle store', () => {
 
   it('publishes complete pairs when the optional master overview fails', async () => {
     const input = await fixture();
-    const store = new PromptBundleStore({
+    const store = promptStore({
       randomId: () => 'overview-session',
       writeAtomically: async (target: string, content: string | Uint8Array) => {
         if (target.endsWith('overview.md')) throw new Error('overview disk failure');
@@ -151,7 +204,7 @@ describe('prompt bundle store', () => {
 
   it('rejects unsafe collection paths and invalid PNG data before creating a pair', async () => {
     const input = await fixture();
-    const store = new PromptBundleStore({ randomId: () => 'safe-session' });
+    const store = promptStore({ randomId: () => 'safe-session' });
     await expect(
       store.startSession({ ...startInput(input, 'Unsafe'), collectionId: '../escape' }),
     ).rejects.toThrow(/safe path segment/);
@@ -181,7 +234,7 @@ describe('prompt bundle store', () => {
 
   it('rejects corrupt or manifest-mismatched PNGs and incomplete successful sessions', async () => {
     const input = await fixture();
-    const store = new PromptBundleStore({ randomId: () => 'manifest-session' });
+    const store = promptStore({ randomId: () => 'manifest-session' });
     const session = await store.startSession(startInput(input, 'Manifest', 2));
     const corrupt = png().slice();
     corrupt[corrupt.length - 1] ^= 1;
@@ -193,6 +246,16 @@ describe('prompt bundle store', () => {
         markdown: '# Corrupt\n',
       }),
     ).rejects.toThrow(/integrity check/);
+    const invalidIdat = pngWithInvalidIdatAndValidCrc();
+    expect(() => validatePromptBundlePng(invalidIdat, { width: 1, height: 1 })).not.toThrow();
+    await expect(
+      store.commitBundle({
+        sessionId: session.sessionId,
+        bundleNumber: 1,
+        png: invalidIdat,
+        markdown: '# Invalid image data\n',
+      }),
+    ).rejects.toThrow(/scanlines|header check/);
     await store.commitBundle({
       sessionId: session.sessionId,
       bundleNumber: 1,
@@ -203,7 +266,7 @@ describe('prompt bundle store', () => {
     const cancelled = await store.cancelSession(session.sessionId);
     expect(cancelled).toMatchObject({ status: 'cancelled', bundles: [{ bundleNumber: 1 }] });
 
-    const mismatchStore = new PromptBundleStore({ randomId: () => 'dimension-session' });
+    const mismatchStore = promptStore({ randomId: () => 'dimension-session' });
     const mismatch = await mismatchStore.startSession({
       ...startInput(input, 'Dimension'),
       bundles: [{ bundleNumber: 1, width: 2, height: 1 }],
@@ -221,7 +284,7 @@ describe('prompt bundle store', () => {
 
   it('returns an idempotent recovery grant if the reserved destination appears', async () => {
     const input = await fixture();
-    const store = new PromptBundleStore({ randomId: () => 'collision-session' });
+    const store = promptStore({ randomId: () => 'collision-session' });
     const session = await store.startSession(startInput(input, 'Collision'));
     await store.commitBundle({
       sessionId: session.sessionId,

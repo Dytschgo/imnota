@@ -11,13 +11,18 @@ import type {
 } from '../src/shared/workflow-bridge.js';
 import { assertNoLinks, isWithin } from './files.js';
 import {
+  MAX_PROMPT_BUNDLE_MARKDOWN_BYTES,
+  MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS,
+  MAX_PROMPT_BUNDLE_PNG_BYTES,
   PromptBundleStore,
   type FinalizedPromptBundleSession,
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 
-const MAX_PNG_DATA_URL_CHARACTERS = 134_000_000;
+const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
+const MAX_PNG_DATA_URL_CHARACTERS =
+  PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_PROMPT_BUNDLE_PNG_BYTES / 3) * 4;
 const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
 
 export interface AuthorizedPromptCollection {
@@ -79,12 +84,43 @@ function decodePngDataUrl(dataUrl: string): Uint8Array {
   return Buffer.from(match[1], 'base64');
 }
 
+async function readBoundedRegularFile(
+  filePath: string,
+  maximumBytes: number,
+  label: string,
+): Promise<Buffer> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new NativeWorkflowError('io-failure', `${label} is no longer a regular file.`);
+    if (stat.size < 0 || stat.size > maximumBytes)
+      throw new NativeWorkflowError(
+        'io-failure',
+        `${label} is larger than the safe ${maximumBytes.toLocaleString('en-US')}-byte read limit.`,
+      );
+    const content = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < content.length) {
+      const { bytesRead } = await handle.read(content, offset, content.length - offset, offset);
+      if (!bytesRead)
+        throw new NativeWorkflowError('io-failure', `${label} changed while it was being read.`);
+      offset += bytesRead;
+    }
+    const trailing = Buffer.alloc(1);
+    if ((await handle.read(trailing, 0, 1, offset)).bytesRead)
+      throw new NativeWorkflowError('io-failure', `${label} changed or exceeded its limit while being read.`);
+    return content;
+  } finally {
+    await handle.close();
+  }
+}
+
 export class PromptBundleWorkflow {
   private readonly grants = new Map<string, SessionGrant>();
 
   constructor(
     private readonly dependencies: PromptBundleWorkflowDependencies,
-    private readonly store = new PromptBundleStore(),
+    private readonly store: PromptBundleStore,
   ) {}
 
   async start(
@@ -139,24 +175,28 @@ export class PromptBundleWorkflow {
   async read(sessionId: string, bundleNumber: number): Promise<PromptExportBundleContent> {
     const bundle = this.bundleGrant(sessionId, bundleNumber);
     const grant = this.finalGrant(sessionId);
-    await this.assertGrantedPath(grant, bundle.pngPath);
-    await this.assertGrantedPath(grant, bundle.markdownPath);
-    const [png, markdown] = await Promise.all([
-      fs.readFile(bundle.pngPath),
-      fs.readFile(bundle.markdownPath, 'utf8'),
-    ]);
+    const markdown = await this.readMarkdown(grant, bundle);
+    const imageDataUrl = await this.readPng(grant, bundle);
     return {
       ...publicBundle(bundle),
       markdown,
-      imageDataUrl: `data:image/png;base64,${png.toString('base64')}`,
+      imageDataUrl,
     };
   }
 
   async copy(sessionId: string, bundleNumber: number, target: PromptExportCopyTarget): Promise<void> {
-    const bundle = await this.read(sessionId, bundleNumber);
-    if (target === 'context') await this.dependencies.copyContext(bundle.markdown, bundle.imageDataUrl);
-    else if (target === 'markdown') await this.dependencies.copyText(bundle.markdown);
-    else await this.dependencies.copyImage(bundle.imageDataUrl);
+    const bundle = this.bundleGrant(sessionId, bundleNumber);
+    const grant = this.finalGrant(sessionId);
+    if (target === 'markdown') {
+      await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
+      return;
+    }
+    const imageDataUrl = await this.readPng(grant, bundle);
+    if (target === 'image') {
+      await this.dependencies.copyImage(imageDataUrl);
+      return;
+    }
+    await this.dependencies.copyContext(await this.readMarkdown(grant, bundle), imageDataUrl);
   }
 
   async open(sessionId: string, bundleNumber: number, target: PromptExportOpenTarget): Promise<void> {
@@ -261,5 +301,41 @@ export class PromptBundleWorkflow {
     ]);
     if (!isWithin(realFolder, realTarget))
       throw new NativeWorkflowError('permission-denied', 'Stored prompt path escaped its granted folder.');
+  }
+
+  private async readMarkdown(grant: FinalGrant, bundle: StoredPromptBundle): Promise<string> {
+    await this.assertGrantedPath(grant, bundle.markdownPath);
+    const bytes = await readBoundedRegularFile(
+      bundle.markdownPath,
+      MAX_PROMPT_BUNDLE_MARKDOWN_BYTES,
+      'Stored prompt Markdown',
+    );
+    let markdown: string;
+    try {
+      markdown = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      throw new NativeWorkflowError('io-failure', 'Stored prompt Markdown is not valid UTF-8.');
+    }
+    if (!markdown.trim() || markdown.length > MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS)
+      throw new NativeWorkflowError('io-failure', 'Stored prompt Markdown is empty or too large.');
+    return markdown;
+  }
+
+  private async readPng(grant: FinalGrant, bundle: StoredPromptBundle): Promise<string> {
+    await this.assertGrantedPath(grant, bundle.pngPath);
+    const png = await readBoundedRegularFile(
+      bundle.pngPath,
+      MAX_PROMPT_BUNDLE_PNG_BYTES,
+      'Stored prompt PNG',
+    );
+    try {
+      await this.store.validatePng(png, bundle);
+    } catch (error) {
+      throw new NativeWorkflowError(
+        'io-failure',
+        `Stored prompt PNG is damaged or no longer matches its grant: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return `${PNG_DATA_URL_PREFIX}${png.toString('base64')}`;
   }
 }

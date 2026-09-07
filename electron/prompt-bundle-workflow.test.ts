@@ -3,7 +3,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PromptBundleStore } from './prompt-bundle-store.js';
+import {
+  MAX_PROMPT_BUNDLE_MARKDOWN_BYTES,
+  MAX_PROMPT_BUNDLE_PNG_BYTES,
+  PromptBundleStore,
+} from './prompt-bundle-store.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 
 const temporary: string[] = [];
@@ -41,9 +45,10 @@ async function fixture() {
     new PromptBundleStore({
       randomId: () => 'server-session',
       now: () => new Date(2026, 8, 7, 12, 0, 0),
+      validateDecodedPng: () => undefined,
     }),
   );
-  return { workflow, projectPath, collectionId, copyContext, openPath };
+  return { workflow, projectPath, collectionId, copyContext, copyText, copyImage, openPath };
 }
 
 describe('main-owned prompt bundle grants', () => {
@@ -81,5 +86,24 @@ describe('main-owned prompt bundle grants', () => {
     expect(cancelled).toMatchObject({ status: 'cancelled', published: true });
     await expect(workflow.read(session.sessionId, 1)).resolves.toMatchObject({ markdown: '# Complete\n' });
     await expect(workflow.write(session.sessionId, 2, pngDataUrl(), '# Late\n')).rejects.toThrow(/closed/);
+  });
+
+  it('bounds changed granted files before allocation and copies Markdown without reading PNG', async () => {
+    const { workflow, projectPath, collectionId, copyText, copyImage } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Safe Markdown\n');
+    const finalized = await workflow.finish(session.sessionId);
+    const folder = path.join(projectPath, 'collections', collectionId, 'exports', session.setName);
+    const pngPath = path.join(folder, finalized.bundles[0].pngFilename);
+    const markdownPath = path.join(folder, finalized.bundles[0].markdownFilename);
+
+    await fs.truncate(pngPath, MAX_PROMPT_BUNDLE_PNG_BYTES + 1);
+    await expect(workflow.copy(session.sessionId, 1, 'markdown')).resolves.toBeUndefined();
+    expect(copyText).toHaveBeenCalledWith('# Safe Markdown\n');
+    expect(copyImage).not.toHaveBeenCalled();
+    await expect(workflow.copy(session.sessionId, 1, 'image')).rejects.toThrow(/safe .*byte read limit/);
+
+    await fs.truncate(markdownPath, MAX_PROMPT_BUNDLE_MARKDOWN_BYTES + 1);
+    await expect(workflow.copy(session.sessionId, 1, 'markdown')).rejects.toThrow(/safe .*byte read limit/);
   });
 });

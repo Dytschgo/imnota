@@ -157,10 +157,9 @@ export function validateLegacyProject(value: unknown): LegacyProjectData {
     parsed.schemaVersion === 2 &&
     parsed.screenshots.some(
       (shot) =>
-        portablePathKey(shot.annotationFile) !==
-          portablePathKey(`rounds/${shot.roundId}/annotations/${shot.storedFilename}.json`) ||
-        portablePathKey(shot.notesFile) !==
-          portablePathKey(`rounds/${shot.roundId}/notes/${shot.storedFilename}.md`),
+        shot.annotationFile.replaceAll('\\', '/') !==
+          `rounds/${shot.roundId}/annotations/${shot.storedFilename}.json` ||
+        shot.notesFile.replaceAll('\\', '/') !== `rounds/${shot.roundId}/notes/${shot.storedFilename}.md`,
     )
   )
     throw new Error('Legacy v2 screenshot content paths do not match their collection and filename.');

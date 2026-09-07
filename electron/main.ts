@@ -56,6 +56,7 @@ import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { prepareTerminalUpdate } from './terminal-update.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
@@ -144,10 +145,19 @@ async function assertProjectPath(projectPath: string): Promise<string> {
   return resolved;
 }
 
-async function readProject(projectPath: string): Promise<ProjectData> {
+async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
   await assertNoLinks(path.join(projectPath, 'project.json'));
   const raw = await fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
   const parsed = await migrateProject(projectPath, parseProjectFile(JSON.parse(raw)));
+  return {
+    ...parsed,
+    schemaVersion: 3,
+    exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
+  };
+}
+
+async function readProject(projectPath: string): Promise<ProjectData> {
+  const parsed = await readProjectMetadata(projectPath);
   const screenshots = await Promise.all(
     parsed.screenshots.map(async (shot) => {
       const descriptionPath = path.join(projectPath, shot.descriptionFile);
@@ -402,6 +412,16 @@ function clipboardImage(imageDataUrl: string) {
   return image;
 }
 
+function validateDecodedPromptPng(
+  png: Uint8Array,
+  expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
+): void {
+  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+  const size = image.getSize();
+  if (image.isEmpty() || size.width !== expected.width || size.height !== expected.height)
+    throw new Error('Prompt PNG could not be fully decoded at its reserved dimensions.');
+}
+
 function copyImageToClipboard(imageDataUrl: string): void {
   clipboard.writeImage(clipboardImage(imageDataUrl));
 }
@@ -550,26 +570,29 @@ function registerIpc(): void {
         mainWindow.webContents.send('workflow:project-watch-event', event);
     },
   });
-  promptBundleWorkflow = new PromptBundleWorkflow({
-    authorize: async (projectPath, collectionId) => {
-      const safePath = await assertProjectPath(projectPath);
-      const project = await readProject(safePath);
-      const collection = project.collections.find((candidate) => candidate.id === collectionId);
-      if (!collection) throw new Error('Collection does not belong to this project.');
-      return {
-        projectPath: safePath,
-        collectionId: collection.id,
-        collectionName: collection.name,
-      };
+  promptBundleWorkflow = new PromptBundleWorkflow(
+    {
+      authorize: async (projectPath, collectionId) => {
+        const safePath = await assertProjectPath(projectPath);
+        const project = await readProjectMetadata(safePath);
+        const collection = project.collections.find((candidate) => candidate.id === collectionId);
+        if (!collection) throw new Error('Collection does not belong to this project.');
+        return {
+          projectPath: safePath,
+          collectionId: collection.id,
+          collectionName: collection.name,
+        };
+      },
+      copyContext: (markdown, imageDataUrl) => copyContextToClipboard(markdown, imageDataUrl),
+      copyText: (markdown) => copyTextToClipboard(markdown),
+      copyImage: (imageDataUrl) => copyImageToClipboard(imageDataUrl),
+      openPath: async (targetPath) => {
+        const error = await shell.openPath(targetPath);
+        if (error) throw new Error(error);
+      },
     },
-    copyContext: (markdown, imageDataUrl) => copyContextToClipboard(markdown, imageDataUrl),
-    copyText: (markdown) => copyTextToClipboard(markdown),
-    copyImage: (imageDataUrl) => copyImageToClipboard(imageDataUrl),
-    openPath: async (targetPath) => {
-      const error = await shell.openPath(targetPath);
-      if (error) throw new Error(error);
-    },
-  });
+    new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
+  );
   handle('settings:get', () => settings);
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
