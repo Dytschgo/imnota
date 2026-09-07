@@ -13,6 +13,7 @@ import {
   commitScreenshotTransaction,
   discardScreenshotTransaction,
   listScreenshotTransactions,
+  screenshotTransactionBaseline,
   stageScreenshotTransaction,
 } from './screenshot-transactions.js';
 
@@ -55,8 +56,16 @@ describe('screenshot transaction baseline adapter', () => {
         {
           kind: 'save',
           writes: [
-            { relativePath: 'sidecar.md', after: Buffer.from('candidate sidecar') },
-            { relativePath: 'project.json', after: Buffer.from('{"revision":"candidate"}') },
+            {
+              relativePath: 'sidecar.md',
+              after: Buffer.from('candidate sidecar'),
+              expectedBefore: screenshotTransactionBaseline(Buffer.from('baseline sidecar')),
+            },
+            {
+              relativePath: 'project.json',
+              after: Buffer.from('{"revision":"candidate"}'),
+              expectedBefore: screenshotTransactionBaseline(Buffer.from(baseline)),
+            },
           ],
           operations,
           assertBaseline: async () => {
@@ -73,7 +82,7 @@ describe('screenshot transaction baseline adapter', () => {
           discard: discardScreenshotTransaction,
         },
       ),
-    ).rejects.toThrow('project changed');
+    ).rejects.toThrow(/caller-observed baseline|project changed/);
 
     expect(await fs.readFile(projectFile, 'utf8')).toBe(external);
     expect(await fs.readFile(sidecarFile, 'utf8')).toBe('baseline sidecar');

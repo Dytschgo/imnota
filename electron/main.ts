@@ -54,6 +54,7 @@ import {
   discardScreenshotTransaction,
   recoverScreenshotTransactions,
   replayScreenshotTransaction,
+  screenshotTransactionBaseline,
   type ScreenshotTransactionKind,
   type ScreenshotTransactionOperations,
   type ScreenshotTransactionWrite,
@@ -218,17 +219,26 @@ async function readProject(projectPath: string): Promise<ProjectData> {
 async function readProjectMutationBaseline(projectPath: string): Promise<{
   project: ProjectData;
   projectRevision: string;
+  projectSource: Buffer;
 }> {
   const projectFile = path.join(projectPath, 'project.json');
   for (let attempt = 0; attempt < 3; attempt++) {
-    const before = await fs.readFile(projectFile, 'utf8');
+    const before = await fs.readFile(projectFile);
     const project = await readProject(projectPath);
-    const after = await fs.readFile(projectFile, 'utf8');
+    const after = await fs.readFile(projectFile);
     const beforeRevision = projectRevisionForSource(before);
     const projectRevision = projectRevisionForSource(after);
-    if (beforeRevision === projectRevision) return { project, projectRevision };
+    if (beforeRevision === projectRevision) return { project, projectRevision, projectSource: after };
   }
   throw new Error('The project kept changing while the save was prepared. Wait for changes to settle.');
+}
+
+async function readOptionalFile(filePath: string): Promise<Buffer | null> {
+  await assertNoLinks(filePath);
+  return fs.readFile(filePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
 }
 
 async function assertProjectRevision(projectPath: string, expectedRevision: string): Promise<void> {
@@ -378,15 +388,15 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
   const snapshot = decorateSnapshot(await makeSnapshot(projectPath));
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
   if (!snapshot.recoveryFound) return snapshot;
-  await assertNoLinks(recoveryPath);
-  const recoverySource = await fs.readFile(recoveryPath, 'utf8');
+  const recoverySource = await readOptionalFile(recoveryPath);
+  if (!recoverySource) throw new Error('Recovery data disappeared while the project was opened.');
   const recovery = z
     .object({
       project: z.unknown(),
       annotations: z.record(z.array(annotationSchema)),
       notes: z.record(notesSchema).optional(),
     })
-    .parse(JSON.parse(recoverySource));
+    .parse(JSON.parse(recoverySource.toString('utf8')));
   const recoveryProject = parseProjectFile(recovery.project);
   if (recoveryProject.id !== snapshot.project.id)
     throw new Error('Recovery belongs to a different project. Your files were not changed.');
@@ -405,7 +415,7 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
         });
   if (choice.response === 2) throw new Error('Opening cancelled. Recovery data is unchanged.');
   const recoveryBackupPath = path.join(projectPath, '.imnota-recovery-backup.json');
-  await assertNoLinks(recoveryBackupPath);
+  const recoveryBackupSource = await readOptionalFile(recoveryBackupPath);
   const warnings: string[] = [];
   if (choice.response === 0) {
     const recoveredProject = validateProject({
@@ -416,12 +426,13 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
     const writes: ScreenshotTransactionWrite[] = [
       {
         relativePath: '.imnota-recovery-backup.json',
-        after: Buffer.from(recoverySource),
+        after: recoverySource,
+        expectedBefore: screenshotTransactionBaseline(recoveryBackupSource),
       },
       {
         relativePath: '.imnota-recovery.json',
         after: null,
-        expectedBefore: 'present',
+        expectedBefore: screenshotTransactionBaseline(recoverySource),
       },
     ];
     // Use trusted current file references, not file references from recovery data.
@@ -430,22 +441,34 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
         writes.push({
           relativePath: shot.annotationFile,
           after: Buffer.from(JSON.stringify(recovery.annotations[shot.id], null, 2)),
+          expectedBefore: screenshotTransactionBaseline(
+            await readOptionalFile(path.join(projectPath, shot.annotationFile)),
+          ),
         });
       if (currentById.get(shot.id)?.description !== shot.description)
-        writes.push({ relativePath: shot.descriptionFile, after: Buffer.from(shot.description) });
+        writes.push({
+          relativePath: shot.descriptionFile,
+          after: Buffer.from(shot.description),
+          expectedBefore: screenshotTransactionBaseline(
+            await readOptionalFile(path.join(projectPath, shot.descriptionFile)),
+          ),
+        });
     }
+    const projectSource = await fs.readFile(path.join(projectPath, 'project.json'));
+    const expectedProjectRevision = snapshot.projectRevision;
+    if (!expectedProjectRevision) throw new Error('Recovery snapshot has no project revision.');
+    if (projectRevisionForSource(projectSource) !== expectedProjectRevision)
+      throw new Error('The project changed while recovery was prepared. Reopen it and try again.');
     writes.push({
       relativePath: 'project.json',
       after: Buffer.from(JSON.stringify(recoveredProject, null, 2)),
-      expectedBefore: 'present',
+      expectedBefore: screenshotTransactionBaseline(projectSource),
     });
-    const expectedProjectRevision = snapshot.projectRevision;
-    if (!expectedProjectRevision) throw new Error('Recovery snapshot has no project revision.');
     const expectedRecoveryRevision = projectRevisionForSource(recoverySource);
     warnings.push(
       ...(await commitFileTransaction(projectPath, 'recovery-restore', writes, async () => {
         await assertProjectRevision(projectPath, expectedProjectRevision);
-        const currentRecovery = await fs.readFile(recoveryPath, 'utf8');
+        const currentRecovery = await fs.readFile(recoveryPath);
         if (projectRevisionForSource(currentRecovery) !== expectedRecoveryRevision)
           throw new Error(
             'Recovery data changed while restore was prepared. Reopen the project and try again.',
@@ -502,19 +525,19 @@ function nextScreenshotPosition(project: ProjectData, collectionId: string): num
 async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRecord) {
   const annotationPath = path.join(projectPath, screenshot.annotationFile);
   const descriptionPath = path.join(projectPath, screenshot.descriptionFile);
-  await assertNoLinks(annotationPath);
-  await assertNoLinks(descriptionPath);
-  const [annotationsJson, description] = await Promise.all([
-    fs.readFile(annotationPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return '[]';
-      throw error;
-    }),
-    fs.readFile(descriptionPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return screenshot.description;
-      throw error;
-    }),
+  const [annotationSource, descriptionSource] = await Promise.all([
+    readOptionalFile(annotationPath),
+    readOptionalFile(descriptionPath),
   ]);
-  return { annotationsJson, description, revision: contentRevision(description, annotationsJson) };
+  const annotationsJson = annotationSource?.toString('utf8') ?? '[]';
+  const description = descriptionSource?.toString('utf8') ?? screenshot.description;
+  return {
+    annotationSource,
+    annotationsJson,
+    description,
+    descriptionSource,
+    revision: contentRevision(description, annotationsJson),
+  };
 }
 
 async function importOne(
@@ -1058,22 +1081,22 @@ function registerIpc(): void {
           {
             relativePath: `collections/${conflict.collectionId}/screenshots/${conflict.storedFilename}`,
             after: conflictImage,
-            expectedBefore: 'absent',
+            expectedBefore: screenshotTransactionBaseline(null),
           },
           {
             relativePath: conflict.annotationFile,
             after: Buffer.from(conflictAnnotations),
-            expectedBefore: 'absent',
+            expectedBefore: screenshotTransactionBaseline(null),
           },
           {
             relativePath: conflict.descriptionFile,
             after: Buffer.from(conflict.description),
-            expectedBefore: 'absent',
+            expectedBefore: screenshotTransactionBaseline(null),
           },
           {
             relativePath: 'project.json',
             after: Buffer.from(projectSource),
-            expectedBefore: 'present',
+            expectedBefore: screenshotTransactionBaseline(baseline.projectSource),
           },
         ],
         () => assertProjectRevision(safePath, baseline.projectRevision),
@@ -1103,17 +1126,30 @@ function registerIpc(): void {
     const annotationsJson = JSON.stringify(input.annotations, null, 2);
     const savedProject = validateProject(project);
     const projectSource = JSON.stringify(savedProject, null, 2);
+    const recoverySource = await readOptionalFile(path.join(safePath, '.imnota-recovery.json'));
     const warnings = await commitFileTransaction(
       safePath,
       'save',
       [
-        { relativePath: screenshot.annotationFile, after: Buffer.from(annotationsJson) },
-        { relativePath: screenshot.descriptionFile, after: Buffer.from(screenshot.description) },
-        { relativePath: '.imnota-recovery.json', after: null },
+        {
+          relativePath: screenshot.annotationFile,
+          after: Buffer.from(annotationsJson),
+          expectedBefore: screenshotTransactionBaseline(currentContent.annotationSource),
+        },
+        {
+          relativePath: screenshot.descriptionFile,
+          after: Buffer.from(screenshot.description),
+          expectedBefore: screenshotTransactionBaseline(currentContent.descriptionSource),
+        },
+        {
+          relativePath: '.imnota-recovery.json',
+          after: null,
+          expectedBefore: screenshotTransactionBaseline(recoverySource),
+        },
         {
           relativePath: 'project.json',
           after: Buffer.from(projectSource),
-          expectedBefore: 'present',
+          expectedBefore: screenshotTransactionBaseline(baseline.projectSource),
         },
       ],
       async () => {
