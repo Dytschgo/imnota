@@ -1462,6 +1462,8 @@ function configureAutoUpdates(): void {
 async function createWindow(): Promise<BrowserWindow> {
   mainWindow = new BrowserWindow({
     show: process.env.IMNOTA_SMOKE !== '1',
+    // macOS CI displays can be smaller than the desktop viewport under test.
+    enableLargerThanScreen: process.env.IMNOTA_SMOKE === '1',
     width: 1440,
     height: 920,
     minWidth: 1080,

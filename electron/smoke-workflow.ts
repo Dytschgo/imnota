@@ -435,8 +435,25 @@ async function selectTool(driver: NativeUiDriver, label: string): Promise<void> 
   ]);
 }
 
+async function waitForStableCanvas(driver: NativeUiDriver): Promise<void> {
+  let previous = '';
+  let unchangedSince = Date.now();
+  const started = Date.now();
+  while (Date.now() - started < 10_000) {
+    const current = JSON.stringify(await canvasGeometry(driver));
+    if (current !== previous) {
+      previous = current;
+      unchangedSince = Date.now();
+    } else if (Date.now() - unchangedSince >= 400) return;
+    await delay(50);
+  }
+  throw new Error('Canvas layout did not settle before native interaction.');
+}
+
 async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   await driver.waitFor({ selector: '.konvajs-content' });
+  // Hosted runners can finish their first ResizeObserver/layout pass after the stage mounts.
+  await waitForStableCanvas(driver);
   let geometry = await canvasGeometry(driver);
   const panStart = {
     x: Math.round(geometry.stage.x + 20),
@@ -485,7 +502,23 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
     throw new Error('Native text input did not receive the expected value.');
   await driver.press('ENTER');
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' }, { absent: true });
-  const reopenPoint = sourceBoxInteriorPoint(textPoint, { width: 260, height: 42 }, geometry.image.scale);
+  const sourceOrigin = {
+    x: (textPoint.x - geometry.image.x) / geometry.image.scale,
+    y: (textPoint.y - geometry.image.y) / geometry.image.scale,
+  };
+  const currentReopenPoint = async () => {
+    await waitForStableCanvas(driver);
+    const current = await canvasGeometry(driver);
+    return sourceBoxInteriorPoint(
+      {
+        x: current.image.x + sourceOrigin.x * current.image.scale,
+        y: current.image.y + sourceOrigin.y * current.image.scale,
+      },
+      { width: 260, height: 42 },
+      current.image.scale,
+    );
+  };
+  let reopenPoint = await currentReopenPoint();
   await driver.evaluate(`window.__imnotaPointerGeometry.reopenPoint = ${JSON.stringify(reopenPoint)}`);
   await delay(600);
   await driver.clickPoint(reopenPoint);
@@ -500,6 +533,7 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
       `Committed annotation text did not reach the inspector: ${JSON.stringify(inspectorText)}.`,
     );
   await delay(600);
+  reopenPoint = await currentReopenPoint();
   await driver.doubleClick(reopenPoint);
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
   const reopened = await driver.evaluate<string>(
@@ -523,6 +557,7 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
   })()`);
   if (afterEscape !== 'Trusted pointer note')
     throw new Error(`Escape changed the committed inspector text: ${JSON.stringify(afterEscape)}.`);
+  reopenPoint = await currentReopenPoint();
   await driver.doubleClick(reopenPoint);
   await driver.waitFor({ selector: '[aria-label="Edit annotation text"]' });
   const cancelled = await driver.evaluate<string>(

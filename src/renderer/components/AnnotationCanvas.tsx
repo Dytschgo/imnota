@@ -328,8 +328,12 @@ export function AnnotationCanvas({
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
-      if (wrapRef.current)
-        setSize({ width: wrapRef.current.clientWidth, height: wrapRef.current.clientHeight });
+      if (wrapRef.current) {
+        const next = { width: wrapRef.current.clientWidth, height: wrapRef.current.clientHeight };
+        setSize((current) =>
+          current.width === next.width && current.height === next.height ? current : next,
+        );
+      }
     });
     if (wrapRef.current) resizeObserver.observe(wrapRef.current);
     return () => resizeObserver.disconnect();
