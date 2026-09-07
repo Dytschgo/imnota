@@ -1,5 +1,17 @@
-import { Clipboard, Eye, EyeOff, FileImage, PanelLeft, Upload } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  Clipboard,
+  Eye,
+  EyeOff,
+  FileImage,
+  PanelLeft,
+  Pencil,
+  Plus,
+  Upload,
+} from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
@@ -37,9 +49,61 @@ export function CollectionControls({
   const [name, setName] = useState(current?.name ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const pickerMenuRef = useRef<HTMLDivElement>(null);
+  const pickerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pickerId = useId().replace(/:/g, '');
+  const collections = project?.collections ?? [];
+  const selectedIndex = Math.max(
+    0,
+    collections.findIndex((collection) => collection.id === current?.id),
+  );
 
   useEffect(() => setName(current?.name ?? ''), [current?.id, current?.name]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setPickerOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutside);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside);
+    };
+  }, [pickerOpen]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const option = pickerOptionRefs.current[focusedIndex];
+      const menu = pickerMenuRef.current;
+      if (!option || !menu) return;
+      const top = option.offsetTop;
+      const bottom = top + option.offsetHeight;
+      if (top < menu.scrollTop) menu.scrollTop = top;
+      else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
+      option.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedIndex, pickerOpen]);
   if (!project || !current || !store.snapshot) return null;
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
+  };
+  const openPicker = (index = selectedIndex) => {
+    setFocusedIndex(Math.min(Math.max(index, 0), collections.length - 1));
+    setPickerOpen(true);
+  };
+  const chooseCollection = (collectionId: string) => {
+    closePicker(true);
+    void (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(collectionId);
+  };
+  const moveFocus = (nextIndex: number) => {
+    setFocusedIndex(Math.min(Math.max(nextIndex, 0), collections.length - 1));
+  };
 
   async function apply(action: 'create' | 'rename' | 'archive' | 'restore') {
     if (busy || (action === 'rename' && !name.trim()) || (await onFlush()) === false) return;
@@ -81,38 +145,115 @@ export function CollectionControls({
 
   return (
     <div className="round-controls">
-      <label className="field">
+      <div className="collection-control-heading">
         <span className="field-label">Collection</span>
-        <select
+        <IconButton
+          data-testid="new-collection"
+          className="new-collection-button"
+          label="New collection"
+          disabled={busy}
+          onClick={() => void apply('create')}
+        >
+          <Plus size={14} aria-hidden="true" />
+        </IconButton>
+      </div>
+      <div className="collection-picker" ref={pickerRef}>
+        <button
+          ref={pickerTriggerRef}
+          type="button"
+          className="collection-picker-trigger"
           aria-label="Collection"
+          aria-haspopup="listbox"
+          aria-expanded={pickerOpen}
+          aria-controls={pickerId}
           data-testid="collection-picker"
-          value={store.activeCollectionId}
-          onChange={(event) =>
-            void (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(event.target.value)
-          }
+          onClick={() => (pickerOpen ? closePicker() : openPicker())}
+          onKeyDown={(event) => {
+            if (
+              event.key === 'ArrowDown' ||
+              event.key === 'ArrowUp' ||
+              event.key === 'Home' ||
+              event.key === 'End'
+            ) {
+              event.preventDefault();
+              openPicker(selectedIndex);
+            } else if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              if (pickerOpen) closePicker();
+              else openPicker();
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              closePicker(true);
+            }
+          }}
         >
-          {project.collections.map((collection) => (
-            <option key={collection.id} value={collection.id}>
-              {collection.name}
-              {collection.archived ? ' (Archived)' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="round-actions">
-        <Button data-testid="new-collection" variant="ghost" busy={busy} onClick={() => void apply('create')}>
-          New collection
-        </Button>
-        <Button variant="ghost" disabled={busy} onClick={() => setRenaming(true)}>
-          Rename
-        </Button>
-        <Button
-          variant="ghost"
-          busy={busy}
-          onClick={() => void apply(current.archived ? 'restore' : 'archive')}
-        >
-          {current.archived ? 'Restore' : 'Archive'}
-        </Button>
+          <span>{current.name}</span>
+          {current.archived && <small>Archived</small>}
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+        <div className="collection-picker-actions">
+          <IconButton label="Rename" disabled={busy} onClick={() => setRenaming(true)}>
+            <Pencil size={14} aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            label={current.archived ? 'Restore' : 'Archive'}
+            disabled={busy}
+            onClick={() => void apply(current.archived ? 'restore' : 'archive')}
+          >
+            <Archive size={14} aria-hidden="true" />
+          </IconButton>
+        </div>
+        {pickerOpen && (
+          <div
+            ref={pickerMenuRef}
+            id={pickerId}
+            className="collection-picker-menu"
+            role="listbox"
+            aria-label="Collections"
+          >
+            {collections.map((collection, index) => (
+              <button
+                ref={(element) => {
+                  pickerOptionRefs.current[index] = element;
+                }}
+                type="button"
+                role="option"
+                aria-selected={collection.id === current.id}
+                tabIndex={index === focusedIndex ? 0 : -1}
+                className="collection-picker-option"
+                key={collection.id}
+                onClick={() => chooseCollection(collection.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    moveFocus(index + 1);
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    moveFocus(index - 1);
+                  } else if (event.key === 'Home') {
+                    event.preventDefault();
+                    moveFocus(0);
+                  } else if (event.key === 'End') {
+                    event.preventDefault();
+                    moveFocus(collections.length - 1);
+                  } else if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    chooseCollection(collection.id);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closePicker(true);
+                  }
+                }}
+              >
+                <span>{collection.name}</span>
+                {collection.archived && <small>Archived</small>}
+                {collection.id === current.id && (
+                  <Check className="collection-picker-check" size={13} aria-hidden="true" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <details className="collection-context">
         <summary>Overall context{current.overallContext.trim() ? ' · Added' : ''}</summary>

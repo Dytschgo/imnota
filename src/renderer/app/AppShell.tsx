@@ -1,9 +1,9 @@
 import {
   BookOpen,
+  ChevronDown,
   FolderOpen,
   Heart,
   Info,
-  Keyboard,
   Layers3,
   PanelLeft,
   Plus,
@@ -11,7 +11,7 @@ import {
   Settings2,
   Sparkles,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button, IconButton } from '../components/ui';
 import { Logo } from '../components/Logo';
 import { useAppStore, type AppView } from '../store';
@@ -22,13 +22,15 @@ export interface AppShellProps {
   onNavigate(view: AppView): void | Promise<void>;
   onNewProject(): void;
   onOpenProject(): void | Promise<void>;
+  onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onSearch(): void | Promise<void>;
   onOpenPromptBundles(): void | Promise<void>;
   onToggleFavourite(): void | Promise<void>;
   onAbout(): void;
-  onShortcuts(): void;
   onDropFiles?(files: FileList): void | Promise<void>;
 }
+
+type LibraryView = 'projects' | 'recent' | 'favourites';
 
 export function AppShell({
   children,
@@ -36,19 +38,37 @@ export function AppShell({
   onNavigate,
   onNewProject,
   onOpenProject,
+  onOpenCollection,
   onSearch,
   onOpenPromptBundles,
   onToggleFavourite,
   onAbout,
-  onShortcuts,
   onDropFiles,
 }: AppShellProps) {
   const store = useAppStore();
-  const nav: Array<{ id: AppView; label: string; icon: typeof Layers3 }> = [
+  const [expandedGroups, setExpandedGroups] = useState({ recent: true, favourites: true });
+  const nav: Array<{ id: LibraryView; label: string; icon: typeof Layers3 }> = [
     { id: 'projects', label: 'Projects', icon: Layers3 },
     { id: 'recent', label: 'Recent', icon: BookOpen },
     { id: 'favourites', label: 'Favourites', icon: Heart },
   ];
+  const collectionEntries = store.projects.flatMap((project) =>
+    project.collections
+      .filter((collection) => !collection.archived)
+      .map((collection) => ({
+        ...collection,
+        projectName: project.name,
+        projectFavourite: project.favourite,
+        projectPath: project.projectPath,
+      })),
+  );
+  const recentCollections = [...collectionEntries]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, 4);
+  const favouriteCollections = collectionEntries
+    .filter((collection) => collection.projectFavourite)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, 4);
   return (
     <div
       className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
@@ -78,24 +98,80 @@ export function AppShell({
         </div>
         <div className="sidebar-links" hidden={!store.navigationOpen}>
           <nav aria-label="Primary">
-            <span className="nav-label">Library</span>
-            {nav.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                className={`nav-item ${store.view === id ? 'active' : ''}`}
-                onClick={() => void onNavigate(id)}
-              >
-                <Icon size={16} aria-hidden="true" />
-                {label}
-                {id === 'favourites' && store.projects.some((item) => item.favourite) && (
-                  <span className="nav-count">{store.projects.filter((item) => item.favourite).length}</span>
-                )}
-              </button>
-            ))}
+            <h2 className="nav-label" id="library-navigation-heading">
+              Library
+            </h2>
+            {nav.map(({ id, label, icon: Icon }) => {
+              const entries =
+                id === 'recent' ? recentCollections : id === 'favourites' ? favouriteCollections : [];
+              const collectionHeading =
+                id === 'recent' ? 'Recently updated collections' : `${label} collections`;
+              return (
+                <div className={`nav-group ${entries.length ? 'has-submenu' : ''}`} key={id}>
+                  <div className="nav-group-row">
+                    <button
+                      className={`nav-item ${store.view === id ? 'active' : ''}`}
+                      onClick={() => void onNavigate(id)}
+                    >
+                      <Icon size={16} aria-hidden="true" />
+                      <span>{label}</span>
+                      {id === 'favourites' && store.projects.some((item) => item.favourite) && (
+                        <span className="nav-count">
+                          {store.projects.filter((item) => item.favourite).length}
+                        </span>
+                      )}
+                    </button>
+                    {entries.length > 0 && id !== 'projects' && (
+                      <button
+                        type="button"
+                        className="nav-disclosure"
+                        aria-label={`${expandedGroups[id] ? 'Collapse' : 'Expand'} ${collectionHeading.toLowerCase()}`}
+                        aria-controls={`${id}-collections`}
+                        aria-expanded={expandedGroups[id]}
+                        onClick={() => setExpandedGroups((groups) => ({ ...groups, [id]: !groups[id] }))}
+                      >
+                        <ChevronDown size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                  {entries.length > 0 && id !== 'projects' && (
+                    <section
+                      id={`${id}-collections`}
+                      className="nav-submenu"
+                      aria-labelledby={`${id}-collections-heading`}
+                      hidden={!expandedGroups[id]}
+                    >
+                      <h3 className="sr-only" id={`${id}-collections-heading`}>
+                        {collectionHeading}
+                      </h3>
+                      {entries.map((entry) => (
+                        <button
+                          type="button"
+                          className={`nav-submenu-item ${
+                            store.snapshot?.projectPath === entry.projectPath &&
+                            store.activeCollectionId === entry.id
+                              ? 'active'
+                              : ''
+                          }`}
+                          key={`${entry.projectPath}:${entry.id}`}
+                          title={`${entry.projectName} / ${entry.name}`}
+                          onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
+                        >
+                          <span>{entry.name}</span>
+                          <small>{entry.projectName}</small>
+                        </button>
+                      ))}
+                    </section>
+                  )}
+                </div>
+              );
+            })}
           </nav>
           <div className="sidebar-spacer" />
-          <nav aria-label="Application">
-            <span className="nav-label">Workspace</span>
+          <nav aria-labelledby="workspace-navigation-heading">
+            <h2 className="nav-label" id="workspace-navigation-heading">
+              Workspace
+            </h2>
             <button
               data-testid="settings-button"
               className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
@@ -103,10 +179,6 @@ export function AppShell({
             >
               <Settings2 size={16} aria-hidden="true" />
               Settings
-            </button>
-            <button className="nav-item" onClick={onShortcuts}>
-              <Keyboard size={16} aria-hidden="true" />
-              Shortcuts
             </button>
           </nav>
         </div>

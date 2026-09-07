@@ -52,3 +52,17 @@ it('remembers the last opened collection locally and selects its first sorted sc
   expect(useAppStore.getState().activeCollectionId).toBe('002-collection');
   expect(useAppStore.getState().activeScreenshotId).toBe('first');
 });
+
+it('keeps the selected screenshot when the current project snapshot is refreshed', () => {
+  const value = snapshot();
+  useAppStore.getState().setProject(value);
+  useAppStore.getState().setActiveCollection('002-collection');
+  useAppStore.getState().set({ activeScreenshotId: 'later' });
+
+  useAppStore.getState().setProject({
+    ...value,
+    project: { ...value.project, favourite: true, updatedAt: '2026-02-02' },
+  });
+
+  expect(useAppStore.getState().activeScreenshotId).toBe('later');
+});

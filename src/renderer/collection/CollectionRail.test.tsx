@@ -178,6 +178,44 @@ describe('CollectionRail', () => {
     expect(restored.screenshots.map((item) => item.id)).toEqual(['alpha', 'beta', 'gamma', 'outside']);
   });
 
+  it('keeps the selected collection focused through complete picker keyboard navigation', async () => {
+    const snapshot = projectSnapshot();
+    snapshot.project.collections = Array.from({ length: 14 }, (_, index) => ({
+      id: `collection-${index}`,
+      name: `Collection ${index + 1}`,
+      archived: index > 8,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      overallContext: '',
+    }));
+    useAppStore.setState({ snapshot, activeCollectionId: 'collection-0' });
+    const onSelectCollection = vi.fn();
+    render(<CollectionRail {...props({ onSelectCollection })} />);
+
+    const trigger = screen.getByTestId('collection-picker');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const options = await screen.findAllByRole('option');
+    await waitFor(() => expect(options[0]).toHaveFocus());
+
+    fireEvent.keyDown(options[0], { key: 'ArrowDown' });
+    await waitFor(() => expect(options[1]).toHaveFocus());
+    fireEvent.keyDown(options[1], { key: 'Home' });
+    await waitFor(() => expect(options[0]).toHaveFocus());
+    fireEvent.keyDown(options[0], { key: 'End' });
+    await waitFor(() => expect(options.at(-1)).toHaveFocus());
+    fireEvent.keyDown(options.at(-1)!, { key: ' ' });
+
+    expect(onSelectCollection).toHaveBeenCalledWith('collection-13');
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    await screen.findAllByRole('option');
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it('reorders screenshots through drag and drop while preserving IDs and normalized positions', async () => {
     const onSaveProject = vi.fn<CollectionRailProps['onSaveProject']>(async () => true);
     render(<CollectionRail {...props({ onSaveProject })} />);

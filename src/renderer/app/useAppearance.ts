@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AccentPreset, AppearancePreferences, GlassLevel } from '../../shared/preferences';
+import {
+  isAllowedBackgroundImage,
+  isBackdropPreset,
+  type AccentPreset,
+  type AppearancePreferences,
+  type BackdropPreset,
+  type GlassLevel,
+} from '../../shared/preferences';
 
 export type ResolvedTheme = 'light' | 'dark';
 export type GlassFallbackReason = 'none' | 'user-disabled' | 'reduced-transparency' | 'performance';
@@ -71,6 +78,24 @@ function mediaMatches(query: string): boolean {
     typeof window.matchMedia === 'function' &&
     window.matchMedia(query).matches
   );
+}
+
+export function backdropPresetUrl(preset: BackdropPreset): string {
+  const base = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL || './';
+  const path = `${base.endsWith('/') ? base : `${base}/`}backdrops/${preset}.png`;
+  return typeof document === 'undefined' ? path : new URL(path, document.baseURI).href;
+}
+
+export function cssBackgroundImage(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || !isAllowedBackgroundImage(trimmed)) return 'none';
+  if (isBackdropPreset(trimmed))
+    return `url("${backdropPresetUrl(trimmed.slice('preset:'.length) as BackdropPreset)}")`;
+  const escaped = trimmed
+    .replaceAll('\\', '\\\\')
+    .replaceAll('"', '\\"')
+    .replace(/[\r\n]/g, '');
+  return `url("${escaped}")`;
 }
 
 export function resolveAppearance(
@@ -185,10 +210,20 @@ export function useAppearance(
     root.style.setProperty('--imnota-glass-opacity', `${Number(glass.alpha) * 100}%`);
     root.style.setProperty('--imnota-glass-blur', glass.blur);
     root.style.setProperty('--imnota-glass-saturation', glass.saturation);
+    const backdropActive = effective.glassLevel !== 'off' && Boolean(preferences.backgroundImage);
+    root.dataset.background = backdropActive ? 'active' : 'none';
+    root.style.setProperty(
+      '--imnota-background-image',
+      backdropActive ? cssBackgroundImage(preferences.backgroundImage) : 'none',
+    );
+    root.style.setProperty(
+      '--imnota-background-opacity',
+      backdropActive ? String(preferences.backgroundOpacity) : '0',
+    );
     // Compatibility aliases let the current indigo-named shell adopt presets before its global tokens are renamed.
     root.style.setProperty('--indigo', accent.base);
     root.style.setProperty('--indigo-light', accent.hover);
-  }, [effective, options.root]);
+  }, [effective, options.root, preferences.backgroundImage, preferences.backgroundOpacity]);
 
   return effective;
 }

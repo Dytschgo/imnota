@@ -295,23 +295,29 @@ export default function App() {
       const identity = ++navigationIdentity.current;
       if (!(await flushAll())) {
         setError(`${failure} was cancelled so your unsaved work stays open.`);
-        return;
+        return false;
       }
       const nativeMutationToken = persistence.beginNativeMutation();
       try {
         const next = await action();
         if (identity !== navigationIdentity.current) {
           await persistence.cancelNativeMutation(nativeMutationToken);
-          return;
+          return false;
         }
         if (next) {
-          if (!(await persistence.adoptAuthoritativeSnapshot(next, nativeMutationToken)))
+          if (!(await persistence.adoptAuthoritativeSnapshot(next, nativeMutationToken))) {
             setError(`${failure} could not safely adopt the latest project state.`);
-        } else await persistence.cancelNativeMutation(nativeMutationToken);
+            return false;
+          }
+          return true;
+        }
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        return false;
       } catch (reason) {
         await persistence.cancelNativeMutation(nativeMutationToken);
         if (identity === navigationIdentity.current)
           setError(reason instanceof Error ? reason.message : failure);
+        return false;
       }
     },
     [flushAll, persistence],
@@ -442,8 +448,21 @@ export default function App() {
     if (id !== store.activeScreenshotId && (await flushAll()))
       useAppStore.getState().set({ activeScreenshotId: id });
   }
-  async function selectCollection(id: string) {
-    if (id !== store.activeCollectionId && (await flushAll())) useAppStore.getState().setActiveCollection(id);
+  async function selectCollection(id: string, navigationIdentityAtStart?: number) {
+    if (navigationIdentityAtStart !== undefined && navigationIdentityAtStart !== navigationIdentity.current)
+      return;
+    if (id !== store.activeCollectionId && (await flushAll())) {
+      if (navigationIdentityAtStart !== undefined && navigationIdentityAtStart !== navigationIdentity.current)
+        return;
+      useAppStore.getState().setActiveCollection(id);
+    }
+  }
+  async function openCollection(projectPath: string, collectionId: string) {
+    if (!(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the collection')))
+      return;
+    const requestIdentity = navigationIdentity.current;
+    const current = useAppStore.getState();
+    if (current.snapshot?.projectPath === projectPath) await selectCollection(collectionId, requestIdentity);
   }
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
@@ -669,12 +688,14 @@ export default function App() {
         searchShortcut={shortcutLabel('project.search')}
         onNavigate={navigate}
         onNewProject={() => setDialog('new-project')}
-        onOpenProject={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
+        onOpenProject={() =>
+          void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')
+        }
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
-        onShortcuts={() => setDialog('shortcuts')}
+        onOpenCollection={openCollection}
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
