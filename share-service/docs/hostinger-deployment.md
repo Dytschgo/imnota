@@ -9,6 +9,7 @@ This is a deployment plan, not evidence of a live deployment. No Hostinger setti
 - Keep the deployed package at `/home/u644068606/domains/imnota.xyz/public_html/app`, but set `IMNOTA_SHARE_DATA_DIR=/home/u644068606/.imnota-shares`. The SQLite database and uploads must remain outside `public_html`, the repository, and all static document roots.
 - Set the application origin to `https://app.imnota.xyz`, route the Hostinger-assigned application port through its HTTPS proxy, preserve `Host` and `X-Forwarded-Proto`, and set `IMNOTA_SHARE_TRUST_PROXY=loopback` unless Hostinger documents a different trusted proxy range.
 - Generate `IMNOTA_SHARE_RECEIPT_SECRET` once with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`. Store it only in Hostinger's secret environment settings and the encrypted operational backup. Losing or rotating it prevents receipt recovery and changes derived capabilities for retried uploads; do not rotate it as an ordinary deployment step.
+- The database stores a SHA-256 fingerprint of that secret and refuses to start with a different key. Restore the original secret with its matching metadata backup; do not remove the fingerprint to bypass a failed restore.
 - Confirm that the hosting plan provides a persistent Node process, persistent home-directory storage, scheduled jobs, enough disk for the configured quota plus backups, and TLS renewal. If application storage is ephemeral, stop and move artifacts to durable S3-compatible storage before release.
 
 Required environment:
@@ -39,6 +40,12 @@ Create the data directory as the application user with mode `0700`. The service 
 The health response exposes only service state plus actual, recorded, and reserved aggregate storage bytes. Monitor non-2xx rates, process restarts, disk free space, SQLite write and backup errors, cleanup failures, upload rate-limit volume, certificate expiry, and health latency. Alert before disk usage reaches the configured 2 GiB quota or the hosting account's own limit. Monitor the private backup directory separately because backups do not count toward the upload quota.
 
 ## Cleanup and retention
+
+### Provider access logs
+
+The application does not log request URLs, authorization headers or artifact content. [Hostinger documents automatic server access logs](https://www.hostinger.com/support/5650167-how-to-use-the-analytics-section-on-hpanel-at-hostinger/), including requested resources and visitor IP addresses. These logs can therefore contain public share capabilities in `/s/<token>` paths. The desktop confirmation discloses provider logging; do not promise that links are absent from hosting logs.
+
+Keep hPanel log access limited to the account owner and necessary service operators. Do not enable analytics integrations or forward access logs to third parties. Redact `/s/<token>` to `/s/[redacted]` before copying logs into support tickets, issues or diagnostics; never copy authorization headers. Avoid downloading raw access logs. Delete any temporary diagnostic copies within 24 hours and retain only aggregate counters for monitoring. The connector does not expose a provider retention or URL-redaction setting, so provider-side retention is not verified or represented as an application guarantee. Review the hosting provider's log policy when changing the service's privacy commitments.
 
 The running process checks hourly. A share becomes inaccessible exactly at expiry or revocation, then its directory and metadata are deleted after the 24-hour recovery grace period. Active shares are excluded. Expired pairing records are deleted after the same grace period. Uploads reserve quota in SQLite before private staging files are written. Startup reconciliation aggressively removes incomplete staging reservations and unreferenced directories left by a prior process; hourly reconciliation removes only entries older than the grace period so it cannot delete a live upload.
 
