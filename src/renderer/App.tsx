@@ -206,8 +206,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (persistence.hasUnsavedChanges || contentPersistence.hasUnsavedChanges)
-      allowClose.current = false;
+    if (persistence.hasUnsavedChanges || contentPersistence.hasUnsavedChanges) allowClose.current = false;
   }, [persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
 
   useEffect(() => {

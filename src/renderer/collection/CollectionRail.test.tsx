@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import { useAppStore } from '../store';
@@ -124,6 +124,45 @@ afterEach(() => {
 });
 
 describe('CollectionRail', () => {
+  it('admits one collection operation while its preflight save is pending', async () => {
+    let finishFlush!: (saved: boolean) => void;
+    const onFlush = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishFlush = resolve;
+        }),
+    );
+    const editCollection = vi.fn(async () => projectSnapshot());
+    window.imnota = { editCollection } as unknown as ImnotaBridge;
+    render(<CollectionRail {...props({ onFlush })} />);
+    const create = screen.getByRole('button', { name: 'New collection' });
+    fireEvent.click(create);
+    fireEvent.click(create);
+    expect(onFlush).toHaveBeenCalledOnce();
+    expect(editCollection).not.toHaveBeenCalled();
+    expect(create).toBeDisabled();
+    await act(async () => finishFlush(true));
+    await waitFor(() => expect(editCollection).toHaveBeenCalledOnce());
+    expect(create).toBeEnabled();
+  });
+
+  it.each(['blocked', 'rejected'])('allows retry after a %s preflight save', async (failure) => {
+    const onFlush = vi.fn(async () => true);
+    if (failure === 'blocked') onFlush.mockResolvedValueOnce(false);
+    else onFlush.mockRejectedValueOnce(new Error('Save unavailable'));
+    const editCollection = vi.fn(async () => projectSnapshot());
+    window.imnota = { editCollection } as unknown as ImnotaBridge;
+    render(<CollectionRail {...props({ onFlush })} />);
+    const create = screen.getByRole('button', { name: 'New collection' });
+    fireEvent.click(create);
+    await waitFor(() => expect(create).toBeEnabled());
+    expect(editCollection).not.toHaveBeenCalled();
+    if (failure === 'rejected') expect(screen.getByRole('alert')).toHaveTextContent('Save unavailable');
+    fireEvent.click(create);
+    await waitFor(() => expect(editCollection).toHaveBeenCalledOnce());
+    expect(onFlush).toHaveBeenCalledTimes(2);
+  });
+
   it('applies visibility to the selected conflict copy after flushing', async () => {
     const current = projectSnapshot();
     const text = {

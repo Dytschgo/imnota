@@ -51,6 +51,7 @@ export function CollectionControls({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(current?.name ?? '');
   const [busy, setBusy] = useState(false);
+  const operationPending = useRef(false);
   const [error, setError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -109,10 +110,12 @@ export function CollectionControls({
   };
 
   async function apply(action: 'create' | 'rename' | 'archive' | 'restore') {
-    if (busy || (action === 'rename' && !name.trim()) || (await onFlush()) === false) return;
+    if (operationPending.current || (action === 'rename' && !name.trim())) return;
+    operationPending.current = true;
     setBusy(true);
     setError('');
     try {
+      if ((await onFlush()) === false) return;
       const snapshot = await window.imnota.editCollection({
         projectPath: store.snapshot!.projectPath,
         collectionId: current!.id,
@@ -129,6 +132,7 @@ export function CollectionControls({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The collection could not be saved.');
     } finally {
+      operationPending.current = false;
       setBusy(false);
     }
   }
