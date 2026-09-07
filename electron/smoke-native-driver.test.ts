@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import {
   NativeUiDriver,
+  mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
   validateCreatedSmokeDirectory,
@@ -17,6 +18,13 @@ afterEach(async () => {
 });
 
 describe('native smoke driver', () => {
+  it('maps native source pixels through expanded bounds and prompt offsets', () => {
+    expect(mapSourcePointToPromptPixel({ x: 1200, y: 400 }, { x: 160, y: 76 }, { x: 32, y: 80 })).toEqual({
+      x: 1072,
+      y: 404,
+    });
+  });
+
   it('accepts only dedicated real fixture/artifact directories and contained PNG names', async () => {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
     temporary.push(parent);

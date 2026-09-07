@@ -5,6 +5,7 @@ import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/t
 import {
   NativeUiDriver,
   SMOKE_VIEWPORTS,
+  mapSourcePointToPromptPixel,
   pathIsWithin,
   validateCreatedSmokeDirectory,
   type SmokeCapture,
@@ -507,11 +508,29 @@ async function verifyOneImagePromptBundle(
     );
   const imageX = 32;
   const imageY = 32 + 36 + 12;
-  const maskX = imageX + Math.round(320 - expandedScreenshot.x + 48);
-  const maskY = imageY + Math.round(220 - expandedScreenshot.y + 40);
-  const pixel = pixelAt(exported, maskX, maskY);
+  const promptImageOrigin = { x: imageX, y: imageY };
+  const expandedSourceOrigin = { x: expandedScreenshot.x, y: expandedScreenshot.y };
+  const maskPixel = mapSourcePointToPromptPixel(
+    { x: 320 + 48, y: 220 + 40 },
+    expandedSourceOrigin,
+    promptImageOrigin,
+  );
+  const pixel = pixelAt(exported, maskPixel.x, maskPixel.y);
   if (!pixel.equals(Buffer.from([18, 13, 11, 255])))
     throw new Error(`Redaction pixel was not opaque: ${pixel.toString('hex')}.`);
+
+  // This point is inside the original source and the annotation-expanded output,
+  // but beyond the crop's right edge. It must be neutral canvas, never source data.
+  const privacyPoint = mapSourcePointToPromptPixel(
+    { x: 1200, y: 400 },
+    expandedSourceOrigin,
+    promptImageOrigin,
+  );
+  const privacyPixel = pixelAt(exported, privacyPoint.x, privacyPoint.y);
+  if (!privacyPixel.equals(Buffer.from([255, 255, 255, 255])))
+    throw new Error(
+      `Cropped source pixels leaked into the expanded prompt area: ${privacyPixel.toString('hex')}.`,
+    );
 }
 
 async function excludeScreenshotThroughUi(
@@ -1022,7 +1041,7 @@ export async function runSmokeWorkflow(
     deterministic.annotations,
   );
   assertions.push(
-    'one-image prompt header/margins, expanded crop/outside bounds, opaque redaction pixels, and one PNG/Markdown pair',
+    'one-image prompt header/margins, expanded crop/outside bounds, cropped-source privacy, opaque redaction pixels, and one PNG/Markdown pair',
   );
   await closePromptDialog(driver);
 

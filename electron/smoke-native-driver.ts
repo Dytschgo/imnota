@@ -25,6 +25,17 @@ export interface SmokeCapture {
   devicePixelRatio: number;
 }
 
+export function mapSourcePointToPromptPixel(
+  sourcePoint: SmokePoint,
+  expandedSourceOrigin: SmokePoint,
+  promptImageOrigin: SmokePoint,
+): SmokePoint {
+  return {
+    x: promptImageOrigin.x + sourcePoint.x - expandedSourceOrigin.x,
+    y: promptImageOrigin.y + sourcePoint.y - expandedSourceOrigin.y,
+  };
+}
+
 export const SMOKE_VIEWPORTS: readonly SmokeViewport[] = [
   { width: 1280, height: 800 },
   { width: 1440, height: 900 },
