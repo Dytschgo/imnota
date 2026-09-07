@@ -19,6 +19,30 @@ const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 );
+const metaCspDirectives = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-src 'none'",
+  "form-action 'self'",
+];
+
+function assertMetaCsp(html) {
+  const charsetAt = html.indexOf('charset="utf-8"');
+  const policyAt = html.indexOf('http-equiv="Content-Security-Policy"');
+  const firstResourceAt = Math.min(
+    ...['<script', '<link'].map((tag) => {
+      const index = html.indexOf(tag);
+      return index < 0 ? Number.POSITIVE_INFINITY : index;
+    }),
+  );
+  assert.ok(charsetAt >= 0 && policyAt > charsetAt && policyAt < firstResourceAt);
+  for (const directive of metaCspDirectives) assert.ok(html.includes(directive), directive);
+}
 
 const testCrcTable = new Uint32Array(256).map((_, index) => {
   let value = index;
@@ -108,10 +132,13 @@ test('health and pairing pages use restrictive security headers', async (t) => {
   assert.deepEqual(health.body, { status: 'ok', storageBytes: 0, recordedBytes: 0, reservedBytes: 0 });
   assert.equal(health.headers['x-powered-by'], undefined);
   assert.match(health.headers['content-security-policy'], /frame-ancestors 'none'/);
-  assert.equal(health.headers['x-frame-options'], 'SAMEORIGIN');
+  assert.match(health.headers['content-security-policy'], /connect-src 'self'/);
+  assert.match(health.headers['content-security-policy'], /frame-src 'none'/);
+  assert.equal(health.headers['x-frame-options'], 'DENY');
   assert.equal(health.headers['x-content-type-options'], 'nosniff');
   const page = await instance.api.get('/new').expect(200);
   assert.equal(page.headers['x-robots-tag'], 'noindex, nofollow');
+  assertMetaCsp(page.text);
 });
 
 test('pairing requires the configured browser origin and issues high-entropy hashed tokens', async (t) => {
@@ -162,6 +189,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.doesNotMatch(page.text, /<img src=x/);
   assert.doesNotMatch(page.text, /href="javascript:/);
   assert.match(page.text, /Available until/);
+  assertMetaCsp(page.text);
 
   const markdown = await instance.api.get(`/s/${publicToken}/markdown`).expect(200);
   assert.match(markdown.headers['content-type'], /^text\/markdown/);
@@ -482,10 +510,11 @@ test('pairing is one logical upload, supports receipt recovery, and management r
     .expect(200);
   assert.ok(revoked.body.revokedAt);
   const token = first.body.url.split('/').at(-1);
-  await instance.api
+  const unavailable = await instance.api
     .get(`/s/${token}`)
     .expect(404)
     .expect(({ text }) => assert.match(text, /expired, or was revoked/));
+  assertMetaCsp(unavailable.text);
   const repeated = await instance.api
     .post(`/api/shares/${first.body.id}/revoke`)
     .set('Authorization', `Bearer ${first.body.managementToken}`)

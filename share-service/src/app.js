@@ -25,6 +25,9 @@ import {
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(sourceDir, '../public');
+const metaCsp =
+  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'";
+const metaCspTag = `<meta http-equiv="Content-Security-Policy" content="${metaCsp}">`;
 
 class ApiError extends Error {
   constructor(status, code, message) {
@@ -315,7 +318,7 @@ function markdownRenderer() {
 }
 
 function unavailablePage() {
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Share unavailable · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Imnota shared prompt</p><h1>Share unavailable</h1><p>This link does not exist, has expired, or was revoked.</p></main></body></html>';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Share unavailable · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Imnota shared prompt</p><h1>Share unavailable</h1><p>This link does not exist, has expired, or was revoked.</p></main></body></html>`;
 }
 
 function sharePage(record, markdownHtml, assets, publicToken, publicOrigin) {
@@ -331,7 +334,7 @@ function sharePage(record, markdownHtml, assets, publicToken, publicOrigin) {
   const archive = record.has_archive
     ? `<a class="button" href="/s/${publicToken}/archive.zip">Download ZIP</a>`
     : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${escapeHtml(record.title)} · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Intentionally published with Imnota</p><h1>${escapeHtml(record.title)}</h1><p class="expiry">Available until <time datetime="${new Date(record.expires_at).toISOString()}">${new Date(record.expires_at).toLocaleString('en-GB', { timeZone: 'UTC', timeZoneName: 'short' })}</time></p><nav><a class="button" href="/s/${publicToken}/markdown">Download Markdown</a>${archive}</nav><article>${markdownHtml}</article>${imageHtml}<footer>Read-only share hosted at ${escapeHtml(new URL(publicOrigin).host)}.</footer></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${escapeHtml(record.title)} · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Intentionally published with Imnota</p><h1>${escapeHtml(record.title)}</h1><p class="expiry">Available until <time datetime="${new Date(record.expires_at).toISOString()}">${new Date(record.expires_at).toLocaleString('en-GB', { timeZone: 'UTC', timeZoneName: 'short' })}</time></p><nav><a class="button" href="/s/${publicToken}/markdown">Download Markdown</a>${archive}</nav><article>${markdownHtml}</article>${imageHtml}<footer>Read-only share hosted at ${escapeHtml(new URL(publicOrigin).host)}.</footer></main></body></html>`;
 }
 
 export function createService(overrides = {}) {
@@ -350,12 +353,15 @@ export function createService(overrides = {}) {
           scriptSrc: ["'self'"],
           styleSrc: ["'self'"],
           imgSrc: ["'self'"],
+          connectSrc: ["'self'"],
           objectSrc: ["'none'"],
           baseUri: ["'none'"],
+          frameSrc: ["'none'"],
           frameAncestors: ["'none'"],
           formAction: ["'self'"],
         },
       },
+      frameguard: { action: 'deny' },
       referrerPolicy: { policy: 'no-referrer' },
     }),
   );
