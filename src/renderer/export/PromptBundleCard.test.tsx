@@ -4,6 +4,23 @@ import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard
 
 afterEach(cleanup);
 
+it('disables preview while another prompt operation is running', () => {
+  const onLoadPreview = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model()}
+      disabled
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onLoadPreview={onLoadPreview}
+    />,
+  );
+  const preview = screen.getByRole('button', { name: /full-resolution preview/i });
+  expect(preview).toBeDisabled();
+  fireEvent.click(preview);
+  expect(onLoadPreview).not.toHaveBeenCalled();
+});
+
 function model(overrides: Partial<PromptBundleCardModel> = {}): PromptBundleCardModel {
   return {
     planId: 'plan-current',

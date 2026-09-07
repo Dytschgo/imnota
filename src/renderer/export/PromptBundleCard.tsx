@@ -89,11 +89,11 @@ export function PromptBundleCard({
         type="button"
         className="prompt-bundle-preview"
         aria-label={`Open full-resolution preview for Prompt ${bundle.bundleNumber}`}
-        disabled={!onLoadPreview || busy}
+        disabled={disabled || !onLoadPreview || busy}
         onClick={() => void onLoadPreview?.(request)}
       >
         {bundle.previewDataUrl ? (
-          <img src={bundle.previewDataUrl} alt={`Preview of Prompt ${bundle.bundleNumber}`} />
+          <img src={bundle.previewDataUrl} alt={`First screenshot in Prompt ${bundle.bundleNumber}`} />
         ) : (
           <FileImage size={24} aria-hidden="true" />
         )}
