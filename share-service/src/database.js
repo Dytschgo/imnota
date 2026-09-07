@@ -38,6 +38,14 @@ export function openDatabase(config) {
       height INTEGER NOT NULL,
       PRIMARY KEY (share_id, filename)
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS staging_uploads (
+      id TEXT PRIMARY KEY,
+      upload_token_hash TEXT NOT NULL UNIQUE,
+      request_id TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      reserved_bytes INTEGER NOT NULL
+    ) STRICT;
     CREATE INDEX IF NOT EXISTS shares_expiry_idx ON shares(expires_at);
     CREATE INDEX IF NOT EXISTS shares_revoked_idx ON shares(revoked_at);
     CREATE INDEX IF NOT EXISTS pairings_expiry_idx ON pairings(expires_at);

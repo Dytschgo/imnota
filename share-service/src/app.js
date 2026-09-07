@@ -11,11 +11,12 @@ import MarkdownIt from 'markdown-it';
 import sanitizeHtml from 'sanitize-html';
 import { loadConfig } from './config.js';
 import { openDatabase } from './database.js';
+import { directorySize } from './maintenance.js';
 import {
   deriveToken,
   escapeHtml,
-  inspectPng,
   isSafePngFilename,
+  normalizePng,
   randomToken,
   safeHashEqual,
   tokenHash,
@@ -35,6 +36,41 @@ class ApiError extends Error {
 const asyncRoute = (handler) => (request, response, next) => {
   Promise.resolve(handler(request, response, next)).catch(next);
 };
+
+function concurrencyGate(limit) {
+  let active = 0;
+  return (request, response, next) => {
+    if (active >= limit) {
+      return response.status(503).json({
+        error: { code: 'server_busy', message: 'Too many uploads are in progress. Try again later.' },
+      });
+    }
+    active += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      active -= 1;
+    };
+    response.once('finish', release);
+    response.once('close', release);
+    next();
+  };
+}
+
+async function waitForCommittedShare(db, uploadTokenHash, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const record = db.prepare('SELECT * FROM shares WHERE upload_token_hash = ?').get(uploadTokenHash);
+    if (record) return record;
+    const staging = db
+      .prepare('SELECT 1 FROM staging_uploads WHERE upload_token_hash = ?')
+      .get(uploadTokenHash);
+    if (!staging) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return undefined;
+}
 
 function jsonLimiter(settings) {
   return rateLimit({
@@ -56,7 +92,7 @@ function validateUpload(body, config) {
   if (
     !title ||
     title.length > 200 ||
-    [...title].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+    [...title].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   ) {
     throw new ApiError(400, 'invalid_request', 'Title must contain 1 to 200 printable characters.');
   }
@@ -79,6 +115,7 @@ function validateUpload(body, config) {
     );
   }
   const filenames = new Set();
+  let uploadedBytes = markdown.length;
   const images = body.images.map((image) => {
     if (!image || typeof image !== 'object' || !isSafePngFilename(image.filename)) {
       throw new ApiError(400, 'invalid_request', 'Each image needs a safe .png filename without a path.');
@@ -96,21 +133,36 @@ function validateUpload(body, config) {
     ) {
       throw new ApiError(400, 'invalid_request', `Image ${image.filename} has invalid base64 data.`);
     }
-    const data = Buffer.from(image.dataBase64, 'base64');
-    if (data.length > config.maxImageBytes) {
+    const uploadedData = Buffer.from(image.dataBase64, 'base64');
+    if (uploadedData.length > config.maxImageBytes) {
       throw new ApiError(413, 'payload_too_large', `Image ${image.filename} exceeds the size limit.`);
     }
-    let dimensions;
+    uploadedBytes += uploadedData.length;
+    if (uploadedBytes > config.maxBundleBytes) {
+      throw new ApiError(413, 'payload_too_large', 'The decoded upload bundle exceeds the size limit.');
+    }
+    let normalized;
     try {
-      dimensions = inspectPng(data, config.maxImageDimension);
+      normalized = normalizePng(uploadedData, {
+        maxDimension: config.maxImageDimension,
+        maxPixels: config.maxImagePixels,
+        maxInflatedBytes: config.maxInflatedPngBytes,
+      });
     } catch (error) {
       throw new ApiError(400, 'invalid_request', `${image.filename}: ${error.message}`);
     }
-    return { filename: image.filename, data, ...dimensions };
+    if (normalized.data.length > config.maxImageBytes) {
+      throw new ApiError(
+        413,
+        'payload_too_large',
+        `Normalized image ${image.filename} exceeds the size limit.`,
+      );
+    }
+    return { filename: image.filename, ...normalized };
   });
   const decodedBytes = markdown.length + images.reduce((sum, image) => sum + image.data.length, 0);
   if (decodedBytes > config.maxBundleBytes) {
-    throw new ApiError(413, 'payload_too_large', 'The decoded bundle exceeds the size limit.');
+    throw new ApiError(413, 'payload_too_large', 'The normalized bundle exceeds the size limit.');
   }
   const expiresInDays = body.expiresInDays ?? config.defaultExpiryDays;
   if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > config.maxExpiryDays) {
@@ -157,8 +209,8 @@ function uploadFingerprint(upload) {
 }
 
 function shareReceipt(record, uploadToken, config, assets, recovered = false) {
-  const publicToken = deriveToken(uploadToken, record.request_id, 'public');
-  const managementToken = deriveToken(uploadToken, record.request_id, 'management');
+  const publicToken = deriveToken(config.receiptSecret, uploadToken, record.request_id, 'public');
+  const managementToken = deriveToken(config.receiptSecret, uploadToken, record.request_id, 'management');
   const url = `${config.publicOrigin}/s/${publicToken}`;
   return {
     id: record.id,
@@ -284,24 +336,33 @@ export function createService(overrides = {}) {
     }),
   );
   app.use('/static', express.static(staticDir, { fallthrough: false, etag: true, maxAge: '1h' }));
-  app.use(express.json({ limit: config.jsonLimit, strict: true }));
-
   const pairingLimiter = jsonLimiter(config.rateLimits.pairing);
   const uploadLimiter = jsonLimiter(config.rateLimits.upload);
   const publicLimiter = jsonLimiter(config.rateLimits.publicRead);
+  const uploadConcurrency = concurrencyGate(config.maxConcurrentUploads);
+  const pairingJsonParser = express.json({ limit: '1kb', strict: true });
+  const uploadJsonParser = express.json({ limit: config.jsonLimit, strict: true });
 
-  app.get('/health', (_request, response) => {
-    db.prepare('SELECT 1').get();
-    const storage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get();
-    response.json({ status: 'ok', storageBytes: storage.bytes });
-  });
+  app.get(
+    '/health',
+    publicLimiter,
+    asyncRoute(async (_request, response) => {
+      db.prepare('SELECT 1').get();
+      const recorded = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+      const reserved = db
+        .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
+        .get().bytes;
+      const storageBytes = await directorySize(config.uploadsDir);
+      response.json({ status: 'ok', storageBytes, recordedBytes: recorded, reservedBytes: reserved });
+    }),
+  );
 
-  app.get('/new', (_request, response) => {
+  app.get('/new', publicLimiter, (_request, response) => {
     response.set('X-Robots-Tag', 'noindex, nofollow');
     response.sendFile(path.join(staticDir, 'new.html'));
   });
 
-  app.post('/api/pairing', pairingLimiter, (request, response, next) => {
+  app.post('/api/pairing', pairingLimiter, pairingJsonParser, (request, response, next) => {
     try {
       if (!config.allowedPairingOrigins.includes(request.get('origin'))) {
         throw new ApiError(403, 'origin_denied', 'Pairing must be started from the Imnota sharing page.');
@@ -325,6 +386,8 @@ export function createService(overrides = {}) {
   app.post(
     '/api/shares',
     uploadLimiter,
+    uploadConcurrency,
+    uploadJsonParser,
     asyncRoute(async (request, response) => {
       const bearer = readBearer(request);
       if (!bearer) throw new ApiError(401, 'invalid_token', 'The upload token is invalid.');
@@ -355,33 +418,119 @@ export function createService(overrides = {}) {
       if (pairing.expires_at <= now())
         throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
 
-      const usage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
-      const estimatedSize = upload.includeArchive ? upload.decodedBytes * 2 + 4096 : upload.decodedBytes;
-      if (usage + estimatedSize > config.maxStorageBytes) {
-        throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
+      const staging = db
+        .prepare('SELECT * FROM staging_uploads WHERE upload_token_hash = ?')
+        .get(uploadTokenHash);
+      if (staging) {
+        if (staging.request_id !== upload.requestId || !safeHashEqual(staging.payload_hash, payloadHash)) {
+          throw new ApiError(
+            409,
+            'idempotency_conflict',
+            'This upload token is already bound to a different request.',
+          );
+        }
+        const committed = await waitForCommittedShare(db, uploadTokenHash);
+        if (!committed)
+          throw new ApiError(
+            409,
+            'upload_interrupted',
+            'The matching upload did not complete. Retry the request.',
+          );
+        const committedAssets = db
+          .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+          .all(committed.id);
+        return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+      }
+      const committedAfterStaging = db
+        .prepare('SELECT * FROM shares WHERE upload_token_hash = ?')
+        .get(uploadTokenHash);
+      if (committedAfterStaging) {
+        if (
+          committedAfterStaging.request_id !== upload.requestId ||
+          !safeHashEqual(committedAfterStaging.payload_hash, payloadHash)
+        ) {
+          throw new ApiError(
+            409,
+            'idempotency_conflict',
+            'This upload token is already bound to a different request.',
+          );
+        }
+        const committedAssets = db
+          .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+          .all(committedAfterStaging.id);
+        return response
+          .status(200)
+          .json(shareReceipt(committedAfterStaging, bearer, config, committedAssets, true));
       }
 
+      const estimatedSize = upload.includeArchive ? upload.decodedBytes * 2 + 4096 : upload.decodedBytes;
+      const filesystemUsage = await directorySize(config.uploadsDir);
       const id = randomUUID();
-      const publicToken = deriveToken(bearer, upload.requestId, 'public');
-      const managementToken = deriveToken(bearer, upload.requestId, 'management');
+      const stagedAt = now();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const usage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+        const reserved = db
+          .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
+          .get().bytes;
+        if (Math.max(filesystemUsage, usage) + reserved + estimatedSize > config.maxStorageBytes) {
+          throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
+        }
+        db.prepare(
+          'INSERT INTO staging_uploads (id, upload_token_hash, request_id, payload_hash, created_at, reserved_bytes) VALUES (?, ?, ?, ?, ?, ?)',
+        ).run(id, uploadTokenHash, upload.requestId, payloadHash, stagedAt, estimatedSize);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        const concurrent = db
+          .prepare('SELECT * FROM staging_uploads WHERE upload_token_hash = ?')
+          .get(uploadTokenHash);
+        if (concurrent) {
+          if (
+            concurrent.request_id !== upload.requestId ||
+            !safeHashEqual(concurrent.payload_hash, payloadHash)
+          ) {
+            throw new ApiError(
+              409,
+              'idempotency_conflict',
+              'This upload token is already bound to a different request.',
+            );
+          }
+          const committed = await waitForCommittedShare(db, uploadTokenHash);
+          if (!committed)
+            throw new ApiError(
+              409,
+              'upload_interrupted',
+              'The matching upload did not complete. Retry the request.',
+            );
+          const committedAssets = db
+            .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+            .all(committed.id);
+          return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+        }
+        throw error;
+      }
+
+      const publicToken = deriveToken(config.receiptSecret, bearer, upload.requestId, 'public');
+      const managementToken = deriveToken(config.receiptSecret, bearer, upload.requestId, 'management');
+      const stagingDirectory = path.join(config.uploadsDir, `.staging-${id}`);
       const shareDirectory = path.join(config.uploadsDir, id);
-      await fsp.mkdir(shareDirectory, { recursive: false, mode: 0o700 });
       let byteSize = upload.decodedBytes;
       try {
-        await fsp.writeFile(path.join(shareDirectory, 'prompt.md'), upload.markdown, {
+        await fsp.mkdir(stagingDirectory, { recursive: false, mode: 0o700 });
+        await fsp.writeFile(path.join(stagingDirectory, 'prompt.md'), upload.markdown, {
           mode: 0o600,
           flag: 'wx',
         });
         for (const image of upload.images) {
-          await fsp.writeFile(path.join(shareDirectory, image.filename), image.data, {
+          await fsp.writeFile(path.join(stagingDirectory, image.filename), image.data, {
             mode: 0o600,
             flag: 'wx',
           });
         }
-        if (upload.includeArchive) byteSize += await writeArchive(shareDirectory, upload.images);
-        if (usage + byteSize > config.maxStorageBytes) {
-          throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
-        }
+        if (upload.includeArchive) byteSize += await writeArchive(stagingDirectory, upload.images);
+        await fsp.rename(stagingDirectory, shareDirectory);
+        const finalFilesystemUsage = await directorySize(config.uploadsDir);
         const createdAt = now();
         const expiresAt = createdAt + upload.expiresInDays * 24 * 60 * 60 * 1000;
         const recoveryUntil = createdAt + config.receiptRecoveryMs;
@@ -390,7 +539,13 @@ export function createService(overrides = {}) {
           const committedUsage = db
             .prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares')
             .get().bytes;
-          if (committedUsage + byteSize > config.maxStorageBytes) {
+          const otherReservations = db
+            .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads WHERE id != ?')
+            .get(id).bytes;
+          if (
+            Math.max(finalFilesystemUsage, committedUsage + byteSize) + otherReservations >
+            config.maxStorageBytes
+          ) {
             throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
           }
           const consumed = db
@@ -425,9 +580,31 @@ export function createService(overrides = {}) {
           );
           for (const image of upload.images)
             insertAsset.run(id, image.filename, image.data.length, image.width, image.height);
+          db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
           db.exec('COMMIT');
         } catch (error) {
           db.exec('ROLLBACK');
+          const committed = db
+            .prepare('SELECT * FROM shares WHERE upload_token_hash = ?')
+            .get(uploadTokenHash);
+          if (committed) {
+            if (
+              committed.request_id !== upload.requestId ||
+              !safeHashEqual(committed.payload_hash, payloadHash)
+            ) {
+              throw new ApiError(
+                409,
+                'idempotency_conflict',
+                'This upload token is already bound to a different request.',
+              );
+            }
+            await fsp.rm(shareDirectory, { recursive: true, force: true });
+            db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
+            const committedAssets = db
+              .prepare('SELECT filename FROM assets WHERE share_id = ? ORDER BY filename')
+              .all(committed.id);
+            return response.status(200).json(shareReceipt(committed, bearer, config, committedAssets, true));
+          }
           throw error;
         }
         response.status(201).json(
@@ -445,7 +622,9 @@ export function createService(overrides = {}) {
           ),
         );
       } catch (error) {
+        await fsp.rm(stagingDirectory, { recursive: true, force: true });
         await fsp.rm(shareDirectory, { recursive: true, force: true });
+        db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
         throw error;
       }
     }),
@@ -584,7 +763,6 @@ export function createService(overrides = {}) {
     response.status(404).json({ error: { code: 'not_found', message: 'Endpoint not found.' } }),
   );
   app.use((error, _request, response, _next) => {
-    // Express identifies error middleware by its four-argument signature.
     void _next;
     if (error?.type === 'entity.too.large') {
       return response

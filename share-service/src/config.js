@@ -20,6 +20,14 @@ export function loadConfig(overrides = {}) {
     throw new Error('IMNOTA_SHARE_PUBLIC_ORIGIN must be an http(s) origin without a path.');
   }
   const publicOrigin = parsedOrigin.origin;
+  const receiptSecret = overrides.receiptSecret ?? process.env.IMNOTA_SHARE_RECEIPT_SECRET;
+  if (
+    typeof receiptSecret !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(receiptSecret) ||
+    Buffer.from(receiptSecret, 'base64url').length !== 32
+  ) {
+    throw new Error('IMNOTA_SHARE_RECEIPT_SECRET must be a base64url-encoded 32-byte server secret.');
+  }
 
   return {
     port: integer(overrides.port ?? process.env.PORT, 3000),
@@ -28,11 +36,13 @@ export function loadConfig(overrides = {}) {
     dataDir: root,
     databasePath: path.join(root, 'shares.sqlite'),
     uploadsDir: path.join(root, 'uploads'),
+    backupsDir: path.join(root, 'backups'),
     pairingTtlMs: integer(overrides.pairingTtlMs ?? process.env.IMNOTA_SHARE_PAIRING_TTL_MS, 10 * 60 * 1000),
     receiptRecoveryMs: integer(
       overrides.receiptRecoveryMs ?? process.env.IMNOTA_SHARE_RECEIPT_RECOVERY_MS,
       24 * 60 * 60 * 1000,
     ),
+    receiptSecret,
     defaultExpiryDays: integer(
       overrides.defaultExpiryDays ?? process.env.IMNOTA_SHARE_DEFAULT_EXPIRY_DAYS,
       30,
@@ -45,6 +55,17 @@ export function loadConfig(overrides = {}) {
     cleanupIntervalMs: integer(
       overrides.cleanupIntervalMs ?? process.env.IMNOTA_SHARE_CLEANUP_INTERVAL_MS,
       60 * 60 * 1000,
+    ),
+    backupIntervalMs: integer(
+      overrides.backupIntervalMs ?? process.env.IMNOTA_SHARE_BACKUP_INTERVAL_MS,
+      24 * 60 * 60 * 1000,
+    ),
+    backupRetentionMs: Math.min(
+      integer(
+        overrides.backupRetentionMs ?? process.env.IMNOTA_SHARE_BACKUP_RETENTION_MS,
+        31 * 24 * 60 * 60 * 1000,
+      ),
+      31 * 24 * 60 * 60 * 1000,
     ),
     maxMarkdownBytes: integer(
       overrides.maxMarkdownBytes ?? process.env.IMNOTA_SHARE_MAX_MARKDOWN_BYTES,
@@ -63,9 +84,21 @@ export function loadConfig(overrides = {}) {
       overrides.maxImageDimension ?? process.env.IMNOTA_SHARE_MAX_IMAGE_DIMENSION,
       10_000,
     ),
+    maxImagePixels: integer(
+      overrides.maxImagePixels ?? process.env.IMNOTA_SHARE_MAX_IMAGE_PIXELS,
+      16_000_000,
+    ),
+    maxInflatedPngBytes: integer(
+      overrides.maxInflatedPngBytes ?? process.env.IMNOTA_SHARE_MAX_INFLATED_PNG_BYTES,
+      64 * 1024 * 1024,
+    ),
     maxStorageBytes: integer(
       overrides.maxStorageBytes ?? process.env.IMNOTA_SHARE_MAX_STORAGE_BYTES,
       2 * 1024 * 1024 * 1024,
+    ),
+    maxConcurrentUploads: integer(
+      overrides.maxConcurrentUploads ?? process.env.IMNOTA_SHARE_MAX_CONCURRENT_UPLOADS,
+      4,
     ),
     jsonLimit: overrides.jsonLimit ?? process.env.IMNOTA_SHARE_JSON_LIMIT ?? '36mb',
     trustProxy: overrides.trustProxy ?? process.env.IMNOTA_SHARE_TRUST_PROXY ?? 'loopback',

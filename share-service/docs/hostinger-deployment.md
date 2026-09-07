@@ -8,6 +8,7 @@ This is a deployment plan, not evidence of a live deployment. No Hostinger setti
 - Use Node 22.13+ or Node 24 LTS, run `npm ci --omit=dev`, and use `npm start` as the start command. There is no build step.
 - Keep the deployed package at `/home/u644068606/domains/imnota.xyz/public_html/app`, but set `IMNOTA_SHARE_DATA_DIR=/home/u644068606/.imnota-shares`. The SQLite database and uploads must remain outside `public_html`, the repository, and all static document roots.
 - Set the application origin to `https://app.imnota.xyz`, route the Hostinger-assigned application port through its HTTPS proxy, preserve `Host` and `X-Forwarded-Proto`, and set `IMNOTA_SHARE_TRUST_PROXY=loopback` unless Hostinger documents a different trusted proxy range.
+- Generate `IMNOTA_SHARE_RECEIPT_SECRET` once with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`. Store it only in Hostinger's secret environment settings and the encrypted operational backup. Losing or rotating it prevents receipt recovery and changes derived capabilities for retried uploads; do not rotate it as an ordinary deployment step.
 - Confirm that the hosting plan provides a persistent Node process, persistent home-directory storage, scheduled jobs, enough disk for the configured quota plus backups, and TLS renewal. If application storage is ephemeral, stop and move artifacts to durable S3-compatible storage before release.
 
 Required environment:
@@ -19,6 +20,9 @@ IMNOTA_SHARE_PUBLIC_ORIGIN=https://app.imnota.xyz
 IMNOTA_SHARE_DATA_DIR=/home/u644068606/.imnota-shares
 IMNOTA_SHARE_TRUST_PROXY=loopback
 IMNOTA_SHARE_RECEIPT_RECOVERY_MS=86400000
+IMNOTA_SHARE_RECEIPT_SECRET=<32-random-bytes-as-base64url>
+IMNOTA_SHARE_BACKUP_INTERVAL_MS=86400000
+IMNOTA_SHARE_BACKUP_RETENTION_MS=2678400000
 ```
 
 Create the data directory as the application user with mode `0700`. The service creates SQLite and artifact files with private modes. Do not place an `.env` file in the document root; use Hostinger's environment-variable settings.
@@ -32,11 +36,11 @@ Create the data directory as the application user with mode `0700`. The service 
 5. Verify `curl --fail --silent --show-error https://app.imnota.xyz/health`, TLS validity, HSTS, CSP, `X-Robots-Tag` on `/new` and share paths, correct `X-Forwarded-Proto`, a full manual share flow, and a 404 after revoke.
 6. Keep the prior release directory and compatible backup until the observation window closes.
 
-The health response exposes only service state and aggregate recorded storage bytes. Monitor non-2xx rates, process restarts, disk free space, SQLite write errors, cleanup failures, upload rate-limit volume, certificate expiry, and health latency. Alert before disk usage reaches the configured 2 GiB quota or the hosting account's own limit.
+The health response exposes only service state plus actual, recorded, and reserved aggregate storage bytes. Monitor non-2xx rates, process restarts, disk free space, SQLite write and backup errors, cleanup failures, upload rate-limit volume, certificate expiry, and health latency. Alert before disk usage reaches the configured 2 GiB quota or the hosting account's own limit. Monitor the private backup directory separately because backups do not count toward the upload quota.
 
 ## Cleanup and retention
 
-The running process checks hourly. A share becomes inaccessible exactly at expiry or revocation, then its directory and metadata are deleted after the 24-hour recovery grace period. Active shares are excluded. Expired pairing records are deleted after the same grace period.
+The running process checks hourly. A share becomes inaccessible exactly at expiry or revocation, then its directory and metadata are deleted after the 24-hour recovery grace period. Active shares are excluded. Expired pairing records are deleted after the same grace period. Uploads reserve quota in SQLite before private staging files are written. Startup reconciliation aggressively removes incomplete staging reservations and unreferenced directories left by a prior process; hourly reconciliation removes only entries older than the grace period so it cannot delete a live upload.
 
 Also schedule this command hourly in Hostinger as defense against process downtime:
 
@@ -48,10 +52,12 @@ Only one cleanup invocation should normally run at a time. Investigate a non-zer
 
 ## Backup and recovery
 
-Back up metadata and artifacts together at least daily, encrypt the backup, retain it according to the same privacy policy as active shares, and test restores. A simple consistent low-volume procedure is:
+The service uses SQLite `VACUUM INTO` to create a transactionally consistent metadata backup in `/home/u644068606/.imnota-shares/backups` on startup and every 24 hours. It writes through a private temporary file, atomically renames the completed backup, and deletes metadata backups older than 31 days. `npm run backup` triggers the same bounded operation. These local copies protect SQLite metadata but are not a complete disaster-recovery set without their matching artifacts.
+
+Back up metadata and artifacts together at least daily, encrypt the backup, keep off-host copies no longer than 31 days, and test restores. A simple consistent low-volume procedure is:
 
 1. Put `app.imnota.xyz` in maintenance mode or stop its Node process so no upload or cleanup can mutate data.
-2. Archive `/home/u644068606/.imnota-shares` to a dated file in a private backup location outside `public_html`.
+2. Run `npm run backup`, then archive its newest completed metadata backup together with `uploads/` to a dated file in a private backup location outside `public_html`. Do not copy a `.pending-*` backup.
 3. Restart the process and verify `/health`.
 4. Copy the archive to durable off-host encrypted storage, verify its checksum, and expire old backups on a documented schedule.
 
@@ -64,7 +70,8 @@ If health or the manual flow fails, remove traffic from the candidate, stop it, 
 ## Release limits requiring follow-up
 
 - Browser pairing is anonymous and protected by origin checks plus rate limits; it does not prove user identity. Abuse monitoring and quota headroom are operational requirements.
-- Uploads are bounded JSON envelopes and therefore buffered in memory by Express. The 36 MiB body limit must fit the Hostinger process memory budget and proxy request limit.
-- The service validates the PNG signature, IHDR dimensions, filename, and byte limits but does not re-encode images or strip PNG ancillary metadata. The desktop exporter should continue producing clean finalized PNGs. Add server-side re-encoding if uploads from other clients are permitted.
+- Uploads are bounded JSON envelopes and therefore buffered in memory by Express. Rate limiting and a four-upload concurrency gate run before parsing, but the 36 MiB body limit still must fit the Hostinger process memory budget and proxy request limit.
+- PNG normalization deliberately rejects interlaced files and converts accepted files to 8-bit RGBA. This is compatible with the current desktop canvas exporter but should be retested if the exporter changes.
 - Receipt recovery requires the desktop to protect the pending upload bearer and UUID for up to 24 hours. They are a sensitive capability during that window and should be removed immediately after the receipt is committed locally.
+- The default in-memory rate-limit counters assume one Node process. Multiple instances require a shared rate-limit store before traffic is distributed across them.
 - Cross-platform Windows, macOS, and Linux desktop end-to-end tests remain release gates after the separate desktop client is integrated. This package's automated tests exercise the HTTP service locally only.
