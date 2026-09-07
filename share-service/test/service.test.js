@@ -185,7 +185,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
 
   const page = await instance.api.get(`/s/${publicToken}`).expect(200);
   assert.equal(page.headers['x-robots-tag'], 'noindex, nofollow');
-  assert.equal(page.headers['cache-control'], 'private, no-store');
+  assert.equal(page.headers['cache-control'], 'private, no-store, no-transform');
   assert.doesNotMatch(page.text, /<script>alert/);
   assert.doesNotMatch(page.text, /<img src=x/);
   assert.doesNotMatch(page.text, /href="javascript:/);

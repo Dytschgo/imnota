@@ -728,7 +728,7 @@ export function createService(overrides = {}) {
   app.use('/s', publicLimiter, (request, response, next) => {
     response.set({
       'X-Robots-Tag': 'noindex, nofollow',
-      'Cache-Control': 'private, no-store',
+      'Cache-Control': 'private, no-store, no-transform',
     });
     next();
   });
