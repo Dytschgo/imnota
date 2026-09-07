@@ -1,14 +1,14 @@
-import { generateMarkdown } from '../shared/markdown';
-import type { Annotation, ImagePayload, ImnotaBridge, NoteFields, ProjectData } from '../shared/types';
+import { generateMarkdown, numberCollectionScreenshots } from '../shared/markdown';
+import type { Annotation, ImagePayload, ImnotaBridge, ProjectData } from '../shared/types';
 
 type Content = Awaited<ReturnType<ImnotaBridge['loadScreenshotContent']>>;
 
-/** Capture selection and in-memory edits before awaiting any disk read or render. */
+/** Capture ordering, export visibility, and in-memory edits before awaiting disk reads. */
 export async function prepareContext(
   input: {
     project: ProjectData;
     projectPath: string;
-    roundId?: string;
+    collectionId: string;
     active?: { id: string; content: Content };
   },
   load: ImnotaBridge['loadScreenshotContent'],
@@ -16,31 +16,27 @@ export async function prepareContext(
   progress: (index: number, count: number) => void,
 ) {
   const snapshot = structuredClone(input);
-  const shots = snapshot.project.screenshots.filter(
-    (shot) => shot.includeInExport && (!snapshot.roundId || shot.roundId === snapshot.roundId),
-  );
-  const notes: Record<string, NoteFields> = {};
+  const numbered = numberCollectionScreenshots(snapshot.project, snapshot.collectionId);
+  const included = numbered.filter(({ screenshot }) => screenshot.includeInExport);
   const annotations: Record<string, Annotation[]> = {};
   const images = [];
-  for (const [index, shot] of shots.entries()) {
-    progress(index + 1, shots.length);
+  for (const [index, { screenshot: shot, pictureNumber }] of included.entries()) {
+    progress(index + 1, included.length);
     const content =
       snapshot.active?.id === shot.id
         ? snapshot.active.content
         : await load({ projectPath: snapshot.projectPath, screenshot: shot });
-    // Each reference is read once; the same content supplies text and pixels.
-    notes[shot.id] = content.notes;
     annotations[shot.id] = content.annotations;
     images.push({
-      filename: `${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
+      filename: `${String(pictureNumber).padStart(2, '0')}-${shot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
       dataUrl: await render(content.image, content.annotations),
     });
   }
   return {
-    markdown: generateMarkdown(snapshot.project, shots, notes, annotations),
+    markdown: generateMarkdown(snapshot.project, snapshot.collectionId, annotations),
     images,
     projectPath: snapshot.projectPath,
-    roundId: snapshot.roundId,
+    collectionId: snapshot.collectionId,
     preferences: snapshot.project.exportPreferences,
   };
 }

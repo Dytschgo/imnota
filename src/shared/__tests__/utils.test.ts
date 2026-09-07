@@ -9,9 +9,9 @@ describe('Imnota data helpers', () => {
   });
   it('creates a versioned project with safe defaults', () => {
     const project = emptyProject('Review', 'A brief');
-    expect(project.schemaVersion).toBe(2);
+    expect(project.schemaVersion).toBe(3);
     expect(project.screenshots).toEqual([]);
-    expect(project.rounds[0].name).toBe('Subfolder 1');
+    expect(project.collections[0].name).toBe('Workspace / Collection 01');
     expect(project.exportPreferences.includeAnnotationMetadata).toBe(true);
   });
   it('rejects traversal outside an approved workspace', () => {

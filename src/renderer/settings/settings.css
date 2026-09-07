@@ -1,0 +1,589 @@
+.imnota-preference-section {
+  min-width: 0;
+  width: 100%;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-preference-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 24px 0 18px;
+}
+
+.imnota-preference-heading h2,
+.imnota-shortcut-group h3 {
+  margin: 0;
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-preference-heading h2 {
+  font-size: 16px;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+.imnota-preference-heading p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: var(--ink-3, #7d8595);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.imnota-preference-row {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(420px, 1.2fr);
+  align-items: center;
+  gap: 28px;
+  min-height: 72px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+}
+
+.imnota-preference-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.imnota-preference-copy strong,
+.imnota-check-row strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.imnota-preference-copy span,
+.imnota-check-row small {
+  color: var(--ink-3, #7d8595);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.imnota-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 3px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+  border-radius: 9px;
+  background: var(--input, #0f1218);
+}
+
+.imnota-segmented label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border-radius: 6px;
+  color: var(--ink-3, #7d8595);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.imnota-segmented label:hover {
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-segmented label[data-selected] {
+  background: var(--surface-3, #202532);
+  color: var(--ink, #f4f5f7);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.14);
+}
+
+.imnota-segmented input,
+.imnota-accent-options input,
+.imnota-glass-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.imnota-segmented label:has(input:focus-visible),
+.imnota-accent-options label:has(input:focus-visible),
+.imnota-glass-options label:has(input:focus-visible) {
+  outline: 2px solid var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  outline-offset: 2px;
+}
+
+.imnota-segmented label:has(input:disabled),
+.imnota-accent-options label:has(input:disabled),
+.imnota-glass-options label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.imnota-preference-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 22px 0 24px;
+  border: 0;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+}
+
+.imnota-preference-fieldset legend {
+  padding: 0;
+  color: var(--ink, #f4f5f7);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.imnota-preference-fieldset > p {
+  max-width: 70ch;
+  margin: 5px 0 15px;
+  color: var(--ink-3, #7d8595);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.imnota-accent-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 8px;
+}
+
+.imnota-accent-options label {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 1fr 14px;
+  align-items: center;
+  gap: 9px;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+  border-radius: 9px;
+  color: var(--ink-2, #b3bac8);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease-out,
+    background 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.imnota-accent-options label:hover {
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.15));
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-accent-options label[data-selected] {
+  border-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-accent-options label svg {
+  color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+}
+
+.imnota-accent-swatch {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.imnota-glass-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 8px;
+}
+
+.imnota-glass-options label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 10px;
+  overflow: hidden;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+  border-radius: 10px;
+  background: var(--surface, #12151c);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease-out,
+    background 160ms ease-out;
+}
+
+.imnota-glass-options label:hover {
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.15));
+}
+
+.imnota-glass-options label[data-selected] {
+  border-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
+}
+
+.imnota-glass-options label > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.imnota-glass-options strong {
+  color: var(--ink, #f4f5f7);
+  font-size: 11px;
+}
+
+.imnota-glass-options small {
+  color: var(--ink-3, #7d8595);
+  font-size: 10px;
+}
+
+.imnota-glass-sample {
+  width: 30px;
+  height: 36px;
+  flex: none;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.15));
+  border-radius: 6px;
+  background-color: var(--surface-3, #202532);
+  background-image: linear-gradient(145deg, var(--imnota-accent, #6857f5) 0 32%, transparent 33% 100%);
+}
+
+.imnota-glass-sample-subtle {
+  background-color: color-mix(in srgb, var(--surface-3, #202532) 92%, transparent);
+  backdrop-filter: blur(10px) saturate(108%);
+}
+
+.imnota-glass-sample-balanced {
+  background-color: color-mix(in srgb, var(--surface-3, #202532) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(115%);
+}
+
+.imnota-glass-sample-strong {
+  background-color: color-mix(in srgb, var(--surface-3, #202532) 70%, transparent);
+  backdrop-filter: blur(28px) saturate(124%);
+}
+
+.imnota-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  color: var(--ink, #f4f5f7);
+  cursor: pointer;
+}
+
+.imnota-check-row input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--imnota-accent, var(--indigo, #6857f5));
+}
+
+.imnota-check-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.imnota-inline-status,
+.imnota-completion-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 13px;
+  color: var(--ink-2, #b3bac8);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.imnota-inline-status svg,
+.imnota-completion-state svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+}
+
+.imnota-secondary-button,
+.imnota-shortcut-recorder,
+.imnota-shortcut-search button {
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.15));
+  background: var(--surface-2, #191d27);
+  color: var(--ink-2, #b3bac8);
+  font: inherit;
+}
+
+.imnota-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.imnota-secondary-button:hover:not(:disabled),
+.imnota-shortcut-recorder:hover:not(:disabled) {
+  border-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-secondary-button:disabled,
+.imnota-shortcut-recorder:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.imnota-shortcut-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 360px);
+  min-height: 34px;
+  margin-bottom: 16px;
+  padding: 0 9px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+  border-radius: 7px;
+  background: var(--input, #0f1218);
+  color: var(--ink-3, #7d8595);
+}
+
+.imnota-shortcut-search:focus-within {
+  border-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  box-shadow: 0 0 0 1px var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+}
+
+.imnota-shortcut-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink, #f4f5f7);
+  font-size: 12px;
+}
+
+.imnota-shortcut-search input::placeholder {
+  color: var(--ink-3, #7d8595);
+}
+
+.imnota-shortcut-search button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+}
+
+.imnota-shortcut-table {
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+}
+
+.imnota-shortcut-group {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.5fr) minmax(420px, 1.5fr);
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+}
+
+.imnota-shortcut-group h3 {
+  padding: 17px 18px 17px 0;
+  color: var(--ink-3, #7d8595);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.imnota-shortcut-row {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: minmax(220px, 1fr) 190px;
+  align-items: center;
+  gap: 20px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.09));
+}
+
+.imnota-shortcut-row:last-child {
+  border-bottom: 0;
+}
+
+.imnota-shortcut-row > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.imnota-shortcut-row strong {
+  color: var(--ink-2, #b3bac8);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.imnota-shortcut-row small {
+  color: var(--danger, #ef4444);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.imnota-shortcut-row[data-conflict] {
+  background: rgba(239, 68, 68, 0.045);
+}
+
+.imnota-shortcut-recorder {
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.imnota-shortcut-recorder[aria-pressed='true'] {
+  border-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-shortcut-help,
+.imnota-no-results,
+.imnota-preference-error {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.imnota-shortcut-help {
+  margin: 12px 0 0;
+  color: var(--ink-3, #7d8595);
+}
+
+.imnota-no-results {
+  margin: 0;
+  padding: 20px 0;
+  color: var(--ink-3, #7d8595);
+}
+
+.imnota-preference-error {
+  margin: 12px 0 0;
+  color: var(--danger, #ef4444);
+}
+
+.imnota-completion-state {
+  margin: -4px 0 22px;
+}
+
+.imnota-preference-section .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .imnota-glass-sample {
+    background-color: var(--surface-3, #202532);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .imnota-glass-sample {
+    background-color: var(--surface-3, #202532);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imnota-preference-section * {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  .imnota-preference-row {
+    grid-template-columns: minmax(180px, 0.65fr) minmax(360px, 1.35fr);
+  }
+
+  .imnota-accent-options,
+  .imnota-glass-options {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .imnota-shortcut-group {
+    grid-template-columns: 150px minmax(360px, 1fr);
+  }
+
+  .imnota-shortcut-row {
+    grid-template-columns: minmax(190px, 1fr) 170px;
+  }
+}
+
+@container settings-content (max-width: 720px) {
+  .imnota-preference-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  .imnota-shortcut-group {
+    grid-template-columns: 132px minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-row {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 170px);
+    gap: 14px;
+  }
+}
+
+@container settings-content (max-width: 520px) {
+  .imnota-preference-heading {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .imnota-accent-options,
+  .imnota-glass-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .imnota-shortcut-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-group h3,
+  .imnota-shortcut-row {
+    grid-column: 1;
+  }
+
+  .imnota-shortcut-group h3 {
+    padding-bottom: 8px;
+  }
+}
+
+@container settings-content (max-width: 400px) {
+  .imnota-accent-options,
+  .imnota-glass-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .imnota-shortcut-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 10px 0 12px;
+  }
+
+  .imnota-shortcut-recorder {
+    width: 100%;
+  }
+}

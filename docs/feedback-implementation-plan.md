@@ -1,5 +1,7 @@
 # Imnota Feedback Implementation Plan
 
+> Historical record for the schema-2 feedback-round release. The current product contract uses collections, one Description, Low/Medium/High priority and current-collection-only prompt bundles. See [the user guide](user-guide.md). Statements and validation counts below describe that earlier revision only.
+
 ## Implementation status
 
 Implemented locally: native macOS title-bar safe space and branded packaging icon, responsive panels including navigation collapse, bounded scrolling for long screenshot lists, pan/zoom/fit/actual size, direct text editing, image clipboard and attachment checklist, feedback rounds with independent files and safe version-1 migration, and current-round/all-round exports.

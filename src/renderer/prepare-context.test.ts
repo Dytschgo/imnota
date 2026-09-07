@@ -1,40 +1,38 @@
 import { expect, it, vi } from 'vitest';
-import { EMPTY_NOTES, emptyProject } from '../shared/utils';
+import { emptyProject } from '../shared/utils';
 import type { Annotation, ScreenshotRecord } from '../shared/types';
 import { prepareContext } from './prepare-context';
 
-function shot(id: string, roundId = '001-first-feedback'): ScreenshotRecord {
+function shot(id: string, position: number, includeInExport = true): ScreenshotRecord {
   return {
     id,
-    roundId,
+    collectionId: '001-collection',
     title: id,
     originalFilename: `${id}.png`,
     storedFilename: `${id}.png`,
-    description: '',
-    position: 0,
-    createdAt: '',
+    description: `${id} description`,
+    position,
+    createdAt: `${position}`,
     updatedAt: '',
-    tags: [],
     priority: 'low',
-    status: 'draft',
-    annotationFile: '',
-    notesFile: '',
+    annotationFile: `collections/001-collection/annotations/${id}.png.json`,
+    descriptionFile: `collections/001-collection/descriptions/${id}.png.md`,
     originalWidth: 10,
     originalHeight: 10,
-    includeInExport: true,
+    includeInExport,
   };
 }
 
-it('captures selection and active edits before asynchronous rendering and reads each other reference once', async () => {
+it('captures active edits, preserves pre-filter numbering, and reads each other included screenshot once', async () => {
   const project = emptyProject('Original brief', '');
-  project.screenshots = [shot('one'), shot('two'), shot('excluded'), shot('other', 'other-folder')];
-  project.screenshots[2].includeInExport = false;
+  project.screenshots = [shot('one', 0), shot('excluded', 1, false), shot('three', 2)];
   const active = {
     id: 'one',
     content: {
       image: { dataUrl: 'active-pixels', width: 10, height: 10, filename: 'one.png' },
-      notes: { ...EMPTY_NOTES, problem: 'Original problem' },
       annotations: [{ id: 'a', kind: 'text', text: 'Original mark', x: 0, y: 0, zIndex: 0 }] as Annotation[],
+      description: 'one description',
+      contentRevision: 'active-revision',
     },
   };
   let finish!: (value: string) => void;
@@ -46,33 +44,31 @@ it('captures selection and active edits before asynchronous rendering and reads 
           finish = resolve;
         }),
     )
-    .mockResolvedValue('second-png');
+    .mockResolvedValue('third-png');
   const load = vi.fn().mockResolvedValue({
-    image: { dataUrl: 'disk', width: 10, height: 10 },
-    notes: { ...EMPTY_NOTES, problem: 'Disk problem' },
+    image: { dataUrl: 'disk', width: 10, height: 10, filename: 'three.png' },
     annotations: [],
+    description: 'three description',
+    contentRevision: 'disk-revision',
   });
   const pending = prepareContext(
-    { project, projectPath: '/fixture', roundId: '001-first-feedback', active },
+    { project, projectPath: '/fixture', collectionId: '001-collection', active },
     load,
     render,
     () => undefined,
   );
   project.name = 'Changed while rendering';
   project.screenshots.reverse();
-  project.screenshots.forEach((item) => {
-    item.includeInExport = false;
-  });
-  active.content.notes.problem = 'Changed problem';
   active.content.annotations[0].text = 'Changed mark';
   finish('first-png');
   const result = await pending;
-  expect(result.markdown).toContain('# Original brief');
-  expect(result.markdown).toContain('Original problem');
   expect(result.markdown).toContain('Original mark');
-  expect(result.markdown).toContain('Disk problem');
-  expect(result.markdown).not.toContain('Changed');
-  expect(result.images.map((item) => item.filename)).toEqual(['one-annotated.png', 'two-annotated.png']);
+  expect(result.markdown).not.toContain('Changed mark');
+  expect(result.markdown).toContain('Picture 2 was intentionally excluded');
+  expect(result.images.map((item) => item.filename)).toEqual([
+    '01-one-annotated.png',
+    '03-three-annotated.png',
+  ]);
   expect(load).toHaveBeenCalledTimes(1);
   expect(render.mock.calls[0][1][0].text).toBe('Original mark');
 });

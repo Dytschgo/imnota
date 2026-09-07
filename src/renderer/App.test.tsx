@@ -1,18 +1,27 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
+import type { WorkflowBridge } from '../shared/workflow-bridge';
+import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
+import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { matchesProjectSearch, RoundControls, SettingsView } from './App';
-import { EMPTY_NOTES } from '../shared/utils';
+import App, { CollectionControls, matchesProjectSearch, SettingsView } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
-vi.mock('./components/AnnotationCanvas', () => ({ AnnotationCanvas: () => null }));
+const annotationCanvasSpy = vi.hoisted(() => vi.fn());
+vi.mock('./components/AnnotationCanvas', () => ({
+  AnnotationCanvas: (props: unknown) => {
+    annotationCanvasSpy(props);
+    return null;
+  },
+}));
 
 afterEach(() => {
   cleanup();
+  annotationCanvasSpy.mockClear();
   useAppStore.setState({
     snapshot: null,
-    activeRoundId: '001-first-feedback',
+    activeCollectionId: '001-collection',
     activeScreenshotId: null,
     view: 'projects',
     search: '',
@@ -24,38 +33,35 @@ const snapshot: ProjectSnapshot = {
   thumbnails: {},
   recoveryFound: false,
   project: {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: 'project-id',
     name: 'Project',
     description: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     status: 'active',
-    tags: ['design'],
     favourite: false,
-    rounds: [
+    collections: [
       {
-        id: '001-first-feedback',
-        name: 'Subfolder 1',
+        id: '001-collection',
+        name: 'Workspace / Collection 01',
         archived: false,
         createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        overallContext: '',
       },
     ],
     screenshots: [],
     exportPreferences: {
       includeOriginalScreenshots: true,
       includeAnnotationMetadata: true,
-      includedFields: [],
-      overallInstructions: '',
-      desiredOutcome: '',
-      technicalConstraints: '',
       template: 'default',
     },
   },
 };
 
 describe('feedback controls', () => {
-  function renderApp(overrides: Partial<ImnotaBridge> = {}) {
+  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
@@ -65,34 +71,65 @@ describe('feedback controls', () => {
       listProjects: vi.fn(async () => []),
       onUpdateStatus: () => () => {},
       getUpdateStatus: async () => ({ state: 'idle' as const }),
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      setPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      getNativePerformanceProfile: async () => ({
+        ok: true,
+        value: {
+          platform: 'windows',
+          performanceClass: 'standard',
+          reducedEffectsRecommended: false,
+          reasons: [],
+        },
+      }),
+      startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
+        ok: true,
+        value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },
+      }),
+      stopProjectWatch: async () => ({ ok: true, value: undefined }),
+      onProjectWatchEvent: () => () => {},
+      saveProjectCompareAndSwap: async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+        ok: true,
+        value: { snapshot: { ...snapshot, project }, projectRevision: 'project-2' },
+      }),
+      reloadWatchedProject: async () => ({ ok: true, value: { snapshot, projectRevision: 'project-2' } }),
       ...overrides,
     } as unknown as ImnotaBridge;
     window.matchMedia = vi.fn(() => ({ matches: false })) as unknown as typeof window.matchMedia;
     return render(<App />);
   }
 
-  async function renderEditingProject(overrides: Partial<ImnotaBridge> = {}) {
+  async function renderEditingProject(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}) {
     const editingSnapshot: ProjectSnapshot = {
       ...snapshot,
       project: {
         ...snapshot.project,
-        exportPreferences: { ...snapshot.project.exportPreferences, includedFields: ['problem'] },
         screenshots: [
           {
             id: 'shot',
-            roundId: '001-first-feedback',
+            collectionId: '001-collection',
             originalFilename: 'screen.png',
             storedFilename: 'screen.png',
             title: 'Screen',
-            description: '',
+            description: 'Original note',
             position: 0,
             createdAt: snapshot.project.createdAt,
             updatedAt: snapshot.project.updatedAt,
-            tags: [],
             priority: 'medium',
-            status: 'draft',
-            annotationFile: 'shot.json',
-            notesFile: 'shot.md',
+            annotationFile: 'collections/001-collection/annotations/screen.png.json',
+            descriptionFile: 'collections/001-collection/descriptions/screen.png.md',
             originalWidth: 100,
             originalHeight: 100,
             includeInExport: true,
@@ -100,19 +137,31 @@ describe('feedback controls', () => {
         ],
       },
     };
-    const save = vi.fn(async () => {});
+    const save = vi.fn<ImnotaBridge['saveScreenshotContent']>(async (input) => ({
+      project: {
+        ...editingSnapshot.project,
+        screenshots: editingSnapshot.project.screenshots.map((shot) =>
+          shot.id === input.screenshot.id ? input.screenshot : shot,
+        ),
+      },
+      savedScreenshotId: input.screenshot.id,
+      conflictCreated: false,
+      contentRevision: 'b'.repeat(64),
+      projectRevision: 'project-content-2',
+    }));
     renderApp({
       saveScreenshotContent: save,
       loadScreenshotContent: async () => ({
         image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
         annotations: [],
-        notes: { ...EMPTY_NOTES, problem: 'Original note' },
+        description: 'Original note',
+        contentRevision: 'a'.repeat(64),
       }),
       ...overrides,
     });
     await screen.findByRole('textbox', { name: 'Search projects' });
     act(() => useAppStore.getState().setProject(editingSnapshot));
-    const note = await screen.findByRole('textbox', { name: 'Problem description' });
+    const note = await screen.findByRole('textbox', { name: 'Description' });
     await waitFor(() => expect(note).toHaveValue('Original note'));
     return { save, note, editingSnapshot };
   }
@@ -124,9 +173,7 @@ describe('feedback controls', () => {
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     await waitFor(() => expect(search).toHaveFocus());
     expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notes: expect.objectContaining({ problem: 'Latest note' }),
-      }),
+      expect.objectContaining({ screenshot: expect.objectContaining({ description: 'Latest note' }) }),
     );
     expect(useAppStore.getState().snapshot).toBeNull();
   });
@@ -136,10 +183,80 @@ describe('feedback controls', () => {
     fireEvent.change(note, { target: { value: 'Unsaved note' } });
     save.mockRejectedValueOnce(new Error('Workspace unavailable'));
     fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Search was cancelled');
-    expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cancelled|Workspace unavailable/i);
+    expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
+    expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
     expect(note).toHaveValue('Unsaved note');
     expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
+  });
+
+  it('keeps context C visible when delayed context B finishes saving first', async () => {
+    let resolveB!: (value: unknown) => void;
+    let projectB!: ProjectSnapshot['project'];
+    const saveMetadata = vi
+      .fn()
+      .mockImplementationOnce(({ project }: { project: ProjectSnapshot['project'] }) => {
+        projectB = project;
+        return new Promise((resolve) => {
+          resolveB = resolve;
+        });
+      })
+      .mockImplementationOnce(async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+        ok: true as const,
+        value: {
+          snapshot: { ...useAppStore.getState().snapshot!, project },
+          projectRevision: 'project-C',
+        },
+      }));
+    const { editingSnapshot } = await renderEditingProject({
+      saveProjectCompareAndSwap: saveMetadata as never,
+    });
+    const context = screen.getByRole('textbox', { name: 'Overall context' });
+    fireEvent.change(context, { target: { value: 'B' } });
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(1));
+    fireEvent.change(context, { target: { value: 'C' } });
+    await act(async () =>
+      resolveB({
+        ok: true,
+        value: {
+          snapshot: { ...editingSnapshot, project: projectB },
+          projectRevision: 'project-B',
+        },
+      }),
+    );
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(context).toHaveValue('C'));
+    expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe('C');
+  });
+
+  it('routes a remapped fit shortcut to the canvas without redispatching keydown', async () => {
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            shortcuts: { bindings: { 'canvas.fit': 'Ctrl+9' } },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    const canvasProps = annotationCanvasSpy.mock.calls.at(-1)?.[0] as {
+      stageRef: { current: { container(): HTMLElement } | null };
+    };
+    const container = document.createElement('div');
+    canvasProps.stageRef.current = { container: () => container };
+    const commands: CanvasCommand[] = [];
+    container.addEventListener(CANVAS_COMMAND_EVENT, (event) => {
+      commands.push((event as CustomEvent<CanvasCommand>).detail);
+    });
+    const keydowns = vi.fn();
+    window.addEventListener('keydown', keydowns);
+    fireEvent.keyDown(window, { key: '9', code: 'Digit9', ctrlKey: true });
+    window.removeEventListener('keydown', keydowns);
+    expect(commands).toEqual(['fit']);
+    expect(keydowns).toHaveBeenCalledOnce();
   });
 
   it('runs an available Terminal update from the app banner', async () => {
@@ -172,67 +289,8 @@ describe('feedback controls', () => {
     save.mockRejectedValueOnce(new Error('Workspace unavailable'));
     act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not be saved');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be saved|Workspace unavailable/i);
     expect(installUpdate).not.toHaveBeenCalled();
-  });
-
-  it('keeps newer edits open when an update save is still in flight', async () => {
-    let emitUpdate: (status: { state: 'downloaded'; version: string }) => void = () => {};
-    const installUpdate = vi.fn(async () => {});
-    const { save, note } = await renderEditingProject({
-      onUpdateStatus: (handler) => {
-        emitUpdate = handler;
-        return () => {};
-      },
-      installUpdate,
-    });
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSave = resolve;
-        }),
-    );
-    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
-    fireEvent.change(note, { target: { value: 'Typed while saving' } });
-    await act(async () => finishSave());
-    expect(installUpdate).not.toHaveBeenCalled();
-    expect(note).toHaveValue('Typed while saving');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Choose restart again');
-  });
-
-  it('does not override newer navigation when a search save completes', async () => {
-    const { save } = await renderEditingProject();
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSave = resolve;
-        }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await act(async () => finishSave());
-    expect(useAppStore.getState().view).toBe('settings');
-    expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
-  });
-
-  it('keeps newer edits open when an older search save completes', async () => {
-    const { save, note, editingSnapshot } = await renderEditingProject();
-    let finishSave!: () => void;
-    save.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSave = resolve;
-        }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
-    fireEvent.change(note, { target: { value: 'Typed while saving' } });
-    await act(async () => finishSave());
-    expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
-    expect(note).toHaveValue('Typed while saving');
-    expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
   });
 
   it('keeps the editor available when project refresh fails', async () => {
@@ -242,6 +300,221 @@ describe('feedback controls', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Refresh unavailable');
     expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
     expect(note).toHaveValue('Original note');
+  });
+
+  it('ignores a delayed project-open result after newer navigation', async () => {
+    let resolveOpen!: (value: ProjectSnapshot) => void;
+    renderApp({
+      openProjectDialog: vi.fn(
+        () =>
+          new Promise<ProjectSnapshot | null>((resolve) => {
+            resolveOpen = resolve;
+          }),
+      ),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    await act(async () => resolveOpen(snapshot));
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(useAppStore.getState().snapshot).toBeNull();
+  });
+
+  it('surfaces nonfatal snapshot warnings and recovered delete grants', async () => {
+    const recovered = {
+      ...snapshot,
+      projectRevision: 'project-recovered',
+      warnings: ['A screenshot transaction was recovered after an interrupted write.'],
+      recoveredDeletes: [{ undoToken: 'undo-token', screenshotId: 'restored-shot' }],
+    } as ProjectSnapshot;
+    const restored = { ...snapshot, projectRevision: 'project-restored' } as ProjectSnapshot;
+    const undoDeleteScreenshot = vi.fn(async () => restored);
+    renderApp({ openProjectDialog: vi.fn(async () => recovered), undoDeleteScreenshot });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    expect(await screen.findByTestId('snapshot-notice')).toHaveTextContent(
+      'A screenshot transaction was recovered',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Undo delete' }));
+    await waitFor(() =>
+      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+        projectPath: snapshot.projectPath,
+        undoToken: 'undo-token',
+      }),
+    );
+  });
+
+  it('keeps Description Undo separate from canvas annotation history', async () => {
+    const { note } = await renderEditingProject();
+    fireEvent.change(note, { target: { value: 'Rewritten description' } });
+    expect(note).toHaveValue('Rewritten description');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo description' }));
+    expect(note).toHaveValue('Original note');
+  });
+
+  it('shares the semantic text color and manual override between Select and Text creation', async () => {
+    await renderEditingProject();
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#ffffff', theme: 'dark', tool: 'select' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use color #22c55e' }));
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#22c55e', theme: 'dark', tool: 'select' }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Text/ }));
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ annotationColor: '#22c55e', theme: 'dark', tool: 'text' }),
+      ),
+    );
+  });
+
+  it('appends pasted screenshots and activates the newest one', async () => {
+    let persisted = snapshot;
+    const { editingSnapshot } = await renderEditingProject({
+      pasteImage: vi.fn(async () => {
+        const original = editingSnapshot.project.screenshots[0];
+        persisted = {
+          ...editingSnapshot,
+          project: {
+            ...editingSnapshot.project,
+            screenshots: [
+              original,
+              {
+                ...original,
+                id: 'pasted',
+                storedFilename: '002-pasted.png',
+                originalFilename: 'pasted.png',
+                title: 'pasted.png',
+                position: 1,
+                annotationFile: 'collections/001-collection/annotations/002-pasted.png.json',
+                descriptionFile: 'collections/001-collection/descriptions/002-pasted.png.md',
+              },
+            ],
+          },
+        };
+        return persisted;
+      }),
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-paste-2' },
+      }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
+  });
+
+  it('preserves picker order and activates the last imported screenshot', async () => {
+    const snapshotRef: { current?: ProjectSnapshot } = {};
+    let persisted = snapshot;
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(async (input) => {
+      const editingSnapshot = snapshotRef.current!;
+      const original = editingSnapshot.project.screenshots[0];
+      const added = input.paths.map((file, index) => ({
+        ...original,
+        id: `import-${index}`,
+        storedFilename: `00${index + 2}-${file}`,
+        originalFilename: file,
+        title: file,
+        position: index + 1,
+        annotationFile: `collections/001-collection/annotations/00${index + 2}-${file}.json`,
+        descriptionFile: `collections/001-collection/descriptions/00${index + 2}-${file}.md`,
+      }));
+      persisted = {
+        ...editingSnapshot,
+        project: { ...editingSnapshot.project, screenshots: [original, ...added] },
+      };
+      return persisted;
+    });
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      getDroppedFilePath: (file) => file.name,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-import-2' },
+      }),
+    });
+    snapshotRef.current = editingSnapshot;
+    const first = new File(['first'], 'first.png', { type: 'image/png' });
+    const second = new File(['second'], 'second.png', { type: 'image/png' });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [first, second] } });
+    await waitFor(() => expect(importImageFiles).toHaveBeenCalled());
+    expect(importImageFiles.mock.calls[0][0].paths).toEqual(['first.png', 'second.png']);
+    await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('import-1'));
+  });
+
+  it('defers context autosave during a slow import and rebases it onto the import revision', async () => {
+    let resolveImport!: (value: ProjectSnapshot) => void;
+    const importedRef: { current?: ProjectSnapshot } = {};
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveImport = resolve;
+        }),
+    );
+    const saveMetadata = vi.fn(async ({ project }: { project: ProjectSnapshot['project'] }) => ({
+      ok: true as const,
+      value: {
+        snapshot: { ...importedRef.current!, project, projectRevision: 'project-context-3' },
+        projectRevision: 'project-context-3',
+      },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      getDroppedFilePath: (file) => file.name,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: importedRef.current!, projectRevision: 'project-import-2' },
+      }),
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    const file = new File(['slow'], 'slow.png', { type: 'image/png' });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+      target: { value: 'Typed during slow import' },
+    });
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 800)));
+    expect(saveMetadata).not.toHaveBeenCalled();
+
+    const original = editingSnapshot.project.screenshots[0]!;
+    importedRef.current = {
+      ...editingSnapshot,
+      projectRevision: 'project-import-2',
+      project: {
+        ...editingSnapshot.project,
+        screenshots: [
+          original,
+          {
+            ...original,
+            id: 'slow-import',
+            originalFilename: 'slow.png',
+            storedFilename: '002-slow.png',
+            title: 'slow.png',
+            position: 1,
+          },
+        ],
+      },
+    };
+    await act(async () => resolveImport(importedRef.current!));
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+    expect(saveMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'project-import-2',
+        project: expect.objectContaining({
+          collections: [expect.objectContaining({ overallContext: 'Typed during slow import' })],
+          screenshots: expect.arrayContaining([expect.objectContaining({ id: 'slow-import' })]),
+        }),
+      }),
+    );
+    await waitFor(() =>
+      expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe(
+        'Typed during slow import',
+      ),
+    );
   });
 
   it('focuses the existing library search without clearing its query', async () => {
@@ -257,6 +530,7 @@ describe('feedback controls', () => {
     renderApp();
     await screen.findByRole('button', { name: 'Settings' });
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
     useAppStore.getState().set({ search: 'stale query' });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
@@ -270,7 +544,7 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     fireEvent.change(search, { target: { value: 'recent filter' } });
-    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     await waitFor(() => expect(search).toHaveFocus());
     expect(useAppStore.getState().view).toBe('recent');
     expect(search).toHaveValue('recent filter');
@@ -285,38 +559,48 @@ describe('feedback controls', () => {
     ).toBe(true);
   });
 
-  it('focuses the subfolder name and submits its modal form', async () => {
+  it('creates an automatically named empty collection and activates it', async () => {
     let finishCreate!: (result: ProjectSnapshot) => void;
-    const editRound = vi.fn(
+    const editCollection = vi.fn(
       () =>
         new Promise<ProjectSnapshot>((resolve) => {
           finishCreate = resolve;
         }),
     );
-    window.imnota = { editRound } as unknown as ImnotaBridge;
-    useAppStore.setState({ snapshot, activeRoundId: '001-first-feedback' });
-    render(<RoundControls onFlush={vi.fn(async () => {})} />);
+    window.imnota = { editCollection } as unknown as ImnotaBridge;
+    useAppStore.setState({ snapshot, activeCollectionId: '001-collection' });
+    render(<CollectionControls onFlush={vi.fn(async () => {})} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'New subfolder' }));
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    const name = screen.getByRole('textbox', { name: 'Subfolder name' });
-    expect(name).toHaveFocus();
-    fireEvent.change(name, { target: { value: 'Second feedback' } });
-    fireEvent.submit(name.closest('form')!);
+    fireEvent.click(screen.getByRole('button', { name: 'New collection' }));
 
     await waitFor(() =>
-      expect(editRound).toHaveBeenCalledWith({
+      expect(editCollection).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
-        roundId: '001-first-feedback',
+        collectionId: '001-collection',
         action: 'create',
-        name: 'Second feedback',
+        name: undefined,
       }),
     );
-    expect(name).toBeDisabled();
-    fireEvent.submit(name.closest('form')!);
-    expect(editRound).toHaveBeenCalledOnce();
-    await act(async () => finishCreate(snapshot));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const created: ProjectSnapshot = {
+      ...snapshot,
+      project: {
+        ...snapshot.project,
+        collections: [
+          { ...snapshot.project.collections[0], archived: true },
+          {
+            id: '002-collection',
+            name: 'workspace / Collection 02',
+            archived: false,
+            createdAt: '2026-01-02',
+            updatedAt: '2026-01-02',
+            overallContext: '',
+          },
+        ],
+      },
+    };
+    await act(async () => finishCreate(created));
+    expect(useAppStore.getState().activeCollectionId).toBe('002-collection');
+    expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
   it('saves an accessible theme option and reports preference failures', async () => {

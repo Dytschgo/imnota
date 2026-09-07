@@ -1,182 +1,182 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react';
 import type Konva from 'konva';
+import { Check, FolderOpen, FolderPlus, Heart, Layers3, Plus, Search, ShieldCheck, X } from 'lucide-react';
+import { shouldShowOnboarding } from '../shared/preferences';
 import {
-  ArrowDownAZ,
-  BookOpen,
-  Check,
-  Clipboard,
-  Copy,
-  Download,
-  FileImage,
-  FolderOpen,
-  FolderPlus,
-  Heart,
-  ImagePlus,
-  Info,
-  Keyboard,
-  Layers3,
-  Monitor,
-  MoreVertical,
-  Moon,
-  PanelLeft,
-  PanelRight,
-  Plus,
-  RefreshCw,
-  Search,
-  Settings2,
-  ShieldCheck,
-  Sparkles,
-  Sun,
-  Trash2,
-  Upload,
-  X,
-} from 'lucide-react';
+  formatShortcut,
+  resolveShortcutBindings,
+  detectShortcutPlatform,
+  type ShortcutActionId,
+} from '../shared/shortcuts';
 import type {
   Annotation,
-  AnnotationKind,
-  NoteFields,
   ProjectData,
   ProjectListItem,
   ProjectSnapshot,
   ScreenshotRecord,
   UpdateStatus,
 } from '../shared/types';
-import { DEFAULT_TAGS, EMPTY_NOTES, nowIso } from '../shared/utils';
-import { generateMarkdown } from '../shared/markdown';
-import { renderAnnotatedImage } from './export-image';
-import { prepareContext } from './prepare-context';
-import { useAppStore } from './store';
-import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { nowIso } from '../shared/utils';
+import { AppDialogs, type AppDialog, type NewProjectDraft } from './app/AppDialogs';
+import { AppShell } from './app/AppShell';
+import { useAppearance } from './app/useAppearance';
+import { usePreferences } from './app/usePreferences';
+import { useProjectPersistence } from './app/useProjectPersistence';
+import { Workspace } from './app/Workspace';
+import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
+import { dispatchCanvasCommand } from './canvas/commands';
 import { Logo } from './components/Logo';
-import { Button, EmptyState, IconButton, Modal, TextArea, TextInput } from './components/ui';
-import { Toolbar } from './components/Toolbar';
-import { UpdateControl } from './components/UpdateControl';
-import { ProblemDescriptionEditor } from './components/ProblemDescriptionEditor';
-import { CombinedContextCopy } from './components/CombinedContextCopy';
-import { version as appVersion } from '../../package.json';
+import type { ToolChoice } from './components/Toolbar';
+import { Button, EmptyState, IconButton } from './components/ui';
+import { OnboardingDemo } from './onboarding';
+import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
+import { usePromptBundleController } from './export/usePromptBundleController';
+import { SettingsView, useKeyboardShortcuts } from './settings';
+import { useAppStore, type AppView } from './store';
 
-// Intent: a designer or developer is translating a visible defect into a brief; the workbench should feel calm, exact and native.
-// Hierarchy: the screenshot canvas wins through area and contrast; controls stay compact and peripheral.
-// Palette: graphite surfaces and one indigo identity keep attention on real screenshots; semantic colors mean something.
-// Depth: borders and tonal layers carry hierarchy without a stack of floating cards.
-// Surfaces: dark base, raised rail, and one higher inspector level make the three-column workbench legible.
-// Typography: system UI with compact 12/13/14px roles keeps a dense desktop tool crisp and platform-friendly.
-// Spacing: 4px base, dense controls, generous breathing room around the active screenshot.
+export { CollectionControls } from './collection/CollectionRail';
+export { SettingsView } from './settings/SettingsView';
 
-const platformKey = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';
+interface SnapshotNotice {
+  projectPath: string;
+  warnings: string[];
+  recoveredDeletes: Array<{ undoToken: string; screenshotId: string }>;
+}
+
+interface SnapshotExtras {
+  warnings?: string[];
+  recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
+}
 
 export default function App() {
   const store = useAppStore();
+  const preferences = usePreferences();
+  const appearance = useAppearance(preferences.settings.appearance, {
+    performanceConstrained: preferences.performance.reducedEffectsRecommended,
+  });
   const [booting, setBooting] = useState(true);
-  const [modal, setModal] = useState<'new' | 'shortcuts' | 'about' | 'delete' | null>(null);
-  const [newProject, setNewProject] = useState({ name: '', description: '', tags: [] as string[] });
-  const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
-  const [image, setImage] = useState<any>(null);
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [notes, setNotes] = useState<NoteFields>(EMPTY_NOTES);
+  const [dialog, setDialog] = useState<AppDialog>(null);
+  const [newProject, setNewProject] = useState<NewProjectDraft>({ name: '', description: '' });
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const [tool, setTool] = useState<ToolChoice>('select');
+  const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [history, setHistory] = useState<Annotation[][]>([]);
   const [redo, setRedo] = useState<Annotation[][]>([]);
-  const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
-  const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
-  const [toast, setToast] = useState('');
-  const [clipboardBusy, setClipboardBusy] = useState(false);
-  const preparingContext = useRef(false);
+  const [toast, setToast] = useState<{ message: string; action?: { label: string; run(): void } } | null>(
+    null,
+  );
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const updateStatusRevision = useRef(0);
-  const restarting = useRef(false);
-  const [restartBusy, setRestartBusy] = useState(false);
-  const [installHandoff, setInstallHandoff] = useState(false);
-  const appShellRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (appShellRef.current) appShellRef.current.inert = installHandoff;
-  }, [installHandoff]);
-  const editRevision = useRef(0);
-  const [attachments, setAttachments] = useState<{
-    folderPath: string;
-    markdown: string;
-    images: Array<{ filename: string; dataUrl: string }>;
-  } | null>(null);
+  const [snapshotNotice, setSnapshotNotice] = useState<SnapshotNotice | null>(null);
+  const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const lastLoadedId = useRef<string | null>(null);
+  const projectSearchInputRef = useRef<HTMLInputElement>(null);
+  const metadataTimer = useRef<number | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
-  const projectSearchInputRef = useRef<HTMLInputElement>(null);
-  const projectSearchRequest = useRef(0);
-  const contentRevision = useRef(0);
-  const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
+  const navigationIdentity = useRef(0);
 
   const activeShot = store.activeScreenshot();
-  const workspaceSet = Boolean(store.settings.workspacePath);
-  const hasProject = Boolean(store.snapshot);
-  useEffect(() => {
-    editRevision.current++;
-  }, [annotations, notes, activeShot?.id, store.snapshot?.projectPath]);
-  useEffect(() => {
-    contentRevision.current++;
-  }, [annotations, notes, activeShot, store.snapshot]);
+  const adoptSnapshot = useCallback((snapshot: ProjectSnapshot, selectScreenshotId?: string) => {
+    useAppStore.getState().setProject(snapshot);
+    if (selectScreenshotId) useAppStore.getState().set({ activeScreenshotId: selectScreenshotId });
+    const extras = snapshot as ProjectSnapshot & SnapshotExtras;
+    setSnapshotNotice((current) => {
+      const sameProject = current?.projectPath === snapshot.projectPath;
+      const warnings = [...new Set([...(sameProject ? current.warnings : []), ...(extras.warnings ?? [])])];
+      const recoveredByToken = new Map(
+        [...(sameProject ? current.recoveredDeletes : []), ...(extras.recoveredDeletes ?? [])].map((item) => [
+          item.undoToken,
+          item,
+        ]),
+      );
+      const recoveredDeletes = [...recoveredByToken.values()];
+      return warnings.length || recoveredDeletes.length
+        ? { projectPath: snapshot.projectPath, warnings, recoveredDeletes }
+        : null;
+    });
+    setError('');
+  }, []);
+  const persistence = useProjectPersistence({
+    snapshot: store.snapshot,
+    activeScreenshot: activeShot,
+    onProject: useCallback((project) => useAppStore.getState().updateProject(project), []),
+    onSnapshot: adoptSnapshot,
+    onSelectScreenshot: useCallback((id) => useAppStore.getState().set({ activeScreenshotId: id }), []),
+  });
+  const getSavedPromptContext = useCallback(
+    () => persistence.getSavedContext(useAppStore.getState().activeCollectionId),
+    [persistence],
+  );
+  const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
+  const handlePromptAction = useCallback(
+    async (action: ReturnType<typeof promptBundles.open>) => {
+      const result = await action;
+      if (!result.ok) setError(result.error.message);
+    },
+    [promptBundles],
+  );
 
   const showToast = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(''), 3000);
+    setToast({ message });
+    window.setTimeout(() => setToast(null), 3500);
   }, []);
   const refreshProjects = useCallback(async () => {
-    const projects = await window.imnota.listProjects();
-    store.set({ projects });
-  }, [store]);
-  const openSnapshot = useCallback(async (snapshot: ProjectSnapshot) => {
-    useAppStore.getState().setProject(snapshot);
-    setError('');
-    lastLoadedId.current = null;
-    setImage(null);
-    setAnnotations([]);
-    setNotes(EMPTY_NOTES);
-  }, []);
-  const loadContent = useCallback(async (projectPath: string, shot: ScreenshotRecord) => {
-    try {
-      const loaded = await window.imnota.loadScreenshotContent({ projectPath, screenshot: shot });
-      const current = useAppStore.getState();
-      if (current.snapshot?.projectPath !== projectPath || current.activeScreenshotId !== shot.id) return;
-      setImage(loaded.image);
-      setAnnotations(loaded.annotations);
-      setNotes(loaded.notes);
-      setHistory([]);
-      setRedo([]);
-      setSelectedAnnotation(null);
-      lastLoadedId.current = shot.id;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The screenshot could not be loaded.');
-    }
+    useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const settings = await window.imnota.getSettings();
+    let active = true;
+    void window.imnota
+      .getSettings()
+      .then(async (settings) => {
+        if (!active) return;
         useAppStore.getState().set({ settings });
-        if (settings.workspacePath) {
-          const projects = await window.imnota.listProjects();
-          useAppStore.getState().set({ projects });
-          if (settings.openRecentOnLaunch && projects[0])
-            await openSnapshot(await window.imnota.loadProject(projects[0].projectPath));
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Imnota could not start.');
-      } finally {
-        setBooting(false);
-      }
-    })();
-  }, [openSnapshot]);
+        if (!settings.workspacePath) return;
+        const projects = await window.imnota.listProjects();
+        if (!active) return;
+        useAppStore.getState().set({ projects });
+        if (settings.openRecentOnLaunch && projects[0])
+          adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Imnota could not start.'))
+      .finally(() => active && setBooting(false));
+    return () => {
+      active = false;
+    };
+  }, [adoptSnapshot]);
+
   useEffect(() => {
-    const theme =
-      store.settings.theme === 'system'
-        ? window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'light'
-          : 'dark'
-        : store.settings.theme;
-    document.documentElement.dataset.theme = theme;
-  }, [store.settings.theme]);
+    if (
+      preferences.result &&
+      shouldShowOnboarding(preferences.result.settings.onboarding, preferences.result.profile)
+    )
+      setShowOnboarding(true);
+  }, [preferences.result]);
+
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${store.settings.interfaceScale * 100}%`;
+  }, [store.settings.interfaceScale]);
+
+  useEffect(() => {
+    const unsubscribe = window.imnota.onUpdateStatus((status) => setUpdateStatus(status));
+    void window.imnota
+      .getUpdateStatus()
+      .then(setUpdateStatus)
+      .catch(() => undefined);
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    setHistory([]);
+    setRedo([]);
+    setSelectedAnnotationId(null);
+  }, [persistence.loadedScreenshotId]);
+
   useEffect(() => {
     if (!projectSearchFocusRequest || !['projects', 'recent', 'favourites'].includes(store.view)) return;
     const frame = window.requestAnimationFrame(() => {
@@ -185,995 +185,785 @@ export default function App() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [projectSearchFocusRequest, store.view]);
+
+  const flushAll = useCallback(async (): Promise<boolean> => {
+    if (metadataTimer.current !== null) {
+      window.clearTimeout(metadataTimer.current);
+      metadataTimer.current = null;
+    }
+    if (!(await persistence.flush())) return false;
+    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
+    return true;
+  }, [persistence]);
+
   useEffect(() => {
-    if (!store.snapshot || !activeShot || lastLoadedId.current === activeShot.id) return;
-    void loadContent(store.snapshot.projectPath, activeShot);
-  }, [activeShot, store.snapshot, loadContent]);
-  useEffect(() => {
-    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return;
-    setSaving('saving');
-    const input = { projectPath: store.snapshot.projectPath, screenshot: activeShot, annotations, notes };
-    let saved = false;
-    const save = () => {
-      if (saved) return;
-      saved = true;
-      void window.imnota
-        .saveScreenshotContent(input)
-        .then(() => setSaving('saved'))
-        .catch(() => {
-          setSaving('error');
-          setError('Your changes could not be saved. Keep Imnota open and check your workspace.');
-        });
-    };
-    const timer = window.setTimeout(save, 650);
-    return () => {
-      window.clearTimeout(timer);
-      const current = useAppStore.getState();
-      if (
-        current.activeScreenshotId !== input.screenshot.id ||
-        current.snapshot?.projectPath !== input.projectPath
-      )
-        save();
-    };
-  }, [annotations, notes, activeShot, store.snapshot]);
-  useEffect(() => {
-    const beforeClose = (event: BeforeUnloadEvent) => {
-      if (allowClose.current || !store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id)
-        return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowClose.current || !persistence.hasUnsavedChanges) return;
       event.preventDefault();
       event.returnValue = '';
-      void window.imnota
-        .saveScreenshotContent({
-          projectPath: store.snapshot.projectPath,
-          screenshot: activeShot,
-          annotations,
-          notes,
-        })
-        .then(() => {
+      void flushAll().then((saved) => {
+        if (saved) {
           allowClose.current = true;
           window.close();
-        })
-        .catch(() =>
-          setError(
-            'Closing was cancelled because your edits could not be saved. Check the workspace and try again.',
-          ),
-        );
-    };
-    window.addEventListener('beforeunload', beforeClose);
-    return () => window.removeEventListener('beforeunload', beforeClose);
-  }, [annotations, notes, store.snapshot, activeShot]);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-      if (target instanceof HTMLElement && target.closest('[role="dialog"]')) return;
-      const typing =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT' ||
-        target.isContentEditable;
-      const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && event.key.toLowerCase() === 'f') {
-        event.preventDefault();
-        void openProjectSearch();
-        return;
-      }
-      if (typing && !(modifier && event.key.toLowerCase() === 's')) return;
-      if (modifier && event.key.toLowerCase() === 'n') {
-        event.preventDefault();
-        setModal('new');
-      } else if (modifier && event.key.toLowerCase() === 'o') {
-        event.preventDefault();
-        void window.imnota.openProjectDialog().then((snapshot) => {
-          if (snapshot) void openSnapshot(snapshot);
-        });
-      } else if (modifier && event.key.toLowerCase() === 'v' && store.snapshot) {
-        event.preventDefault();
-        if (copiedAnnotation.current) {
-          const copy = {
-            ...copiedAnnotation.current,
-            id: crypto.randomUUID(),
-            x: copiedAnnotation.current.x + 16,
-            y: copiedAnnotation.current.y + 16,
-            zIndex: annotations.length,
-          };
-          changeAnnotations([...annotations, copy]);
-          setSelectedAnnotation(copy.id);
-        } else void pasteImage();
-      } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
-        event.preventDefault();
-        void copyContext();
-      } else if (modifier && event.key.toLowerCase() === 'c' && selectedAnnotation) {
-        event.preventDefault();
-        copiedAnnotation.current = structuredClone(
-          annotations.find((item) => item.id === selectedAnnotation) ?? null,
-        );
-        showToast('Annotation copied inside Imnota. Use Add screenshot to paste an image.');
-      } else if (modifier && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        void persistCurrent();
-      } else if (modifier && event.key.toLowerCase() === 'z') {
-        event.preventDefault();
-        if (event.shiftKey) redoAction();
-        else undo();
-      } else if (!modifier && (event.key === 'Delete' || event.key === 'Backspace') && selectedAnnotation) {
-        event.preventDefault();
-        changeAnnotations(annotations.filter((item) => item.id !== selectedAnnotation));
-        setSelectedAnnotation(null);
-      } else if (event.key === 'Escape') {
-        setTool('select');
-        setSelectedAnnotation(null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  });
-  useEffect(() => {
-    let active = true;
-    const revisionAtMount = updateStatusRevision.current;
-    const unsubscribe = window.imnota.onUpdateStatus((status) => {
-      updateStatusRevision.current++;
-      if (active) {
-        if (status.state === 'downloaded' && status.installing === false) {
-          allowClose.current = false;
-          setInstallHandoff(false);
         }
-        setUpdateStatus(status);
-        if (status.state === 'downloaded' && !status.installing && !status.message)
-          showToast(`Imnota ${status.version ?? 'update'} is ready. Restart to apply it.`);
-      }
-    });
-    void window.imnota
-      .getUpdateStatus()
-      .then((status) => {
-        if (active && updateStatusRevision.current === revisionAtMount) setUpdateStatus(status);
-      })
-      .catch(() => {
-        // Settings offers an explicit retry if initial status cannot be read.
       });
-    return () => {
-      active = false;
-      unsubscribe();
     };
-  }, [showToast]);
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [flushAll, persistence.hasUnsavedChanges]);
 
-  async function persistCurrent(): Promise<boolean> {
-    if (!store.snapshot || !activeShot || lastLoadedId.current !== activeShot.id) return true;
-    try {
-      await window.imnota.saveScreenshotContent({
-        projectPath: store.snapshot.projectPath,
-        screenshot: { ...activeShot, updatedAt: nowIso() },
-        annotations,
-        notes,
-      });
-      const project = {
-        ...store.snapshot.project,
-        screenshots: store.snapshot.project.screenshots.map((s) =>
-          s.id === activeShot.id ? { ...activeShot, updatedAt: nowIso() } : s,
-        ),
-        updatedAt: nowIso(),
-      };
-      if (useAppStore.getState().snapshot === store.snapshot) store.updateProject(project);
-      setSaving('saved');
-      return true;
-    } catch {
-      setSaving('error');
-      setError('Your changes could not be saved. Check that the workspace is still available.');
-      return false;
-    }
-  }
-  async function restartToUpdate() {
-    if (restarting.current || updateStatus?.installing) return;
-    restarting.current = true;
-    setRestartBusy(true);
-    const revision = editRevision.current;
-    try {
-      if (!(await persistCurrent())) return;
-      if (revision !== editRevision.current) {
-        setError('Your changes were updated while saving. Choose restart again to save them first.');
+  const queueProjectSave = useCallback(
+    (project: ProjectData, changedShot?: ScreenshotRecord) => {
+      if (changedShot) {
+        useAppStore.getState().updateProject(project);
+        persistence.markScreenshotDirty(changedShot);
         return;
       }
-      allowClose.current = true;
-      setInstallHandoff(true);
-      await window.imnota.installUpdate();
-    } catch {
-      allowClose.current = false;
-      setInstallHandoff(false);
-      setError('The update could not be installed. Try restarting Imnota again.');
-    } finally {
-      restarting.current = false;
-      setRestartBusy(false);
-    }
-  }
-  async function downloadUpdate() {
-    try {
-      await window.imnota.downloadUpdate();
-    } catch {
-      setError('The update could not be downloaded. Check your connection and try again.');
-    }
-  }
-  async function openProjectSearch() {
-    if (!workspaceSet) {
-      setError('Choose a workspace before searching projects.');
-      return;
-    }
-    if (['projects', 'recent', 'favourites'].includes(store.view) && !store.snapshot) {
-      setProjectSearchFocusRequest((request) => request + 1);
-      return;
-    }
-    const request = ++projectSearchRequest.current;
-    const sourceSnapshot = store.snapshot;
-    const sourceView = store.view;
-    const sourceRevision = contentRevision.current;
-    const stillCurrent = () => {
+      // Queue the concrete edit before any asynchronous save can publish an older snapshot.
+      persistence.queueProjectMetadata(project);
+      useAppStore.getState().updateProject(project);
+      if (metadataTimer.current !== null) window.clearTimeout(metadataTimer.current);
+      metadataTimer.current = window.setTimeout(() => {
+        metadataTimer.current = null;
+        void persistence.flushProjectMetadata();
+      }, 700);
+    },
+    [persistence],
+  );
+
+  const updateShot = useCallback(
+    (patch: Partial<ScreenshotRecord>) => {
       const current = useAppStore.getState();
-      return (
-        request === projectSearchRequest.current &&
-        current.snapshot === sourceSnapshot &&
-        current.view === sourceView &&
-        contentRevision.current === sourceRevision
+      const shot = current.activeScreenshot();
+      if (!current.snapshot || !shot) return;
+      const nextShot = { ...shot, ...patch, updatedAt: nowIso() };
+      queueProjectSave(
+        {
+          ...current.snapshot.project,
+          updatedAt: nowIso(),
+          screenshots: current.snapshot.project.screenshots.map((item) =>
+            item.id === shot.id ? nextShot : item,
+          ),
+        },
+        nextShot,
       );
-    };
-    if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id) {
-      setSaving('saving');
-      try {
-        await window.imnota.saveScreenshotContent({
-          projectPath: store.snapshot.projectPath,
-          screenshot: activeShot,
-          annotations,
-          notes,
-        });
-        setSaving('saved');
-      } catch {
-        if (!stillCurrent()) return;
-        setSaving('error');
-        setError('Your changes could not be saved. Search was cancelled so you can keep working.');
+    },
+    [queueProjectSave],
+  );
+
+  const changeAnnotations = useCallback(
+    (next: Annotation[]) => {
+      setHistory((items) => [...items, persistence.annotations]);
+      setRedo([]);
+      persistence.changeAnnotations(next);
+    },
+    [persistence],
+  );
+  const undoAnnotations = useCallback(() => {
+    const previous = history.at(-1);
+    if (!previous) return;
+    setRedo((items) => [...items, persistence.annotations]);
+    persistence.changeAnnotations(previous);
+    setHistory((items) => items.slice(0, -1));
+  }, [history, persistence]);
+  const redoAnnotations = useCallback(() => {
+    const next = redo.at(-1);
+    if (!next) return;
+    setHistory((items) => [...items, persistence.annotations]);
+    persistence.changeAnnotations(next);
+    setRedo((items) => items.slice(0, -1));
+  }, [persistence, redo]);
+  function changeDescription(value: string) {
+    if (!activeShot || value === activeShot.description) return;
+    setDescriptionHistory((items) => ({
+      ...items,
+      [activeShot.id]: [...(items[activeShot.id] ?? []), activeShot.description],
+    }));
+    updateShot({ description: value });
+  }
+  function undoDescription() {
+    if (!activeShot) return;
+    const values = descriptionHistory[activeShot.id] ?? [];
+    const previous = values.at(-1);
+    if (previous === undefined) return;
+    setDescriptionHistory((items) => ({ ...items, [activeShot.id]: values.slice(0, -1) }));
+    updateShot({ description: previous });
+  }
+
+  const guardedSnapshot = useCallback(
+    async (action: () => Promise<ProjectSnapshot | null | undefined>, failure: string) => {
+      const identity = ++navigationIdentity.current;
+      if (!(await flushAll())) {
+        setError(`${failure} was cancelled so your unsaved work stays open.`);
         return;
       }
-      if (!stillCurrent()) return;
+      const nativeMutationToken = persistence.beginNativeMutation();
+      try {
+        const next = await action();
+        if (identity !== navigationIdentity.current) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          return;
+        }
+        if (next) {
+          if (!(await persistence.adoptAuthoritativeSnapshot(next, nativeMutationToken)))
+            setError(`${failure} could not safely adopt the latest project state.`);
+        } else await persistence.cancelNativeMutation(nativeMutationToken);
+      } catch (reason) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        if (identity === navigationIdentity.current)
+          setError(reason instanceof Error ? reason.message : failure);
+      }
+    },
+    [flushAll, persistence],
+  );
+
+  async function beginCurrentProjectMutation(): Promise<number | null> {
+    if (!(await flushAll())) return null;
+    return persistence.beginNativeMutation();
+  }
+
+  async function navigate(view: AppView) {
+    const identity = ++navigationIdentity.current;
+    if (!(await flushAll())) {
+      setError('Navigation was cancelled so your unsaved work stays open.');
+      return;
     }
     try {
-      await refreshProjects();
-      if (!stillCurrent()) return;
-      store.set({ view: 'projects', snapshot: null, search: '' });
-      setProjectSearchFocusRequest((request) => request + 1);
-    } catch (err) {
-      if (!stillCurrent()) return;
-      setError(err instanceof Error ? err.message : 'Projects could not be refreshed for search.');
+      const opensLibrary = ['projects', 'recent', 'favourites'].includes(view);
+      if (opensLibrary) await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
+      if (!(await flushAll())) {
+        setError('Navigation was cancelled because newer edits could not be saved.');
+        return;
+      }
+      const state = useAppStore.getState();
+      const currentIsLibrary = ['projects', 'recent', 'favourites'].includes(state.view) && !state.snapshot;
+      state.set({
+        view,
+        snapshot: opensLibrary || view === 'settings' ? null : state.snapshot,
+        search: opensLibrary && !currentIsLibrary ? '' : state.search,
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The project library could not be refreshed.');
     }
   }
+
   async function chooseWorkspace() {
     try {
       const settings = await window.imnota.chooseWorkspace();
-      if (settings) {
-        store.set({ settings, projects: await window.imnota.listProjects() });
-        showToast('Workspace ready');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Workspace could not be selected.');
+      if (!settings) return false;
+      store.set({ settings, projects: await window.imnota.listProjects() });
+      showToast('Workspace ready');
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Workspace could not be selected.');
+      return false;
     }
   }
   async function createProject() {
     if (!newProject.name.trim()) return;
+    if (!(await flushAll())) {
+      setError('Project creation was cancelled so your unsaved work stays open.');
+      return;
+    }
+    setDialogBusy(true);
     try {
+      if (!store.settings.workspacePath && !(await chooseWorkspace())) return;
       const snapshot = await window.imnota.createProject(newProject);
-      setModal(null);
-      setNewProject({ name: '', description: '', tags: [] });
+      if (!(await flushAll())) {
+        setError(
+          'The project was created, but the current project stayed open because newer edits could not be saved.',
+        );
+        return;
+      }
+      setDialog(null);
+      setNewProject({ name: '', description: '' });
       await refreshProjects();
-      await openSnapshot(snapshot);
+      adoptSnapshot(snapshot);
       showToast('Project created');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Project could not be created.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Project could not be created.');
+    } finally {
+      setDialogBusy(false);
     }
   }
+
   async function importPaths(paths: string[]) {
-    if (!store.snapshot || !paths.length) return;
+    const current = useAppStore.getState();
+    if (!current.snapshot || !paths.length) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
+      const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
       const snapshot = await window.imnota.importImageFiles({
-        projectPath: store.snapshot.projectPath,
-        roundId: store.activeRoundId,
+        projectPath: current.snapshot.projectPath,
+        collectionId: current.activeCollectionId,
         paths,
       });
-      await openSnapshot(snapshot);
+      const newest = snapshot.project.screenshots
+        .filter((shot) => shot.collectionId === current.activeCollectionId && !existingIds.has(shot.id))
+        .sort((left, right) => left.position - right.position)
+        .at(-1);
+      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id, nativeMutationToken))) return;
       await refreshProjects();
       showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The screenshots could not be imported.');
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshots could not be imported.');
     }
-  }
-  async function onFileInput(event: ChangeEvent<HTMLInputElement>) {
-    const paths = Array.from(event.target.files ?? []).map((file) => window.imnota.getDroppedFilePath(file));
-    await importPaths(paths);
-    event.target.value = '';
   }
   async function pasteImage() {
-    if (!store.snapshot) return;
+    const current = useAppStore.getState();
+    if (!current.snapshot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
-      await openSnapshot(await window.imnota.pasteImage(store.snapshot.projectPath, store.activeRoundId));
+      const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
+      const snapshot = await window.imnota.pasteImage(
+        current.snapshot.projectPath,
+        current.activeCollectionId,
+      );
+      if (
+        !(await persistence.acceptMutationSnapshot(
+          snapshot,
+          snapshot.project.screenshots.find((shot) => !existingIds.has(shot.id))?.id,
+          nativeMutationToken,
+        ))
+      )
+        return;
       await refreshProjects();
       showToast('Screenshot pasted');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The clipboard does not contain an image.');
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The clipboard does not contain an image.');
     }
   }
-  function changeAnnotations(next: Annotation[]) {
-    setHistory((items) => [...items, annotations]);
-    setRedo([]);
-    setAnnotations(next);
+  async function selectShot(id: string) {
+    if (id !== store.activeScreenshotId && (await flushAll()))
+      useAppStore.getState().set({ activeScreenshotId: id });
   }
-  function undo() {
-    const previous = history.at(-1);
-    if (!previous) return;
-    setRedo((items) => [...items, annotations]);
-    setAnnotations(previous);
-    setHistory((items) => items.slice(0, -1));
+  async function selectCollection(id: string) {
+    if (id !== store.activeCollectionId && (await flushAll())) useAppStore.getState().setActiveCollection(id);
   }
-  function redoAction() {
-    const next = redo.at(-1);
-    if (!next) return;
-    setHistory((items) => [...items, annotations]);
-    setAnnotations(next);
-    setRedo((items) => items.slice(0, -1));
-  }
-  async function copyContext() {
-    if (preparingContext.current) return;
-    preparingContext.current = true;
+  async function duplicateScreenshot() {
+    const current = useAppStore.getState();
+    const shot = current.activeScreenshot();
+    if (!current.snapshot || !shot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
     try {
-      const result = await exportPackage(false);
-      if (!result) return;
-      await window.imnota.copyText(result.markdown);
-      setAttachments(result);
-      showToast(
-        `AI context copied · ${result.images.length} screenshot${result.images.length === 1 ? '' : 's'}`,
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The context could not be copied.');
-    } finally {
-      preparingContext.current = false;
-    }
-  }
-  const buildMarkdown = useCallback(async () => {
-    if (!store.snapshot) return '';
-    const shots = store.snapshot.project.screenshots.filter(
-      (shot) => shot.includeInExport && (store.exportAllRounds || shot.roundId === store.activeRoundId),
-    );
-    const cache: Record<string, { annotations: Annotation[]; notes: NoteFields }> = {
-      ...(activeShot && lastLoadedId.current === activeShot.id
-        ? { [activeShot.id]: { annotations, notes } }
-        : {}),
-    };
-    for (const shot of shots.filter((shot) => !cache[shot.id])) {
-      const loaded = await window.imnota.loadScreenshotContent({
-        projectPath: store.snapshot!.projectPath,
+      const existing = new Set(current.snapshot.project.screenshots.map((item) => item.id));
+      const snapshot = await window.imnota.duplicateScreenshot({
+        projectPath: current.snapshot.projectPath,
         screenshot: shot,
       });
-      cache[shot.id] = { notes: loaded.notes, annotations: loaded.annotations };
-    }
-    return generateMarkdown(
-      store.snapshot.project,
-      shots,
-      Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.notes ?? EMPTY_NOTES])),
-      Object.fromEntries(shots.map((shot) => [shot.id, cache[shot.id]?.annotations ?? []])),
-    );
-  }, [store.snapshot, store.activeRoundId, store.exportAllRounds, activeShot, annotations, notes]);
-  async function exportPackage(openFolder = true) {
-    if (!store.snapshot) return;
-    try {
-      const prepared = await prepareContext(
-        {
-          project: store.snapshot.project,
-          projectPath: store.snapshot.projectPath,
-          roundId: store.exportAllRounds ? undefined : store.activeRoundId,
-          active:
-            activeShot && lastLoadedId.current === activeShot.id && image
-              ? { id: activeShot.id, content: { image, annotations, notes } }
-              : undefined,
-        },
-        window.imnota.loadScreenshotContent,
-        renderAnnotatedImage,
-        (index, count) => showToast(`Rendering screenshot ${index} of ${count}…`),
-      );
-      const result = await window.imnota.exportPackage({
-        projectPath: prepared.projectPath,
-        roundId: prepared.roundId,
-        markdown: prepared.markdown,
-        annotatedImages: prepared.images,
-        includeOriginal: prepared.preferences.includeOriginalScreenshots,
-        includeAnnotations: prepared.preferences.includeAnnotationMetadata,
-      });
-      showToast(`Exported ${result.count} screenshot${result.count === 1 ? '' : 's'} to the project folder`);
-      if (openFolder) await window.imnota.openPath(result.folderPath);
-      return { folderPath: result.folderPath, images: prepared.images, markdown: prepared.markdown };
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The export could not be created.');
+      if (
+        !(await persistence.acceptMutationSnapshot(
+          snapshot,
+          snapshot.project.screenshots.find((item) => !existing.has(item.id))?.id,
+          nativeMutationToken,
+        ))
+      )
+        return;
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshot could not be duplicated.');
     }
   }
-  async function deleteActiveProject() {
-    if (!store.snapshot) return;
+  async function deleteScreenshot() {
+    const current = useAppStore.getState();
+    const shot = current.activeScreenshot();
+    if (!current.snapshot || !shot) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
+    try {
+      const result = await window.imnota.deleteScreenshot({
+        projectPath: current.snapshot.projectPath,
+        screenshotId: shot.id,
+      });
+      if (!(await persistence.acceptMutationSnapshot(result.snapshot, undefined, nativeMutationToken)))
+        return;
+      setToast({
+        message: 'Screenshot moved to trash.',
+        action: {
+          label: 'Undo',
+          run: () => void undoDeletedScreenshot(current.snapshot!.projectPath, result.undoToken, shot.id),
+        },
+      });
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshot could not be moved to trash.');
+    }
+  }
+  async function undoDeletedScreenshot(projectPath: string, undoToken: string, screenshotId: string) {
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
+    try {
+      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
+      await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken);
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
+    }
+  }
+  async function deleteProject() {
+    if (!store.snapshot || !(await flushAll())) return;
+    setDialogBusy(true);
     try {
       await window.imnota.deleteProject(store.snapshot.projectPath);
-      setModal(null);
+      setDialog(null);
       store.setProject(null);
       await refreshProjects();
       showToast('Project moved to the system trash');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The project could not be deleted.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The project could not be deleted.');
+    } finally {
+      setDialogBusy(false);
+    }
+  }
+  async function restoreRecoveredDelete(undoToken: string, screenshotId: string) {
+    const current = useAppStore.getState().snapshot;
+    if (!current) return;
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return;
+    try {
+      const restored = await window.imnota.undoDeleteScreenshot({
+        projectPath: current.projectPath,
+        undoToken,
+      });
+      if (!(await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken))) return;
+      setSnapshotNotice((notice) => {
+        if (!notice) return null;
+        const recoveredDeletes = notice.recoveredDeletes.filter((item) => item.undoToken !== undoToken);
+        return notice.warnings.length || recoveredDeletes.length ? { ...notice, recoveredDeletes } : null;
+      });
+      showToast('Recovered screenshot restored');
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      setError(reason instanceof Error ? reason.message : 'The recovered screenshot could not be restored.');
     }
   }
   async function toggleFavourite() {
     if (!store.snapshot) return;
-    const project = {
+    queueProjectSave({
       ...store.snapshot.project,
       favourite: !store.snapshot.project.favourite,
       updatedAt: nowIso(),
-    };
-    store.updateProject(project);
-    try {
-      await window.imnota.saveProject(store.snapshot.projectPath, project);
-      await refreshProjects();
-    } catch {
-      setError('The favourite state could not be saved.');
-    }
+    });
   }
-  async function handleDrop(event: React.DragEvent) {
-    event.preventDefault();
-    const paths = Array.from(event.dataTransfer.files).map((file) => window.imnota.getDroppedFilePath(file));
-    await importPaths(paths);
+  async function openProjectSearch() {
+    if (!store.settings.workspacePath) {
+      setError('Choose a workspace before searching projects.');
+      return;
+    }
+    if (!store.snapshot && ['projects', 'recent', 'favourites'].includes(store.view)) {
+      setProjectSearchFocusRequest((value) => value + 1);
+      return;
+    }
+    await navigate('projects');
+    if (!useAppStore.getState().snapshot) setProjectSearchFocusRequest((value) => value + 1);
   }
 
-  if (booting)
+  const platform = detectShortcutPlatform();
+  const resolvedShortcuts = useMemo(
+    () => resolveShortcutBindings(preferences.settings.shortcuts.bindings, platform),
+    [platform, preferences.settings.shortcuts.bindings],
+  );
+  const shortcutLabel = useCallback(
+    (id: ShortcutActionId) => formatShortcut(resolvedShortcuts[id], platform),
+    [platform, resolvedShortcuts],
+  );
+  const orderedShots = useMemo(
+    () =>
+      store.snapshot?.project.screenshots
+        .filter((item) => item.collectionId === store.activeCollectionId)
+        .sort((left, right) => left.position - right.position) ?? [],
+    [store.activeCollectionId, store.snapshot],
+  );
+  const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
+    'project.new': () => setDialog('new-project'),
+    'project.open': () =>
+      void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project'),
+    'project.search': () => void openProjectSearch(),
+    'edit.save': () => void flushAll(),
+    'edit.undo': undoAnnotations,
+    'edit.redo': redoAnnotations,
+    'edit.copyAnnotation': () => {
+      copiedAnnotation.current = structuredClone(
+        persistence.annotations.find((item) => item.id === selectedAnnotationId) ?? null,
+      );
+      if (copiedAnnotation.current) showToast('Annotation copied inside Imnota.');
+    },
+    'edit.paste': () => {
+      if (copiedAnnotation.current) {
+        const copy = {
+          ...copiedAnnotation.current,
+          id: crypto.randomUUID(),
+          x: copiedAnnotation.current.x + 16,
+          y: copiedAnnotation.current.y + 16,
+          zIndex: persistence.annotations.length,
+        };
+        changeAnnotations([...persistence.annotations, copy]);
+        setSelectedAnnotationId(copy.id);
+      } else void pasteImage();
+    },
+    'edit.deleteAnnotation': () => {
+      if (selectedAnnotationId) {
+        changeAnnotations(persistence.annotations.filter((item) => item.id !== selectedAnnotationId));
+        setSelectedAnnotationId(null);
+      }
+    },
+    'tool.select': () => setTool('select'),
+    'tool.text': () => setTool('text'),
+    'tool.arrow': () => setTool('arrow'),
+    'tool.rectangle': () => setTool('rectangle'),
+    'tool.highlight': () => setTool('highlight'),
+    'tool.step': () => setTool('step'),
+    'screenshot.previous': () => {
+      const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
+      if (index > 0) void selectShot(orderedShots[index - 1]!.id);
+    },
+    'screenshot.next': () => {
+      const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
+      if (index >= 0 && index < orderedShots.length - 1) void selectShot(orderedShots[index + 1]!.id);
+    },
+    'screenshot.toggleExport': () =>
+      activeShot && updateShot({ includeInExport: !activeShot.includeInExport }),
+    'prompt.copy': () => void handlePromptAction(promptBundles.copyFresh(1)),
+    'panel.toggleCollections': () => store.set({ leftPanelOpen: !store.leftPanelOpen }),
+    'panel.toggleInspector': () => store.set({ rightPanelOpen: !store.rightPanelOpen }),
+    'canvas.fit': () => dispatchCanvasCommand(stageRef.current, 'fit'),
+    'canvas.actualSize': () => dispatchCanvasCommand(stageRef.current, 'actual-size'),
+    'collection.new': () =>
+      document.querySelector<HTMLButtonElement>('[data-testid="new-collection"]')?.click(),
+    'collection.overallContext': () => {
+      const details = document.querySelector<HTMLDetailsElement>('.collection-context');
+      if (details) details.open = true;
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Overall context"]')?.focus();
+    },
+  };
+  useKeyboardShortcuts({ bindings: preferences.settings.shortcuts.bindings, handlers });
+
+  if (booting || preferences.loading)
     return (
       <div className="boot-screen">
         <Logo />
         <span>Preparing your workspace…</span>
       </div>
     );
+  const visibleError = error || persistence.error || preferences.error;
+  const creationColorTool: ToolChoice = tool === 'select' ? 'text' : tool;
+  const creationKind: Annotation['kind'] = creationColorTool === 'eraser' ? 'arrow' : creationColorTool;
+  const annotationColor =
+    toolColors[creationColorTool] ?? semanticAnnotationColor(creationKind, appearance.theme);
+  const selectedAnnotation = persistence.annotations.find((item) => item.id === selectedAnnotationId);
+  const paletteColor = selectedAnnotation
+    ? selectedAnnotation.kind === 'text'
+      ? liveTextColor(selectedAnnotation.fill ?? selectedAnnotation.stroke, appearance.theme)
+      : ((selectedAnnotation.fill === 'transparent' ? selectedAnnotation.stroke : selectedAnnotation.fill) ??
+        semanticAnnotationColor(selectedAnnotation.kind, appearance.theme))
+    : annotationColor;
   return (
     <>
-      <div
-        ref={appShellRef}
-        className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''}`}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          if (hasProject) void handleDrop(event);
-        }}
+      <AppShell
+        searchShortcut={shortcutLabel('project.search')}
+        onNavigate={navigate}
+        onNewProject={() => setDialog('new-project')}
+        onOpenProject={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
+        onSearch={openProjectSearch}
+        onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
+        onToggleFavourite={toggleFavourite}
+        onAbout={() => setDialog('about')}
+        onShortcuts={() => setDialog('shortcuts')}
+        onDropFiles={(files) =>
+          importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
+        }
       >
-        {renderSidebar()}
-        <main className="main-shell">
-          <Topbar
-            onNew={() => setModal('new')}
-            onOpen={async () => {
-              try {
-                const snapshot = await window.imnota.openProjectDialog();
-                if (snapshot) await openSnapshot(snapshot);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Project could not be opened.');
-              }
-            }}
-            onSearch={() => void openProjectSearch()}
-            onCopy={copyContext}
-            onOpenExport={async () => {
-              if (store.snapshot)
-                await window.imnota.openPath(
-                  store.exportAllRounds
-                    ? `${store.snapshot.projectPath}/exports`
-                    : `${store.snapshot.projectPath}/rounds/${store.activeRoundId}/exports`,
-                );
-            }}
-            onToggleFavourite={() => void toggleFavourite()}
-          />
-          {error && (
-            <div className="error-banner" role="alert">
-              <ShieldCheck size={16} />
-              <span>{error}</span>
-              <IconButton label="Dismiss" onClick={() => setError('')}>
-                <X size={16} />
-              </IconButton>
-            </div>
-          )}
-          {updateStatus?.state === 'error' && (
-            <div className="update-banner" role="alert">
-              <Download size={16} />
-              <span>{updateStatus.message ?? 'The update failed. Try checking again.'}</span>
-              <Button
-                onClick={() =>
-                  void window.imnota
-                    .checkForUpdates()
-                    .catch(() => setError('Could not check for updates. Try again.'))
-                }
-              >
-                Retry update check
-              </Button>
-            </div>
-          )}
-          {updateStatus?.state === 'available' && (
-            <div className="update-banner" role="status">
-              <Download size={16} />
-              <span>
-                {updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is available.`}
-                {updateStatus.terminalCommand
-                  ? ' Run the verified update in Terminal.'
-                  : updateStatus.manualDownload
-                    ? ' Download it for the selected channel.'
-                    : ''}
-              </span>
-              <Button onClick={() => void downloadUpdate()}>
-                {updateStatus.terminalCommand
-                  ? 'Run update in Terminal'
-                  : updateStatus.manualDownload
-                    ? 'Open download'
-                    : 'Download update'}
-              </Button>
-            </div>
-          )}
-          {updateStatus?.state === 'downloading' && (
-            <div className="update-banner" role="status">
-              <Download size={16} />
-              <span>Downloading update… {Math.round(updateStatus.percent ?? 0)}%</span>
-              <div
-                className="update-progress"
-                role="progressbar"
-                aria-label="Update download progress"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(updateStatus.percent ?? 0)}
-              >
-                <span
-                  style={{
-                    transform: `scaleX(${Math.max(0, Math.min(100, updateStatus.percent ?? 0)) / 100})`,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-          {updateStatus?.state === 'downloaded' && (
-            <div className="update-banner" role="status">
-              <Download size={16} />
-              <span>
-                {updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is ready to install.`}
-              </span>
-              <Button
-                variant="soft"
-                disabled={restartBusy || updateStatus.installing}
-                onClick={() => void restartToUpdate()}
-              >
-                {restartBusy || updateStatus.installing ? 'Preparing restart…' : 'Restart to update'}
-              </Button>
-            </div>
-          )}
-          {!workspaceSet ? (
-            <Welcome chooseWorkspace={chooseWorkspace} />
-          ) : store.view === 'settings' ? (
-            <SettingsView onInstall={restartToUpdate} />
-          ) : !hasProject ? (
-            <Library
-              onNew={() => setModal('new')}
-              onOpen={async () => {
-                const snapshot = await window.imnota.openProjectDialog();
-                if (snapshot) await openSnapshot(snapshot);
+        {visibleError && (
+          <div className="error-banner" role="alert">
+            <ShieldCheck size={16} aria-hidden="true" />
+            <span>{visibleError}</span>
+            <IconButton
+              label="Dismiss error"
+              onClick={() => {
+                setError('');
+                persistence.clearError();
+                preferences.clearError();
               }}
-              searchInputRef={projectSearchInputRef}
-            />
-          ) : store.view === 'context' ? (
-            <ContextBuilder buildMarkdown={buildMarkdown} onExport={exportPackage} onCopy={copyContext} />
-          ) : (
-            <Workspace
-              onFlush={async () => {
-                if (store.snapshot && activeShot && lastLoadedId.current === activeShot.id)
-                  await window.imnota.saveScreenshotContent({
-                    projectPath: store.snapshot.projectPath,
-                    screenshot: activeShot,
-                    annotations,
-                    notes,
-                  });
-              }}
-              onExportImage={async () => {
-                if (!store.snapshot || !activeShot || !image) return;
-                try {
-                  const dataUrl = await renderAnnotatedImage(image, annotations);
-                  await window.imnota.exportAnnotatedImage({
-                    projectPath: store.snapshot.projectPath,
-                    roundId: activeShot.roundId,
-                    filename: `${activeShot.storedFilename.replace(/\.[^.]+$/, '')}-annotated.png`,
-                    dataUrl,
-                  });
-                  showToast('Annotated PNG saved in this subfolder’s exports folder.');
-                } catch (err) {
-                  setError(
-                    `The PNG could not be exported: ${err instanceof Error ? err.message : 'check the workspace and try again.'}`,
-                  );
-                }
-              }}
-              onImport={() => fileInputRef.current?.click()}
-              onPaste={pasteImage}
-              onSelect={(id: string) => store.set({ activeScreenshotId: id })}
-              onChangeAnnotations={changeAnnotations}
-              onSelectAnnotation={setSelectedAnnotation}
-              onMessage={showToast}
-              onTool={setTool}
-              tool={tool}
-              image={activeShot?.id === lastLoadedId.current ? image : null}
-              annotations={annotations}
-              selectedAnnotation={selectedAnnotation}
-              stageRef={stageRef}
-              onUndo={undo}
-              onRedo={redoAction}
-              canUndo={history.length > 0}
-              canRedo={redo.length > 0}
-              onZoom={(delta: number) =>
-                window.dispatchEvent(new KeyboardEvent('keydown', { key: delta > 0 ? '+' : '-' }))
-              }
-              onFit={() => {
-                window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }));
-              }}
-              saving={saving}
-              notes={notes}
-              setNotes={setNotes}
-              onDuplicate={async () => {
-                if (activeShot && store.snapshot)
-                  await openSnapshot(
-                    await window.imnota.duplicateScreenshot({
-                      projectPath: store.snapshot.projectPath,
-                      screenshot: activeShot,
-                    }),
-                  );
-              }}
-              onDeleteProject={() => setModal('delete')}
-            />
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            multiple
-            hidden
-            onChange={onFileInput}
-          />
-        </main>
-        {toast && (
-          <div className="toast" role="status">
-            <Check size={16} />
-            {toast}
+            >
+              <X size={16} aria-hidden="true" />
+            </IconButton>
           </div>
         )}
-        {attachments && (
-          <Modal
-            title="Share context and images"
-            description="Markdown is copied. Try combined copy below, or paste the text and attach the exported PNGs. Individual image copying replaces clipboard text."
-            onClose={() => {
-              if (!clipboardBusy) setAttachments(null);
-            }}
-          >
-            <div className="modal-form sharing-content">
-              <CombinedContextCopy
-                markdown={attachments.markdown}
-                images={attachments.images}
-                onBusyChange={setClipboardBusy}
-              />
-              <p className="helper sharing-folder">
-                {attachments.images.length} annotated images · {attachments.folderPath}
-              </p>
-              {attachments.images.map((item) => (
-                <div className="sharing-file" key={item.filename}>
-                  <label>
-                    <input type="checkbox" /> Attached {item.filename}
-                  </label>
+        {persistence.warning && (
+          <div className="update-banner" role="status">
+            <span>{persistence.warning}</span>
+            <IconButton label="Dismiss save warning" onClick={persistence.clearWarning}>
+              <X size={16} aria-hidden="true" />
+            </IconButton>
+          </div>
+        )}
+        {snapshotNotice && (
+          <div className="snapshot-notice" role="status" data-testid="snapshot-notice">
+            <div>
+              {snapshotNotice.warnings.map((message) => (
+                <p key={message}>{message}</p>
+              ))}
+              {snapshotNotice.recoveredDeletes.map((recovered) => (
+                <div className="recovered-delete" key={recovered.undoToken}>
+                  <span>A previously deleted screenshot can still be restored.</span>
                   <Button
-                    disabled={clipboardBusy}
-                    onClick={async () => {
-                      try {
-                        await window.imnota.copyImage(item.dataUrl);
-                        showToast('Image copied. Paste it into your AI assistant.');
-                      } catch {
-                        setError('Image could not be copied. Attach the exported PNG instead.');
-                      }
-                    }}
+                    variant="soft"
+                    onClick={() => void restoreRecoveredDelete(recovered.undoToken, recovered.screenshotId)}
                   >
-                    Copy image
+                    Undo delete
                   </Button>
                 </div>
               ))}
-              <div className="sharing-actions">
-                <Button
-                  disabled={clipboardBusy}
-                  onClick={async () => {
-                    try {
-                      await window.imnota.copyText(attachments.markdown);
-                      showToast('Markdown copied.');
-                    } catch {
-                      setError('Markdown could not be copied. Open the exported context.md file instead.');
-                    }
-                  }}
-                >
-                  Copy Markdown again
-                </Button>
-                <Button onClick={() => window.imnota.openPath(attachments.folderPath)}>
-                  Open export folder
-                </Button>
-              </div>
             </div>
-          </Modal>
+            <IconButton label="Dismiss project notices" onClick={() => setSnapshotNotice(null)}>
+              <X size={16} aria-hidden="true" />
+            </IconButton>
+          </div>
         )}
-        {modal === 'new' && (
-          <Modal
-            title="New project"
-            description="Keep the brief and its screenshots together in one local folder."
-            onClose={() => setModal(null)}
-          >
-            <div className="modal-form">
-              <TextInput
-                autoFocus
-                label="Project name"
-                placeholder="e.g. Checkout flow review"
-                value={newProject.name}
-                onChange={(event) => setNewProject({ ...newProject, name: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void createProject();
+        {persistence.externalChange && (
+          <div className="external-change-banner" role="alert" data-testid="external-change-banner">
+            <span>{persistence.externalChange.message}</span>
+            <div>
+              <Button
+                variant="soft"
+                onClick={() => {
+                  const discardLocalChanges = persistence.hasUnsavedChanges;
+                  if (discardLocalChanges) {
+                    if (metadataTimer.current !== null) window.clearTimeout(metadataTimer.current);
+                    metadataTimer.current = null;
+                  }
+                  void persistence.reloadExternal({ discardLocalChanges });
                 }}
-              />
-              <TextArea
-                label="Description"
-                placeholder="What are you trying to explain?"
-                rows={3}
-                value={newProject.description}
-                onChange={(event) => setNewProject({ ...newProject, description: event.target.value })}
-              />
-              <div className="modal-actions">
-                <Button variant="ghost" onClick={() => setModal(null)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => void createProject()}
-                  disabled={!newProject.name.trim()}
-                >
-                  <Plus size={16} />
-                  Create project
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-        {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
-        {modal === 'about' && (
-          <Modal
-            title="About Imnota"
-            description="Screenshots that AI understands."
-            onClose={() => setModal(null)}
-          >
-            <div className="about-copy">
-              <Logo />
-              <p>
-                Imnota keeps screenshot context local, editable and ready to share. No account. No backend. No
-                telemetry by default.
-              </p>
-              <span className="muted">
-                Version {updateStatus?.currentVersion ?? appVersion} · MIT License · Built by Dytschgo
-              </span>
-            </div>
-          </Modal>
-        )}
-        {modal === 'delete' && (
-          <Modal
-            title="Delete this project?"
-            description="This moves the project folder to the operating system trash, including screenshots, annotations, notes and exports."
-            onClose={() => setModal(null)}
-          >
-            <div className="modal-actions">
-              <Button variant="ghost" onClick={() => setModal(null)}>
-                Keep project
+              >
+                {persistence.hasUnsavedChanges ? 'Discard local edits & reload' : 'Reload project'}
               </Button>
-              <Button variant="danger" onClick={() => void deleteActiveProject()}>
-                <Trash2 size={16} />
-                Move to trash
-              </Button>
+              <IconButton label="Dismiss external change notice" onClick={persistence.dismissExternalChange}>
+                <X size={16} aria-hidden="true" />
+              </IconButton>
             </div>
-          </Modal>
+          </div>
         )}
-      </div>
-      {installHandoff && (
-        <div className="modal-backdrop">
-          <section
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Restarting to update"
-            tabIndex={-1}
-            ref={(element) => element?.focus()}
-            onKeyDown={(event) => {
-              if (event.key === 'Tab') event.preventDefault();
+        {updateStatus?.state === 'error' && (
+          <div className="update-banner" role="alert">
+            <span>{updateStatus.message ?? 'The update check failed.'}</span>
+            <Button
+              onClick={() =>
+                void window.imnota
+                  .checkForUpdates()
+                  .catch(() => setError('Could not check for updates. Try again.'))
+              }
+            >
+              Retry update check
+            </Button>
+          </div>
+        )}
+        {updateStatus?.state === 'available' && (
+          <div className="update-banner" role="status">
+            <span>{updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is available.`}</span>
+            <Button
+              onClick={() =>
+                void window.imnota
+                  .downloadUpdate()
+                  .catch(() => setError('The update could not be downloaded.'))
+              }
+            >
+              {updateStatus.terminalCommand
+                ? 'Run update in Terminal'
+                : updateStatus.manualDownload
+                  ? 'Open download'
+                  : 'Download update'}
+            </Button>
+          </div>
+        )}
+        {updateStatus?.state === 'downloading' && (
+          <div className="update-banner" role="status">
+            <span>Downloading update… {Math.round(updateStatus.percent ?? 0)}%</span>
+            <progress max={100} value={updateStatus.percent ?? 0} aria-label="Update download progress" />
+          </div>
+        )}
+        {updateStatus?.state === 'downloaded' && (
+          <div className="update-banner" role="status">
+            <span>{updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is ready.`}</span>
+            <Button
+              variant="soft"
+              onClick={async () => {
+                if (await flushAll()) {
+                  allowClose.current = true;
+                  await window.imnota.installUpdate();
+                }
+              }}
+            >
+              Restart to update
+            </Button>
+          </div>
+        )}
+        {!store.settings.workspacePath ? (
+          <Welcome chooseWorkspace={() => void chooseWorkspace()} />
+        ) : store.view === 'settings' ? (
+          <SettingsView
+            preferences={preferences.settings}
+            effectiveAppearance={appearance}
+            savingPreferences={preferences.saving}
+            preferenceError={preferences.error}
+            onAppearanceChange={preferences.saveAppearance}
+            onShortcutChange={preferences.saveShortcuts}
+            onReplayOnboarding={() => setShowOnboarding(true)}
+            onInstall={async () => {
+              if (await flushAll()) {
+                allowClose.current = true;
+                await window.imnota.installUpdate();
+              }
             }}
-          >
-            <div className="modal-header">
-              <div>
-                <h2>Restarting to update</h2>
-                <p>Your changes are saved. Imnota will reopen after installation.</p>
-              </div>
-            </div>
-          </section>
+            onWorkspaceChanged={refreshProjects}
+          />
+        ) : !store.snapshot ? (
+          <Library
+            onNew={() => setDialog('new-project')}
+            onOpen={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
+            onSelect={(projectPath) =>
+              guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project')
+            }
+            searchInputRef={projectSearchInputRef}
+          />
+        ) : (
+          <Workspace
+            image={persistence.image}
+            annotations={persistence.annotations}
+            selectedAnnotationId={selectedAnnotationId}
+            tool={tool}
+            annotationColor={annotationColor}
+            paletteColor={paletteColor}
+            resolvedTheme={appearance.theme}
+            stageRef={stageRef}
+            saveState={persistence.saveState}
+            canUndo={history.length > 0}
+            canRedo={redo.length > 0}
+            canUndoDescription={Boolean(activeShot && descriptionHistory[activeShot.id]?.length)}
+            shortcutLabels={{
+              select: shortcutLabel('tool.select'),
+              text: shortcutLabel('tool.text'),
+              arrow: shortcutLabel('tool.arrow'),
+              rectangle: shortcutLabel('tool.rectangle'),
+              highlight: shortcutLabel('tool.highlight'),
+              step: shortcutLabel('tool.step'),
+              undo: shortcutLabel('edit.undo'),
+              redo: shortcutLabel('edit.redo'),
+              fit: shortcutLabel('canvas.fit'),
+              actualSize: shortcutLabel('canvas.actualSize'),
+            }}
+            onTool={setTool}
+            onColor={(color) => {
+              setToolColors((current) => ({
+                ...current,
+                [selectedAnnotation?.kind ?? creationColorTool]: color,
+              }));
+              if (selectedAnnotationId)
+                changeAnnotations(
+                  persistence.annotations.map((item) =>
+                    item.id === selectedAnnotationId
+                      ? {
+                          ...item,
+                          stroke: color,
+                          ...(['text', 'highlight', 'callout', 'step'].includes(item.kind)
+                            ? { fill: color }
+                            : {}),
+                        }
+                      : item,
+                  ),
+                );
+            }}
+            onChangeAnnotations={changeAnnotations}
+            onSelectAnnotation={setSelectedAnnotationId}
+            onUndo={undoAnnotations}
+            onRedo={redoAnnotations}
+            onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
+            onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
+            onZoom={(delta) => dispatchCanvasCommand(stageRef.current, delta > 0 ? 'zoom-in' : 'zoom-out')}
+            onFlush={flushAll}
+            onSaveProject={persistence.saveProjectMetadata}
+            onUpdateProject={(project) => queueProjectSave(project)}
+            onSnapshot={async (snapshot, id) => {
+              if (!(await persistence.acceptMutationSnapshot(snapshot, id)))
+                throw new Error(
+                  'The latest project state could not be adopted. Reload the project and try again.',
+                );
+            }}
+            onSelectScreenshot={selectShot}
+            onSelectCollection={selectCollection}
+            onImport={() => fileInputRef.current?.click()}
+            onPaste={pasteImage}
+            onMessage={showToast}
+            onUpdateShot={updateShot}
+            onDescriptionChange={changeDescription}
+            onUndoDescription={undoDescription}
+            onDuplicate={duplicateScreenshot}
+            onDeleteScreenshot={deleteScreenshot}
+            onDeleteProject={() => setDialog('delete-project')}
+          />
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          hidden
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const paths = Array.from(event.target.files ?? []).map((file) =>
+              window.imnota.getDroppedFilePath(file),
+            );
+            void importPaths(paths);
+            event.target.value = '';
+          }}
+        />
+      </AppShell>
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={16} aria-hidden="true" />
+          <span>{toast.message}</span>
+          {toast.action && (
+            <button type="button" onClick={toast.action.run}>
+              {toast.action.label}
+            </button>
+          )}
         </div>
+      )}
+      <AppDialogs
+        dialog={dialog}
+        newProject={newProject}
+        shortcuts={preferences.settings.shortcuts}
+        currentVersion={updateStatus?.currentVersion}
+        busy={dialogBusy}
+        onNewProjectChange={setNewProject}
+        onCreateProject={createProject}
+        onDeleteProject={deleteProject}
+        onShortcutChange={preferences.saveShortcuts}
+        onClose={() => setDialog(null)}
+      />
+      <PromptBundleDialogHost controller={promptBundles} onError={setError} />
+      {showOnboarding && (
+        <OnboardingDemo
+          onCopyBundle={({ markdown, imageDataUrl }) => window.imnota.copyContext({ markdown, imageDataUrl })}
+          onMarkCompleted={preferences.saveOnboarding}
+          onCreateFirstProject={async () => {
+            if (!useAppStore.getState().settings.workspacePath && !(await chooseWorkspace()))
+              throw new Error('Workspace selection was cancelled.');
+            setShowOnboarding(false);
+            setDialog('new-project');
+          }}
+          onDismiss={() => setShowOnboarding(false)}
+        />
       )}
     </>
   );
-
-  function renderSidebar() {
-    const nav = [
-      { id: 'projects', label: 'Projects', icon: Layers3 },
-      { id: 'recent', label: 'Recent', icon: BookOpen },
-      { id: 'favourites', label: 'Favourites', icon: Heart },
-    ];
-    return (
-      <aside
-        className={`sidebar ${store.navigationOpen ? '' : 'sidebar-collapsed'}`}
-        aria-label="Side navigation"
-      >
-        <div className="sidebar-top">
-          <Logo compact={!store.navigationOpen} />
-          <IconButton
-            className="sidebar-toggle"
-            label={store.navigationOpen ? 'Hide navigation' : 'Show navigation'}
-            onClick={() => store.set({ navigationOpen: !store.navigationOpen })}
-          >
-            <PanelLeft size={16} />
-          </IconButton>
-        </div>
-        <div className="sidebar-links" hidden={!store.navigationOpen}>
-          <nav aria-label="Primary">
-            <span className="nav-label">Library</span>
-            {nav.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                className={`nav-item ${store.view === id ? 'active' : ''}`}
-                onClick={() =>
-                  store.set({
-                    view: id as any,
-                    snapshot:
-                      id === 'projects' || id === 'recent' || id === 'favourites' ? null : store.snapshot,
-                  })
-                }
-              >
-                <Icon size={16} />
-                {label}
-                {id === 'favourites' && store.projects.filter((p) => p.favourite).length > 0 && (
-                  <span className="nav-count">{store.projects.filter((p) => p.favourite).length}</span>
-                )}
-              </button>
-            ))}
-          </nav>
-          <div className="sidebar-spacer" />
-          <nav>
-            <span className="nav-label">Workspace</span>
-            <button
-              className={`nav-item ${store.view === 'settings' ? 'active' : ''}`}
-              onClick={() => store.set({ view: 'settings', snapshot: null })}
-            >
-              <Settings2 size={16} />
-              Settings
-            </button>
-            <button className="nav-item" onClick={() => setModal('shortcuts')}>
-              <Keyboard size={16} />
-              Shortcuts <kbd>{platformKey} /</kbd>
-            </button>
-          </nav>
-        </div>
-        <div className="sidebar-footer">
-          <button className="nav-item" aria-label="About" title="About" onClick={() => setModal('about')}>
-            <Info size={16} />
-            <span>About</span>
-          </button>
-          <IconButton
-            label="Check for app updates"
-            disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
-            onClick={async () => {
-              try {
-                await window.imnota.checkForUpdates();
-                const status = await window.imnota.getUpdateStatus();
-                showToast(
-                  status.message ??
-                    (status.state === 'not-available'
-                      ? 'You’re on the latest version.'
-                      : status.state === 'available'
-                        ? `Imnota ${status.version} is available. Open Settings for update options.`
-                        : status.state === 'downloaded'
-                          ? 'Update ready. Restart to install.'
-                          : 'Checking app updates…'),
-                );
-              } catch {
-                setError('Could not check for updates. Check your connection and try again.');
-              }
-            }}
-          >
-            <RefreshCw size={16} />
-          </IconButton>
-        </div>
-      </aside>
-    );
-  }
 }
 
-function Topbar({
-  onNew,
-  onOpen,
-  onSearch,
-  onCopy,
-  onOpenExport,
-  onToggleFavourite,
-}: {
-  onNew: () => void;
-  onOpen: () => void;
-  onSearch: () => void;
-  onCopy: () => void;
-  onOpenExport: () => void;
-  onToggleFavourite: () => void;
-}) {
-  const { snapshot, view, set, settings } = useAppStore();
-  return (
-    <header className="topbar">
-      <div className="crumbs">
-        <span className="crumb-muted">
-          {view === 'settings' ? 'Settings' : snapshot ? snapshot.project.name : 'Projects'}
-        </span>
-        {snapshot && view !== 'settings' && (
-          <>
-            <span className="crumb-separator">/</span>
-            <span>{view === 'context' ? 'Context Builder' : 'Screenshots'}</span>
-          </>
-        )}
-      </div>
-      <div className="topbar-actions">
-        <button className="search-trigger" onClick={onSearch} disabled={!settings.workspacePath}>
-          <Search size={15} />
-          <span>Search projects</span>
-          <kbd>{platformKey} F</kbd>
-        </button>
-        {snapshot && (
-          <>
-            <Button variant="ghost" onClick={() => set({ view: 'workspace' })}>
-              <ImagePlus size={15} />
-              Screenshots
-            </Button>
-            <Button variant="ghost" onClick={() => set({ view: 'context' })}>
-              <Sparkles size={15} />
-              Context Builder
-            </Button>
-            <Button variant="primary" onClick={onCopy}>
-              <Clipboard size={15} />
-              Copy AI context
-            </Button>
-            <IconButton
-              label={snapshot.project.favourite ? 'Remove from favourites' : 'Add to favourites'}
-              className="topbar-favourite"
-              onClick={onToggleFavourite}
-            >
-              <Heart size={16} fill={snapshot.project.favourite ? 'currentColor' : 'none'} />
-            </IconButton>
-            <button
-              className="more-button"
-              aria-label="Open export folder"
-              title="Open export folder"
-              onClick={onOpenExport}
-            >
-              <MoreVertical size={17} />
-            </button>
-          </>
-        )}
-        {!snapshot && (
-          <>
-            <Button variant="ghost" onClick={onOpen}>
-              <FolderOpen size={15} />
-              Open
-            </Button>
-            <Button variant="primary" onClick={onNew}>
-              <Plus size={15} />
-              New project
-            </Button>
-          </>
-        )}
-      </div>
-    </header>
-  );
-}
-
-function Welcome({ chooseWorkspace }: { chooseWorkspace: () => void }) {
+function Welcome({ chooseWorkspace }: { chooseWorkspace(): void }) {
   return (
     <section className="welcome">
       <div className="welcome-mark">
@@ -1187,7 +977,7 @@ function Welcome({ chooseWorkspace }: { chooseWorkspace: () => void }) {
       <p>Annotate what matters. Add the context an AI agent needs. Keep every file local and inspectable.</p>
       <div className="welcome-actions">
         <Button variant="primary" onClick={chooseWorkspace}>
-          <FolderPlus size={17} />
+          <FolderPlus size={17} aria-hidden="true" />
           Choose workspace
         </Button>
         <span>Works offline. No account required.</span>
@@ -1202,7 +992,7 @@ function Welcome({ chooseWorkspace }: { chooseWorkspace: () => void }) {
 }
 
 export function matchesProjectSearch(project: ProjectListItem, search: string) {
-  return (project.searchText ?? `${project.name} ${project.description} ${project.tags.join(' ')}`)
+  return (project.searchText ?? `${project.name} ${project.description}`)
     .toLowerCase()
     .includes(search.trim().toLowerCase());
 }
@@ -1210,17 +1000,17 @@ export function matchesProjectSearch(project: ProjectListItem, search: string) {
 function Library({
   onNew,
   onOpen,
+  onSelect,
   searchInputRef,
 }: {
-  onNew: () => void;
-  onOpen: () => void;
+  onNew(): void;
+  onOpen(): void;
+  onSelect(projectPath: string): void;
   searchInputRef: RefObject<HTMLInputElement>;
 }) {
   const { projects, search, set, view, settings } = useAppStore();
   const filtered = projects.filter(
-    (p) =>
-      (view === 'favourites' ? p.favourite : view === 'recent' ? true : true) &&
-      matchesProjectSearch(p, search),
+    (project) => (view !== 'favourites' || project.favourite) && matchesProjectSearch(project, search),
   );
   return (
     <section className="library">
@@ -1228,59 +1018,69 @@ function Library({
         <div>
           <h1>{view === 'favourites' ? 'Favourites' : view === 'recent' ? 'Recent projects' : 'Projects'}</h1>
           <p>
-            {settings.workspacePath
-              ? `${projects.length} local project${projects.length === 1 ? '' : 's'} · ${settings.workspacePath}`
-              : 'Choose a workspace to get started.'}
+            {projects.length} local project{projects.length === 1 ? '' : 's'} · {settings.workspacePath}
           </p>
         </div>
         <div className="library-actions">
           <Button variant="ghost" onClick={onOpen}>
-            <FolderOpen size={16} />
+            <FolderOpen size={16} aria-hidden="true" />
             Open project
           </Button>
           <Button variant="primary" onClick={onNew}>
-            <Plus size={16} />
+            <Plus size={16} aria-hidden="true" />
             New project
           </Button>
         </div>
       </div>
       <div className="search-line">
-        <Search size={16} />
+        <Search size={16} aria-hidden="true" />
         <input
-          id="project-search"
           ref={searchInputRef}
           aria-label="Search projects"
-          placeholder="Search name, notes, tags or status"
+          placeholder="Search projects and screenshot descriptions"
           value={search}
           onChange={(event) => set({ search: event.target.value })}
         />
-        {search ? (
+        {search && (
           <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
             Clear search
           </button>
-        ) : (
-          <span>{platformKey} F</span>
         )}
       </div>
       {filtered.length ? (
         <div className="project-list">
           {filtered.map((project) => (
-            <ProjectRow key={project.id} project={project} />
+            <button className="project-row" key={project.id} onClick={() => onSelect(project.projectPath)}>
+              <div className="project-symbol">
+                <Layers3 size={18} aria-hidden="true" />
+              </div>
+              <div className="project-row-copy">
+                <strong>{project.name}</strong>
+                <span>{project.description || 'No description yet'}</span>
+                <small>
+                  {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
+                  edited {new Date(project.updatedAt).toLocaleDateString()}
+                </small>
+              </div>
+              <div className="project-row-meta">
+                {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
+              </div>
+            </button>
           ))}
         </div>
       ) : (
         <EmptyState
-          icon={<FolderOpen size={22} />}
+          icon={<FolderOpen size={22} aria-hidden="true" />}
           title={search ? 'No matching projects' : 'Your project library is empty'}
           description={
             search
-              ? 'Try another name, tag or status.'
+              ? 'Try another project name or description.'
               : 'Create a local project, then add the screenshots that explain the work.'
           }
           action={
             !search ? (
               <Button variant="primary" onClick={onNew}>
-                <Plus size={16} />
+                <Plus size={16} aria-hidden="true" />
                 Create first project
               </Button>
             ) : undefined
@@ -1288,950 +1088,5 @@ function Library({
         />
       )}
     </section>
-  );
-}
-
-function ProjectRow({ project }: { project: ProjectListItem }) {
-  const { set, setProject } = useAppStore();
-  return (
-    <button
-      className="project-row"
-      onClick={async () => {
-        try {
-          setProject(await window.imnota.loadProject(project.projectPath));
-        } catch {
-          set({ view: 'projects' });
-        }
-      }}
-    >
-      <div className="project-symbol">
-        <Layers3 size={18} />
-      </div>
-      <div className="project-row-copy">
-        <strong>{project.name}</strong>
-        <span>{project.description || 'No description yet'}</span>
-        <small>
-          {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} · edited{' '}
-          {new Date(project.updatedAt).toLocaleDateString()}
-        </small>
-      </div>
-      <div className="project-row-meta">
-        {project.tags.slice(0, 2).map((tag) => (
-          <span key={tag} className="tag">
-            {tag}
-          </span>
-        ))}
-        {project.favourite && <Heart size={15} fill="currentColor" />}
-      </div>
-      <ArrowDownAZ size={16} className="row-chevron" />
-    </button>
-  );
-}
-
-function Workspace(props: any) {
-  const store = useAppStore();
-  const shot = store.activeScreenshot();
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  async function reorderScreenshot(targetIndex: number) {
-    if (dragIndex === null || dragIndex === targetIndex || !store.snapshot) return;
-    const ordered = store.snapshot.project.screenshots.filter((shot) => shot.roundId === store.activeRoundId);
-    const [moved] = ordered.splice(dragIndex, 1);
-    ordered.splice(targetIndex, 0, moved);
-    let cursor = 0;
-    const screenshots = store.snapshot.project.screenshots.map((shot) =>
-      shot.roundId === store.activeRoundId ? ordered[cursor++] : shot,
-    );
-    const project = {
-      ...store.snapshot.project,
-      screenshots: screenshots.map((item, position) => ({ ...item, position })),
-      updatedAt: nowIso(),
-    };
-    store.updateProject(project);
-    setDragIndex(null);
-    try {
-      await window.imnota.saveProject(store.snapshot.projectPath, project);
-    } catch {
-      props.onMessage('The new screenshot order could not be saved.');
-    }
-  }
-  return (
-    <section
-      className="workspace"
-      style={{
-        gridTemplateColumns: `${store.leftPanelOpen ? 'minmax(180px, 236px)' : '48px'} minmax(0, 1fr)${store.rightPanelOpen ? ' minmax(240px, 302px)' : ''}`,
-      }}
-      onDrop={props.onDrop}
-    >
-      <div className={`shot-rail ${store.leftPanelOpen ? '' : 'collapsed'}`}>
-        <div className="rail-heading">
-          <div>
-            <span className="eyebrow">SEQUENCE</span>
-            <strong>{store.snapshot?.project.name}</strong>
-          </div>
-          <IconButton
-            label={store.leftPanelOpen ? 'Collapse screenshot list' : 'Expand screenshot list'}
-            onClick={() => store.set({ leftPanelOpen: !store.leftPanelOpen })}
-          >
-            <PanelLeft size={17} />
-          </IconButton>
-        </div>
-        {store.leftPanelOpen && (
-          <>
-            <RoundControls onFlush={props.onFlush} />
-            <div className="shot-list">
-              {store.snapshot?.project.screenshots
-                .filter((item) => item.roundId === store.activeRoundId)
-                .map((item: ScreenshotRecord, index: number) => (
-                  <button
-                    key={item.id}
-                    draggable
-                    className={`shot-item ${item.id === store.activeScreenshotId ? 'active' : ''}`}
-                    onDragStart={() => setDragIndex(index)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.stopPropagation();
-                      void reorderScreenshot(index);
-                    }}
-                    onClick={() => props.onSelect(item.id)}
-                  >
-                    <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
-                    <div className="thumb">
-                      {store.snapshot?.thumbnails[item.id] ? (
-                        <img src={store.snapshot.thumbnails[item.id]} alt="" />
-                      ) : (
-                        <FileImage size={18} />
-                      )}
-                    </div>
-                    <span className="shot-copy">
-                      <strong>{item.title || item.originalFilename}</strong>
-                      <small>
-                        <span className={`status-dot status-${item.status}`} />
-                        {item.status.replace('-', ' ')} · {item.priority}
-                      </small>
-                    </span>
-                  </button>
-                ))}
-            </div>
-            <div className="rail-actions">
-              <Button variant="soft" onClick={props.onImport}>
-                <Upload size={15} />
-                Add screenshots
-              </Button>
-              <Button variant="ghost" onClick={props.onPaste}>
-                <Clipboard size={15} />
-                Paste from clipboard
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-      <div className="canvas-column">
-        <div className="workspace-toolbar">
-          <Toolbar
-            tool={props.tool}
-            setTool={props.onTool}
-            onUndo={props.onUndo}
-            onRedo={props.onRedo}
-            canUndo={props.canUndo}
-            canRedo={props.canRedo}
-            onZoom={props.onZoom}
-            onFit={props.onFit}
-          />
-          <div className="canvas-actions">
-            <IconButton
-              label="Export selected screenshot as PNG"
-              disabled={!shot}
-              onClick={() => void props.onExportImage()}
-            >
-              <Download size={17} />
-            </IconButton>
-            <span className={`save-state ${props.saving}`}>
-              <span className="save-dot" />
-              {props.saving === 'saving' ? 'Saving…' : props.saving === 'error' ? 'Save failed' : 'Saved'}
-            </span>
-            <IconButton
-              label="Toggle inspector"
-              onClick={() => store.set({ rightPanelOpen: !store.rightPanelOpen })}
-            >
-              <PanelRight size={17} />
-            </IconButton>
-          </div>
-        </div>
-        {shot ? (
-          <AnnotationCanvas
-            image={props.image}
-            annotations={props.annotations}
-            selectedId={props.selectedAnnotation}
-            tool={props.tool}
-            onChange={props.onChangeAnnotations}
-            onSelect={props.onSelectAnnotation}
-            onMessage={props.onMessage}
-            stageRef={props.stageRef}
-            onTool={props.onTool}
-          />
-        ) : (
-          <EmptyState
-            icon={<ImagePlus size={22} />}
-            title="Add a screenshot to start"
-            description="Paste an image, drag files here, or use Add screenshots."
-            action={
-              <Button variant="primary" onClick={props.onImport}>
-                <Upload size={16} />
-                Add screenshot
-              </Button>
-            }
-          />
-        )}
-      </div>
-      {store.rightPanelOpen && (
-        <Inspector
-          shot={shot}
-          notes={props.notes}
-          setNotes={props.setNotes}
-          selectedAnnotation={
-            props.selectedAnnotation
-              ? props.annotations.find((a: Annotation) => a.id === props.selectedAnnotation)
-              : null
-          }
-          onChangeAnnotation={(patch: Partial<Annotation>) =>
-            props.onChangeAnnotations(
-              props.annotations.map((a: Annotation) =>
-                a.id === props.selectedAnnotation ? { ...a, ...patch } : a,
-              ),
-            )
-          }
-          onDuplicate={props.onDuplicate}
-          onDeleteProject={props.onDeleteProject}
-        />
-      )}
-    </section>
-  );
-}
-
-function Inspector({
-  shot,
-  notes,
-  setNotes,
-  selectedAnnotation,
-  onChangeAnnotation,
-  onDuplicate,
-  onDeleteProject,
-}: any) {
-  const store = useAppStore();
-  if (!shot)
-    return (
-      <aside className="inspector">
-        <EmptyState
-          icon={<PanelRight size={20} />}
-          title="Inspector"
-          description="Select a screenshot to edit its notes and export details."
-        />
-      </aside>
-    );
-  const updateShot = (patch: Partial<ScreenshotRecord>) => {
-    if (!store.snapshot) return;
-    store.updateProject({
-      ...store.snapshot.project,
-      screenshots: store.snapshot.project.screenshots.map((s) => (s.id === shot.id ? { ...s, ...patch } : s)),
-    });
-  };
-  return (
-    <aside className="inspector">
-      <div className="inspector-heading">
-        <div>
-          <span className="eyebrow">SCREENSHOT {String(shot.position + 1).padStart(2, '0')}</span>
-          <h2>Screenshot context</h2>
-        </div>
-      </div>
-      <div className="inspector-scroll">
-        <TextInput
-          label="Title"
-          value={shot.title}
-          onChange={(event) => updateShot({ title: event.target.value })}
-        />
-        <ProblemDescriptionEditor
-          notes={notes}
-          description={shot.description}
-          onChange={(next) => {
-            setNotes(next);
-            const project = store.snapshot!.project;
-            if (
-              next.problem !== notes.problem &&
-              !project.exportPreferences.includedFields.includes('problem')
-            )
-              store.updateProject({
-                ...project,
-                exportPreferences: {
-                  ...project.exportPreferences,
-                  includedFields: [...project.exportPreferences.includedFields, 'problem'],
-                },
-              });
-          }}
-        />
-        <details className="screenshot-details">
-          <summary>Screenshot details</summary>
-          <div className="field-grid">
-            <label className="field">
-              <span className="field-label">Status</span>
-              <select
-                value={shot.status}
-                onChange={(event) => updateShot({ status: event.target.value as any })}
-              >
-                <option value="draft">Draft</option>
-                <option value="ready">Ready</option>
-                <option value="needs-review">Needs review</option>
-                <option value="completed">Completed</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">Priority</span>
-              <select
-                value={shot.priority}
-                onChange={(event) => updateShot({ priority: event.target.value as any })}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </label>
-          </div>
-          <div className="field">
-            <span className="field-label">Tags</span>
-            <div className="tag-editor">
-              {shot.tags.map((tag: string) => (
-                <button
-                  key={tag}
-                  className="tag"
-                  onClick={() => updateShot({ tags: shot.tags.filter((item: string) => item !== tag) })}
-                >
-                  {tag}
-                  <X size={11} />
-                </button>
-              ))}
-              <button
-                className="tag-add"
-                onClick={() => {
-                  const next = DEFAULT_TAGS.find((tag) => !shot.tags.includes(tag));
-                  if (next) updateShot({ tags: [...shot.tags, next] });
-                }}
-              >
-                <Plus size={12} />
-                Add tag
-              </button>
-            </div>
-          </div>
-        </details>
-        {selectedAnnotation && (
-          <div className="annotation-properties">
-            <span className="section-label">Selected annotation</span>
-            <div className="property-line">
-              <span>Type</span>
-              <strong>{selectedAnnotation.kind.replace('-', ' ')}</strong>
-            </div>
-            <div className="field-grid">
-              <TextInput
-                label="Stroke width"
-                type="number"
-                min="1"
-                max="20"
-                value={selectedAnnotation.strokeWidth ?? 4}
-                onChange={(event) => onChangeAnnotation({ strokeWidth: Number(event.target.value) })}
-              />
-              <TextInput
-                label="Opacity"
-                type="number"
-                min="0.1"
-                max="1"
-                step="0.1"
-                value={selectedAnnotation.opacity ?? 1}
-                onChange={(event) => onChangeAnnotation({ opacity: Number(event.target.value) })}
-              />
-            </div>
-            {(selectedAnnotation.kind === 'text' ||
-              selectedAnnotation.kind === 'callout' ||
-              selectedAnnotation.kind === 'step') && (
-              <TextInput
-                label="Label"
-                value={selectedAnnotation.text ?? ''}
-                onChange={(event) => onChangeAnnotation({ text: event.target.value })}
-              />
-            )}
-            <div className="field-grid">
-              <TextInput
-                label="Fill colour"
-                type="color"
-                value={selectedAnnotation.fill?.startsWith('#') ? selectedAnnotation.fill : '#6857f5'}
-                onChange={(event) => onChangeAnnotation({ fill: event.target.value })}
-              />
-              <TextInput
-                label="Stroke colour"
-                type="color"
-                value={selectedAnnotation.stroke ?? '#ef4444'}
-                onChange={(event) => onChangeAnnotation({ stroke: event.target.value })}
-              />
-              <TextInput
-                label="Layer order"
-                type="number"
-                value={selectedAnnotation.zIndex}
-                onChange={(event) => onChangeAnnotation({ zIndex: Number(event.target.value) })}
-              />
-              <TextInput
-                label="Rotation"
-                type="number"
-                disabled={['crop', 'pixelate'].includes(selectedAnnotation.kind)}
-                value={selectedAnnotation.rotation ?? 0}
-                onChange={(event) => onChangeAnnotation({ rotation: Number(event.target.value) })}
-              />
-            </div>
-            {['text', 'callout'].includes(selectedAnnotation.kind) && (
-              <>
-                <TextInput
-                  label="Font size"
-                  type="number"
-                  min="8"
-                  max="200"
-                  value={selectedAnnotation.fontSize ?? 24}
-                  onChange={(event) =>
-                    onChangeAnnotation({ fontSize: Math.max(8, Math.min(200, Number(event.target.value))) })
-                  }
-                />
-                <TextInput
-                  label="Font family"
-                  value={selectedAnnotation.fontFamily ?? 'Arial'}
-                  onChange={(event) => onChangeAnnotation({ fontFamily: event.target.value })}
-                />
-                <label>
-                  Text alignment
-                  <select
-                    aria-label="Text alignment"
-                    value={selectedAnnotation.align ?? 'left'}
-                    onChange={(event) =>
-                      onChangeAnnotation({ align: event.target.value as Annotation['align'] })
-                    }
-                  >
-                    <option value="left">Left</option>
-                    <option value="center">Centre</option>
-                    <option value="right">Right</option>
-                  </select>
-                </label>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={selectedAnnotation.fontStyle === 'bold'}
-                    onChange={(event) =>
-                      onChangeAnnotation({ fontStyle: event.target.checked ? 'bold' : 'normal' })
-                    }
-                  />
-                  Bold text
-                </label>
-              </>
-            )}
-            {selectedAnnotation.kind === 'step' && (
-              <TextInput
-                label="Step number"
-                type="number"
-                min="1"
-                value={selectedAnnotation.stepNumber ?? 1}
-                onChange={(event) =>
-                  onChangeAnnotation({ stepNumber: Math.max(1, Number(event.target.value)) })
-                }
-              />
-            )}
-            {selectedAnnotation.kind === 'arrow' && (
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={selectedAnnotation.arrowhead !== false}
-                  onChange={(event) => onChangeAnnotation({ arrowhead: event.target.checked })}
-                />
-                Show arrowhead
-              </label>
-            )}
-            {selectedAnnotation.kind === 'pixelate' && (
-              <TextInput
-                label="Pixel block size"
-                type="number"
-                min="4"
-                max="100"
-                value={selectedAnnotation.blurIntensity ?? 14}
-                onChange={(event) =>
-                  onChangeAnnotation({
-                    blurIntensity: Math.max(4, Math.min(100, Number(event.target.value))),
-                  })
-                }
-              />
-            )}
-          </div>
-        )}
-        <div className="inspector-footer">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={shot.includeInExport}
-              onChange={(event) => updateShot({ includeInExport: event.target.checked })}
-            />
-            <span>Include in AI context</span>
-          </label>
-          <Button variant="ghost" onClick={() => void onDuplicate()}>
-            <Copy size={15} />
-            Duplicate screenshot
-          </Button>
-          <Button variant="danger" onClick={onDeleteProject}>
-            <Trash2 size={15} />
-            Delete project
-          </Button>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-export function RoundControls({ onFlush }: { onFlush: () => Promise<void> }) {
-  const store = useAppStore();
-  const project = store.snapshot!.project;
-  const current = project.rounds.find((r) => r.id === store.activeRoundId)!;
-  const [action, setAction] = useState<'create' | 'rename' | 'duplicate' | 'archive' | null>(null);
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  async function submit() {
-    if (busy || !action || !name.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      await onFlush();
-      const snapshot = await window.imnota.editRound({
-        projectPath: store.snapshot!.projectPath,
-        roundId: current.id,
-        action,
-        name,
-      });
-      store.setProject(snapshot);
-      if (action === 'create' || action === 'duplicate') {
-        const roundId = snapshot.project.rounds.at(-1)!.id;
-        store.set({
-          activeRoundId: roundId,
-          activeScreenshotId:
-            snapshot.project.screenshots.find((shot) => shot.roundId === roundId)?.id ?? null,
-        });
-      }
-      setAction(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The subfolder could not be saved.');
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="round-controls">
-      <label className="field">
-        <span className="field-label">Subfolder</span>
-        <select
-          aria-label="Subfolder"
-          value={store.activeRoundId}
-          onChange={(event) =>
-            store.set({
-              activeRoundId: event.target.value,
-              activeScreenshotId:
-                project.screenshots.find((shot) => shot.roundId === event.target.value)?.id ?? null,
-            })
-          }
-        >
-          {project.rounds.map((round) => (
-            <option key={round.id} value={round.id}>
-              {round.name}
-              {round.archived ? ' (archived)' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="round-actions">
-        {(['create', 'rename', 'duplicate', 'archive'] as const).map((item) => (
-          <Button
-            key={item}
-            variant="ghost"
-            onClick={() => {
-              setAction(item);
-              setName(
-                item === 'create'
-                  ? `Subfolder ${project.rounds.length + 1}`
-                  : item === 'duplicate'
-                    ? `${current.name} copy`
-                    : current.name,
-              );
-            }}
-          >
-            {item === 'create'
-              ? 'New subfolder'
-              : item === 'archive' && current.archived
-                ? 'Restore'
-                : item[0].toUpperCase() + item.slice(1)}
-          </Button>
-        ))}
-      </div>
-      {action && (
-        <Modal
-          title={`${action === 'archive' && current.archived ? 'Restore' : action === 'create' ? 'New' : action[0].toUpperCase() + action.slice(1)} subfolder`}
-          description={
-            action === 'archive'
-              ? 'Archiving keeps the screenshots and notes. Archived subfolders remain available in the selector.'
-              : 'Each subfolder keeps its own screenshots, annotations and notes.'
-          }
-          onClose={() => {
-            if (!busy) setAction(null);
-          }}
-        >
-          <form
-            className="modal-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <TextInput
-              autoFocus
-              data-autofocus
-              label="Subfolder name"
-              disabled={busy}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            {error && (
-              <p className="modal-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="modal-actions">
-              <Button type="button" variant="ghost" disabled={busy} onClick={() => setAction(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
-                {action === 'create'
-                  ? 'Create subfolder'
-                  : action === 'rename'
-                    ? 'Rename subfolder'
-                    : action === 'duplicate'
-                      ? 'Duplicate subfolder'
-                      : current.archived
-                        ? 'Restore subfolder'
-                        : 'Archive subfolder'}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function ContextBuilder({
-  buildMarkdown,
-  onExport,
-  onCopy,
-}: {
-  buildMarkdown: () => Promise<string>;
-  onExport: () => void;
-  onCopy: () => void;
-}) {
-  const store = useAppStore();
-  const [markdown, setMarkdown] = useState('');
-  const [busy, setBusy] = useState(false);
-  const project = store.snapshot!.project;
-  const [previewError, setPreviewError] = useState('');
-  const updatePrefs = (patch: Partial<ProjectData['exportPreferences']>) => {
-    const next = { ...project, exportPreferences: { ...project.exportPreferences, ...patch } };
-    store.updateProject(next);
-    void window.imnota
-      .saveProject(store.snapshot!.projectPath, next)
-      .catch(() => setPreviewError('Export preferences could not be saved. Check your workspace.'));
-  };
-  useEffect(() => {
-    let cancelled = false;
-    setBusy(true);
-    void buildMarkdown()
-      .then((value) => {
-        if (!cancelled) {
-          setMarkdown(value);
-          setPreviewError('');
-        }
-      })
-      .catch(() => {
-        if (!cancelled)
-          setPreviewError('The brief could not be generated. Check that all screenshots are available.');
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [buildMarkdown]);
-  return (
-    <section className="context-builder">
-      {previewError && <p role="alert">{previewError}</p>}
-      <div className="context-controls">
-        <div className="context-intro">
-          <span className="eyebrow">ASSEMBLE A BRIEF</span>
-          <h1>Context Builder</h1>
-          <p>Subfolder: {project.rounds.find((round) => round.id === store.activeRoundId)?.name}</p>
-          <p>Choose the evidence an AI agent should see, then copy or export a clean Markdown brief.</p>
-        </div>
-        <TextArea
-          label="Desired outcome / definition of done"
-          rows={3}
-          placeholder="What should be true when the work is complete?"
-          value={project.exportPreferences.desiredOutcome}
-          onChange={(event) => updatePrefs({ desiredOutcome: event.target.value })}
-        />
-        <TextArea
-          label="Instructions for the AI agent"
-          rows={3}
-          placeholder="For example: preserve anything not explicitly marked for change."
-          value={project.exportPreferences.overallInstructions}
-          onChange={(event) => updatePrefs({ overallInstructions: event.target.value })}
-        />
-        <TextArea
-          label="Technical constraints"
-          rows={3}
-          placeholder="Stack, browser support, performance or accessibility constraints"
-          value={project.exportPreferences.technicalConstraints}
-          onChange={(event) => updatePrefs({ technicalConstraints: event.target.value })}
-        />
-        <div className="context-settings">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={store.exportAllRounds}
-              onChange={(event) => store.set({ exportAllRounds: event.target.checked })}
-            />
-            Export all subfolders
-          </label>
-          <span className="section-label">Package contents</span>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={project.exportPreferences.includeOriginalScreenshots}
-              onChange={(event) => updatePrefs({ includeOriginalScreenshots: event.target.checked })}
-            />
-            <span>Include original screenshots</span>
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={project.exportPreferences.includeAnnotationMetadata}
-              onChange={(event) => updatePrefs({ includeAnnotationMetadata: event.target.checked })}
-            />
-            <span>Include annotation metadata</span>
-          </label>
-        </div>
-        <div className="context-actions">
-          <Button variant="primary" onClick={onCopy}>
-            <Clipboard size={16} />
-            Copy AI context
-          </Button>
-          <Button variant="soft" onClick={onExport}>
-            <Download size={16} />
-            Export ZIP package
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={async () => {
-              if (store.snapshot) await window.imnota.openPath(`${store.snapshot.projectPath}/exports`);
-            }}
-          >
-            <FolderOpen size={16} />
-            Open export folder
-          </Button>
-        </div>
-      </div>
-      <div className="preview-pane">
-        <div className="preview-heading">
-          <div>
-            <span className="eyebrow">LIVE PREVIEW</span>
-            <h2>{busy ? 'Building preview…' : 'context.md'}</h2>
-          </div>
-          <span className="preview-count">
-            {
-              project.screenshots.filter(
-                (s) => s.includeInExport && (store.exportAllRounds || s.roundId === store.activeRoundId),
-              ).length
-            }{' '}
-            references
-          </span>
-        </div>
-        <pre className="markdown-preview">
-          {markdown || 'Add a desired outcome or screenshot notes to see the brief take shape.'}
-        </pre>
-      </div>
-    </section>
-  );
-}
-
-export function SettingsView({ onInstall }: { onInstall?: () => Promise<void> }) {
-  const { settings, set } = useAppStore();
-  const [savingPreference, setSavingPreference] = useState(false);
-  const [settingError, setSettingError] = useState('');
-  const saveSetting = async (patch: Partial<typeof settings>) => {
-    if (savingPreference) return;
-    setSavingPreference(true);
-    setSettingError('');
-    try {
-      set({ settings: await window.imnota.setSettings(patch) });
-    } catch {
-      setSettingError('This preference could not be saved. Try again.');
-    } finally {
-      setSavingPreference(false);
-    }
-  };
-  return (
-    <section className="settings-view">
-      <div className="settings-heading">
-        <h1>Settings</h1>
-        <p>Preferences stay on this device. Project files remain in the workspace you choose.</p>
-      </div>
-      <div className="settings-grid">
-        <div className="settings-section">
-          <h2>Appearance</h2>
-          <div className="settings-control">
-            <div>
-              <strong>Theme</strong>
-            </div>
-            <div className="theme-options" role="radiogroup" aria-label="Theme">
-              {[
-                { value: 'system', label: 'System', icon: Monitor },
-                { value: 'dark', label: 'Dark', icon: Moon },
-                { value: 'light', label: 'Light', icon: Sun },
-              ].map(({ value, label, icon: Icon }) => (
-                <label key={value} className={settings.theme === value ? 'active' : ''}>
-                  <input
-                    type="radio"
-                    name="theme"
-                    value={value}
-                    checked={settings.theme === value}
-                    disabled={savingPreference}
-                    onChange={() => void saveSetting({ theme: value as typeof settings.theme })}
-                  />
-                  <Icon size={15} />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <label className="field">
-            <span className="field-label">Interface scale</span>
-            <select
-              value={settings.interfaceScale}
-              disabled={savingPreference}
-              onChange={(event) => void saveSetting({ interfaceScale: Number(event.target.value) })}
-            >
-              <option value="0.9">90%</option>
-              <option value="1">100%</option>
-              <option value="1.1">110%</option>
-              <option value="1.2">120%</option>
-            </select>
-          </label>
-          <label className="settings-switch">
-            <span>
-              <strong>Open recent project</strong>
-              <small>Resume your latest project when Imnota opens.</small>
-            </span>
-            <input
-              type="checkbox"
-              checked={settings.openRecentOnLaunch}
-              disabled={savingPreference}
-              onChange={(event) => void saveSetting({ openRecentOnLaunch: event.target.checked })}
-            />
-          </label>
-          <label className="settings-switch">
-            <span>
-              <strong>Confirm before deletion</strong>
-              <small>Ask before moving a project to the system trash.</small>
-            </span>
-            <input
-              type="checkbox"
-              checked={settings.confirmBeforeDeletion}
-              disabled={savingPreference}
-              onChange={(event) => void saveSetting({ confirmBeforeDeletion: event.target.checked })}
-            />
-          </label>
-          {settingError && (
-            <p className="settings-error" role="alert">
-              {settingError}
-            </p>
-          )}
-        </div>
-        <UpdateControl onInstall={onInstall} />
-        <div className="settings-section">
-          <h2>Workspace</h2>
-          <div className="workspace-path">
-            <FolderOpen size={17} />
-            <span>{settings.workspacePath || 'No workspace selected'}</span>
-          </div>
-          <div className="settings-actions">
-            <Button
-              variant="soft"
-              onClick={async () => {
-                const next = await window.imnota.chooseWorkspace();
-                if (next) set({ settings: next });
-              }}
-            >
-              <FolderOpen size={15} />
-              Change folder
-            </Button>
-            {settings.workspacePath && (
-              <Button variant="ghost" onClick={() => window.imnota.openPath(settings.workspacePath!)}>
-                Open folder
-              </Button>
-            )}
-          </div>
-          <details className="settings-disclosure">
-            <summary>About workspace files</summary>
-            <p>
-              Projects are plain folders with JSON, Markdown and image files. Back them up or version-control
-              them with your usual tools.
-            </p>
-          </details>
-        </div>
-        <div className="settings-section">
-          <h2>Privacy</h2>
-          <div className="privacy-panel">
-            <ShieldCheck size={18} />
-            <div>
-              <strong>Local-first by default</strong>
-              <p>No account, cloud storage, telemetry or runtime AI service is required.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ShortcutsModal({ onClose }: { onClose: () => void }) {
-  const rows = [
-    [`${platformKey} N`, 'New project'],
-    [`${platformKey} O`, 'Open project'],
-    [`${platformKey} V`, 'Paste screenshot'],
-    [`${platformKey} S`, 'Save'],
-    [`${platformKey} Z`, 'Undo'],
-    [`${platformKey} Shift Z`, 'Redo'],
-    [`${platformKey} Shift C`, 'Copy AI context'],
-    [`${platformKey} F`, 'Search'],
-    ['Delete', 'Delete selected annotation'],
-    ['0', 'Fit screenshot'],
-    ['1', 'Actual size'],
-  ];
-  return (
-    <Modal title="Keyboard shortcuts" description="Shortcuts respect focused text fields." onClose={onClose}>
-      <div className="shortcut-list">
-        {rows.map(([key, label]) => (
-          <div key={key}>
-            <kbd>{key}</kbd>
-            <span>{label}</span>
-          </div>
-        ))}
-      </div>
-    </Modal>
   );
 }

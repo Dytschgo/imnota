@@ -20,18 +20,16 @@ const reference = (folder: string) =>
     .string()
     .refine(
       (value) =>
-        (value.startsWith(`${folder}/`) &&
-          filenameSchema.safeParse(value.slice(folder.length + 1)).success) ||
-        (value.split('/').length === 4 &&
-          value.split('/')[0] === 'rounds' &&
-          filenameSchema.safeParse(value.split('/')[1]).success &&
-          value.split('/')[2] === folder &&
-          filenameSchema.safeParse(value.split('/')[3]).success),
+        value.split('/').length === 4 &&
+        value.split('/')[0] === 'collections' &&
+        filenameSchema.safeParse(value.split('/')[1]).success &&
+        value.split('/')[2] === folder &&
+        filenameSchema.safeParse(value.split('/')[3]).success,
     );
 
 export const screenshotSchema = z.object({
-  roundId: filenameSchema.default('001-first-feedback'),
-  id: z.string(),
+  collectionId: filenameSchema,
+  id: z.string().min(1),
   originalFilename: z.string(),
   storedFilename: filenameSchema,
   title: z.string(),
@@ -39,17 +37,69 @@ export const screenshotSchema = z.object({
   position: z.number().int().nonnegative(),
   createdAt: z.string(),
   updatedAt: z.string(),
-  tags: z.array(z.string()),
-  priority: z.enum(['low', 'medium', 'high', 'critical']),
-  status: z.enum(['draft', 'ready', 'needs-review', 'completed']),
+  priority: z.enum(['low', 'medium', 'high']),
   annotationFile: reference('annotations'),
-  notesFile: reference('notes'),
+  descriptionFile: reference('descriptions'),
+  originalWidth: z.number().positive(),
+  originalHeight: z.number().positive(),
+  includeInExport: z.boolean().default(true),
+  conflict: z.boolean().optional(),
+});
+
+export const projectSchema = z.object({
+  schemaVersion: z.literal(3),
+  collections: z
+    .array(
+      z.object({
+        id: filenameSchema,
+        name: z.string().min(1).max(120),
+        archived: z.boolean(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+        overallContext: z.string(),
+      }),
+    )
+    .min(1)
+    .max(1000),
+  id: z.string(),
+  name: z.string().min(1),
+  description: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  status: z.enum(['active', 'archived']),
+  favourite: z.boolean(),
+  screenshots: z.array(screenshotSchema),
+  exportPreferences: z
+    .object({
+      includeOriginalScreenshots: z.boolean(),
+      includeAnnotationMetadata: z.boolean(),
+      template: z.literal('default'),
+    })
+    .optional(),
+});
+
+const legacyReference = z.string().min(1);
+export const legacyScreenshotSchema = z.object({
+  roundId: filenameSchema.default('001-first-feedback'),
+  id: z.string().min(1),
+  originalFilename: z.string(),
+  storedFilename: filenameSchema,
+  title: z.string(),
+  description: z.string().default(''),
+  position: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  tags: z.array(z.string()).default([]),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
+  status: z.enum(['draft', 'ready', 'needs-review', 'completed']).default('draft'),
+  annotationFile: legacyReference,
+  notesFile: legacyReference,
   originalWidth: z.number().positive(),
   originalHeight: z.number().positive(),
   includeInExport: z.boolean().default(true),
 });
 
-export const projectSchema = z.object({
+export const legacyProjectSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2)]),
   rounds: z
     .array(
@@ -70,23 +120,12 @@ export const projectSchema = z.object({
   status: z.enum(['active', 'archived']),
   tags: z.array(z.string()),
   favourite: z.boolean(),
-  screenshots: z.array(screenshotSchema),
+  screenshots: z.array(legacyScreenshotSchema),
   exportPreferences: z
     .object({
       includeOriginalScreenshots: z.boolean(),
       includeAnnotationMetadata: z.boolean(),
-      includedFields: z.array(
-        z.enum([
-          'summary',
-          'observation',
-          'problem',
-          'expectedBehaviour',
-          'requestedChange',
-          'technicalDetails',
-          'aiInstruction',
-          'additionalNotes',
-        ]),
-      ),
+      includedFields: z.array(z.string()),
       overallInstructions: z.string(),
       desiredOutcome: z.string(),
       technicalConstraints: z.string(),
@@ -95,23 +134,81 @@ export const projectSchema = z.object({
     .optional(),
 });
 
-export function validateProject(value: unknown): ProjectData {
-  const parsed = projectSchema.parse(value);
-  const ids = new Set(parsed.rounds.map((round) => round.id));
-  if (ids.size !== parsed.rounds.length || parsed.screenshots.some((shot) => !ids.has(shot.roundId)))
-    throw new Error('Project contains invalid subfolder references.');
-  if (new Set(parsed.screenshots.map((shot) => shot.id)).size !== parsed.screenshots.length)
-    throw new Error('Project contains duplicate screenshot IDs.');
+export type LegacyProjectData = z.infer<typeof legacyProjectSchema>;
+
+function portablePathKey(value: string): string {
+  return value.replaceAll('\\', '/').normalize('NFC').toLowerCase();
+}
+
+function hasDuplicates(values: readonly string[]): boolean {
+  return new Set(values).size !== values.length;
+}
+
+export function validateLegacyProject(value: unknown): LegacyProjectData {
+  const parsed = legacyProjectSchema.parse(value);
+  const collectionIds = new Set(parsed.rounds.map((round) => round.id));
+  if (collectionIds.size !== parsed.rounds.length)
+    throw new Error('Legacy project contains duplicate collection IDs.');
+  if (hasDuplicates(parsed.screenshots.map((shot) => shot.id)))
+    throw new Error('Legacy project contains duplicate screenshot IDs.');
+  if (parsed.screenshots.some((shot) => !collectionIds.has(shot.roundId)))
+    throw new Error('Legacy project contains a dangling collection reference.');
   if (
     parsed.schemaVersion === 2 &&
     parsed.screenshots.some(
       (shot) =>
-        shot.annotationFile !== `rounds/${shot.roundId}/annotations/${shot.storedFilename}.json` ||
-        shot.notesFile !== `rounds/${shot.roundId}/notes/${shot.storedFilename}.md`,
+        shot.annotationFile.replaceAll('\\', '/') !==
+          `rounds/${shot.roundId}/annotations/${shot.storedFilename}.json` ||
+        shot.notesFile.replaceAll('\\', '/') !== `rounds/${shot.roundId}/notes/${shot.storedFilename}.md`,
     )
   )
-    throw new Error('Screenshot file references do not match its subfolder.');
+    throw new Error('Legacy v2 screenshot content paths do not match their collection and filename.');
+  const imageKeys = parsed.screenshots.map((shot) =>
+    portablePathKey(
+      parsed.schemaVersion === 1 ? shot.storedFilename : `${shot.roundId}/${shot.storedFilename}`,
+    ),
+  );
+  const contentKeys = parsed.screenshots.flatMap((shot) => [
+    portablePathKey(shot.annotationFile),
+    portablePathKey(shot.notesFile),
+  ]);
+  if (hasDuplicates(imageKeys) || hasDuplicates(contentKeys))
+    throw new Error('Legacy screenshots contain aliased content paths. Migration was not started.');
+  return parsed;
+}
+
+export function validateProject(value: unknown): ProjectData {
+  const parsed = projectSchema.parse(value);
+  const ids = new Set(parsed.collections.map((collection) => collection.id));
+  if (
+    ids.size !== parsed.collections.length ||
+    parsed.screenshots.some((shot) => !ids.has(shot.collectionId))
+  )
+    throw new Error('Project contains invalid collection references.');
+  if (new Set(parsed.screenshots.map((shot) => shot.id)).size !== parsed.screenshots.length)
+    throw new Error('Project contains duplicate screenshot IDs.');
+  if (
+    hasDuplicates(
+      parsed.screenshots.map((shot) => portablePathKey(`${shot.collectionId}/${shot.storedFilename}`)),
+    )
+  )
+    throw new Error('Screenshots contain aliased per-collection storage paths.');
+  if (
+    parsed.screenshots.some(
+      (shot) =>
+        shot.annotationFile !== `collections/${shot.collectionId}/annotations/${shot.storedFilename}.json` ||
+        shot.descriptionFile !== `collections/${shot.collectionId}/descriptions/${shot.storedFilename}.md`,
+    )
+  )
+    throw new Error('Screenshot file references do not match its collection.');
   return { ...parsed, exportPreferences: parsed.exportPreferences ?? { ...DEFAULT_EXPORT_PREFERENCES } };
+}
+
+export function parseProjectFile(value: unknown): ProjectData | LegacyProjectData {
+  const version = z.object({ schemaVersion: z.number().int() }).parse(value).schemaVersion;
+  if (version === 3) return validateProject(value);
+  if (version === 1 || version === 2) return validateLegacyProject(value);
+  throw new Error(`Unsupported project schema version: ${version}.`);
 }
 
 export const notesSchema = z.object({

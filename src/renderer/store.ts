@@ -7,22 +7,40 @@ import type {
   WorkspaceSettings,
 } from '../shared/types';
 
+export type AppView = 'projects' | 'recent' | 'favourites' | 'workspace' | 'context' | 'settings';
+
 interface AppState {
   settings: WorkspaceSettings;
   projects: ProjectListItem[];
   snapshot: ProjectSnapshot | null;
   activeScreenshotId: string | null;
-  activeRoundId: string;
-  exportAllRounds: boolean;
+  activeCollectionId: string;
   navigationOpen: boolean;
-  view: 'projects' | 'recent' | 'favourites' | 'workspace' | 'context' | 'settings';
+  view: AppView;
   search: string;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
   set: (patch: Partial<AppState>) => void;
   setProject: (snapshot: ProjectSnapshot | null) => void;
+  setActiveCollection: (collectionId: string) => void;
   updateProject: (project: ProjectData) => void;
   activeScreenshot: () => ScreenshotRecord | null;
+}
+
+function localValue(key: string): string | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function remember(key: string, value: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+  } catch {
+    // Local UI preferences are best effort and never affect project data.
+  }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -37,27 +55,46 @@ export const useAppStore = create<AppState>((set, get) => ({
   projects: [],
   snapshot: null,
   activeScreenshotId: null,
-  activeRoundId: '001-first-feedback',
-  exportAllRounds: false,
+  activeCollectionId: '001-collection',
   navigationOpen: true,
   view: 'projects',
   search: '',
-  leftPanelOpen: true,
-  rightPanelOpen: true,
+  leftPanelOpen: localValue('imnota:left-panel') !== 'closed',
+  rightPanelOpen: localValue('imnota:right-panel') !== 'closed',
   set: (patch) => set(patch),
   setProject: (snapshot) => {
-    const roundId =
-      snapshot?.project.rounds.find(
-        (round) =>
-          round.id === (get().snapshot?.project.id === snapshot.project.id ? get().activeRoundId : ''),
+    const remembered = snapshot ? localValue(`imnota:last-collection:${snapshot.project.id}`) : null;
+    const collectionId =
+      snapshot?.project.collections.find(
+        (collection) =>
+          collection.id ===
+          (get().snapshot?.project.id === snapshot.project.id ? get().activeCollectionId : remembered),
       )?.id ??
-      snapshot?.project.rounds[0]?.id ??
-      '001-first-feedback';
+      [...(snapshot?.project.collections ?? [])]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .find((collection) => !collection.archived)?.id ??
+      snapshot?.project.collections[0]?.id ??
+      '001-collection';
     set({
       snapshot,
-      activeRoundId: roundId,
-      activeScreenshotId: snapshot?.project.screenshots.find((shot) => shot.roundId === roundId)?.id ?? null,
+      activeCollectionId: collectionId,
+      activeScreenshotId:
+        snapshot?.project.screenshots
+          .filter((shot) => shot.collectionId === collectionId)
+          .sort((a, b) => a.position - b.position)[0]?.id ?? null,
       view: snapshot ? 'workspace' : 'projects',
+    });
+  },
+  setActiveCollection: (collectionId) => {
+    const snapshot = get().snapshot;
+    if (!snapshot?.project.collections.some((collection) => collection.id === collectionId)) return;
+    remember(`imnota:last-collection:${snapshot.project.id}`, collectionId);
+    set({
+      activeCollectionId: collectionId,
+      activeScreenshotId:
+        snapshot.project.screenshots
+          .filter((shot) => shot.collectionId === collectionId)
+          .sort((a, b) => a.position - b.position)[0]?.id ?? null,
     });
   },
   updateProject: (project) =>
@@ -74,3 +111,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     return state.snapshot?.project.screenshots.find((shot) => shot.id === state.activeScreenshotId) ?? null;
   },
 }));
+
+useAppStore.subscribe((state, previous) => {
+  if (state.leftPanelOpen !== previous.leftPanelOpen)
+    remember('imnota:left-panel', state.leftPanelOpen ? 'open' : 'closed');
+  if (state.rightPanelOpen !== previous.rightPanelOpen)
+    remember('imnota:right-panel', state.rightPanelOpen ? 'open' : 'closed');
+});

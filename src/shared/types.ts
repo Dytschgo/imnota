@@ -1,6 +1,7 @@
+import type { WorkflowBridge } from './workflow-bridge.js';
+
 export type ProjectStatus = 'active' | 'archived';
-export type ScreenshotStatus = 'draft' | 'ready' | 'needs-review' | 'completed';
-export type Priority = 'low' | 'medium' | 'high' | 'critical';
+export type Priority = 'low' | 'medium' | 'high';
 export type AnnotationKind =
   | 'arrow'
   | 'line'
@@ -41,7 +42,7 @@ export interface Annotation {
 }
 
 export interface ScreenshotRecord {
-  roundId: string;
+  collectionId: string;
   id: string;
   originalFilename: string;
   storedFilename: string;
@@ -50,16 +51,16 @@ export interface ScreenshotRecord {
   position: number;
   createdAt: string;
   updatedAt: string;
-  tags: string[];
   priority: Priority;
-  status: ScreenshotStatus;
   annotationFile: string;
-  notesFile: string;
+  descriptionFile: string;
   originalWidth: number;
   originalHeight: number;
   includeInExport: boolean;
+  conflict?: boolean;
 }
 
+/** Version 1/2 note fields retained only for lossless migration. */
 export interface NoteFields {
   summary: string;
   observation: string;
@@ -74,32 +75,29 @@ export interface NoteFields {
 export interface ExportPreferences {
   includeOriginalScreenshots: boolean;
   includeAnnotationMetadata: boolean;
-  includedFields: Array<keyof NoteFields>;
-  overallInstructions: string;
-  desiredOutcome: string;
-  technicalConstraints: string;
   template: 'default';
 }
 
 export interface ProjectData {
-  schemaVersion: 1 | 2;
-  rounds: FeedbackRound[];
+  schemaVersion: 3;
+  collections: Collection[];
   id: string;
   name: string;
   description: string;
   createdAt: string;
   updatedAt: string;
   status: ProjectStatus;
-  tags: string[];
   favourite: boolean;
   screenshots: ScreenshotRecord[];
   exportPreferences: ExportPreferences;
 }
-export interface FeedbackRound {
+export interface Collection {
   id: string;
   name: string;
   archived: boolean;
   createdAt: string;
+  updatedAt: string;
+  overallContext: string;
 }
 
 export interface ProjectSnapshot {
@@ -107,6 +105,11 @@ export interface ProjectSnapshot {
   project: ProjectData;
   thumbnails: Record<string, string>;
   recoveryFound: boolean;
+  /** Revision of project.json used for compare-and-swap metadata saves. */
+  projectRevision?: string;
+  warnings?: string[];
+  /** Delete journals recovered during open that still carry a valid Undo grant. */
+  recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
 }
 
 export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };
@@ -145,7 +148,7 @@ export interface ImagePayload {
 }
 
 export interface ExportRequest {
-  roundId?: string;
+  collectionId?: string;
   projectPath: string;
   markdown: string;
   annotatedImages: Array<{ filename: string; dataUrl: string }>;
@@ -153,12 +156,27 @@ export interface ExportRequest {
   includeAnnotations: boolean;
 }
 
-export interface ImnotaBridge {
+export interface SaveScreenshotResult {
+  project: ProjectData;
+  savedScreenshotId: string;
+  conflictCreated: boolean;
+  contentRevision: string;
+  /** Fresh project.json revision after this native mutation. */
+  projectRevision?: string;
+  warnings?: string[];
+}
+
+export interface DeleteScreenshotResult {
+  snapshot: ProjectSnapshot;
+  undoToken: string;
+}
+
+export interface ImnotaBridge extends WorkflowBridge {
   getSettings(): Promise<WorkspaceSettings>;
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;
   listProjects(): Promise<ProjectListItem[]>;
-  createProject(input: { name: string; description: string; tags: string[] }): Promise<ProjectSnapshot>;
+  createProject(input: { name: string; description: string }): Promise<ProjectSnapshot>;
   openProjectDialog(): Promise<ProjectSnapshot | null>;
   loadProject(projectPath: string): Promise<ProjectSnapshot>;
   saveProject(projectPath: string, project: ProjectData): Promise<void>;
@@ -166,25 +184,29 @@ export interface ImnotaBridge {
     projectPath: string;
     screenshot: ScreenshotRecord;
     annotations: Annotation[];
-    notes: NoteFields;
-  }): Promise<void>;
-  loadScreenshotContent(input: {
-    projectPath: string;
-    screenshot: ScreenshotRecord;
-  }): Promise<{ image: ImagePayload; annotations: Annotation[]; notes: NoteFields }>;
+    contentRevision: string;
+  }): Promise<SaveScreenshotResult>;
+  loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
+    image: ImagePayload;
+    annotations: Annotation[];
+    description: string;
+    contentRevision: string;
+  }>;
   importImageFiles(input: {
     projectPath: string;
     paths: string[];
-    roundId?: string;
+    collectionId?: string;
   }): Promise<ProjectSnapshot>;
-  pasteImage(projectPath: string, roundId?: string): Promise<ProjectSnapshot>;
-  editRound(input: {
+  pasteImage(projectPath: string, collectionId?: string): Promise<ProjectSnapshot>;
+  editCollection(input: {
     projectPath: string;
-    action: 'create' | 'rename' | 'duplicate' | 'archive';
-    roundId?: string;
-    name: string;
+    action: 'create' | 'rename' | 'archive' | 'restore';
+    collectionId?: string;
+    name?: string;
   }): Promise<ProjectSnapshot>;
   duplicateScreenshot(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<ProjectSnapshot>;
+  deleteScreenshot(input: { projectPath: string; screenshotId: string }): Promise<DeleteScreenshotResult>;
+  undoDeleteScreenshot(input: { projectPath: string; undoToken: string }): Promise<ProjectSnapshot>;
   duplicateProject(projectPath: string): Promise<ProjectSnapshot>;
   archiveProject(projectPath: string): Promise<void>;
   deleteProject(projectPath: string): Promise<void>;
@@ -192,7 +214,7 @@ export interface ImnotaBridge {
     projectPath: string;
     filename: string;
     dataUrl: string;
-    roundId?: string;
+    collectionId?: string;
   }): Promise<string>;
   exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
@@ -203,7 +225,6 @@ export interface ImnotaBridge {
     projectPath: string;
     project: ProjectData;
     annotations: Record<string, Annotation[]>;
-    notes: Record<string, NoteFields>;
   }): Promise<void>;
   clearRecovery(projectPath: string): Promise<void>;
   getDroppedFilePath(file: File): string;

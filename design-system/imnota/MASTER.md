@@ -1,240 +1,100 @@
-# Design System Master File
+# Imnota design system
 
-> **LOGIC:** When building a specific page, first check `design-system/pages/[page-name].md`.
-> If that file exists, its rules **override** this Master file.
-> If not, strictly follow the rules below.
+This document describes the application's existing visual foundation. `src/renderer/styles.css` is the implementation source of truth. Extend it through semantic tokens and established component patterns; this is not a brand-redesign brief.
 
----
+## Visual direction
 
-**Project:** Imnota
-**Generated:** 2026-09-05 15:44:43
-**Category:** Developer Tool / IDE
-**Design Dials:** Variance 4/10 (Balanced / Modern) | Motion 3/10 (Subtle) | Density 8/10 (Dense / Dashboard)
+Imnota is a focused desktop workbench: quiet dark or light surfaces, indigo interaction color, compact controls and enough contrast to keep screenshots and annotations dominant. It should feel like a native developer tool, not a marketing site or a themed code editor.
 
----
+- Variance: restrained. Use hierarchy, spacing and state rather than decorative novelty.
+- Motion: subtle and functional. Prefer 120–200 ms state transitions; respect reduced motion.
+- Density: compact but readable for repeated screenshot work.
+- Target: desktop and laptop, with the smallest fully usable layout aimed at a 13-inch laptop. Phone and tablet layouts are out of scope.
 
-## Global Rules
+## Typography
 
-### Color Palette
-
-| Role             | Hex       | CSS Variable               |
-| ---------------- | --------- | -------------------------- |
-| Primary          | `#1E293B` | `--color-primary`          |
-| On Primary       | `#FFFFFF` | `--color-on-primary`       |
-| Secondary        | `#334155` | `--color-secondary`        |
-| On Secondary     | `#FFFFFF` | `--color-on-secondary`     |
-| Accent/CTA       | `#22C55E` | `--color-accent`           |
-| On Accent/CTA    | `#0F172A` | `--color-on-accent`        |
-| Background       | `#0F172A` | `--color-background`       |
-| Foreground       | `#F8FAFC` | `--color-foreground`       |
-| Card             | `#1B2336` | `--color-card`             |
-| Card Foreground  | `#F8FAFC` | `--color-card-foreground`  |
-| Muted            | `#272F42` | `--color-muted`            |
-| Muted Foreground | `#94A3B8` | `--color-muted-foreground` |
-| Border           | `#475569` | `--color-border`           |
-| Destructive      | `#EF4444` | `--color-destructive`      |
-| On Destructive   | `#000000` | `--color-on-destructive`   |
-| Ring             | `#FFFFFF` | `--color-ring`             |
-
-**Color Notes:** Code dark + run green
-
-### Typography
-
-- **Heading Font:** JetBrains Mono
-- **Body Font:** IBM Plex Sans
-- **Mood:** code, developer, technical, precise, functional, hacker
-- **Google Fonts:** [JetBrains Mono + IBM Plex Sans](https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap)
-
-**CSS Import:**
+Use the existing local/system UI stack:
 
 ```css
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+font-family:
+  Inter,
+  Geist,
+  system-ui,
+  -apple-system,
+  BlinkMacSystemFont,
+  'Segoe UI',
+  sans-serif;
 ```
 
-### Spacing Variables
+Inter and Geist are optional locally available faces, not required web downloads. System fonts keep the desktop application fast and platform-appropriate. Use weight and size for hierarchy; do not introduce a separate monospace heading identity.
 
-_Density: 8/10 — Dense / Dashboard_
+Body copy defaults to 14 px. Labels and dense metadata may be smaller when contrast and legibility remain clear. User-entered Markdown and screenshot titles should not be forced to uppercase.
 
-| Token         | Value              | Usage                     |
-| ------------- | ------------------ | ------------------------- |
-| `--space-xs`  | `2px` / `0.125rem` | Tight gaps                |
-| `--space-sm`  | `4px` / `0.25rem`  | Icon gaps, inline spacing |
-| `--space-md`  | `8px` / `0.5rem`   | Standard padding          |
-| `--space-lg`  | `12px` / `0.75rem` | Section padding           |
-| `--space-xl`  | `16px` / `1rem`    | Large gaps                |
-| `--space-2xl` | `24px` / `1.5rem`  | Section margins           |
-| `--space-3xl` | `32px` / `2rem`    | Hero padding              |
+## Core color tokens
 
-### Shadow Depths
+Dark is the current explicit base theme. Light uses the same semantic hierarchy. The application may follow the operating-system preference by default.
 
-| Level         | Value                          | Usage                       |
-| ------------- | ------------------------------ | --------------------------- |
-| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.05)`   | Subtle lift                 |
-| `--shadow-md` | `0 4px 6px rgba(0,0,0,0.1)`    | Cards, buttons              |
-| `--shadow-lg` | `0 10px 15px rgba(0,0,0,0.1)`  | Modals, dropdowns           |
-| `--shadow-xl` | `0 20px 25px rgba(0,0,0,0.15)` | Hero images, featured cards |
+| Role                    | Dark      | Light     | Token            |
+| ----------------------- | --------- | --------- | ---------------- |
+| App background          | `#0b0d12` | `#f5f6f8` | `--bg`           |
+| Primary surface         | `#12151c` | `#ffffff` | `--surface`      |
+| Secondary surface       | `#191d27` | `#f0f1f4` | `--surface-2`    |
+| Raised/selected surface | `#202532` | `#e8eaf0` | `--surface-3`    |
+| Input surface           | `#0f1218` | `#f9fafb` | `--input`        |
+| Primary text            | `#f4f5f7` | `#17191f` | `--ink`          |
+| Secondary text          | `#b3bac8` | `#656b78` | `--ink-2`        |
+| Muted text              | `#7d8595` | `#7d8491` | `--ink-3`        |
+| Faint text              | `#545d6e` | `#a8afbb` | `--ink-4`        |
+| Action/focus            | `#6857f5` | `#6857f5` | `--indigo`       |
+| Strong focus            | `#8b7cf6` | `#8b7cf6` | `--indigo-light` |
+| Informational accent    | `#3ec6e0` | `#3ec6e0` | `--cyan`         |
+| Success                 | `#22c55e` | `#22c55e` | `--success`      |
+| Warning                 | `#f59e0b` | `#f59e0b` | `--warning`      |
+| Destructive             | `#ef4444` | `#ef4444` | `--danger`       |
 
----
+Borders use low-opacity ink through `--line` and `--line-strong`. Shadows are broad and quiet (`--shadow`) and should be reserved for menus, dialogs and meaningful elevation.
 
-## Component Specs
+Curated Graphite, Indigo, Emerald, Amber and Glass presets extend these semantic roles; they do not replace component-level colors ad hoc. Glass is cosmetic, has a solid fallback and must reduce or disable transparency for low-performance systems and reduced-transparency preferences.
 
-### Buttons
+## Layout and hierarchy
 
-```css
-/* Primary Button */
-.btn-primary {
-  background: #22c55e;
-  color: white;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 600;
-  transition: all 200ms ease;
-  cursor: pointer;
-}
+The shell is a desktop workspace with side navigation, a collection rail, the canvas and an inspector. The canvas gets remaining space when a panel collapses. Panels become usable drawers where width is constrained; controls must not simply disappear.
 
-.btn-primary:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
+- Keep the macOS traffic-light safe area and draggable title region clear.
+- Use consistent 4, 8, 12, 16, 24 and 32 px spacing steps.
+- Keep rails compact and scroll long screenshot lists inside their region.
+- Make the active collection, active screenshot and active annotation tool unambiguous.
+- Muted/excluded screenshot rows remain readable and selectable.
+- Dialog actions should place the most common current-collection prompt copies first and fallbacks nearby.
 
-/* Secondary Button */
-.btn-secondary {
-  background: transparent;
-  color: #1e293b;
-  border: 2px solid #1e293b;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 600;
-  transition: all 200ms ease;
-  cursor: pointer;
-}
-```
+## Components and states
 
-### Cards
+Buttons use indigo for the primary action, semantic colors for status/destructive actions and neutral surfaces for secondary actions. Hover must not shift layout. Icon-only buttons use Lucide icons and visible tooltips; do not use emoji as interface icons.
 
-```css
-.card {
-  background: #0f172a;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: var(--shadow-md);
-  transition: all 200ms ease;
-  cursor: pointer;
-}
+Inputs and text areas use `--input`, a subtle border and an indigo focus ring. Focus is always visible for keyboard navigation. Disabled controls remain identifiable and use `not-allowed` cursor behavior.
 
-.card:hover {
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-2px);
-}
-```
+Cards and rows communicate selection with surface and border changes, not scale effects. Use badges sparingly for archived, conflict, priority and Note references. Error states name the affected screenshot or operation and offer a next action.
 
-### Inputs
+Annotation colors and application-theme colors are related but distinct. The live canvas follows semantic annotation defaults and user palette overrides. Prompt PNG export always renders on white and may adapt annotation colors for contrast without changing persisted intent.
 
-```css
-.input {
-  padding: 12px 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 16px;
-  transition: border-color 200ms ease;
-}
+## Motion and accessibility
 
-.input:focus {
-  border-color: #1e293b;
-  outline: none;
-  box-shadow: 0 0 0 3px #1e293b20;
-}
-```
+- Animate only state, focus, panel and progress transitions that improve orientation.
+- Avoid scroll-reveal, parallax, ambient glow and decorative looping effects.
+- Respect `prefers-reduced-motion` and reduced-transparency preferences.
+- Maintain at least WCAG AA text contrast for ordinary text and a clear non-color state cue where practical.
+- Preserve full keyboard access, platform-aware shortcuts and conflict explanations.
+- Do not hide essential controls behind hover alone; tooltips supplement visible state.
 
-### Modals
+## Pre-delivery checklist
 
-```css
-.modal-overlay {
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-}
-
-.modal {
-  background: white;
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: var(--shadow-xl);
-  max-width: 500px;
-  width: 90%;
-}
-```
-
----
-
-## Style Guidelines
-
-**Style:** Dark Mode (OLED)
-
-**Keywords:** Dark theme, low light, high contrast, deep black, midnight blue, eye-friendly, OLED, night mode, power efficient
-
-**Best For:** Night-mode apps, coding platforms, entertainment, eye-strain prevention, OLED devices, low-light
-
-**Key Effects:** Minimal glow (text-shadow: 0 0 10px), dark-to-light transitions, low white emission, high readability, visible focus
-
-### Page Pattern
-
-**Pattern Name:** FAQ/Documentation Landing
-
-- **Conversion Strategy:** Reduce support tickets. Track search analytics. Show related articles. Contact escalation path.
-- **CTA Placement:** Search bar prominent + Contact CTA for unresolved questions
-- **Section Order:** Hero with search bar > Popular categories > FAQ accordion > Contact/support CTA
-
----
-
-## Motion
-
-**Scroll Reveal** (Subtle) — Trigger: scroll (viewport enter) | Duration: 300-400ms | Easing: `power1.out`
-
-```js
-gsap.from(el, {
-  opacity: 0,
-  y: 12,
-  duration: 0.35,
-  ease: 'power1.out',
-  scrollTrigger: { trigger: el, start: 'top 90%', toggleActions: 'play none none reverse' },
-});
-```
-
-**Framework notes:** Requires the ScrollTrigger plugin registered once via gsap.registerPlugin(ScrollTrigger); Use matchMedia('(prefers-reduced-motion: reduce)') to skip non-essential motion and render the final state immediately
-
-- ✅ Keep the y offset small (8-16px) so it reads as a fade, not a slide
-- ❌ Don't reveal below-the-fold content needed for SEO/crawlers as invisible-by-default without a no-JS fallback
-- ⚡ toggleActions 'play none none reverse' avoids re-triggering on every scroll direction change
-
----
-
-## Anti-Patterns (Do NOT Use)
-
-- ❌ Light mode default
-- ❌ Slow performance
-
-### Additional Forbidden Patterns
-
-- ❌ **Emojis as icons** — Use SVG icons (Heroicons, Lucide, Simple Icons)
-- ❌ **Missing cursor:pointer** — All clickable elements must have cursor:pointer
-- ❌ **Layout-shifting hovers** — Avoid scale transforms that shift layout
-- ❌ **Low contrast text** — Maintain 4.5:1 minimum contrast ratio
-- ❌ **Instant state changes** — Always use transitions (150-300ms)
-- ❌ **Invisible focus states** — Focus states must be visible for a11y
-
----
-
-## Pre-Delivery Checklist
-
-Before delivering any UI code, verify:
-
-- [ ] No emojis used as icons (use SVG instead)
-- [ ] All icons from consistent icon set (Heroicons/Lucide)
-- [ ] `cursor-pointer` on all clickable elements
-- [ ] Hover states with smooth transitions (150-300ms)
-- [ ] Light mode: text contrast 4.5:1 minimum
-- [ ] Focus states visible for keyboard navigation
-- [ ] `prefers-reduced-motion` respected
-- [ ] Responsive: 375px, 768px, 1024px, 1440px
-- [ ] No content hidden behind fixed navbars
-- [ ] No horizontal scroll on mobile
+- [ ] Uses semantic tokens from `src/renderer/styles.css` rather than an unrelated palette.
+- [ ] Uses the system UI font stack with no required remote font request.
+- [ ] Active, hover, focus, disabled, loading, error and empty states are covered.
+- [ ] Collection rail and inspector remain usable at the 13-inch laptop target.
+- [ ] Light, dark and system-following modes preserve contrast.
+- [ ] Glass/preset styling has a solid accessible fallback.
+- [ ] Reduced motion/transparency preferences are respected.
+- [ ] Lucide icons and tooltips are used consistently; no emoji icons.
+- [ ] Prompt previews show the white export surface accurately.
+- [ ] No cloud, account or AI-provider affordance is implied by visual copy.
