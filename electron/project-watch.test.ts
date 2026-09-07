@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectWatchEvent } from '../src/shared/workflow-bridge.js';
 import { emptyProject } from '../src/shared/utils.js';
-import { ProjectWatchManager } from './project-watch.js';
+import { ignoredProjectWatchPath, ProjectWatchManager } from './project-watch.js';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -43,6 +43,14 @@ async function fixture() {
 }
 
 describe('project file watch and compare-and-swap', () => {
+  it('ignores internal export, trash, recovery, and screenshot transaction paths', () => {
+    expect(ignoredProjectWatchPath('collections/001/exports/set/prompt.png')).toBe(true);
+    expect(ignoredProjectWatchPath('.imnota-undo/token/manifest.json')).toBe(true);
+    expect(ignoredProjectWatchPath('.imnota-transactions/txn-token/after-0001.bin')).toBe(true);
+    expect(ignoredProjectWatchPath('.imnota-recovery.json')).toBe(true);
+    expect(ignoredProjectWatchPath('collections/001/annotations/screenshot.json')).toBe(false);
+  });
+
   it('debounces external changes while ignoring exports and known self revisions', async () => {
     const { manager, projectPath, projectFile, listener, events } = await fixture();
     await manager.start(projectPath);
