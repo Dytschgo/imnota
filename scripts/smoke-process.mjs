@@ -137,10 +137,16 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
         `Native verification exited without a readable report (exit ${result.code}, signal ${result.signal}).`,
       );
     }
-    if (result.code !== 0)
+    if (result.code !== 0) {
+      if (report.rendererState)
+        console.error(
+          'Isolated fixture renderer diagnostics:',
+          JSON.stringify(report.rendererState).slice(0, 24000),
+        );
       throw new Error(
         `Native verification failed (exit ${result.code}, signal ${result.signal}): ${report.error ?? 'no application detail'}`,
       );
+    }
     if (
       report.passed !== true ||
       typeof report.version !== 'string' ||

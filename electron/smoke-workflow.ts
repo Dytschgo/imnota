@@ -475,7 +475,7 @@ async function exerciseNativeCanvas(driver: NativeUiDriver): Promise<void> {
     if (!stageContainer) throw new Error('Canvas command target is unavailable');
     stageContainer.dispatchEvent(new CustomEvent('imnota:canvas-command', { detail: 'fit' }));
   })()`);
-  await delay(80);
+  await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
   const textPoint = {
     x: Math.round(geometry.image.x + geometry.image.width * 0.5),
@@ -878,16 +878,16 @@ async function exercisePreferencesAndChannel(driver: NativeUiDriver, host: Smoke
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   const chooseNightly = async () => {
     await driver.waitFor(channelSelect);
-    // Focus the HTML select without opening a platform-native popup that webContents
-    // key events cannot control on macOS. The actual selection still uses native keys.
+    // Standard DOM option selection avoids OS-owned popup menus outside webContents.
+    // Keep the real React change handler, confirmation dialog and persistence checks.
     await driver.evaluate(`(() => {
       const select = document.querySelector('[data-testid="update-channel"], .update-settings select');
       select.scrollIntoView({ block: 'center' });
       select.focus();
+      select.value = 'nightly';
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
-    await driver.press('DOWN');
-    if (!(await driver.exists({ selector: '[role="dialog"]', text: 'Switch to Nightly?' })))
-      await driver.press('ENTER');
   };
   await chooseNightly();
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Switch to Nightly?' });
