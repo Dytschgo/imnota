@@ -28,13 +28,16 @@ export async function exerciseMixedContent(
   await driver.waitFor(
     {
       selector:
-        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-prompt-1"]:not(:disabled)',
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]:not(:disabled)',
     },
     { timeoutMs: 30_000 },
   );
-  await driver.click({ selector: '[data-testid="copy-prompt-1"]' });
+  await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
   await driver.waitFor(
-    { selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] .prompt-bundle-state-success' },
+    {
+      selector:
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"].is-copied',
+    },
     { timeoutMs: 30_000 },
   );
   if (!clipboard.readText().includes('# System overview') || !clipboard.readImage().isEmpty())
@@ -111,13 +114,16 @@ export async function exerciseMixedContent(
   await driver.waitFor(
     {
       selector:
-        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-prompt-1"]:not(:disabled)',
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]:not(:disabled)',
     },
     { timeoutMs: 30_000 },
   );
-  await driver.click({ selector: '[data-testid="copy-prompt-1"]' });
+  await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
   await driver.waitFor(
-    { selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] .prompt-bundle-state-success' },
+    {
+      selector:
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"].is-copied',
+    },
     { timeoutMs: 30_000 },
   );
   const mixedMarkdown = clipboard.readText();
