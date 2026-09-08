@@ -320,9 +320,23 @@ describe('HostedShareClient request boundary', () => {
     await expect(guarded.create(upload(), artifacts())).rejects.toMatchObject({
       code: 'io-failure',
       message: expect.stringMatching(/save local hosted-share data/i),
-      details: { requestMayHaveCommitted: false },
     });
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('does not mark a failed pending recovery read as safe to retry', async () => {
+    const { root } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(pendingFile, '{broken');
+    const transport = vi.fn<HostedShareFetch>();
+    const error = await new HostedShareClient(root, async () => undefined, transport)
+      .create(upload(), artifacts())
+      .catch((failure: unknown) => failure);
+
+    expect(error).toMatchObject({ code: 'io-failure' });
+    expect((error as { details?: Record<string, unknown> }).details?.requestMayHaveCommitted).not.toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    expect(await fs.readFile(pendingFile, 'utf8')).toBe('{broken');
   });
 
   it('preserves pending recovery metadata when local history is saved but pending cleanup fails', async () => {

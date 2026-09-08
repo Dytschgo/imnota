@@ -371,16 +371,7 @@ export class HostedShareClient {
         ...(artifacts.bundles ? { bundles: artifacts.bundles } : {}),
       };
       const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-      const pairingToken = await this.resolvePairingToken(input, payloadFingerprint, controller.signal).catch(
-        (error: unknown) => {
-          if (error instanceof NativeWorkflowError && error.code === 'io-failure')
-            throw new NativeWorkflowError(error.code, error.message, error.retryable, {
-              ...error.details,
-              requestMayHaveCommitted: false,
-            });
-          throw error;
-        },
-      );
+      const pairingToken = await this.resolvePairingToken(input, payloadFingerprint, controller.signal);
       const target = `${originForTests()}/api/shares`;
       const response = await this.fetchTransport(target, {
         method: 'POST',
