@@ -18,9 +18,9 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "49d8be0f6739920491d13d1a9d6b081630565bff",
+  "sourceRevision": "1573a2389223b5f4abaa3b212950bf9690fbe0c2",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291439096",
-  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; individually reviewed settings copy and restored transparent backdrop captures and diff images",
-  "sourceCommit": "49d8be0f6739920491d13d1a9d6b081630565bff"
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291781425",
+  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; individually reviewed generic picker settings scrollbar and inherited transparent backdrop captures and diff images",
+  "sourceCommit": "1573a2389223b5f4abaa3b212950bf9690fbe0c2"
 }
