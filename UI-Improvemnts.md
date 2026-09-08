@@ -195,16 +195,16 @@ Use actual supported desktop window sizes, including a compact window, a normal 
 
 Regression coverage should target real behavior: tooltip dismissal after click, correct row deletion, dialogs escaping clipped parents, preview fitting, accurate save-state propagation, and automatic theme/backdrop transitions. Pure text/spacing removal needs visual inspection and adjusted existing assertions rather than a separate test for every deleted word.
 
-| Plan PR                          | Status                                           | Pull request                                             |
-| -------------------------------- | ------------------------------------------------ | -------------------------------------------------------- |
-| 1 - Navigation and header        | Implemented, independently reviewed              | [#44](https://github.com/Dytschgo/imnota/pull/44)        |
-| 2 - Dialogs and preview          | Implemented, independently reviewed              | [#45](https://github.com/Dytschgo/imnota/pull/45)        |
-| 3 - Collection cleanup and trash | Implemented, independently reviewed              | [#46](https://github.com/Dytschgo/imnota/pull/46)        |
-| 4 - Delete banner removal        | Implemented and regression-tested                | [#47](https://github.com/Dytschgo/imnota/pull/47)        |
-| 5 - Toolbar and tooltips         | Implemented, independently reviewed              | [#48](https://github.com/Dytschgo/imnota/pull/48)        |
-| 6 - Drawing canvas               | Implemented, independently reviewed              | [#49](https://github.com/Dytschgo/imnota/pull/49)        |
-| 7 - Glass and transparency       | Implemented, independently reviewed              | [#50](https://github.com/Dytschgo/imnota/pull/50)        |
-| 8 - Generic backdrops            | Generated, integrated and independently reviewed | `fix/ui-generic-backdrops`, link added after PR creation |
+| Plan PR                          | Status                                           | Pull request                                      |
+| -------------------------------- | ------------------------------------------------ | ------------------------------------------------- |
+| 1 - Navigation and header        | Implemented, independently reviewed              | [#44](https://github.com/Dytschgo/imnota/pull/44) |
+| 2 - Dialogs and preview          | Implemented, independently reviewed              | [#45](https://github.com/Dytschgo/imnota/pull/45) |
+| 3 - Collection cleanup and trash | Implemented, independently reviewed              | [#46](https://github.com/Dytschgo/imnota/pull/46) |
+| 4 - Delete banner removal        | Implemented and regression-tested                | [#47](https://github.com/Dytschgo/imnota/pull/47) |
+| 5 - Toolbar and tooltips         | Implemented, independently reviewed              | [#48](https://github.com/Dytschgo/imnota/pull/48) |
+| 6 - Drawing canvas               | Implemented, independently reviewed              | [#49](https://github.com/Dytschgo/imnota/pull/49) |
+| 7 - Glass and transparency       | Implemented, independently reviewed              | [#50](https://github.com/Dytschgo/imnota/pull/50) |
+| 8 - Generic backdrops            | Generated, integrated and independently reviewed | [#51](https://github.com/Dytschgo/imnota/pull/51) |
 
 Completion means every feedback-map entry has a corresponding verified result. Any materially unclear behavior is clarified with Dylan one question at a time; the confirmed nightly baseline does not need to be asked again. Drawing 11 is treated as reference only unless Dylan supplies a separate request for it.
 
