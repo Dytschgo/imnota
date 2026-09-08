@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
+import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import {
   NativeUiDriver,
   SMOKE_VIEWPORTS,
@@ -1861,6 +1862,10 @@ export async function runSmokeWorkflow(
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
+  );
+  artifacts.push(...(await exerciseUiFeedback(driver, artifactDirectory)));
+  assertions.push(
+    'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
 
   const report: SmokeWorkflowReport = {

@@ -14,6 +14,16 @@ Choose a workspace folder, then create or open a project. Collections replace th
 
 Overall context is optional and applies to the active collection. Prompt 1 contains it in full; later prompts briefly point back to Prompt 1 instead of duplicating it.
 
+Use the plus button beside **Projects** to create a project from the sidebar. Choose a predefined icon in the new-project dialog. **Edit project** on a project row changes its name, description and icon without renaming its folder.
+
+**Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Open **Archived projects** to search archived projects or restore one to the active library.
+
+## Navigate and search
+
+The toolbar **Back** button returns to earlier app locations, including the project, collection and item you were viewing before Settings. **Forward** becomes available after going back; navigating somewhere new clears the forward history. Navigation saves pending work before leaving it.
+
+Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope.
+
 ## Add and organize screenshots
 
 Paste, drop or import PNG, JPEG or WebP images. Imnota appends them in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
@@ -45,7 +55,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Open the sharing dialog from the active collection. Each card shows a preview and a **Bundle 1**, **Bundle 2**, etc. heading. Dimensions and counts are under **Bundle details**.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview and a **Bundle 1**, **Bundle 2**, etc. heading. Dimensions and counts are under **Bundle details**.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
@@ -87,6 +97,8 @@ Usage counts start when this feature is deployed. They count successful page loa
 ## Appearance, settings and onboarding
 
 Appearance follows the operating-system theme by default. Settings also provides Light, Dark and curated color presets. Glass is cosmetic, respects reduced-transparency preferences and falls back to solid surfaces when transparency is unavailable or reduced.
+
+You can use the same background for both themes or choose separate Light and Dark images and opacity. Existing backgrounds remain shared until you change this option. **No image** applies to the selected theme when using separate backgrounds. System mode uses the background for the current operating-system theme. Reading surfaces keep a protective light or dark background over wallpaper; **Solid** removes transparency. These preferences do not change the white background of exported bundles. Settings categories scroll with the page.
 
 Onboarding appears only for a genuinely new local application profile. It uses an isolated demo project, never the real workspace, and covers importing, annotating and copying a prompt bundle. Completion is stored with local application settings rather than project files, so normal updates do not show it again. Replay it at any time from Settings.
 
