@@ -1,6 +1,6 @@
 # PR test coverage map
 
-Policy introduced in PR #36. This map describes application-impact PRs and full validation runs; [prose-only PRs](ci-routing.md) use the separately reviewed documentation route. The full suite remains in Linux `quality`. Package jobs run `test:platform`: the same default discovery minus the 41 exact renderer paths in [the policy](../tests/platform-test-policy.json), followed by all script tests. All 37 other application test files remain on Linux, Windows, and macOS. Hosted share contracts, the three service jobs, actual packaged walkthroughs, and Windows visual checks remain unchanged. Nightly and stable release keep their existing full-suite commands.
+Policy introduced in PR #36. This map describes application-impact PRs and full validation runs; [prose-only PRs](ci-routing.md) use the separately reviewed documentation route. The full suite remains in Linux `quality`. Package jobs run `test:platform`: the same default discovery minus the 41 exact renderer paths in [the policy](../tests/platform-test-policy.json), followed by all script tests. All 37 other application test files remain on Linux, Windows, and macOS. Hosted share contracts, the three service jobs, actual packaged walkthroughs, and Windows visual checks remain unchanged. Nightly keeps its full-suite command. [Stable release CI](stable-release-ci.md) now runs the full suite once in quality and the platform subset plus all script tests in every package job.
 
 ## Why the renderer exclusions are safe
 
