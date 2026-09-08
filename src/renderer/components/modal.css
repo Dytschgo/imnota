@@ -1,0 +1,62 @@
+/* The body portal escapes filtered glass panels and their overflow clipping. */
+.modal-backdrop.modal-viewport {
+  z-index: 100;
+  padding: clamp(8px, 2vw, 20px);
+}
+
+.modal-viewport[hidden] {
+  display: none;
+}
+
+.modal-viewport .modal {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - clamp(16px, 4vw, 40px));
+  overflow: hidden;
+}
+
+.modal-viewport .modal-header {
+  flex: none;
+  min-width: 0;
+}
+
+.modal-viewport .modal-header > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modal-viewport .modal-header > button {
+  flex: none;
+}
+
+.modal-viewport .modal > :not(.modal-header) {
+  min-height: 0;
+  overflow: auto;
+}
+
+.modal-viewport .modal-actions {
+  position: sticky;
+  bottom: 0;
+  flex-wrap: wrap;
+  padding-block: 12px;
+  background: var(--surface-2);
+}
+
+.modal-viewport .modal-form {
+  padding-bottom: 0;
+}
+
+.modal-backdrop.modal-viewport-preview {
+  padding: 8px;
+}
+
+.modal-viewport .modal-preview {
+  width: 100%;
+  height: calc(100dvh - 16px);
+  max-height: none;
+}
+
+.modal-preview .modal-header {
+  align-items: center;
+  padding: 10px 14px;
+}
