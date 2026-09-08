@@ -20,7 +20,7 @@ it('shows a useful empty state without offering a misleading copy action', () =>
   );
   expect(screen.getByRole('dialog')).toBeInTheDocument();
   expect(screen.getByText('No screenshots are included. Turn one on first.')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /copy fresh prompt/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copy Bundle' })).not.toBeInTheDocument();
 });
 
 it('reports typed progress, offers cancellation, and avoids receiver-detection claims', () => {
@@ -33,13 +33,13 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
       onCancel={onCancel}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Rendering Prompt 2 of 4');
+  expect(screen.getByRole('status')).toHaveTextContent('Rendering Bundle 2 of 4');
   expect(screen.queryByText('No prompt bundle to share')).not.toBeInTheDocument();
   expect(screen.getByText(/Reading the saved collection/)).toBeInTheDocument();
   expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
   fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();
-  expect(screen.getByRole('dialog')).toHaveTextContent(/confirm that both Markdown and image are present/i);
+  expect(screen.getByRole('dialog')).toHaveTextContent(/Copy Bundle includes image and Markdown/i);
   expect(screen.getByRole('dialog')).not.toHaveTextContent(/receiver detected|attachment received/i);
 });
 

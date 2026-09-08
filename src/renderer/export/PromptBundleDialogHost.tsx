@@ -85,15 +85,15 @@ export function PromptBundleDialogHost({
       )}
       {controller.preview && (
         <Modal
-          title={`Prompt ${controller.preview.bundleNumber} preview`}
-          description={`${controller.preview.width} × ${controller.preview.height}px. Only this full-resolution preview is held in memory.`}
+          title={`Bundle ${controller.preview.bundleNumber} preview`}
+          description={`${controller.preview.width} × ${controller.preview.height}px`}
           onClose={controller.clearPreview}
           closeTestId="prompt-preview-close"
         >
           <div className="prompt-large-preview" data-testid="prompt-large-preview">
             <img
               src={controller.preview.dataUrl}
-              alt={`Full-resolution Prompt ${controller.preview.bundleNumber}`}
+              alt={`Full-resolution Bundle ${controller.preview.bundleNumber}`}
             />
           </div>
         </Modal>

@@ -39,9 +39,9 @@ function progressLabel(progress: PromptBundleProgress): string {
       writing: 'Writing',
       copying: 'Copying',
     }[progress.phase];
-    return `${action} Prompt ${progress.bundleNumber} of ${progress.totalBundles}`;
+    return `${action} Bundle ${progress.bundleNumber} of ${progress.totalBundles}`;
   }
-  return 'Preparing prompt bundles';
+  return 'Preparing bundles';
 }
 
 export function PromptSharingDialog({
@@ -73,8 +73,8 @@ export function PromptSharingDialog({
         : undefined;
   return (
     <Modal
-      title="Share prompt bundles"
-      description="Each primary Copy Prompt action creates a fresh export from saved collection state. Some apps may paste only the text or only the image."
+      title="Share bundles"
+      description="Copy the latest bundle, or choose a single format."
       onClose={onClose}
       closeTestId="prompt-sharing-close"
     >
@@ -107,7 +107,7 @@ export function PromptSharingDialog({
           <div className="prompt-sharing-empty">
             <AlertTriangle size={20} aria-hidden="true" />
             <div>
-              <h3>No prompt bundle to share</h3>
+              <h3>No bundle to share</h3>
               <p>
                 {noContentMessage ??
                   'Include at least one screenshot in this collection before preparing a prompt bundle.'}
@@ -132,7 +132,10 @@ export function PromptSharingDialog({
           </div>
         )}
         <footer className="prompt-sharing-footer">
-          <p>After pasting, confirm that both Markdown and image are present in the receiving app.</p>
+          <details className="prompt-sharing-info">
+            <summary>Copying help</summary>
+            <p>Copy Bundle includes image and Markdown. Check the receiving app after pasting.</p>
+          </details>
           <div>
             {onOpenExportFolder && (
               <Button variant="ghost" disabled={busy} onClick={() => void onOpenExportFolder()}>
