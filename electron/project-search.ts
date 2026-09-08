@@ -21,6 +21,7 @@ export const SEARCH_LIMITS = {
   totalBytes: 32_000_000,
   fileOperations: 10_000,
   cachedProjects: 100,
+  cachedCharacters: 8_000_000,
   results: 100,
 } as const;
 
@@ -36,6 +37,7 @@ interface ProjectIndex {
 
 interface CacheEntry extends ProjectIndex {
   lastUsed: number;
+  characters: number;
 }
 
 interface SearchBudget {
@@ -177,7 +179,14 @@ async function readBoundedText(
     }
     budget.remainingBytes -= bytesRead;
     const finalPathStat = await fs.lstat(filePath);
-    if (stat.dev !== finalPathStat.dev || stat.ino !== finalPathStat.ino) {
+    const finalHandleStat = await handle.stat();
+    if (
+      stat.dev !== finalPathStat.dev ||
+      stat.ino !== finalPathStat.ino ||
+      stat.size !== finalHandleStat.size ||
+      stat.mtimeMs !== finalHandleStat.mtimeMs ||
+      stat.ctimeMs !== finalHandleStat.ctimeMs
+    ) {
       budget.unreadableFiles += 1;
       budget.truncated = true;
       throw new Error('A project content path changed while it was read.');
@@ -251,17 +260,19 @@ function score(document: SearchDocument, tokens: readonly string[], query: strin
 
 export class ProjectSearchService {
   private readonly cache = new Map<string, CacheEntry>();
+  private cachedCharacters = 0;
   private searchGeneration = 0;
 
   constructor(private readonly dependencies: ProjectSearchDependencies) {}
 
   invalidateForPath(targetPath: string): void {
     for (const projectPath of this.cache.keys())
-      if (isWithin(projectPath, targetPath)) this.cache.delete(projectPath);
+      if (isWithin(projectPath, targetPath)) this.deleteCached(projectPath);
   }
 
   clear(): void {
     this.cache.clear();
+    this.cachedCharacters = 0;
   }
 
   async search(rawInput: ProjectSearchInput): Promise<ProjectSearchResponse> {
@@ -466,13 +477,32 @@ export class ProjectSearchService {
         contentPaths.length > limitedPaths.length ||
         entriesRead > SEARCH_LIMITS.entriesPerProject,
       lastUsed: Date.now(),
+      characters: documents.reduce((total, item) => total + item.searchable.length + item.excerpt.length, 0),
     };
     // A file skipped because the current search exhausted its byte budget gets another chance later.
-    if (budget.skippedFiles + budget.unreadableFiles === skippedBefore) this.cache.set(projectPath, index);
-    if (this.cache.size > SEARCH_LIMITS.cachedProjects) {
+    if (
+      budget.skippedFiles + budget.unreadableFiles === skippedBefore &&
+      index.characters <= SEARCH_LIMITS.cachedCharacters
+    ) {
+      this.deleteCached(projectPath);
+      this.cache.set(projectPath, index);
+      this.cachedCharacters += index.characters;
+    }
+    while (
+      this.cache.size > SEARCH_LIMITS.cachedProjects ||
+      this.cachedCharacters > SEARCH_LIMITS.cachedCharacters
+    ) {
       const oldest = [...this.cache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0]?.[0];
-      if (oldest) this.cache.delete(oldest);
+      if (!oldest) break;
+      this.deleteCached(oldest);
     }
     return index;
+  }
+
+  private deleteCached(projectPath: string): void {
+    const cached = this.cache.get(projectPath);
+    if (!cached) return;
+    this.cachedCharacters -= cached.characters;
+    this.cache.delete(projectPath);
   }
 }
