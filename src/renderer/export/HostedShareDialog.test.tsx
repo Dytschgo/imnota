@@ -167,6 +167,114 @@ describe('HostedShareDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('A previous receipt timed out.');
   });
 
+  it('clears resolved recovery warnings after a successful upload refresh', async () => {
+    const listHostedShares = vi
+      .fn<ImnotaBridge['listHostedShares']>()
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { records: [], recoveryErrors: ['A previous receipt timed out.'] },
+      })
+      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
+    const native = bridge({ listHostedShares });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    expect(await screen.findByText('A previous receipt timed out.')).toBeInTheDocument();
+
+    approveAndPublish();
+    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    await waitFor(() => expect(native.listHostedShares).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument();
+    expect(screen.getByText('Local share history (1)')).toBeInTheDocument();
+  });
+
+  it('keeps a successful upload ready when its follow-up history refresh fails', async () => {
+    const listHostedShares = vi
+      .fn<ImnotaBridge['listHostedShares']>()
+      .mockResolvedValueOnce({ ok: true, value: { records: [], recoveryErrors: [] } })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'network-failure', message: 'History refresh is offline.', retryable: true },
+      });
+    bridge({ listHostedShares });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(listHostedShares).toHaveBeenCalledOnce());
+
+    approveAndPublish();
+    expect(await screen.findByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
+    expect(screen.queryByText('History refresh is offline.')).not.toBeInTheDocument();
+  });
+
+  it('does not let a late initial history load overwrite a new upload', async () => {
+    let resolveInitial!: (value: Awaited<ReturnType<ImnotaBridge['listHostedShares']>>) => void;
+    const initial = new Promise<Awaited<ReturnType<ImnotaBridge['listHostedShares']>>>(
+      (resolve) => (resolveInitial = resolve),
+    );
+    const listHostedShares = vi
+      .fn<ImnotaBridge['listHostedShares']>()
+      .mockImplementationOnce(() => initial)
+      .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
+    bridge({ listHostedShares });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    approveAndPublish();
+
+    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    await waitFor(() => expect(listHostedShares).toHaveBeenCalledTimes(2));
+    resolveInitial({
+      ok: true,
+      value: { records: [expired], recoveryErrors: ['A stale recovery warning.'] },
+    });
+    await waitFor(() => expect(screen.getByText('Local share history (1)')).toBeInTheDocument());
+    expect(screen.queryByText('A stale recovery warning.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Expired prompt · expired/)).not.toBeInTheDocument();
+  });
+
+  it('dismisses recovery warnings without changing history or invoking a destructive bridge action', async () => {
+    const native = bridge({
+      listHostedShares: vi.fn(async () => ({
+        ok: true as const,
+        value: { records: [active], recoveryErrors: ['A previous receipt timed out.'] },
+      })),
+    });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await screen.findByText('A previous receipt timed out.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument();
+    expect(screen.getByText('Local share history (1)')).toBeInTheDocument();
+    expect(native.cancelHostedShare).not.toHaveBeenCalled();
+    expect(native.revokeHostedShare).not.toHaveBeenCalled();
+  });
+
+  it('keeps recovery warnings visible when retry fails and prevents a second retry while busy', async () => {
+    let finishRetry!: (value: Awaited<ReturnType<ImnotaBridge['listHostedShares']>>) => void;
+    const retry = new Promise<Awaited<ReturnType<ImnotaBridge['listHostedShares']>>>(
+      (resolve) => (finishRetry = resolve),
+    );
+    const listHostedShares = vi
+      .fn<ImnotaBridge['listHostedShares']>()
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { records: [active], recoveryErrors: ['A previous receipt timed out.'] },
+      })
+      .mockImplementationOnce(() => retry);
+    bridge({ listHostedShares });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await screen.findByText('A previous receipt timed out.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry recovery' }));
+    expect(screen.getByRole('button', { name: 'Retry recovery' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry recovery' }));
+    expect(listHostedShares).toHaveBeenCalledTimes(2);
+
+    finishRetry({
+      ok: false,
+      error: { code: 'network-failure', message: 'Recovery service is offline.', retryable: true },
+    });
+    expect(await screen.findByText('Recovery service is offline.')).toBeInTheDocument();
+    expect(screen.getByText('A previous receipt timed out.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry recovery' })).toBeEnabled();
+  });
+
   it('requires revoke confirmation, supports cancel, and surfaces revoke failure after upload success', async () => {
     const revokeHostedShare = vi.fn(async () => ({
       ok: false as const,
