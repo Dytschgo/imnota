@@ -546,15 +546,10 @@ select {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 28px;
+  display: block;
+  width: 32px;
   height: 32px;
-  border: 1px solid var(--share-accent);
-  border-radius: 4px;
-  color: var(--share-accent);
-  font-family: Georgia, serif;
-  font-style: italic;
+  flex: 0 0 32px;
 }
 
 .brand-context {
