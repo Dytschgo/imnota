@@ -112,10 +112,22 @@ jobs:
       - name: Smoke packaged Linux application
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
-      - uses: actions/upload-artifact@v7
+      - name: Retain review installers and build diagnostics
+        uses: actions/upload-artifact@v7
         with:
           name: imnota-${{ matrix.os }}
-          path: release/
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest*.yml
+            release/builder-debug.yml
+            release/builder-effective-config.yaml
+          if-no-files-found: error
+          compression-level: 0
 
   dependency-review:
     if: github.event_name == 'pull_request'

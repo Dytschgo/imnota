@@ -14,7 +14,7 @@ The [baseline nightly](https://github.com/Dytschgo/imnota/actions/runs/342660143
 
 ## 1. Working agreement and verification tiers
 
-Current documentation-only slice:
+Completed in [PR #35](https://github.com/Dytschgo/imnota/pull/35):
 
 - [x] Replace hard PR-size stops with warnings and justified exceptions.
 - [x] Keep cohesive backend/UI/test changes and required dependency updates together.
@@ -24,7 +24,13 @@ Current documentation-only slice:
 
 Acceptance: both documents agree, commands and local links are valid, and it is clear that no existing CI gate or repository setting changes in this slice. The tiers guide local work now; automated routing requires the next reviewed CI change.
 
-## 2. Next experiment: remove redundant PR test execution
+## 2. Completed: remove redundant PR test execution
+
+[PR #36](https://github.com/Dytschgo/imnota/pull/36) mapped all tests and retained the full suite in Linux quality. Each package job now repeats the 37 unexcluded application test files and all script tests. The 41 exact renderer exclusions were reviewed for simulated or platform-independent behavior; new tests remain in platform runs by default. See the [coverage map](pr-test-coverage.md).
+
+In one successful PR-run comparison ([before](https://github.com/Dytschgo/imnota/actions/runs/34276483712), [after](https://github.com/Dytschgo/imnota/actions/runs/34277727340)), the package test step fell from 82s to 36s on Windows, 85s to 52s on macOS, and 42s to 20s on Linux. All native, visual, security, and quality checks passed. Workflow-level queue delay was zero at API timestamp resolution in both runs; runner scheduling and total job times vary. No test cases were deleted and release gates were unchanged.
+
+The experiment used these requirements:
 
 Before changing the matrix, map the current tests by the behavior they protect and record their durations. Include Electron, renderer, shared-code, script, and service tests. A directory name or jsdom environment alone does not prove OS independence.
 
@@ -42,6 +48,8 @@ Acceptance:
 ## 3. Follow-up speed and reliability work
 
 Choose the next item from measured cost and failure frequency, rather than implementing this entire list automatically.
+
+Current experiment: reduce [CI review artifacts](ci-artifacts.md) to useful distributables and diagnostics. The macOS baseline uploaded 814 files and 1.32 GB in about 80s, including duplicate unpacked output. Validate still builds and tests the same packages. Candidate measurements and independent review must be recorded before merge.
 
 | Candidate                     | Investigation and acceptance                                                                                                                                                                                                                                                                                       |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
