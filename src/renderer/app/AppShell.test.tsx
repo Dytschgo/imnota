@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectListItem } from '../../shared/types';
 import { useAppStore } from '../store';
 import { AppShell } from './AppShell';
+import { SideNav } from './SideNav';
 
 const projects: ProjectListItem[] = [
   {
@@ -29,7 +30,15 @@ beforeEach(() => {
     navigationOpen: true,
     snapshot: null,
     activeCollectionId: 'atlas-recent',
+    recentCollections: [
+      {
+        projectPath: '/workspace/atlas',
+        collectionId: 'atlas-recent',
+        openedAt: '2026-09-03T00:00:00.000Z',
+      },
+    ],
   });
+  localStorage.removeItem('imnota:sidenav-disclosures');
 });
 
 afterEach(() => {
@@ -38,7 +47,7 @@ afterEach(() => {
 });
 
 describe('AppShell navigation', () => {
-  it('keeps Recent and Favourites navigation separate from their expanded collection disclosures', () => {
+  it('keeps library destinations separate from quick access disclosures', () => {
     const onNavigate = vi.fn();
     const onOpenCollection = vi.fn();
     render(
@@ -58,18 +67,18 @@ describe('AppShell navigation', () => {
     );
 
     expect(screen.getByRole('heading', { name: 'Library' })).toBeVisible();
-    const disclosure = screen.getByRole('button', { name: 'Collapse recently updated collections' });
+    const disclosure = screen.getByRole('button', { name: 'Collapse quick access' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(disclosure);
-    expect(document.getElementById('recent-collections')).toHaveAttribute('hidden');
+    expect(document.getElementById('quick-access-collections')).toHaveAttribute('hidden');
 
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     expect(onNavigate).toHaveBeenCalledWith('recent');
     expect(onOpenCollection).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expand recently updated collections' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand quick access' }));
     fireEvent.click(
-      within(document.getElementById('recent-collections')!).getByRole('button', {
+      within(document.getElementById('quick-access-collections')!).getByRole('button', {
         name: /Latest review/,
       }),
     );
@@ -80,5 +89,65 @@ describe('AppShell navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show navigation' }));
     expect(screen.getByLabelText('Side navigation')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Hide navigation' })).toHaveFocus();
+  });
+
+  it('skips controls inside collapsed regions when moving shortcut focus', () => {
+    render(
+      <AppShell
+        searchShortcut="Ctrl+P"
+        onNavigate={vi.fn()}
+        onNewProject={vi.fn()}
+        onOpenProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSearch={vi.fn()}
+        onOpenPromptBundles={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        onAbout={vi.fn()}
+      >
+        <div>Workbench</div>
+      </AppShell>,
+    );
+
+    const disclosure = screen.getByRole('button', { name: 'Collapse quick access' });
+    fireEvent.click(disclosure);
+    disclosure.focus();
+    fireEvent.keyDown(disclosure, { key: 'ArrowDown' });
+
+    expect(screen.getByRole('button', { name: 'Collapse favourite projects' })).toHaveFocus();
+  });
+
+  it('does not reopen an active favourite group when project metadata refreshes', () => {
+    const props = {
+      activeCollectionId: 'atlas-recent',
+      activeProjectPath: '/workspace/atlas',
+      navigationOpen: true,
+      projects,
+      recentCollections: [
+        {
+          projectPath: '/workspace/atlas',
+          collectionId: 'atlas-recent',
+          openedAt: '2026-09-03T00:00:00.000Z',
+        },
+      ],
+      view: 'workspace' as const,
+      onAbout: vi.fn(),
+      onNavigate: vi.fn(),
+      onNewProject: vi.fn(),
+      onOpenCollection: vi.fn(),
+      onSetNavigationOpen: vi.fn(),
+    };
+    const { rerender } = render(<SideNav {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse favourite projects' }));
+    expect(document.getElementById('favourite-projects')).toHaveAttribute('hidden');
+
+    rerender(
+      <SideNav
+        {...props}
+        projects={projects.map((project) => ({ ...project, updatedAt: '2026-09-04T00:00:00.000Z' }))}
+      />,
+    );
+
+    expect(document.getElementById('favourite-projects')).toHaveAttribute('hidden');
   });
 });
