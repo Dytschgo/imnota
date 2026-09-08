@@ -251,9 +251,8 @@ async function exerciseOnboarding(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
-): Promise<boolean> {
-  const present = await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog);
-  if (!present) return false;
+): Promise<void> {
+  await driver.waitFor(SMOKE_UI_CONTRACT.onboardingDialog[0]);
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png'));
@@ -276,7 +275,6 @@ async function exerciseOnboarding(
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
   await driver.click({ text: 'Copy PNG + Markdown', exact: true });
   await driver.waitFor({ text: 'PNG and Markdown copied together' });
-  return true;
 }
 
 async function importImages(
@@ -1672,9 +1670,9 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
-  const onboardingPresent = await exerciseOnboarding(driver, artifactDirectory, artifacts);
-  if (onboardingPresent) assertions.push('onboarding sample and native clipboard action');
-  const projectPath = await createProjectThroughUi(driver, 'Native Verification', onboardingPresent);
+  await exerciseOnboarding(driver, artifactDirectory, artifacts);
+  assertions.push('onboarding sample and native clipboard action');
+  const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: 'button[aria-label="Rename"]' });
