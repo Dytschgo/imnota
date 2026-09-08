@@ -92,6 +92,8 @@ export class UpdateController {
         state: 'not-available',
         version: candidate.version,
         releaseUrl: candidate.url,
+        releaseNotes: candidate.releaseNotes,
+        sourceChannel: candidate.sourceChannel,
         manualDownload: comparison < 0,
         message:
           comparison < 0
@@ -110,6 +112,8 @@ export class UpdateController {
       state: 'available',
       version: candidate.version,
       releaseUrl: candidate.url,
+      releaseNotes: candidate.releaseNotes,
+      sourceChannel: candidate.sourceChannel,
       manualDownload: this.ops.manual,
       terminalCommand: this.terminalUpdate?.command,
       message: stableFallback

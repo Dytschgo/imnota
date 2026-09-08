@@ -11,6 +11,7 @@ lock_dir=""
 lock_owned=0
 app_path=""
 backup_path=""
+backup_root=""
 transaction_committed=0
 keep_staging=0
 rollback_failed=0
@@ -182,6 +183,66 @@ plist_value() {
 
 stat_identity() {
   /usr/bin/stat -f '%d:%i' "$1"
+}
+
+is_imnota_bundle() {
+  local bundle=$1 bundle_id
+  [[ -d "$bundle" && ! -L "$bundle" ]] || return 1
+  bundle_id="$(plist_value "$bundle/Contents/Info.plist" CFBundleIdentifier)" || return 1
+  [[ "$bundle_id" == "$APP_ID" ]]
+}
+
+is_legacy_backup_name() {
+  local name=$1
+  [[ "$name" =~ ^${APP_NAME}[[:space:]]Backup[[:space:]][0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*[[:space:]][0-9]{8}-[0-9]{6}[[:space:]][0-9]+\.app$ ]] ||
+    [[ "$name" =~ ^${APP_NAME}-backup-[0-9]{8}-[0-9]{6}(\.[0-9A-Za-z-]+)?\.app$ ]]
+}
+
+cleanup_legacy_backups() {
+  local parent=$1 candidate name
+  while IFS= read -r -d '' candidate; do
+    name="${candidate##*/}"
+    is_legacy_backup_name "$name" || continue
+    is_imnota_bundle "$candidate" || continue
+    if ! /bin/mv -- "$candidate" "$stage_dir/retired-${name}"; then
+      warn "Could not retire an old Imnota rollback backup: $candidate"
+    fi
+  done < <(
+    /usr/bin/find "$parent" -maxdepth 1 -type d \
+      \( -name "${APP_NAME} Backup *.app" -o -name "${APP_NAME}-backup-*.app" \) -print0
+  )
+}
+
+retain_latest_rollback_backup() {
+  local active_backup="$backup_root/${APP_NAME}.app"
+  [[ -n "$backup_path" && -d "$backup_path" ]] || return 0
+
+  if [[ -e "$active_backup" || -L "$active_backup" ]]; then
+    if ! is_imnota_bundle "$active_backup"; then
+      warn "The managed rollback location contains an unexpected item; preserving the newest rollback at: $backup_path"
+      return 0
+    fi
+    if ! /bin/mv -- "$active_backup" "$stage_dir/retired-rollback.app"; then
+      warn "Could not retire the previous rollback backup; preserving the newest rollback at: $backup_path"
+      return 0
+    fi
+  fi
+
+  if /bin/mv -- "$backup_path" "$active_backup"; then
+    backup_path="$active_backup"
+  else
+    warn "Could not place the rollback backup in its managed location; it was preserved at: $backup_path"
+  fi
+}
+
+cleanup_stale_rollback_backups() {
+  local candidate
+  while IFS= read -r -d '' candidate; do
+    [[ "$candidate" != "$backup_path" ]] || continue
+    is_imnota_bundle "$candidate" || continue
+    /bin/mv -- "$candidate" "$stage_dir/retired-${candidate##*/}" ||
+      warn "Could not retire a stale Imnota rollback backup: $candidate"
+  done < <(/usr/bin/find "$backup_root" -maxdepth 1 -type d -name '.rollback-*.app' -print0)
 }
 
 verify_signature() {
@@ -359,9 +420,15 @@ wait_for_app_to_quit() {
 
 swap_and_launch() {
   local replacement=$1
-  local timestamp
-  timestamp="$(/bin/date '+%Y%m%d-%H%M%S')"
-  backup_path="${app_path%/*}/${APP_NAME} Backup ${CURRENT_VERSION} ${timestamp} $$.app"
+  backup_root="${app_path%/*}/.imnota-backups.noindex"
+  if [[ -e "$backup_root" || -L "$backup_root" ]]; then
+    [[ -d "$backup_root" && ! -L "$backup_root" ]] ||
+      die "The managed rollback folder is not a safe directory."
+  else
+    /bin/mkdir -- "$backup_root" || die "The managed rollback folder could not be created."
+  fi
+  /bin/chmod 700 "$backup_root" || die "The managed rollback folder could not be secured."
+  backup_path="$backup_root/.rollback-$$.app"
   [[ ! -e "$backup_path" && ! -L "$backup_path" ]] || die "A backup path collision prevented the update."
 
   /bin/mv -- "$app_path" "$backup_path" || die "The existing app could not be moved into the rollback area."
@@ -370,7 +437,10 @@ swap_and_launch() {
   launch_app "$app_path" || die "The updated app could not be opened; restoring the previous version."
 
   transaction_committed=1
-  printf 'The previous version was kept at: %s\n' "$backup_path"
+  retain_latest_rollback_backup
+  cleanup_stale_rollback_backups
+  cleanup_legacy_backups "${app_path%/*}"
+  printf 'The rollback copy is kept in Imnota-managed support storage.\n'
 }
 
 main() {
