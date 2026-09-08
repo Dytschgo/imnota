@@ -1,4 +1,4 @@
-import { Copy, ImagePlus, PanelRight, Trash2, Upload } from 'lucide-react';
+import { Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
@@ -30,7 +30,6 @@ export interface WorkspaceProps {
   onContentRetry?(): void;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDuplicateContent?(): void | Promise<void>;
-  onDeleteContent?(): void | Promise<void>;
   onDrawingTitle?(title: string): void;
   image: ImagePayload | null;
   annotations: Annotation[];
@@ -68,7 +67,7 @@ export interface WorkspaceProps {
   onDescriptionChange(value: string): void;
   onUndoDescription(): void;
   onDuplicate(): void | Promise<void>;
-  onDeleteScreenshot(): void | Promise<void>;
+  onDeleteItem(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
   onDeleteProject(): void;
 }
 
@@ -180,6 +179,8 @@ export function Workspace(props: WorkspaceProps) {
         onMessage={props.onMessage}
         onSnapshot={props.onSnapshot}
         onAddContent={props.onAddContent}
+        onDeleteItem={props.onDeleteItem}
+        onDeleteProject={props.onDeleteProject}
       />
       <div className="canvas-column">
         <div className="workspace-toolbar">
@@ -329,10 +330,6 @@ export function Workspace(props: WorkspaceProps) {
                   <Copy size={15} aria-hidden="true" />
                   Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
                 </Button>
-                <Button variant="ghost" onClick={() => void props.onDeleteContent?.()}>
-                  <Trash2 size={15} aria-hidden="true" />
-                  Delete {item.kind === 'text' ? 'text' : 'drawing'}
-                </Button>
               </aside>
             ) : (
               <ScreenshotInspector
@@ -352,8 +349,6 @@ export function Workspace(props: WorkspaceProps) {
                   );
                 }}
                 onDuplicate={props.onDuplicate}
-                onDeleteScreenshot={props.onDeleteScreenshot}
-                onDeleteProject={props.onDeleteProject}
               />
             )}
           </div>

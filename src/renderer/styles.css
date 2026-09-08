@@ -2909,3 +2909,48 @@ kbd {
     padding-left: 0;
   }
 }
+
+/* Row actions share the existing narrow action column. */
+.shot-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.shot-item-actions .icon-button {
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+}
+.shot-delete {
+  color: var(--ink-3);
+}
+.shot-delete:hover {
+  color: var(--danger);
+}
+.project-actions {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+}
+.project-actions > summary {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 5px;
+}
+.project-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.project-actions > .btn {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
