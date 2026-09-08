@@ -472,7 +472,7 @@ describe('feedback controls', () => {
 
   it('opens the inspector as a focusable narrow-window drawer and dismisses it with Escape', async () => {
     await renderEditingProject({}, true);
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
 
     const trigger = screen.getByRole('button', { name: 'Expand inspector' });
     fireEvent.click(trigger);
@@ -489,13 +489,17 @@ describe('feedback controls', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
     );
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Expand inspector' })).toHaveFocus();
   });
 
   it('keeps the desktop inspector modeless', async () => {
     await renderEditingProject();
     expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Collapse inspector' }).closest('.inspector-heading'),
+    ).not.toBeNull();
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Saved');
+    expect(screen.getByTestId('save-state').closest('.topbar')).not.toBeNull();
     expect(screen.getByRole('textbox', { name: 'Title' })).toBeInTheDocument();
   });
 
@@ -511,7 +515,7 @@ describe('feedback controls', () => {
     expect(trigger).toHaveFocus();
     act(() => changeViewport(true));
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Expand inspector' })).toHaveFocus();
   });
 
   it('keeps the project and notes open when saving before search fails', async () => {
@@ -522,6 +526,8 @@ describe('feedback controls', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/cancelled|Workspace unavailable/i);
     expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
     expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Save failed');
+    expect(screen.getByTestId('save-state').closest('.topbar')).not.toBeNull();
     expect(note).toHaveValue('Unsaved note');
     expect(screen.queryByTestId('global-search-input')).not.toBeInTheDocument();
   });

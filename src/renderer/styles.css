@@ -619,7 +619,21 @@ button.icon-button.new-collection-button svg {
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 97%, var(--bg));
 }
+.topbar-navigation {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.topbar-navigation .icon-button,
+.topbar > .navigation-restore,
+.crumbs > .save-state {
+  flex: none;
+  white-space: nowrap;
+}
 .crumbs {
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -638,6 +652,7 @@ button.icon-button.new-collection-button svg {
   font-weight: 400;
 }
 .topbar-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1220,6 +1235,10 @@ button.icon-button.new-collection-button svg {
 .shot-rail.collapsed .rail-heading {
   padding: 12px 6px;
 }
+.inspector-restore {
+  flex: none;
+  margin-left: auto;
+}
 .rail-heading,
 .inspector-heading {
   display: flex;
@@ -1607,6 +1626,9 @@ button.icon-button.new-collection-button svg {
 .inspector-heading {
   min-height: 72px;
   padding: 15px 16px 13px;
+}
+.inspector-heading > .icon-button {
+  flex: none;
 }
 .inspector-heading > div {
   display: flex;
@@ -2612,9 +2634,7 @@ kbd {
 
 .crumb-current {
   min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
+  display: block;
   overflow: hidden;
   font-weight: 650;
   text-overflow: ellipsis;
