@@ -105,7 +105,11 @@ export function resolveAppearance(
   environment: AppearanceEnvironment,
 ): EffectiveAppearance {
   const theme = preferences.mode === 'system' ? environment.systemTheme : preferences.mode;
-  if (preferences.glassLevel === 'off') {
+  const image = appearanceBackdrop(preferences, theme).image;
+  const automaticLightGlass = theme === 'light' && Boolean(image) && isAllowedBackgroundImage(image);
+  const glassLevel =
+    automaticLightGlass && preferences.glassLevel === 'off' ? 'strong' : preferences.glassLevel;
+  if (glassLevel === 'off') {
     return {
       theme,
       accent: preferences.accent,
@@ -136,7 +140,7 @@ export function resolveAppearance(
     theme,
     accent: preferences.accent,
     requestedGlassLevel: preferences.glassLevel,
-    glassLevel: preferences.glassLevel,
+    glassLevel,
     glassFallbackReason: 'none',
   };
 }
@@ -244,7 +248,11 @@ export function useAppearance(
         ? 'preset'
         : 'upload'
       : 'none';
-    root.dataset.desktopGlass = desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off';
+    root.dataset.desktopGlass = desktopActive
+      ? 'active'
+      : preferences.desktopGlass && !backdrop.image
+        ? 'fallback'
+        : 'off';
     root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, backdrop.opacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',
@@ -258,6 +266,10 @@ export function useAppearance(
 
   return {
     ...effective,
-    desktopGlassStatus: desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off',
+    desktopGlassStatus: desktopActive
+      ? 'active'
+      : preferences.desktopGlass && !appearanceBackdrop(preferences, effective.theme).image
+        ? 'fallback'
+        : 'off',
   };
 }

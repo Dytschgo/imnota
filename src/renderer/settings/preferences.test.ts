@@ -38,6 +38,32 @@ describe('appearance resolution', () => {
     ).toMatchObject({ glassLevel: 'off', glassFallbackReason: 'performance' });
   });
 
+  it('lets accessibility and host fallbacks override automatic light image glass', () => {
+    const preferences = { ...DEFAULT_APPEARANCE, backgroundImage: 'preset:graphite' };
+    for (const [reducedTransparency, performanceConstrained, reason] of [
+      [true, false, 'reduced-transparency'],
+      [false, true, 'performance'],
+    ] as const) {
+      expect(
+        resolveAppearance(preferences, { systemTheme: 'light', reducedTransparency, performanceConstrained }),
+      ).toMatchObject({ glassLevel: 'off', glassFallbackReason: reason });
+    }
+    expect(
+      resolveAppearance(preferences, {
+        systemTheme: 'light',
+        reducedTransparency: false,
+        performanceConstrained: false,
+      }),
+    ).toMatchObject({ glassLevel: 'strong', requestedGlassLevel: 'off' });
+    expect(
+      resolveAppearance(preferences, {
+        systemTheme: 'dark',
+        reducedTransparency: false,
+        performanceConstrained: false,
+      }),
+    ).toMatchObject({ glassLevel: 'off', requestedGlassLevel: 'off' });
+  });
+
   it('lets an explicit keep-transparency preference dominate performance inference', () => {
     expect(
       resolveAppearance(
