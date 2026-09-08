@@ -58,6 +58,19 @@ export async function exerciseUiFeedback(
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png'));
 
+  await driver.click({ selector: '[data-testid="settings-button"]' });
+  await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
+  await driver.click({ selector: '.topbar [aria-label="Back"]' });
+  await driver.waitFor({ selector: '[data-image-scale]' });
+  await driver.click({ selector: '.topbar [aria-label="Forward"]' });
+  await driver.waitFor({
+    selector: '.settings-navigation button[aria-current="page"]',
+    text: 'Shortcuts',
+    exact: true,
+  });
+  await driver.click({ selector: '.topbar [aria-label="Back"]' });
+  await driver.waitFor({ selector: '[data-image-scale]' });
+
   // Exercise the same revision-protected contracts used by project row actions.
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.click({ selector: `[data-testid="project-edit-${fixture.projectId}"]` });
