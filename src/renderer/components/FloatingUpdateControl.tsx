@@ -15,7 +15,12 @@ export function FloatingUpdateControl({
   onInstall,
   onRetry,
 }: FloatingUpdateControlProps) {
-  if (!status || ['idle', 'not-available', 'checking'].includes(status.state)) return null;
+  if (
+    !status ||
+    ['idle', 'checking'].includes(status.state) ||
+    (status.state === 'not-available' && !status.manualDownload)
+  )
+    return null;
 
   const downloading = status.state === 'downloading';
   const downloaded = status.state === 'downloaded';
@@ -65,9 +70,10 @@ export function FloatingUpdateControl({
       <IconButton
         className="floating-update-button"
         label={label}
-        disabled={downloading}
         onClick={() =>
-          void (failed ? onRetry() : downloaded ? onInstall() : available ? onDownload() : undefined)
+          void (
+            failed ? onRetry() : downloaded ? onInstall() : available || status.manualDownload ? onDownload() : undefined
+          )
         }
       >
         {failed ? (

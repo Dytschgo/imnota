@@ -36,7 +36,7 @@ import { usePromptBundleController } from './export/usePromptBundleController';
 import { SettingsView, useKeyboardShortcuts } from './settings';
 import { useAppStore, type AppView } from './store';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
-import { readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -173,36 +173,40 @@ export default function App() {
         const projects = await window.imnota.listProjects();
         if (!active) return;
         useAppStore.getState().set({ projects });
-        if (settings.openRecentOnLaunch) {
-          const checkpoint = readSessionCheckpoint();
-          const savedProject = checkpoint?.projectPath
-            ? projects.find((project) => project.projectPath === checkpoint.projectPath)
-            : undefined;
-          if (savedProject && checkpoint?.view === 'workspace') {
-            adoptSnapshot(
-              await window.imnota.loadProject(savedProject.projectPath),
-              checkpoint.itemId ?? undefined,
-            );
-            const restored = useAppStore.getState();
+        const checkpoint = readSessionCheckpoint();
+        const validCheckpoint =
+          checkpoint &&
+          checkpoint.workspacePath === settings.workspacePath &&
+          Number.isFinite(Date.parse(checkpoint.savedAt))
+            ? checkpoint
+            : null;
+        const savedProject = validCheckpoint?.projectPath
+          ? projects.find((project) => project.projectPath === validCheckpoint.projectPath)
+          : undefined;
+        if (validCheckpoint && savedProject && ['workspace', 'context'].includes(validCheckpoint.view)) {
+          adoptSnapshot(await window.imnota.loadProject(savedProject.projectPath), validCheckpoint.itemId ?? undefined);
+          const restored = useAppStore.getState();
+          if (
+            validCheckpoint.collectionId &&
+            restored.snapshot?.project.collections.some((item) => item.id === validCheckpoint.collectionId)
+          ) {
+            restored.setActiveCollection(validCheckpoint.collectionId);
             if (
-              checkpoint.collectionId &&
-              restored.snapshot?.project.collections.some((item) => item.id === checkpoint.collectionId)
-            ) {
-              restored.setActiveCollection(checkpoint.collectionId);
-              if (
-                checkpoint.itemId &&
-                restored.snapshot &&
-                orderedCollectionItems(restored.snapshot.project, checkpoint.collectionId).some(
-                  (item) => item.id === checkpoint.itemId,
-                )
+              validCheckpoint.itemId &&
+              restored.snapshot &&
+              orderedCollectionItems(restored.snapshot.project, validCheckpoint.collectionId).some(
+                (item) => item.id === validCheckpoint.itemId,
               )
-                restored.set({ activeScreenshotId: checkpoint.itemId });
-            }
-            restored.set({ search: checkpoint.search });
-          } else if (checkpoint?.view === 'settings') {
-            useAppStore.getState().set({ view: 'settings', search: checkpoint.search });
-          } else if (projects[0]) adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
+            )
+              restored.set({ activeScreenshotId: validCheckpoint.itemId });
+          }
+          restored.set({ view: validCheckpoint.view, search: validCheckpoint.search });
+        } else if (validCheckpoint && ['projects', 'recent', 'favourites', 'settings'].includes(validCheckpoint.view)) {
+          useAppStore.getState().set({ view: validCheckpoint.view, search: validCheckpoint.search });
+        } else if (projects[0]) {
+          adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
         }
+        if (checkpoint) clearSessionCheckpoint();
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Imnota could not start.'))
       .finally(() => active && setBooting(false));
@@ -1143,9 +1147,11 @@ export default function App() {
       </AppShell>
       <FloatingUpdateControl
         status={updateStatus}
-        onDownload={() =>
-          window.imnota.downloadUpdate().catch(() => setError('The update could not be downloaded.'))
-        }
+        onDownload={async () => {
+          if (!(await flushAll())) return;
+          checkpointSession();
+          await window.imnota.downloadUpdate().catch(() => setError('The update could not be downloaded.'));
+        }}
         onRetry={() =>
           window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
         }

@@ -235,6 +235,15 @@ retain_latest_rollback_backup() {
   fi
 }
 
+cleanup_stale_rollback_backups() {
+  local candidate
+  while IFS= read -r -d '' candidate; do
+    is_imnota_bundle "$candidate" || continue
+    /bin/mv -- "$candidate" "$stage_dir/retired-${candidate##*/}" ||
+      warn "Could not retire a stale Imnota rollback backup: $candidate"
+  done < <(/usr/bin/find "$backup_root" -maxdepth 1 -type d -name '.rollback-*.app' -print0)
+}
+
 verify_signature() {
   /usr/bin/codesign --verify --deep --strict --all-architectures "$1"
 }
@@ -428,6 +437,7 @@ swap_and_launch() {
 
   transaction_committed=1
   retain_latest_rollback_backup
+  cleanup_stale_rollback_backups
   cleanup_legacy_backups "${app_path%/*}"
   printf 'The rollback copy is kept in Imnota-managed support storage.\n'
 }
