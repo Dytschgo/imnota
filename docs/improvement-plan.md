@@ -26,11 +26,11 @@ Acceptance: both documents agree, commands and local links are valid, and it is 
 
 ## 2. Completed: remove redundant PR test execution
 
-[PR #36](https://github.com/Dytschgo/imnota/pull/36) mapped all tests and retained the full suite in Linux quality. Each package job now repeats the 37 unexcluded application test files and all script tests. The 41 exact renderer exclusions were reviewed for simulated or platform-independent behavior; new tests remain in platform runs by default. See the [coverage map](pr-test-coverage.md).
+[PR #36](https://github.com/Dytschgo/imnota/pull/36) mapped all tests and retained the full suite in Linux quality. Each package job now repeats the 37 unexcluded application test files and all script tests. The 41 exact renderer exclusions were reviewed for simulated or platform-independent behavior; new or unlisted test files remain in platform runs by default. Cases added to an excluded file follow its existing policy until review reclassifies it. See the [coverage map](pr-test-coverage.md).
 
 In one successful PR-run comparison ([before](https://github.com/Dytschgo/imnota/actions/runs/34276483712), [after](https://github.com/Dytschgo/imnota/actions/runs/34277727340)), the package test step fell from 82s to 36s on Windows, 85s to 52s on macOS, and 42s to 20s on Linux. All native, visual, security, and quality checks passed. Workflow-level queue delay was zero at API timestamp resolution in both runs; runner scheduling and total job times vary. No test cases were deleted and release gates were unchanged.
 
-The reviewed coverage map accounts for every existing test and defaults new tests to full platform coverage. Full packaged walkthroughs, Windows visuals, hosted sharing contracts, and service security checks remain. No required check or publication gate was removed.
+The reviewed coverage map accounts for every existing test and defaults new or unlisted test files to full platform coverage. Full packaged walkthroughs, Windows visuals, hosted sharing contracts, and service security checks remain. No required check or publication gate was removed.
 
 ## 3. Follow-up speed and reliability work
 
@@ -56,7 +56,7 @@ For each implemented experiment, record the before/after commit and run URLs, ev
 
 Deferred after this pass:
 
-- The observed macOS dependency cache already restored about 230 MB in roughly 9s and reused all 802 packages without package downloads. Electron/build-helper downloads remain a separate candidate, but no cold/warm pilot establishes that another cache would repay its restore and maintenance cost yet.
+- The observed macOS dependency cache already restored about 230 MB and reused all 802 packages without package downloads. Electron/build-helper downloads remain a separate candidate, but no cold/warm pilot establishes that another cache would repay its restore and maintenance cost yet.
 - Stable-release deduplication needs its own tag/public-install/promotion validation. This pass changes no stable release contract and does not publish a stable version just to benchmark it.
 - Keep universal macOS PR packaging and all native verification. Reducing architecture coverage is a separate tradeoff, not necessary for these measured savings.
 - Structural work below remains conditional on a demonstrated defect or maintenance boundary. No mass IPC, persistence, state, lint, or test-runner migration is required to release the current improvements.

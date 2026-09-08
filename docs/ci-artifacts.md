@@ -16,7 +16,7 @@ The preceding documentation-only [PR run 34276483712](https://github.com/Dytschg
 | `ubuntu-latest`                           |    600,723,798 |         28s |
 | `macos-latest` (arm64, universal package) |  1,315,661,684 |         80s |
 
-The macOS upload contained 814 files. Times use GitHub job-step timestamps rounded to seconds; the workflow-level queue delay was zero at API timestamp resolution. The installer contents have not changed in this experiment. Candidate measurements are recorded below and in PR #37. A single comparison is evidence for this run, not a promise about every runner or upload.
+The macOS upload contained 814 files. Times use GitHub job-step timestamps rounded to seconds; the workflow-level queue delay was zero at API timestamp resolution. This experiment changed no application/package input or package target; separate builds are not claimed to be byte-identical. Candidate measurements are recorded below and in PR #37. A single comparison is evidence for this run, not a promise about every runner or upload.
 
 To recover the previous artifact shape, revert the Validate upload step to `path: release/` and its default compression. No application data or release-channel migration is involved.
 
