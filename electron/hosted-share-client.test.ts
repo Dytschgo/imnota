@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HostedShareUpload } from '../src/shared/workflow-bridge.js';
-import { HostedShareClient } from './hosted-share-client.js';
+import { HostedShareClient, type HostedShareFetch } from './hosted-share-client.js';
 
 const roots: string[] = [];
 const pngBase64 =
@@ -16,6 +16,7 @@ const secondShare = '9f1b0640-dd1d-4db2-8b0f-7e1238385072';
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
   vi.unstubAllGlobals();
 });
@@ -107,6 +108,144 @@ describe('HostedShareClient request boundary', () => {
       includeArchive: true,
       expiresInDays: 30,
     });
+  });
+
+  it('uses the injected transport for upload, receipt recovery, and revocation', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-transport-'));
+    roots.push(root);
+    const transport = vi.fn<HostedShareFetch>(async (target) => {
+      if (target.includes('/receipt/')) return json(receipt(secondRequest));
+      if (target.endsWith('/revoke')) return json({ revokedAt: '2026-01-02T00:00:00.000Z' });
+      return json(receipt(), 201);
+    });
+    const client = new HostedShareClient(root, async () => undefined, transport);
+
+    await client.create(upload(), artifacts());
+    await fs.writeFile(
+      path.join(root, 'hosted-share-pending.json'),
+      JSON.stringify({ [secondRequest]: { requestId: secondRequest, pairingToken: 'b'.repeat(43) } }),
+    );
+    await client.list();
+    await client.revoke(firstShare);
+
+    expect(transport.mock.calls.map(([target]) => target)).toEqual([
+      'https://app.imnota.xyz/api/shares',
+      `https://app.imnota.xyz/api/shares/receipt/${secondRequest}`,
+      `https://app.imnota.xyz/api/shares/${firstShare}/revoke`,
+    ]);
+    expect(transport.mock.calls.map(([, init]) => (init as RequestInit).redirect)).toEqual([
+      'error',
+      'error',
+      'error',
+    ]);
+  });
+
+  it.each([
+    ['CERT_HAS_EXPIRED', 'TLS certificate'],
+    ['ERR_PROXY_CONNECTION_FAILED', 'network proxy'],
+    ['ENOTFOUND', 'hostname could not be resolved'],
+    ['ERR_INTERNET_DISCONNECTED', 'appears to be offline'],
+    ['ECONNRESET', 'connection to the share service was interrupted'],
+  ])(
+    'reports a safe %s transport diagnostic without exposing the underlying error',
+    async (code, expected) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-diagnostic-'));
+      roots.push(root);
+      const secret = 'https://private.invalid/path?token=do-not-expose';
+      const transport = vi.fn(async () => {
+        throw Object.assign(new Error(`transport failed for ${secret}`), { code });
+      });
+      const client = new HostedShareClient(root, async () => undefined, transport);
+
+      const error = await client.create(upload(), artifacts()).catch((failure: unknown) => failure);
+
+      expect(error).toMatchObject({ code: 'network-failure', retryable: true });
+      expect((error as Error).message).toContain(expected);
+      expect((error as Error).message).not.toContain(secret);
+      expect((error as Error).message).not.toContain('do-not-expose');
+    },
+  );
+
+  it('classifies Chromium message codes and nested Node errors without exposing either message', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-diagnostic-'));
+    roots.push(root);
+    const secret = 'https://private.invalid/path?token=do-not-expose';
+    const chromium = new HostedShareClient(
+      root,
+      async () => undefined,
+      vi.fn(async () => {
+        throw new Error(`net::ERR_CERT_AUTHORITY_INVALID ${secret}`);
+      }),
+    );
+    const nested = new HostedShareClient(
+      root,
+      async () => undefined,
+      vi.fn(async () => {
+        throw Object.assign(new Error(`outer failure ${secret}`), {
+          cause: Object.assign(new Error(`inner failure ${secret}`), { code: 'ENOTFOUND' }),
+        });
+      }),
+    );
+    const unknown = new HostedShareClient(
+      root,
+      async () => undefined,
+      vi.fn(async () => {
+        throw new Error(`unrecognized failure ${secret}`);
+      }),
+    );
+
+    const chromiumError = await chromium.create(upload(), artifacts()).catch((failure: unknown) => failure);
+    const nestedError = await nested
+      .create(upload(secondRequest), artifacts())
+      .catch((failure: unknown) => failure);
+    const unknownError = await unknown
+      .create(upload('123e4567-e89b-42d3-a456-426614174003'), artifacts())
+      .catch((failure: unknown) => failure);
+
+    expect(chromiumError).toMatchObject({ message: expect.stringMatching(/TLS certificate/i) });
+    expect(nestedError).toMatchObject({ message: expect.stringMatching(/hostname could not be resolved/i) });
+    expect(unknownError).toMatchObject({
+      message: 'Could not reach the share service. Your local exports remain available.',
+    });
+    for (const error of [chromiumError, nestedError, unknownError])
+      expect((error as Error).message).not.toContain(secret);
+  });
+
+  it('reports local persistence failures without sending an upload', async () => {
+    const { root } = await fixture();
+    const transport = vi.fn();
+    const guarded = new HostedShareClient(root, async () => undefined, transport);
+    vi.spyOn(fs, 'writeFile').mockRejectedValueOnce(new Error('disk /private/path token=secret'));
+
+    await expect(guarded.create(upload(), artifacts())).rejects.toMatchObject({
+      code: 'io-failure',
+      message: expect.stringMatching(/save local hosted-share data/i),
+      details: { requestMayHaveCommitted: false },
+    });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('preserves pending recovery metadata when local history is saved but pending cleanup fails', async () => {
+    const { root } = await fixture();
+    const transport = vi.fn().mockResolvedValue(json(receipt(), 201));
+    const client = new HostedShareClient(root, async () => undefined, transport);
+    const rename = fs.rename.bind(fs);
+    let pendingWrites = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to).endsWith('hosted-share-pending.json') && ++pendingWrites === 2)
+        throw new Error('disk /private/path token=secret');
+      await rename(from, to);
+    });
+
+    await expect(client.create(upload(), artifacts())).rejects.toMatchObject({
+      code: 'io-failure',
+      message: expect.stringMatching(/save local hosted-share data/i),
+    });
+    const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
+    expect(pending).toHaveProperty(firstRequest);
+    expect(JSON.parse(await fs.readFile(path.join(root, 'hosted-shares.json'), 'utf8'))).toEqual([
+      expect.objectContaining({ id: firstShare }),
+    ]);
   });
 
   it.each([
