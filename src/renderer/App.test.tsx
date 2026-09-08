@@ -186,7 +186,7 @@ describe('feedback controls', () => {
       },
       narrowViewport,
     );
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     act(() => useAppStore.getState().setProject(editingSnapshot));
     const note = await screen.findByRole('textbox', { name: 'Description' });
     await waitFor(() => expect(note).toHaveValue('Original note'));
@@ -200,7 +200,7 @@ describe('feedback controls', () => {
       listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
       loadProject,
     });
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     expect(loadProject).not.toHaveBeenCalled();
   });
 
@@ -241,7 +241,7 @@ describe('feedback controls', () => {
       listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
       loadProject,
     });
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     act(() => useAppStore.getState().setProject(snapshot));
 
     fireEvent.click(screen.getByTestId('search-trigger'));
@@ -263,7 +263,7 @@ describe('feedback controls', () => {
       ],
     });
     renderApp({ listProjects: async () => [{ ...project, projectPath: snapshot.projectPath }], loadProject });
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     await screen.findByRole('heading', { name: 'Recent collections' });
     const row = document.querySelector<HTMLButtonElement>('.library .project-row')!;
@@ -285,7 +285,7 @@ describe('feedback controls', () => {
         throw new Error('Project moved');
       },
     });
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     await screen.findByRole('heading', { name: 'Recent collections' });
     fireEvent.click(document.querySelector<HTMLButtonElement>('.library .project-row')!);
@@ -295,9 +295,10 @@ describe('feedback controls', () => {
 
   it('uses navigation shortcuts without intercepting typing in search', async () => {
     renderApp();
-    const input = await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     fireEvent.keyDown(window, { key: '2', code: 'Digit2', ctrlKey: true });
     await screen.findByRole('heading', { name: 'Recent collections' });
+    const input = screen.getByRole('textbox', { name: 'Filter recent collections' });
     fireEvent.keyDown(input, { key: '3', code: 'Digit3', ctrlKey: true });
     expect(useAppStore.getState().view).toBe('recent');
   });
@@ -355,7 +356,7 @@ describe('feedback controls', () => {
       }),
       deleteContentItem,
     });
-    await screen.findByRole('textbox', { name: 'Search projects' });
+    await screen.findByTestId('library-full-search');
     act(() => useAppStore.getState().setProject(persisted));
     const editor = await screen.findByRole('textbox', { name: 'Markdown' });
     fireEvent.change(editor, { target: { value: 'Local edit' } });
@@ -987,13 +988,418 @@ describe('feedback controls', () => {
     );
   });
 
-  it('opens global search without changing the library filter', async () => {
+  it('restores the selected settings category through Back and Forward navigation', async () => {
     renderApp();
-    const search = await screen.findByRole('textbox', { name: 'Search projects' });
-    fireEvent.change(search, { target: { value: '  design  ' } });
-    fireEvent.click(screen.getByTestId('search-trigger'));
+    await screen.findByTestId('library-full-search');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Editing & shortcuts' }));
+    expect(screen.getByRole('button', { name: 'Editing & shortcuts' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByTestId('settings-view');
+    expect(screen.getByRole('button', { name: 'Editing & shortcuts' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(useAppStore.getState().view).toBe('projects');
+  });
+
+  it('skips a missing project while walking back to the next valid history location', async () => {
+    let listed = [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' as const }];
+    const listProjects = vi.fn(async () => listed);
+    const loadProject = vi.fn(async () => ({ ...snapshot, projectRevision: 'project-1' }));
+    renderApp({ listProjects, loadProject });
+    await screen.findByTestId('library-full-search');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.project-row-main')!);
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+
+    listed = [];
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByTestId('settings-view');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+
+    expect(useAppStore.getState().snapshot).toBeNull();
+    expect(loadProject).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: 'a project freshly reported as archived',
+      restore: async () => ({
+        ...snapshot,
+        projectRevision: 'project-2',
+        project: { ...snapshot.project, status: 'archived' as const },
+      }),
+    },
+    {
+      name: 'a project folder reported as unavailable',
+      restore: async () => {
+        throw new Error('The selected project folder is unavailable.');
+      },
+    },
+  ])('prunes $name when Back has no valid project destination', async ({ restore }) => {
+    localStorage.setItem(
+      'imnota:last-session',
+      JSON.stringify({
+        workspacePath: '/workspace',
+        view: 'workspace',
+        projectPath: snapshot.projectPath,
+        collectionId: '001-collection',
+        itemId: null,
+        search: '',
+        savedAt: new Date().toISOString(),
+      }),
+    );
+    const loadProject = vi
+      .fn<ImnotaBridge['loadProject']>()
+      .mockResolvedValueOnce({ ...snapshot, projectRevision: 'project-1' })
+      .mockImplementationOnce(restore);
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+    });
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByTestId('settings-view');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(loadProject).toHaveBeenCalledTimes(2));
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+  });
+
+  it('does not adopt a delayed project creation after newer navigation', async () => {
+    let resolveCreate!: (value: ProjectSnapshot) => void;
+    const createProject = vi.fn(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    renderApp({ createProject });
+    await screen.findByTestId('library-full-search');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.side-nav-new-project')!);
+    fireEvent.change(await screen.findByTestId('project-name-input'), { target: { value: 'Created later' } });
+    fireEvent.click(screen.getByTestId('create-project-submit'));
+    await waitFor(() => expect(createProject).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    await act(async () =>
+      resolveCreate({
+        ...snapshot,
+        projectPath: '/workspace/created-later',
+        projectRevision: 'created-1',
+      }),
+    );
+
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(useAppStore.getState().snapshot).toBeNull();
+  });
+
+  it('does not open a delayed edit dialog after newer navigation', async () => {
+    let resolveLoad!: (value: ProjectSnapshot) => void;
+    const loadProject = vi.fn(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+    });
+    fireEvent.click(await screen.findByTestId('project-edit-project-id'));
+    await waitFor(() => expect(loadProject).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    await act(async () => resolveLoad({ ...snapshot, projectRevision: 'project-1' }));
+
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument();
+  });
+
+  it('does not archive after navigation wins a delayed revision load', async () => {
+    let resolveLoad!: (value: ProjectSnapshot) => void;
+    const loadProject = vi.fn(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const setProjectArchived = vi.fn();
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+      setProjectArchived,
+    });
+    fireEvent.click(await screen.findByTestId('project-archive-project-id'));
+    await waitFor(() => expect(loadProject).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    await act(async () => resolveLoad({ ...snapshot, projectRevision: 'project-1' }));
+
+    expect(useAppStore.getState().view).toBe('settings');
+    expect(setProjectArchived).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer project open when deletion of the previous project finishes later', async () => {
+    let resolveDelete!: () => void;
+    const deleteProject = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+    const nextSnapshot = {
+      ...snapshot,
+      projectPath: '/workspace/next-project',
+      projectRevision: 'next-1',
+      project: { ...snapshot.project, id: 'next-project', name: 'Next project' },
+    };
+    await renderEditingProject({
+      deleteProject,
+      openProjectDialog: async () => nextSnapshot,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(nextSnapshot.projectPath));
+    await act(async () => resolveDelete());
+
+    expect(useAppStore.getState().snapshot?.projectPath).toBe(nextSnapshot.projectPath);
+  });
+
+  it('lets screenshot selection supersede an older delayed project open', async () => {
+    let resolveOpen!: (value: ProjectSnapshot) => void;
+    const openProjectDialog = vi.fn(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    const { editingSnapshot } = await renderEditingProject({ openProjectDialog });
+    const second = {
+      ...editingSnapshot.project.screenshots[0]!,
+      id: 'second-shot',
+      title: 'Second screen',
+      position: 1,
+    };
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: {
+          ...state.snapshot!,
+          project: {
+            ...state.snapshot!.project,
+            screenshots: [...state.snapshot!.project.screenshots, second],
+          },
+        },
+      })),
+    );
+
+    fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+    await waitFor(() => expect(openProjectDialog).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByTestId('screenshot-second-shot'));
+    await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('second-shot'));
+    await act(async () =>
+      resolveOpen({
+        ...snapshot,
+        projectPath: '/workspace/older-open',
+        projectRevision: 'older-1',
+      }),
+    );
+
+    expect(useAppStore.getState().snapshot?.projectPath).toBe(editingSnapshot.projectPath);
+    expect(useAppStore.getState().activeScreenshotId).toBe('second-shot');
+  });
+
+  it('surfaces a project edit load failure without opening the dialog', async () => {
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject: async () => {
+        throw new Error('Project metadata is unavailable');
+      },
+    });
+    fireEvent.click(await screen.findByTestId('project-edit-project-id'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Project metadata is unavailable');
+    expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument();
+  });
+
+  it('archives a project and restores it from the Undo action with the returned revision', async () => {
+    let archived = false;
+    const listProjects = vi.fn(async () => [
+      {
+        ...snapshot.project,
+        projectPath: snapshot.projectPath,
+        status: archived ? ('archived' as const) : ('active' as const),
+        icon: 'target' as const,
+      },
+    ]);
+    const setProjectArchived = vi.fn<ImnotaBridge['setProjectArchived']>(async (input) => {
+      archived = input.archived;
+      return {
+        ...snapshot,
+        projectRevision: input.archived ? 'project-2' : 'project-3',
+        project: { ...snapshot.project, status: input.archived ? 'archived' : 'active' },
+      };
+    });
+    renderApp({
+      listProjects,
+      loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+      setProjectArchived,
+    });
+    expect((await screen.findAllByTestId('project-icon-target')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('project-archive-project-id'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(setProjectArchived).toHaveBeenCalledTimes(2));
+    expect(setProjectArchived.mock.calls[0]?.[0]).toEqual({
+      projectPath: snapshot.projectPath,
+      expectedRevision: 'project-1',
+      archived: true,
+    });
+    expect(setProjectArchived.mock.calls[1]?.[0]).toEqual({
+      projectPath: snapshot.projectPath,
+      expectedRevision: 'project-2',
+      archived: false,
+    });
+    expect(await screen.findByTestId('project-archive-project-id')).toBeInTheDocument();
+  });
+
+  it('reveals the annotation selected from full-content library search', async () => {
+    const editingSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      projectRevision: 'project-1',
+      project: {
+        ...snapshot.project,
+        screenshots: [
+          {
+            id: 'shot',
+            collectionId: '001-collection',
+            originalFilename: 'screen.png',
+            storedFilename: 'screen.png',
+            title: 'Screen',
+            description: '',
+            position: 0,
+            createdAt: snapshot.project.createdAt,
+            updatedAt: snapshot.project.updatedAt,
+            priority: 'medium',
+            annotationFile: 'collections/001-collection/annotations/screen.png.json',
+            descriptionFile: 'collections/001-collection/descriptions/screen.png.md',
+            originalWidth: 100,
+            originalHeight: 100,
+            includeInExport: true,
+          },
+        ],
+      },
+    };
+    const secondSnapshot: ProjectSnapshot = {
+      ...editingSnapshot,
+      projectPath: '/workspace/second-project',
+      projectRevision: 'second-1',
+      project: {
+        ...editingSnapshot.project,
+        id: 'second-project',
+        name: 'Second project',
+        favourite: true,
+      },
+    };
+    renderApp({
+      listProjects: async () => [
+        { ...snapshot.project, projectPath: snapshot.projectPath },
+        { ...secondSnapshot.project, projectPath: secondSnapshot.projectPath },
+      ],
+      searchProjects: async ({ query, scope }) => ({
+        query,
+        scope: scope ?? 'active',
+        truncated: false,
+        results: [
+          {
+            id: 'annotation-result',
+            kind: 'annotation',
+            title: 'Button label',
+            excerpt: 'Change this copy',
+            projectName: 'Project',
+            collectionName: 'Workspace / Collection 01',
+            target: {
+              projectPath: snapshot.projectPath,
+              collectionId: '001-collection',
+              itemId: 'shot',
+              annotationId: 'annotation-id',
+            },
+          },
+        ],
+      }),
+      loadProject: async (projectPath) =>
+        projectPath === secondSnapshot.projectPath ? secondSnapshot : editingSnapshot,
+      loadScreenshotContent: async () => ({
+        image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+        annotations: [],
+        description: '',
+        contentRevision: 'content-1',
+      }),
+    });
+    fireEvent.click(await screen.findByTestId('library-full-search'));
+    fireEvent.change(await screen.findByTestId('global-search-input'), {
+      target: { value: 'button' },
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Button label/ }));
+
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          selectedId: 'annotation-id',
+          revealAnnotationId: 'annotation-id',
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Second project' }));
+    await waitFor(() =>
+      expect(useAppStore.getState().snapshot?.projectPath).toBe(secondSnapshot.projectPath),
+    );
+    await waitFor(() =>
+      expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ selectedId: null, revealAnnotationId: null }),
+      ),
+    );
+  });
+
+  it('uses full-content search from the library and scopes it to the current project list', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByTestId('library-full-search'));
     await screen.findByTestId('global-search-input');
-    expect(search).toHaveValue('  design  ');
+    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    await screen.findByRole('heading', { name: 'Archived projects' });
+    fireEvent.click(screen.getByTestId('library-full-search'));
+    await screen.findByTestId('global-search-input');
+    expect(screen.getByRole('button', { name: 'Archive' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('opens search from Settings with Ctrl+F and clears a stale query', async () => {
@@ -1012,7 +1418,7 @@ describe('feedback controls', () => {
     renderApp();
     await screen.findByRole('button', { name: 'Recent' });
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
-    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    const search = await screen.findByRole('textbox', { name: 'Filter recent collections' });
     fireEvent.change(search, { target: { value: 'recent filter' } });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     await screen.findByTestId('global-search-input');

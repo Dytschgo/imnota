@@ -1,7 +1,9 @@
-import { BriefcaseBusiness, Code2, Folder, Layers3, Lightbulb, Plus, Rocket, Sparkles, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import type { ShortcutPreferences } from '../../shared/preferences';
+import type { ProjectIconKey } from '../../shared/project-icons';
 import { version as appVersion } from '../../../package.json';
 import { Logo } from '../components/Logo';
+import { PROJECT_ICON_OPTIONS } from '../components/ProjectIcon';
 import { Button, Modal, TextArea, TextInput } from '../components/ui';
 import { ShortcutSettings } from '../settings';
 
@@ -14,19 +16,8 @@ export interface NewProjectDraft {
 }
 
 export interface ProjectEditDraft extends NewProjectDraft {
-  icon: 'layers' | 'briefcase' | 'code-2' | 'folder' | 'lightbulb' | 'rocket' | 'sparkles' | 'target';
+  icon: ProjectIconKey;
 }
-
-const projectIcons = {
-  layers: Layers3,
-  briefcase: BriefcaseBusiness,
-  'code-2': Code2,
-  folder: Folder,
-  lightbulb: Lightbulb,
-  rocket: Rocket,
-  sparkles: Sparkles,
-  target: Layers3,
-} as const;
 
 export interface AppDialogsProps {
   dialog: AppDialog;
@@ -91,12 +82,19 @@ export function AppDialogs({
           />
           <fieldset className="project-icon-picker">
             <legend>Project icon</legend>
-            <div>{Object.entries(projectIcons).map(([key, Icon]) => (
-              <button key={key} type="button" aria-label={`Use ${key} icon`} aria-pressed={(newProject.icon ?? 'layers') === key}
-                onClick={() => onNewProjectChange({ ...newProject, icon: key as ProjectEditDraft['icon'] })}>
-                <Icon size={16} aria-hidden="true" />
-              </button>
-            ))}</div>
+            <div>
+              {PROJECT_ICON_OPTIONS.map(({ key, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-label={`Use ${key} icon`}
+                  aria-pressed={(newProject.icon ?? 'layers') === key}
+                  onClick={() => onNewProjectChange({ ...newProject, icon: key })}
+                >
+                  <Icon size={16} aria-hidden="true" />
+                </button>
+              ))}
+            </div>
           </fieldset>
           <div className="modal-actions">
             <Button type="button" variant="ghost" onClick={onClose}>
@@ -144,13 +142,13 @@ export function AppDialogs({
           <fieldset className="project-icon-picker">
             <legend>Project icon</legend>
             <div>
-              {Object.entries(projectIcons).map(([key, Icon]) => (
+              {PROJECT_ICON_OPTIONS.map(({ key, Icon }) => (
                 <button
                   key={key}
                   type="button"
                   aria-label={`Use ${key} icon`}
                   aria-pressed={editProject.icon === key}
-                  onClick={() => onEditProjectChange({ ...editProject, icon: key as ProjectEditDraft['icon'] })}
+                  onClick={() => onEditProjectChange({ ...editProject, icon: key })}
                 >
                   <Icon size={16} aria-hidden="true" />
                 </button>
@@ -158,8 +156,12 @@ export function AppDialogs({
             </div>
           </fieldset>
           <div className="modal-actions">
-            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!editProject.name.trim()}>Save changes</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!editProject.name.trim()}>
+              Save changes
+            </Button>
           </div>
         </form>
       </Modal>

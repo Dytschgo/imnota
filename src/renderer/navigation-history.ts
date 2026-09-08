@@ -116,7 +116,15 @@ export function resolveRecentCollections(projects: ProjectListItem[], history: R
       (candidate) => candidate.id === entry.collectionId && !candidate.archived,
     );
     return project && project.status !== 'archived' && collection
-      ? [{ ...entry, id: collection.id, name: collection.name, projectName: project.name }]
+      ? [
+          {
+            ...entry,
+            id: collection.id,
+            name: collection.name,
+            projectName: project.name,
+            icon: project.icon,
+          },
+        ]
       : [];
   });
 }

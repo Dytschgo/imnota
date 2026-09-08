@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
+import { ProjectIcon } from '../components/ProjectIcon';
 import { IconButton } from '../components/ui';
 import type { AppView } from '../store';
 import { relativeOpenedTime, resolveRecentCollections } from '../navigation-history';
@@ -97,7 +98,10 @@ export function SideNav({
     () => resolveRecentCollections(projects, recentHistory).slice(0, 6),
     [projects, recentHistory],
   );
-  const activeProjects = useMemo(() => projects.filter((project) => project.status !== 'archived'), [projects]);
+  const activeProjects = useMemo(
+    () => projects.filter((project) => project.status !== 'archived'),
+    [projects],
+  );
   const favouriteProjects = useMemo(
     () => activeProjects.filter((project) => project.favourite),
     [activeProjects],
@@ -326,6 +330,7 @@ export function SideNav({
                               void onOpenCollection(project.projectPath, openCollection.id);
                           }}
                         >
+                          <ProjectIcon icon={project.icon} size={15} />
                           <span>{project.name}</span>
                         </button>
                         {openCollections.length > 0 && (
