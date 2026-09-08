@@ -168,6 +168,9 @@ export function SearchDialog({
               onKeyDown={onInputKeyDown}
               placeholder="Search everything…"
               autoComplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={results.length > 0}
               aria-controls="project-search-results"
               aria-activedescendant={results[activeIndex] ? `search-option-${activeIndex}` : undefined}
             />
@@ -185,7 +188,11 @@ export function SearchDialog({
                   onScopeChange?.(value);
                 }}
               >
-                {value === 'active' ? <Layers3 size={13} /> : <Archive size={13} />}
+                {value === 'active' ? (
+                  <Layers3 size={13} aria-hidden="true" />
+                ) : (
+                  <Archive size={13} aria-hidden="true" />
+                )}
                 {value === 'active' ? 'Active' : 'Archive'}
               </button>
             ))}

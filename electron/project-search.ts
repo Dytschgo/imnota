@@ -19,6 +19,7 @@ export const SEARCH_LIMITS = {
   fileBytes: 2_000_000,
   metadataBytes: 8_000_000,
   totalBytes: 32_000_000,
+  fileOperations: 10_000,
   cachedProjects: 100,
   results: 100,
 } as const;
@@ -39,6 +40,7 @@ interface CacheEntry extends ProjectIndex {
 
 interface SearchBudget {
   remainingBytes: number;
+  remainingFileOperations: number;
   truncated: boolean;
   skippedFiles: number;
   unreadableFiles: number;
@@ -108,7 +110,17 @@ function safeContentPath(projectPath: string, relative: string): string {
   return target;
 }
 
-async function fileSignature(filePath: string, assertNoLinks: (target: string) => Promise<void>) {
+async function fileSignature(
+  filePath: string,
+  budget: SearchBudget,
+  assertNoLinks: (target: string) => Promise<void>,
+) {
+  if (budget.remainingFileOperations <= 0) {
+    budget.skippedFiles += 1;
+    budget.truncated = true;
+    return 'search-budget-exhausted';
+  }
+  budget.remainingFileOperations -= 1;
   await assertNoLinks(filePath);
   const stat = await fs.stat(filePath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null;
@@ -123,6 +135,12 @@ async function readBoundedText(
   dependencies: Pick<ProjectSearchDependencies, 'assertNoLinks' | 'beforeFileOpen' | 'afterFileOpen'>,
   maxBytes: number = SEARCH_LIMITS.fileBytes,
 ): Promise<string | null> {
+  if (budget.remainingFileOperations <= 0) {
+    budget.skippedFiles += 1;
+    budget.truncated = true;
+    return null;
+  }
+  budget.remainingFileOperations -= 1;
   await dependencies.assertNoLinks(filePath);
   await dependencies.beforeFileOpen?.(filePath);
   const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
@@ -259,6 +277,7 @@ export class ProjectSearchService {
     const directories = entries.filter((entry) => entry.isDirectory());
     const budget: SearchBudget = {
       remainingBytes: SEARCH_LIMITS.totalBytes,
+      remainingFileOperations: SEARCH_LIMITS.fileOperations,
       truncated: directories.length > SEARCH_LIMITS.projects,
       skippedFiles: 0,
       unreadableFiles: 0,
@@ -324,21 +343,26 @@ export class ProjectSearchService {
     project: ProjectData,
     budget: SearchBudget,
   ): Promise<ProjectIndex> {
-    const contentPaths = [
-      'project.json',
-      ...project.screenshots.flatMap((shot) => [shot.descriptionFile, shot.annotationFile]),
-      ...(project.contentItems ?? []).flatMap((item) => {
-        const paths = contentItemRelativePaths(item);
-        return [paths.markdown, paths.source].filter((value): value is string => Boolean(value));
-      }),
-    ];
+    const contentPaths = ['project.json'];
+    for (const shot of project.screenshots.slice(0, SEARCH_LIMITS.entriesPerProject))
+      contentPaths.push(shot.descriptionFile, shot.annotationFile);
+    for (const item of (project.contentItems ?? []).slice(0, SEARCH_LIMITS.entriesPerProject)) {
+      const paths = contentItemRelativePaths(item);
+      if (paths.markdown) contentPaths.push(paths.markdown);
+      if (paths.source) contentPaths.push(paths.source);
+    }
     const limitedPaths = contentPaths.slice(0, SEARCH_LIMITS.entriesPerProject + 1);
-    const signatures = await Promise.all(
-      limitedPaths.map(async (relative) => {
-        const target = safeContentPath(projectPath, relative);
-        return `${relative}:${await fileSignature(target, this.dependencies.assertNoLinks)}`;
-      }),
-    );
+    const signatures: string[] = [];
+    for (let offset = 0; offset < limitedPaths.length; offset += 32) {
+      signatures.push(
+        ...(await Promise.all(
+          limitedPaths.slice(offset, offset + 32).map(async (relative) => {
+            const target = safeContentPath(projectPath, relative);
+            return `${relative}:${await fileSignature(target, budget, this.dependencies.assertNoLinks)}`;
+          }),
+        )),
+      );
+    }
     const fingerprint = signatures.join('|');
     const cached = this.cache.get(projectPath);
     if (cached?.fingerprint === fingerprint) {
@@ -437,7 +461,10 @@ export class ProjectSearchService {
     const index: CacheEntry = {
       fingerprint,
       documents,
-      truncated: contentPaths.length > limitedPaths.length || entriesRead > SEARCH_LIMITS.entriesPerProject,
+      truncated:
+        project.screenshots.length + (project.contentItems?.length ?? 0) > SEARCH_LIMITS.entriesPerProject ||
+        contentPaths.length > limitedPaths.length ||
+        entriesRead > SEARCH_LIMITS.entriesPerProject,
       lastUsed: Date.now(),
     };
     // A file skipped because the current search exhausted its byte budget gets another chance later.

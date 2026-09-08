@@ -81,4 +81,20 @@ describe('SearchDialog', () => {
     await act(async () => resolveFirst(response('first', 'Stale result')));
     expect(screen.queryByText('Stale result')).not.toBeInTheDocument();
   });
+
+  it('does not let an earlier open action close a reopened dialog', async () => {
+    setSearch(async ({ query }) => response(query));
+    let finishOpen!: () => void;
+    const onOpenResult = vi.fn(() => new Promise<void>((resolve) => (finishOpen = resolve)));
+    const onClose = vi.fn();
+    const view = render(<SearchDialog open onClose={onClose} onOpenResult={onOpenResult} />);
+    fireEvent.change(screen.getByTestId('global-search-input'), { target: { value: 'button' } });
+    await act(async () => vi.advanceTimersByTime(180));
+    fireEvent.click(screen.getByTestId('global-search-result'));
+    view.rerender(<SearchDialog open={false} onClose={onClose} onOpenResult={onOpenResult} />);
+    view.rerender(<SearchDialog open onClose={onClose} onOpenResult={onOpenResult} />);
+    await act(async () => finishOpen());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('global-search-dialog')).toBeInTheDocument();
+  });
 });
