@@ -31,13 +31,13 @@ The tradeoff is that package runners can spend work on a candidate whose quality
 
 ## Coverage retained and further findings
 
-- All 566 application tests, script tests, format, lint, type checks, service security checks and contract checks remain in nightly quality.
+- All existing application tests, script tests, format, lint, type checks, service security checks and contract checks remain in nightly quality.
 - Release-channel and asset-staging tests still run once through `pnpm test`.
 - The three actual distributables still build and run native verification. Windows visual tolerances and baselines are unchanged.
 - Manifest validation, complete asset-set validation, SHA-256 generation, draft-first publication, and stable-release isolation remain intact.
 - PR/main CI still runs its unpackaged walkthrough and full platform suites. The removed nightly walkthrough therefore retains developer-build coverage there, as well as packaged coverage in nightly.
 - PR CI repeats the full suite across the platform matrix. Some renderer-only tests could eventually run on Linux alone, but platform filesystem, path, symlink, update and native tests must remain. This audit does not delete those suites without a separate coverage map.
-- One previous nightly failed the macOS native double-click timing check and passed a clean retry. That driver timing flake can cost a whole retry; it is recorded separately from intentional test coverage and is not fixed by this scheduling change.
+- Two native test readiness problems were corrected. The Markdown search check now waits for the search dialog to close and the matching content to load, instead of accepting the old editor behind the dialog. Double-clicks now queue both trusted click pairs before yielding, preventing main-process scheduling between clicks from exceeding the canvas double-click window. A driver regression test checks that ordering. Assertions and visual tolerances remain intact; no automatic retries were added.
 
 ## Validation
 

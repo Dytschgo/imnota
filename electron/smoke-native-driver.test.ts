@@ -113,6 +113,21 @@ describe('native smoke driver', () => {
     );
   });
 
+  it('queues both native clicks before a delayed scheduler can split the gesture', async () => {
+    const sendInputEvent = vi.fn();
+    const window = { webContents: { sendInputEvent } } as unknown as BrowserWindow;
+    const action = new NativeUiDriver(window, 100).doubleClick({ x: 20, y: 30 });
+    // No timers or promise continuations have run yet: all input must be queued.
+    expect(sendInputEvent.mock.calls.map(([event]) => [event.type, event.clickCount])).toEqual([
+      ['mouseMove', undefined],
+      ['mouseDown', 1],
+      ['mouseUp', 1],
+      ['mouseDown', 2],
+      ['mouseUp', 2],
+    ]);
+    await action;
+  });
+
   it('sizes and verifies the renderer CSS viewport instead of the outer window frame', async () => {
     const setContentSize = vi.fn();
     const executeJavaScript = vi.fn(async () => ({ width: 1280, height: 800 }));

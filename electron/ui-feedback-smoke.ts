@@ -37,11 +37,19 @@ export async function exerciseUiFeedback(
     captures.push(await driver.capture(artifactDirectory, 'feedback-search.png'));
   }
   await driver.click({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
-  await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
-  const fullTextOpened = await driver.evaluate<boolean>(
-    `document.querySelector('[data-testid="markdown-input"]').value.includes('quartzmarkdownprobe')`,
-  );
-  if (!fullTextOpened) throw new Error('Full Markdown search did not open its matching text block.');
+  // The previous project's editor remains mounted while the search target loads.
+  // Its presence alone does not prove that navigation has completed.
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const editor = document.querySelector('[data-testid="markdown-input"]');
+      if (!document.querySelector('[data-testid="global-search-input"]') &&
+          editor?.value.includes('quartzmarkdownprobe')) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Full Markdown search did not open its matching text block.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
 
   await driver.click({ selector: '[data-testid="search-trigger"]' });
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzannotationprobe');
