@@ -22,7 +22,16 @@ export function pushNavigationLocation(
 ): NavigationStack {
   const current = stack.back.at(-1);
   if (current && JSON.stringify(current) === JSON.stringify(location)) return stack;
-  return { back: [...stack.back, location], forward: [] };
+  return { back: [...stack.back, location].slice(-100), forward: [] };
+}
+
+/** Updates the active entry for local UI changes without creating a new destination. */
+export function replaceNavigationLocation(
+  stack: NavigationStack,
+  location: NavigationLocation,
+): NavigationStack {
+  if (!stack.back.length) return { ...stack, back: [location] };
+  return { ...stack, back: [...stack.back.slice(0, -1), location] };
 }
 
 export function moveNavigationLocation(

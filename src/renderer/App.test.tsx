@@ -235,6 +235,29 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).toBeNull();
   });
 
+  it('returns to the saved workspace location with Back after opening Search', async () => {
+    const loadProject = vi.fn(async () => snapshot);
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+    });
+    await screen.findByRole('textbox', { name: 'Search projects' });
+    act(() => useAppStore.getState().setProject(snapshot));
+
+    fireEvent.click(screen.getByTestId('search-trigger'));
+    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    fireEvent.change(search, { target: { value: 'restored query' } });
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath));
+    expect(useAppStore.getState().view).toBe('workspace');
+    expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath);
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    await waitFor(() => expect(useAppStore.getState().view).toBe('projects'));
+    expect(screen.getByRole('textbox', { name: 'Search projects' })).toHaveValue('restored query');
+  });
+
   it('opens a collection from the full Recent page and records only a successful visit', async () => {
     const second = { ...snapshot.project.collections[0], id: 'second', name: 'Review two' };
     const project = { ...snapshot.project, collections: [...snapshot.project.collections, second] };

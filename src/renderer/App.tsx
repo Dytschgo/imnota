@@ -38,6 +38,7 @@ import { useAppStore, type AppView } from './store';
 import {
   moveNavigationLocation,
   pushNavigationLocation,
+  replaceNavigationLocation,
   resolveRecentCollections,
   relativeOpenedTime,
   type NavigationLocation,
@@ -295,7 +296,8 @@ export default function App() {
       collectionId: current.activeCollectionId,
       itemId: current.activeScreenshotId,
       search: current.search,
-      scrollTop: window.scrollY,
+      scrollTop: document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace')
+        ?.scrollTop,
     };
   }, []);
 
@@ -468,15 +470,21 @@ export default function App() {
         snapshot: opensLibrary || view === 'settings' ? null : state.snapshot,
         search: opensLibrary && !currentIsLibrary ? '' : state.search,
       });
-      setNavigationStack((stack) => pushNavigationLocation(pushNavigationLocation(stack, previousLocation), currentLocation()));
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The project library could not be refreshed.');
     }
   }
 
   async function restoreNavigation(direction: 'back' | 'forward') {
-    const moved = moveNavigationLocation(navigationStack, direction);
+    const moved = moveNavigationLocation(
+      replaceNavigationLocation(navigationStack, currentLocation()),
+      direction,
+    );
     if (!moved.location) return;
+    const identity = ++navigationIdentity.current;
     if (!(await flushAll())) {
       setError('Navigation was cancelled so your unsaved work stays open.');
       return;
@@ -487,20 +495,45 @@ export default function App() {
         const project = useAppStore
           .getState()
           .projects.find((candidate) => candidate.projectPath === target.projectPath);
-        if (!project || project.status === 'archived') return;
+        if (!project || project.status === 'archived') {
+          setNavigationStack(moved.stack);
+          return;
+        }
+        const nativeMutationToken = persistence.beginNativeMutation();
         const snapshot = await window.imnota.loadProject(target.projectPath);
+        if (identity !== navigationIdentity.current) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          return;
+        }
         const collection = snapshot.project.collections.find(
           (entry) => entry.id === target.collectionId && !entry.archived,
         );
-        if (!collection) return;
-        adoptSnapshot(snapshot, target.itemId ?? undefined);
+        if (!collection) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          setNavigationStack(moved.stack);
+          return;
+        }
+        if (!(await persistence.adoptAuthoritativeSnapshot(snapshot, nativeMutationToken))) return;
+        if (identity !== navigationIdentity.current) return;
+        const state = useAppStore.getState();
+        state.setActiveCollection(collection.id);
+        if (
+          target.itemId &&
+          orderedCollectionItems(snapshot.project, collection.id).some((item) => item.id === target.itemId)
+        )
+          state.set({ activeScreenshotId: target.itemId });
         useAppStore.getState().set({ view: target.view, search: target.search });
       } else {
         if (['projects', 'recent', 'favourites', 'archived'].includes(target.view)) await refreshProjects();
+        if (identity !== navigationIdentity.current) return;
         useAppStore.getState().set({ view: target.view, snapshot: null, search: target.search });
       }
       setNavigationStack(moved.stack);
-      if (target.scrollTop !== undefined) window.requestAnimationFrame(() => window.scrollTo({ top: target.scrollTop }));
+      if (target.scrollTop !== undefined)
+        window.requestAnimationFrame(() => {
+          const container = document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace');
+          if (container) container.scrollTop = target.scrollTop!;
+        });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The saved location is no longer available.');
     }
@@ -520,6 +553,7 @@ export default function App() {
   }
   async function createProject() {
     if (!newProject.name.trim()) return;
+    const previousLocation = currentLocation();
     if (!(await flushAll())) {
       setError('Project creation was cancelled so your unsaved work stays open.');
       return;
@@ -539,6 +573,9 @@ export default function App() {
       await refreshProjects();
       adoptSnapshot(snapshot);
       useAppStore.getState().recordCollectionOpen();
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
       showToast('Project created');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Project could not be created.');
@@ -601,7 +638,9 @@ export default function App() {
     const previousLocation = currentLocation();
     if (id !== store.activeScreenshotId && (await flushAll())) {
       useAppStore.getState().set({ activeScreenshotId: id });
-      setNavigationStack((stack) => pushNavigationLocation(pushNavigationLocation(stack, previousLocation), currentLocation()));
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
     }
   }
   async function addContent(kind: 'drawing' | 'text') {
@@ -735,8 +774,24 @@ export default function App() {
         selected.activeCollectionId === collectionId
       )
         selected.recordCollectionOpen();
-      setNavigationStack((stack) => pushNavigationLocation(pushNavigationLocation(stack, previousLocation), currentLocation()));
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
     }
+  }
+  async function openProject(projectPath: string) {
+    const previousLocation = currentLocation();
+    if (!(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project'))) return;
+    setNavigationStack((stack) =>
+      pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+    );
+  }
+  async function openProjectDialog() {
+    const previousLocation = currentLocation();
+    if (!(await guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project'))) return;
+    setNavigationStack((stack) =>
+      pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+    );
   }
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
@@ -1020,17 +1075,13 @@ export default function App() {
         onForward={() => restoreNavigation('forward')}
         onNavigate={navigate}
         onNewProject={() => setDialog('new-project')}
-        onOpenProject={() =>
-          void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')
-        }
+        onOpenProject={openProjectDialog}
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
-        onSelectProject={(projectPath) =>
-          guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project').then(() => {})
-        }
+        onSelectProject={openProject}
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
@@ -1144,10 +1195,8 @@ export default function App() {
           <Library
             onOpenCollection={openCollection}
             onNew={() => setDialog('new-project')}
-            onOpen={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
-            onSelect={(projectPath) =>
-              guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project')
-            }
+            onOpen={openProjectDialog}
+            onSelect={openProject}
             searchInputRef={projectSearchInputRef}
           />
         ) : (
