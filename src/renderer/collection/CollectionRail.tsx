@@ -61,6 +61,8 @@ export function CollectionControls({
   const pickerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
+  const collectionItems = project ? orderedCollectionItems(project, current?.id ?? '') : [];
+  const includedItemCount = collectionItems.filter((item) => item.includeInExport).length;
   const selectedIndex = Math.max(
     0,
     collections.findIndex((collection) => collection.id === current?.id),
@@ -153,7 +155,13 @@ export function CollectionControls({
   return (
     <div className="round-controls">
       <div className="collection-control-heading">
-        <span className="field-label">Collection</span>
+        <span className="field-label">Collection outline</span>
+        <span
+          className="collection-count"
+          aria-label={`${includedItemCount} included items out of ${collectionItems.length}`}
+        >
+          {includedItemCount}/{collectionItems.length} included
+        </span>
         <IconButton
           data-testid="new-collection"
           className="new-collection-button"
@@ -263,11 +271,11 @@ export function CollectionControls({
         )}
       </div>
       <details className="collection-context">
-        <summary>Overall context{current.overallContext.trim() ? ' · Added' : ''}</summary>
+        <summary>Bundle context{current.overallContext.trim() ? ' · Added' : ''}</summary>
         <TextArea
           aria-label="Overall context"
           rows={4}
-          placeholder="Context shared by every item in this collection"
+          placeholder="What should the agent understand about this collection?"
           value={current.overallContext}
           onChange={(event) => updateOverallContext(event.target.value)}
           onBlur={() => {
@@ -336,9 +344,28 @@ export function CollectionRail({
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const addMenuId = useId().replace(/:/g, '');
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const closeMenu = (event: PointerEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAddMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [addMenuOpen]);
 
   async function reorderScreenshot(targetIndex: number, sourceIndex = dragIndex) {
     if (sourceIndex === null || sourceIndex === targetIndex || !project) return;
@@ -417,7 +444,12 @@ export function CollectionRail({
       data-testid="collection-rail"
     >
       <div className="rail-heading">
-        {store.leftPanelOpen && <strong>{project?.name}</strong>}
+        {store.leftPanelOpen && (
+          <div>
+            <span className="eyebrow">Evidence collection</span>
+            <strong>{project?.name}</strong>
+          </div>
+        )}
         <IconButton
           label={store.leftPanelOpen ? 'Collapse collections panel' : 'Expand collections panel'}
           onClick={() => store.set({ leftPanelOpen: !store.leftPanelOpen })}
@@ -492,6 +524,9 @@ export function CollectionRail({
                           ? 'Drawing'
                           : 'Markdown'}
                     </small>
+                    <span className={`item-inclusion ${item.includeInExport ? 'included' : 'excluded'}`}>
+                      {item.includeInExport ? 'Included in bundle' : 'Excluded from bundle'}
+                    </span>
                   </span>
                 </button>
                 <IconButton
@@ -514,30 +549,70 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
-            {onAddContent && (
-              <>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('drawing')}
-                >
-                  <Pencil size={15} aria-hidden="true" />
-                  Add drawing
-                </Button>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('text')}
-                >
-                  <FileText size={15} aria-hidden="true" />
-                  Add text
-                </Button>
-              </>
-            )}
-            <Button variant="soft" disabled={collection?.archived} onClick={onImport}>
-              <Upload size={15} aria-hidden="true" />
-              Add screenshots
-            </Button>
+            <div className="add-item-menu" ref={addMenuRef}>
+              <Button
+                variant="primary"
+                disabled={collection?.archived}
+                aria-expanded={addMenuOpen}
+                aria-haspopup="menu"
+                aria-controls={addMenuId}
+                onClick={() => setAddMenuOpen((open) => !open)}
+              >
+                <Plus size={15} aria-hidden="true" />
+                Add item
+                <ChevronDown size={14} aria-hidden="true" />
+              </Button>
+              {addMenuOpen && (
+                <div className="add-item-popover" id={addMenuId} role="menu" aria-label="Add item">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onImport();
+                      setAddMenuOpen(false);
+                    }}
+                  >
+                    <Upload size={15} aria-hidden="true" />
+                    <span>
+                      <strong>Screenshot</strong>
+                      <small>Import an image into this collection</small>
+                    </span>
+                  </button>
+                  {onAddContent && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void onAddContent('drawing');
+                        setAddMenuOpen(false);
+                      }}
+                    >
+                      <Pencil size={15} aria-hidden="true" />
+                      <span>
+                        <strong>Drawing</strong>
+                        <small>Sketch a visual explanation</small>
+                      </span>
+                    </button>
+                  )}
+                  {onAddContent && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void onAddContent('text');
+                        setAddMenuOpen(false);
+                      }}
+                    >
+                      <FileText size={15} aria-hidden="true" />
+                      <span>
+                        <strong>Text block</strong>
+                        <small>Add Markdown to the prompt sequence</small>
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             <Button variant="ghost" disabled={collection?.archived} onClick={() => void onPaste()}>
               <Clipboard size={15} aria-hidden="true" />
               Paste from clipboard

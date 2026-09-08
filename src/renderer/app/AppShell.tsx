@@ -79,6 +79,19 @@ export function AppShell({
     .filter((collection) => collection.projectFavourite)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, 4);
+  const activeCollection = store.snapshot?.project.collections.find(
+    (collection) => collection.id === store.activeCollectionId,
+  );
+  const activeItemCount = activeCollection
+    ? [
+        ...store.snapshot!.project.screenshots.filter(
+          (screenshot) => screenshot.collectionId === activeCollection.id,
+        ),
+        ...(store.snapshot!.project.contentItems ?? []).filter(
+          (item) => item.collectionId === activeCollection.id,
+        ),
+      ].length
+    : 0;
   return (
     <div
       ref={shellRef}
@@ -223,7 +236,10 @@ export function AppShell({
             {store.snapshot && store.view !== 'settings' && (
               <>
                 <span className="crumb-separator">/</span>
-                <span>Collection</span>
+                <span className="crumb-current">
+                  {activeCollection?.name ?? 'Collection'}
+                  <small>{activeItemCount} items</small>
+                </span>
               </>
             )}
           </div>
@@ -246,7 +262,7 @@ export function AppShell({
                   data-testid="share-prompt-bundles"
                 >
                   <Sparkles size={15} aria-hidden="true" />
-                  Prompt bundles
+                  Copy prompt bundle
                 </Button>
                 <IconButton
                   label={store.snapshot.project.favourite ? 'Remove from favourites' : 'Add to favourites'}

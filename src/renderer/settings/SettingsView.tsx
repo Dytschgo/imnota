@@ -43,13 +43,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
   const [legacyError, setLegacyError] = useState('');
-  const groups = [
-    'Appearance',
-    'Editing & shortcuts',
-    'Workspace & privacy',
-    'Sharing',
-    'Updates & help',
-  ] as const;
+  const groups = ['Appearance', 'Workspace', 'Shortcuts', 'Sharing', 'Updates & about'] as const;
   const [group, setGroup] = useState<(typeof groups)[number]>('Appearance');
   const saveLegacy = async (patch: Partial<typeof settings>) => {
     setLegacyError('');
@@ -62,8 +56,12 @@ export function SettingsView({
   return (
     <section className="settings-view" data-testid="settings-view">
       <div className="settings-heading">
+        <span className="eyebrow">Local workspace</span>
         <h1>Settings</h1>
-        <p>Preferences stay on this device. Project files remain in your local workspace.</p>
+        <p>
+          Control the app, workspace, shortcuts, and sharing defaults without moving project files out of your
+          local workspace.
+        </p>
       </div>
       <nav className="settings-navigation" aria-label="Settings categories">
         {groups.map((name) => (
@@ -96,14 +94,14 @@ export function SettingsView({
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Editing & shortcuts'}>
+        <div hidden={group !== 'Shortcuts'}>
           <ShortcutSettings
             value={preferences.shortcuts}
             onChange={onShortcutChange}
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Updates & help'}>
+        <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} />
           <OnboardingSettings
             value={preferences.onboarding}
@@ -111,7 +109,7 @@ export function SettingsView({
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Editing & shortcuts'}>
+        <div hidden={group !== 'Shortcuts'}>
           <section className="settings-section" aria-labelledby="behaviour-title">
             <h2 id="behaviour-title">Behaviour</h2>
             <label className="field">
@@ -151,7 +149,7 @@ export function SettingsView({
             </label>
           </section>
         </div>
-        <div hidden={group !== 'Workspace & privacy'}>
+        <div hidden={group !== 'Workspace'}>
           <section className="settings-section" aria-labelledby="workspace-settings-title">
             <h2 id="workspace-settings-title">Workspace</h2>
             <div className="workspace-path">

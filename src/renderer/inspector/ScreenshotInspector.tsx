@@ -48,55 +48,66 @@ export function ScreenshotInspector({
         </div>
       </div>
       <div className="inspector-scroll">
-        <TextInput
-          label="Title"
-          value={shot.title}
-          onChange={(event) => onUpdateShot({ title: event.target.value })}
-        />
-        <div className="description-field">
-          <div className="field-heading">
-            <span className="field-label">Description</span>
-            <Button
-              variant="ghost"
-              aria-label="Undo description"
-              disabled={!canUndoDescription}
-              onClick={onUndoDescription}
-            >
-              <Undo2 size={14} aria-hidden="true" />
-              Undo
-            </Button>
-          </div>
-          <TextArea
-            aria-label="Description"
-            rows={6}
-            placeholder="Describe what the agent should understand."
-            value={shot.description}
-            onChange={(event) => onDescriptionChange(event.target.value)}
-          />
-        </div>
-        <label className="field">
-          <span className="field-label">Priority for agent</span>
-          <select
-            aria-label="Priority for agent"
-            value={shot.priority}
-            onChange={(event) =>
-              onUpdateShot({ priority: event.target.value as ScreenshotRecord['priority'] })
-            }
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        {shot.conflict && (
-          <p className="conflict-notice">
-            {shot.includeInExport
-              ? 'Copy conflict · included manually in prompt bundles'
-              : 'Copy conflict · excluded from prompt bundles'}
+        <section className="inspector-section context-section" aria-labelledby="context-heading">
+          <span className="section-label" id="context-heading">
+            Context
+          </span>
+          <p className="section-intro">
+            Give the agent a clear reading of this evidence before it sees the details.
           </p>
-        )}
+          <TextInput
+            label="Title"
+            value={shot.title}
+            onChange={(event) => onUpdateShot({ title: event.target.value })}
+          />
+          <div className="description-field">
+            <div className="field-heading">
+              <span className="field-label">What should change or stay?</span>
+              <Button
+                variant="ghost"
+                aria-label="Undo description"
+                disabled={!canUndoDescription}
+                onClick={onUndoDescription}
+              >
+                <Undo2 size={14} aria-hidden="true" />
+                Undo
+              </Button>
+            </div>
+            <TextArea
+              aria-label="Description"
+              rows={6}
+              placeholder="What should the agent notice, change, or preserve?"
+              value={shot.description}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+            />
+          </div>
+          <label className="field">
+            <span className="field-label">Priority for agent</span>
+            <select
+              aria-label="Priority for agent"
+              value={shot.priority}
+              onChange={(event) =>
+                onUpdateShot({ priority: event.target.value as ScreenshotRecord['priority'] })
+              }
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          {shot.conflict && (
+            <p className="conflict-notice">
+              {shot.includeInExport
+                ? 'Copy conflict · included manually in prompt bundles'
+                : 'Copy conflict · excluded from prompt bundles'}
+            </p>
+          )}
+        </section>
         {selectedAnnotation && (
-          <section className="annotation-properties" aria-labelledby="selected-annotation-heading">
+          <section
+            className="annotation-properties inspector-section"
+            aria-labelledby="selected-annotation-heading"
+          >
             <span className="section-label" id="selected-annotation-heading">
               Selected annotation
             </span>
@@ -259,28 +270,48 @@ export function ScreenshotInspector({
             )}
           </section>
         )}
-        <div className="inspector-footer">
-          <label className="check-row">
+        <section className="inspector-section export-section" aria-labelledby="export-heading">
+          <span className="section-label" id="export-heading">
+            Export
+          </span>
+          <label className="export-state check-row">
             <input
               type="checkbox"
               checked={shot.includeInExport}
               onChange={(event) => onUpdateShot({ includeInExport: event.target.checked })}
             />
-            <span>Include in prompt bundles</span>
+            <span>
+              <strong>
+                {shot.includeInExport ? 'Included in prompt bundle' : 'Excluded from prompt bundle'}
+              </strong>
+              <small>
+                {shot.includeInExport
+                  ? 'Its description and visual evidence will be part of the next bundle.'
+                  : 'Keep editing it locally; it will not be copied into the next bundle.'}
+              </small>
+            </span>
           </label>
           <Button variant="ghost" onClick={() => void onDuplicate()}>
             <Copy size={15} aria-hidden="true" />
             Duplicate screenshot
           </Button>
-          <Button variant="danger" onClick={() => void onDeleteScreenshot()}>
-            <Trash2 size={15} aria-hidden="true" />
-            Delete screenshot
-          </Button>
-          <Button variant="danger" onClick={onDeleteProject}>
-            <Trash2 size={15} aria-hidden="true" />
-            Delete project
-          </Button>
-        </div>
+        </section>
+        <details className="danger-zone">
+          <summary>
+            <span>Danger zone</span>
+            <small>Delete this evidence or the whole project</small>
+          </summary>
+          <div className="danger-zone-actions">
+            <Button variant="danger" onClick={() => void onDeleteScreenshot()}>
+              <Trash2 size={15} aria-hidden="true" />
+              Delete screenshot
+            </Button>
+            <Button variant="danger" onClick={onDeleteProject}>
+              <Trash2 size={15} aria-hidden="true" />
+              Delete project
+            </Button>
+          </div>
+        </details>
       </div>
     </aside>
   );

@@ -118,6 +118,10 @@ const MORE_TOOLS: ToolDefinition[] = [
   },
 ];
 
+const TRANSFORM_TOOLS = MORE_TOOLS.filter((tool) => ['blur', 'pixelate', 'crop'].includes(tool.id));
+const DRAWING_TOOLS = MORE_TOOLS.filter((tool) => !['blur', 'pixelate', 'crop', 'eraser'].includes(tool.id));
+const DANGER_TOOLS = MORE_TOOLS.filter((tool) => tool.id === 'eraser');
+
 function ToolButton({
   definition,
   active,
@@ -147,6 +151,43 @@ function ToolButton({
         {definition.shortcut && <kbd>{definition.shortcut}</kbd>}
       </span>
     </span>
+  );
+}
+
+function MoreToolSection({
+  label,
+  tools,
+  activeTool,
+  onSelect,
+}: {
+  label: string;
+  tools: ToolDefinition[];
+  activeTool: ToolChoice;
+  onSelect(tool: ToolChoice): void;
+}) {
+  return (
+    <div className={label === 'Remove' ? 'annotation-menu-section is-danger' : 'annotation-menu-section'}>
+      <span className="annotation-menu-label">{label}</span>
+      {tools.map((definition) => {
+        const Icon = definition.icon;
+        return (
+          <button
+            key={definition.id}
+            type="button"
+            role="menuitemradio"
+            aria-checked={activeTool === definition.id}
+            className={activeTool === definition.id ? 'is-active' : ''}
+            onClick={() => onSelect(definition.id)}
+          >
+            <Icon size={16} />
+            <span>
+              <strong>{definition.label}</strong>
+              <small>{definition.description}</small>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -202,7 +243,8 @@ export function Toolbar({
 
   return (
     <div className="toolbar annotation-toolbar" role="toolbar" aria-label="Annotation tools">
-      <div className="tool-group annotation-primary-tools">
+      <div className="tool-group annotation-primary-tools" aria-label="Annotate">
+        <span className="toolbar-group-label">Annotate</span>
         {PRIMARY_TOOLS.map((definition) => (
           <ToolButton
             key={definition.id}
@@ -235,28 +277,33 @@ export function Toolbar({
           </span>
           {moreOpen && (
             <div className="annotation-more-menu" role="menu" aria-label="More annotation tools">
-              {MORE_TOOLS.map((definition) => {
-                const Icon = definition.icon;
-                return (
-                  <button
-                    key={definition.id}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={tool === definition.id}
-                    className={tool === definition.id ? 'is-active' : ''}
-                    onClick={() => {
-                      setTool(definition.id);
-                      setMoreOpen(false);
-                    }}
-                  >
-                    <Icon size={16} />
-                    <span>
-                      <strong>{definition.label}</strong>
-                      <small>{definition.description}</small>
-                    </span>
-                  </button>
-                );
-              })}
+              <MoreToolSection
+                label="Transform"
+                tools={TRANSFORM_TOOLS}
+                activeTool={tool}
+                onSelect={(next) => {
+                  setTool(next);
+                  setMoreOpen(false);
+                }}
+              />
+              <MoreToolSection
+                label="Draw"
+                tools={DRAWING_TOOLS}
+                activeTool={tool}
+                onSelect={(next) => {
+                  setTool(next);
+                  setMoreOpen(false);
+                }}
+              />
+              <MoreToolSection
+                label="Remove"
+                tools={DANGER_TOOLS}
+                activeTool={tool}
+                onSelect={(next) => {
+                  setTool(next);
+                  setMoreOpen(false);
+                }}
+              />
             </div>
           )}
         </div>
@@ -282,7 +329,8 @@ export function Toolbar({
       )}
 
       <div className="toolbar-divider" />
-      <div className="tool-group annotation-view-tools">
+      <div className="tool-group annotation-view-tools" aria-label="View">
+        <span className="toolbar-group-label">View</span>
         <IconButton
           label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}
           disabled={!canUndo}

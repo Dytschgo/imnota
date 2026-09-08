@@ -158,6 +158,28 @@
   background: rgba(104, 87, 245, 0.12);
 }
 
+.annotation-menu-section + .annotation-menu-section {
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+
+.annotation-menu-section.is-danger button:hover,
+.annotation-menu-section.is-danger button:focus-visible {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ffb4b4;
+}
+
+.annotation-menu-label {
+  display: block;
+  padding: 3px 8px 5px;
+  color: var(--ink-4);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .annotation-more-menu button > svg {
   margin-top: 1px;
 }

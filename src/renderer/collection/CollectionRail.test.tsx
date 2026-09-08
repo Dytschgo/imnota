@@ -256,8 +256,10 @@ describe('CollectionRail', () => {
     expect(
       useAppStore.getState().snapshot?.project.contentItems?.find((item) => item.id === 'text')?.position,
     ).toBe(0);
-    expect(screen.getByRole('button', { name: 'Add drawing' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add text' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(screen.getByRole('menu', { name: 'Add item' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: /Drawing/ })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: /Text block/ })).toBeVisible();
   });
 
   it('excludes a text block without altering screenshots', async () => {
@@ -317,7 +319,7 @@ describe('CollectionRail', () => {
     });
     expect(onSnapshot).toHaveBeenNthCalledWith(1, expect.any(Object), 'alpha');
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
-    expect(screen.getByRole('button', { name: /add screenshots/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
