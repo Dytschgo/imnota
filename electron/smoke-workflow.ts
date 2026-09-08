@@ -1136,7 +1136,19 @@ async function exercisePreferencesAndChannel(
     await driver.waitFor({ selector: '.settings-view' });
   }
   await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
-  await driver.waitFor({ selector: ':root[data-glass-level="off"]' });
+  await driver.waitFor({ selector: ':root[data-glass-requested="off"]' });
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
+  await driver.waitFor({ selector: ':root[data-theme="light"]' });
+  await driver.evaluate(`(() => {
+    const root = document.documentElement;
+    const fallback = ['reduced-transparency', 'performance'].includes(root.dataset.glassFallback);
+    if (root.dataset.glassLevel !== (fallback ? 'off' : 'strong'))
+      throw new Error('Light backdrop did not apply automatic glass or its accessibility fallback.');
+    if (!fallback && root.dataset.background !== 'active')
+      throw new Error('Automatic light glass did not reveal its backdrop.');
+  })()`);
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
+  await driver.waitFor({ selector: ':root[data-theme="dark"][data-glass-level="off"]' });
   const solidBackdrop = await driver.evaluate<string>(
     `getComputedStyle(document.documentElement).getPropertyValue('--imnota-background-image').trim()`,
   );
