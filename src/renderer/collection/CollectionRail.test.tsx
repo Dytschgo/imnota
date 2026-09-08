@@ -292,6 +292,43 @@ describe('CollectionRail', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it.each([false, true])(
+    'closes both popovers after focus leaves with Tab (reverse=%s)',
+    async (shiftKey) => {
+      render(<CollectionRail {...props()} />);
+      const destination = screen.getByRole('button', { name: /Paste from clipboard/i });
+      for (const [trigger, role] of [
+        [screen.getByRole('button', { name: 'Collection' }), 'listbox'],
+        [screen.getByRole('button', { name: 'Add item' }), 'menu'],
+      ] as const) {
+        fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+        const popup = await screen.findByRole(role);
+        await waitFor(() => expect(popup.contains(document.activeElement)).toBe(true));
+        fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey });
+        // jsdom does not perform browser Tab traversal: model the resulting focus move.
+        act(() => destination.focus());
+        expect(screen.queryByRole(role)).not.toBeInTheDocument();
+        expect(trigger).toHaveAttribute('aria-expanded', 'false');
+        expect(destination).toHaveFocus();
+      }
+    },
+  );
+
+  it('opens collection keyboard endpoints at the requested option', async () => {
+    render(<CollectionRail {...props()} />);
+    const trigger = screen.getByRole('button', { name: 'Collection' });
+    for (const [key, name] of [
+      ['End', 'Collection B'],
+      ['Home', 'Collection A'],
+      ['ArrowUp', 'Collection B'],
+    ] as const) {
+      fireEvent.keyDown(trigger, { key });
+      await waitFor(() => expect(screen.getByRole('option', { name })).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      await waitFor(() => expect(trigger).toHaveFocus());
+    }
+  });
+
   it('excludes a text block without altering screenshots', async () => {
     const current = projectSnapshot();
     current.project.contentItems = [

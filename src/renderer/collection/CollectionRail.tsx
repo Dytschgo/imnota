@@ -191,7 +191,7 @@ export function CollectionControls({
               event.key === 'End'
             ) {
               event.preventDefault();
-              openPicker(selectedIndex);
+              openPicker(event.key === 'Home' || event.key === 'ArrowDown' ? 0 : collections.length - 1);
             } else if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
               if (pickerOpen) closePicker();
@@ -225,6 +225,9 @@ export function CollectionControls({
             className="collection-picker-menu"
             role="listbox"
             aria-label="Collections"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) closePicker();
+            }}
           >
             {collections.map((collection, index) => (
               <button
@@ -626,7 +629,15 @@ export function CollectionRail({
                 <ChevronDown size={14} aria-hidden="true" />
               </Button>
               {addMenuOpen && (
-                <div className="add-item-popover" id={addMenuId} role="menu" aria-label="Add item">
+                <div
+                  className="add-item-popover"
+                  id={addMenuId}
+                  role="menu"
+                  aria-label="Add item"
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) closeAddMenu();
+                  }}
+                >
                   {addItemOptions.map((option, index) => {
                     const Icon = option.icon;
                     return (
