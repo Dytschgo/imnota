@@ -83,6 +83,19 @@ input:focus-visible {
   min-height: 100vh;
   padding: 28px;
 }
+.boot-screen {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 28px;
+}
+.boot-status {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
 .login-panel {
   width: min(440px, 100%);
   margin-top: 20px;
@@ -93,15 +106,30 @@ input:focus-visible {
 }
 .wordmark,
 .rail-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   margin: 0;
   color: var(--ink);
   font-size: 22px;
   font-weight: 760;
   letter-spacing: -0.06em;
 }
-.wordmark span,
-.rail-brand span {
-  margin-left: 8px;
+.wordmark img,
+.rail-brand img {
+  width: 22px;
+  height: 22px;
+}
+.wordmark .wordmark-name,
+.rail-brand .wordmark-name {
+  color: var(--ink);
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
+.wordmark span:not(.wordmark-name),
+.rail-brand span:not(.wordmark-name) {
   color: var(--ink-muted);
   font-size: 11px;
   font-weight: 650;
@@ -462,6 +490,8 @@ form > button:hover {
   color: var(--ink-muted) !important;
 }
 .table-link {
+  display: grid;
+  gap: 2px;
   border: 0;
   background: transparent;
   color: var(--cyan);
@@ -470,6 +500,19 @@ form > button:hover {
   font-weight: 720;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.share-title {
+  overflow: hidden;
+  max-width: 240px;
+  text-overflow: ellipsis;
+}
+.share-reference {
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
 }
 .status-badge {
   display: inline-flex;
@@ -520,16 +563,29 @@ form > button:hover {
   gap: 14px;
 }
 .storage-meter {
+  display: block;
+  width: 100%;
   height: 7px;
   margin-top: 22px;
-  overflow: hidden;
+  appearance: none;
+  border: 0;
   background: var(--graphite-inset);
 }
-.storage-meter span {
-  display: block;
+.storage-meter::-webkit-progress-bar {
+  background: var(--graphite-inset);
+}
+.storage-meter::-webkit-progress-value {
   height: 100%;
-  min-width: 2px;
   background: var(--cyan);
+}
+.storage-meter::-moz-progress-bar {
+  background: var(--cyan);
+}
+.storage-meter.is-over-limit::-webkit-progress-value {
+  background: var(--red);
+}
+.storage-meter.is-over-limit::-moz-progress-bar {
+  background: var(--red);
 }
 .capacity-copy,
 .policy-copy {
@@ -537,6 +593,10 @@ form > button:hover {
   color: var(--ink-secondary);
   font-size: 13px;
   line-height: 1.5;
+}
+.capacity-copy.is-over-limit {
+  color: var(--red);
+  font-weight: 650;
 }
 .storage-list {
   display: grid;
@@ -713,7 +773,17 @@ dialog::backdrop {
     white-space: nowrap;
   }
   .rail-session {
+    display: flex;
+    align-items: center;
+    margin-top: 0;
+    padding: 0 10px;
+    border-top: 0;
+  }
+  .rail-session > :not(.text-button) {
     display: none;
+  }
+  .rail-session .text-button {
+    margin-left: auto;
   }
   .console-main {
     padding: 24px 16px 48px;

@@ -15,8 +15,13 @@ export function ownerPage() {
   </head>
   <body>
     <main class="owner-shell">
+      <section class="boot-screen" data-boot aria-live="polite">
+        <p class="wordmark"><img src="/static/imnota-logo.svg" alt="" aria-hidden="true"><span class="wordmark-name">imnota</span><span>owner console</span></p>
+        <p class="boot-status">Connecting to the private owner console…</p>
+        <noscript><p class="boot-status">Enable JavaScript to use the private owner console.</p></noscript>
+      </section>
       <section class="login-screen" data-login hidden aria-labelledby="owner-access-title">
-        <p class="wordmark">imnota<span>owner console</span></p>
+        <p class="wordmark"><img src="/static/imnota-logo.svg" alt="" aria-hidden="true"><span class="wordmark-name">imnota</span><span>owner console</span></p>
         <div class="login-panel">
           <p class="eyebrow">Private service</p>
           <h1 id="owner-access-title">Owner access</h1>
@@ -32,7 +37,7 @@ export function ownerPage() {
 
       <section class="console" data-dashboard hidden aria-label="Imnota owner console">
         <aside class="console-rail" aria-label="Owner navigation">
-          <a class="rail-brand" href="#overview" aria-label="Imnota owner console">imnota<span>owner</span></a>
+          <a class="rail-brand" href="#overview" aria-label="Imnota owner console"><img src="/static/imnota-logo.svg" alt="" aria-hidden="true"><span class="wordmark-name">imnota</span><span>owner</span></a>
           <nav class="console-nav" aria-label="Console sections">
             <button type="button" class="nav-item is-active" data-view-trigger="overview" aria-current="page">Overview</button>
             <button type="button" class="nav-item" data-view-trigger="shares">Shares</button>
@@ -65,11 +70,11 @@ export function ownerPage() {
             <div class="service-strip" data-overview-status aria-live="polite"></div>
             <div class="overview-grid">
               <section class="readout-panel" aria-labelledby="share-pulse-title">
-                <div class="panel-heading"><div><p class="eyebrow">Lifecycle</p><h2 id="share-pulse-title">Share pulse</h2></div><button class="panel-link" type="button" data-open-view="shares">Inspect shares</button></div>
+                <div class="panel-heading"><div><p class="eyebrow">Lifecycle</p><h2 id="share-pulse-title">Share status</h2></div><button class="panel-link" type="button" data-open-view="shares">Inspect shares</button></div>
                 <div class="readout-list" data-share-pulse></div>
               </section>
               <section class="readout-panel" aria-labelledby="storage-pulse-title">
-                <div class="panel-heading"><div><p class="eyebrow">Capacity</p><h2 id="storage-pulse-title">Storage posture</h2></div><button class="panel-link" type="button" data-open-view="storage">Inspect storage</button></div>
+                <div class="panel-heading"><div><p class="eyebrow">Capacity</p><h2 id="storage-pulse-title">Storage usage</h2></div><button class="panel-link" type="button" data-open-view="storage">Inspect storage</button></div>
                 <div class="readout-list" data-storage-pulse></div>
               </section>
               <section class="readout-panel" aria-labelledby="pairing-pulse-title">
@@ -89,14 +94,15 @@ export function ownerPage() {
               <button type="button" class="filter-button" data-share-filter="expired" aria-pressed="false">Expired</button>
               <button type="button" class="filter-button" data-share-filter="revoked" aria-pressed="false">Revoked</button>
             </div>
-            <div class="table-wrap"><table class="data-table"><caption class="sr-only">Share lifecycle records</caption><thead><tr><th scope="col">Share</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expiry</th><th scope="col">Stored</th><th scope="col">Artifacts</th><th scope="col">Requests</th></tr></thead><tbody data-share-list></tbody></table></div>
+            <div class="table-wrap" role="region" aria-label="Share lifecycle table" tabindex="0"><table class="data-table"><caption class="sr-only">Share lifecycle records</caption><thead><tr><th scope="col">Share</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expiry</th><th scope="col">Stored</th><th scope="col">Artifacts</th><th scope="col">Requests</th></tr></thead><tbody data-share-list></tbody></table></div>
             <div class="empty-state" data-shares-empty hidden><strong>No matching shares</strong><span>No lifecycle records match this filter.</span></div>
             <button class="quiet-button load-more" type="button" data-load-more hidden>Load more</button>
           </section>
 
           <section class="view" data-view="pairing" aria-labelledby="pairing-title" hidden>
             <div class="section-intro"><div><h2 id="pairing-title">Pairing lifecycle</h2><p>One-time codes are never rendered or recoverable from this view.</p></div></div>
-            <div class="table-wrap"><table class="data-table"><caption class="sr-only">Pairing lifecycle records</caption><thead><tr><th scope="col">Reference</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expiry</th><th scope="col">Consumed</th></tr></thead><tbody data-pairing-list></tbody></table></div>
+            <p class="data-note pairing-limit-note">Latest 100 pairing records, newest first. One-time codes are never rendered or recoverable from this view.</p>
+            <div class="table-wrap" role="region" aria-label="Latest 100 pairing lifecycle table" tabindex="0"><table class="data-table"><caption class="sr-only">Latest 100 pairing lifecycle records</caption><thead><tr><th scope="col">Reference</th><th scope="col">State</th><th scope="col">Created</th><th scope="col">Expiry</th><th scope="col">Consumed</th></tr></thead><tbody data-pairing-list></tbody></table></div>
             <div class="empty-state" data-pairings-empty hidden><strong>No pairing records</strong><span>There are no current pairing records to display.</span></div>
           </section>
 
@@ -118,7 +124,8 @@ export function ownerPage() {
       <form method="dialog" data-revoke-form>
         <p class="eyebrow">Confirm revocation</p>
         <h2 id="revoke-title">Revoke this share?</h2>
-        <p>This immediately disables the shared link. Stored artifacts follow the existing automatic retention policy; this action does not delete them.</p>
+        <p data-revoke-share>This immediately disables the shared link.</p>
+        <p>Stored artifacts follow the existing automatic retention policy; this action does not delete them.</p>
         <p class="message" role="alert" data-revoke-error></p>
         <div class="dialog-actions"><button type="submit" value="cancel" class="quiet-button">Keep active</button><button type="submit" value="confirm" class="danger-button">Revoke share</button></div>
       </form>

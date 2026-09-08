@@ -191,6 +191,7 @@ function serializeShare(row, timestamp) {
   return {
     id: row.id,
     reference: shareReference(row.id),
+    title: row.title,
     createdAt: new Date(row.created_at).toISOString(),
     expiresAt: new Date(row.expires_at).toISOString(),
     revokedAt: row.revoked_at === null ? null : new Date(row.revoked_at).toISOString(),
@@ -198,7 +199,7 @@ function serializeShare(row, timestamp) {
     metadataBytes: row.metadata_byte_size,
     storedBytes: row.byte_size + row.metadata_byte_size,
     hasArchive: row.has_archive === 1,
-    artifactCount: row.asset_count + (row.has_archive === 1 ? 1 : 0),
+    artifactCount: row.asset_count + (row.has_archive === 1 ? 1 : 0) + 1,
     expiresSoon: status === 'active' && row.expires_at <= timestamp + expiringWindowMs,
     status,
     usage: {
@@ -337,7 +338,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     parameters.push(limit + 1);
     const rows = db
       .prepare(
-        `SELECT s.id, s.created_at, s.expires_at, s.revoked_at, s.byte_size, s.metadata_byte_size, s.has_archive,
+        `SELECT s.id, s.title, s.created_at, s.expires_at, s.revoked_at, s.byte_size, s.metadata_byte_size, s.has_archive,
           (SELECT COUNT(*) FROM assets a WHERE a.share_id = s.id) AS asset_count,
           COALESCE(u.page_views, 0) AS page_views,
           COALESCE(u.markdown_requests, 0) AS markdown_requests,
