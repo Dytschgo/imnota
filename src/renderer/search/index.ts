@@ -4,4 +4,3 @@ export type {
   ProjectSearchTarget,
   ProjectSearchResult,
 } from '../../shared/project-search';
-

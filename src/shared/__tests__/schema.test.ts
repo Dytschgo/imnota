@@ -9,6 +9,12 @@ describe('project schema', () => {
   it('rejects missing project identity', () => {
     expect(() => validateProject({ schemaVersion: 1 })).toThrow();
   });
+  it('round-trips allowlisted icons and falls back for unknown future icon keys', () => {
+    expect(validateProject({ ...emptyProject('Valid', ''), icon: 'rocket' }).icon).toBe('rocket');
+    expect(
+      validateProject({ ...emptyProject('Valid', ''), icon: 'unknown-plugin-icon' }).icon,
+    ).toBeUndefined();
+  });
   it('rejects two screenshot IDs that alias the same per-collection files', () => {
     const project = emptyProject('Aliased', '');
     const collectionId = project.collections[0].id;

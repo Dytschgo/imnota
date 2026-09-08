@@ -14,4 +14,3 @@ export type ProjectIconKey = (typeof PROJECT_ICON_KEYS)[number];
 export function isProjectIconKey(value: unknown): value is ProjectIconKey {
   return typeof value === 'string' && (PROJECT_ICON_KEYS as readonly string[]).includes(value);
 }
-

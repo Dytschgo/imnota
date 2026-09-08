@@ -1,10 +1,7 @@
 import type { WorkflowBridge } from './workflow-bridge.js';
 import type { ContentBridge, ContentItem } from './content-items.js';
 import type { ProjectIconKey } from './project-icons.js';
-import type {
-  ProjectSearchInput,
-  ProjectSearchResponse,
-} from './project-search.js';
+import type { ProjectSearchInput, ProjectSearchResponse } from './project-search.js';
 
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';

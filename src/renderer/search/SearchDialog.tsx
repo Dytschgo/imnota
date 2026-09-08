@@ -155,11 +155,7 @@ export function SearchDialog({
       description="Find project context, screenshots, annotations, text, and drawings stored on this device."
       onClose={onClose}
     >
-      <div
-        className="project-search"
-        aria-busy={loading || opening}
-        data-testid="global-search-dialog"
-      >
+      <div className="project-search" aria-busy={loading || opening} data-testid="global-search-dialog">
         <div className="project-search-controls">
           <label className="project-search-input">
             <Search size={17} aria-hidden="true" />

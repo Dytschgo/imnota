@@ -1,12 +1,7 @@
 export type ProjectSearchScope = 'active' | 'archived';
 
 export type ProjectSearchResultKind =
-  | 'project'
-  | 'collection'
-  | 'screenshot'
-  | 'annotation'
-  | 'text'
-  | 'drawing';
+  'project' | 'collection' | 'screenshot' | 'annotation' | 'text' | 'drawing';
 
 export interface ProjectSearchTarget {
   projectPath: string;

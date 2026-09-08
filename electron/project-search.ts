@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import type { Annotation, ProjectData } from '../src/shared/types.js';
 import type {
@@ -47,15 +48,15 @@ export interface ProjectSearchDependencies {
   workspace(): string | null;
   authorizeProject(projectPath: string): Promise<string>;
   assertNoLinks(targetPath: string): Promise<void>;
+  /** Test seams used to prove that path replacement between validation and open is rejected. */
+  beforeFileOpen?(targetPath: string): Promise<void>;
+  afterFileOpen?(targetPath: string): Promise<void>;
 }
 
 const textDecoder = new TextDecoder('utf-8', { fatal: false });
 
 function normalized(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase();
+  return value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 }
 
 function cleanText(value: string): string {
@@ -119,21 +120,31 @@ async function fileSignature(filePath: string, assertNoLinks: (target: string) =
 async function readBoundedText(
   filePath: string,
   budget: SearchBudget,
-  assertNoLinks: (target: string) => Promise<void>,
+  dependencies: Pick<ProjectSearchDependencies, 'assertNoLinks' | 'beforeFileOpen' | 'afterFileOpen'>,
   maxBytes: number = SEARCH_LIMITS.fileBytes,
 ): Promise<string | null> {
-  await assertNoLinks(filePath);
-  const handle = await fs.open(filePath, 'r').catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return null;
-    budget.unreadableFiles += 1;
-    budget.truncated = true;
-    throw error;
-  });
+  await dependencies.assertNoLinks(filePath);
+  await dependencies.beforeFileOpen?.(filePath);
+  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+  const handle = await fs
+    .open(filePath, fsConstants.O_RDONLY | noFollow)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      budget.unreadableFiles += 1;
+      budget.truncated = true;
+      throw error;
+    });
   if (!handle) return null;
   try {
-    // The second check closes the swap window before we read from the already-open handle.
-    await assertNoLinks(filePath);
+    await dependencies.afterFileOpen?.(filePath);
+    await dependencies.assertNoLinks(filePath);
     const stat = await handle.stat();
+    const pathStat = await fs.lstat(filePath);
+    if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) {
+      budget.unreadableFiles += 1;
+      budget.truncated = true;
+      throw new Error('A project content path changed while it was opened.');
+    }
     if (!stat.isFile() || stat.size > maxBytes || stat.size > budget.remainingBytes) {
       budget.skippedFiles += 1;
       budget.truncated = true;
@@ -147,6 +158,12 @@ async function readBoundedText(
       return null;
     }
     budget.remainingBytes -= bytesRead;
+    const finalPathStat = await fs.lstat(filePath);
+    if (stat.dev !== finalPathStat.dev || stat.ino !== finalPathStat.ino) {
+      budget.unreadableFiles += 1;
+      budget.truncated = true;
+      throw new Error('A project content path changed while it was read.');
+    }
     return textDecoder.decode(bytes.subarray(0, bytesRead));
   } finally {
     await handle.close();
@@ -257,7 +274,7 @@ export class ProjectSearchService {
         const projectSource = await readBoundedText(
           safeContentPath(projectPath, 'project.json'),
           budget,
-          this.dependencies.assertNoLinks,
+          this.dependencies,
           SEARCH_LIMITS.metadataBytes,
         );
         if (!projectSource) continue;
@@ -293,8 +310,7 @@ export class ProjectSearchService {
         void _searchable;
         return { ...result, excerpt: excerptFor(candidate.excerpt, tokens) };
       }),
-      truncated:
-        budget.truncated || indexes.some((index) => index.truncated) || matches.length > limit,
+      truncated: budget.truncated || indexes.some((index) => index.truncated) || matches.length > limit,
       ...((budget.skippedFiles || budget.unreadableFiles) && {
         warnings: [
           `${budget.skippedFiles + budget.unreadableFiles} local ${budget.skippedFiles + budget.unreadableFiles === 1 ? 'file was' : 'files were'} skipped because they were unavailable or exceeded the search limits.`,
@@ -354,19 +370,26 @@ export class ProjectSearchService {
         (await readBoundedText(
           safeContentPath(projectPath, shot.descriptionFile),
           budget,
-          this.dependencies.assertNoLinks,
+          this.dependencies,
         )) ?? shot.description;
       documents.push(
-        document('screenshot', shot.title || shot.originalFilename, description, project.name, collectionName, {
-          projectPath,
-          collectionId: shot.collectionId,
-          itemId: shot.id,
-        }),
+        document(
+          'screenshot',
+          shot.title || shot.originalFilename,
+          description,
+          project.name,
+          collectionName,
+          {
+            projectPath,
+            collectionId: shot.collectionId,
+            itemId: shot.id,
+          },
+        ),
       );
       const annotationSource = await readBoundedText(
         safeContentPath(projectPath, shot.annotationFile),
         budget,
-        this.dependencies.assertNoLinks,
+        this.dependencies,
       );
       if (annotationSource)
         for (const annotation of annotationTexts(annotationSource)) {
@@ -399,11 +422,7 @@ export class ProjectSearchService {
       const relative = contentItemRelativePaths(item);
       const source = relative.markdown ?? relative.source;
       const raw = source
-        ? await readBoundedText(
-            safeContentPath(projectPath, source),
-            budget,
-            this.dependencies.assertNoLinks,
-          )
+        ? await readBoundedText(safeContentPath(projectPath, source), budget, this.dependencies)
         : null;
       const content = item.kind === 'drawing' ? drawingText(raw ?? '') : (raw ?? item.preview ?? '');
       const title = item.kind === 'drawing' ? item.title || 'Drawing' : item.preview || 'Text block';
