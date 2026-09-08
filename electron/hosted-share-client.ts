@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { HostedShareList, HostedShareRecord, HostedShareUpload } from '../src/shared/workflow-bridge.js';
+import type {
+  HostedShareList,
+  HostedShareRecord,
+  HostedShareRecoveryWarning,
+  HostedShareUpload,
+} from '../src/shared/workflow-bridge.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 
 const PRODUCTION_ORIGIN = 'https://app.imnota.xyz';
@@ -17,6 +22,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_STORED_SHARE_BYTES = MAX_UPLOAD_BYTES * 2 + 1024 * 1024;
 const PENDING_RECOVERY_MS = 24 * 60 * 60 * 1000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const RECOVERY_WARNING_ID = /^recovery:[a-f0-9]{64}$/;
 
 type StoredShare = HostedShareRecord & { managementToken: string };
 type PendingShare = {
@@ -27,6 +33,7 @@ type PendingShare = {
   payloadFingerprint?: string;
 };
 type JsonObject = Record<string, unknown>;
+type DismissedRecoveryWarnings = Record<string, true>;
 
 export type HostedShareFetch = (target: string, init: RequestInit) => Promise<Response>;
 
@@ -34,6 +41,7 @@ export interface HostedShareArtifacts {
   title: string;
   markdown: string;
   images: readonly { filename: string; dataBase64: string }[];
+  bundles?: readonly { bundleNumber: number; markdown: string; imageFilename: string | null }[];
 }
 
 function publicRecord(record: StoredShare): HostedShareRecord {
@@ -73,6 +81,19 @@ function safeText(value: unknown, maximum: number, allowEmpty = false): value is
     (allowEmpty || value.length > 0) &&
     !hasControlCharacter(value)
   );
+}
+
+function safeMarkdown(value: unknown, maximumBytes: number): value is string {
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > maximumBytes)
+    return false;
+  return Array.from(value).every((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return (
+      codePoint !== 0 &&
+      (codePoint > 31 || character === '\t' || character === '\n' || character === '\r') &&
+      (codePoint < 127 || codePoint > 159)
+    );
+  });
 }
 
 function validTimestamp(value: unknown): value is string {
@@ -224,6 +245,26 @@ function safeServerMessage(value: unknown, fallback: string): string {
   return safeText(value, 500) ? value : fallback;
 }
 
+function normalizedSenderName(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string')
+    throw new NativeWorkflowError('invalid-input', 'The sender name is invalid.', false);
+  const name = value.normalize('NFC').trim();
+  if (!name) return undefined;
+  if (!safeText(name, 80))
+    throw new NativeWorkflowError('invalid-input', 'The sender name is invalid.', false);
+  return name;
+}
+
+function recoveryWarning(
+  incident: string,
+  discriminator: string,
+  message: string,
+): HostedShareRecoveryWarning {
+  const id = createHash('sha256').update(`${incident}\u0000${discriminator}\u0000${message}`).digest('hex');
+  return { id: `recovery:${id}`, message };
+}
+
 function errorFor(status: number, code: unknown, message: unknown, fallback: string): NativeWorkflowError {
   const safeCode = safeText(code, 100) ? code : undefined;
   const safeMessage = safeServerMessage(message, fallback);
@@ -291,7 +332,9 @@ function canonicalBase64Png(value: string): Buffer | undefined {
 export class HostedShareClient {
   private readonly active = new Map<string, AbortController>();
   private stateQueue: Promise<void> = Promise.resolve();
-  private recovery?: Promise<string[]>;
+  private recovery?: Promise<HostedShareRecoveryWarning[]>;
+  /** IDs returned by the most recent recovery pass, used to reject stale renderer dismissals. */
+  private currentRecoveryWarningIds = new Set<string>();
 
   constructor(
     private readonly userDataPath: string,
@@ -316,6 +359,7 @@ export class HostedShareClient {
       controller.abort();
     }, 60_000);
     try {
+      const senderName = normalizedSenderName(input.senderName);
       const payload = {
         requestId: input.requestId,
         title: artifacts.title,
@@ -323,23 +367,16 @@ export class HostedShareClient {
         images: artifacts.images,
         includeArchive: input.includeArchive,
         expiresInDays: input.expiresInDays,
+        ...(senderName ? { senderName } : {}),
+        ...(artifacts.bundles ? { bundles: artifacts.bundles } : {}),
       };
       const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-      try {
-        await this.savePending(input, payloadFingerprint);
-      } catch (error) {
-        if (error instanceof NativeWorkflowError && error.code === 'io-failure')
-          throw new NativeWorkflowError(error.code, error.message, error.retryable, {
-            ...error.details,
-            requestMayHaveCommitted: false,
-          });
-        throw error;
-      }
+      const pairingToken = await this.resolvePairingToken(input, payloadFingerprint, controller.signal);
       const target = `${originForTests()}/api/shares`;
       const response = await this.fetchTransport(target, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${input.pairingToken}`,
+          Authorization: `Bearer ${pairingToken}`,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -400,8 +437,33 @@ export class HostedShareClient {
   }
 
   async list(): Promise<HostedShareList> {
-    const recoveryErrors = await this.recoverPending();
-    return { records: (await this.read()).map(publicRecord), recoveryErrors };
+    const recoveryWarnings = await this.recoverPending();
+    let visibleWarnings = recoveryWarnings;
+    try {
+      const dismissed = await this.dismissedRecoveryWarnings();
+      visibleWarnings = recoveryWarnings.filter((warning) => !dismissed[warning.id]);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Hosted-share recovery dismissals could not be read.';
+      const dismissalWarning = recoveryWarning('dismissals', 'read-failure', message);
+      this.currentRecoveryWarningIds.add(dismissalWarning.id);
+      visibleWarnings = [...recoveryWarnings, dismissalWarning];
+    }
+    return {
+      records: (await this.read()).map(publicRecord),
+      recoveryErrors: visibleWarnings.map((warning) => warning.message),
+      recoveryWarnings: visibleWarnings,
+    };
+  }
+
+  async dismissRecoveryWarning(id: string): Promise<void> {
+    if (!RECOVERY_WARNING_ID.test(id) || !this.currentRecoveryWarningIds.has(id))
+      throw new NativeWorkflowError('invalid-input', 'That recovery warning is no longer available.', false);
+    await this.enqueueState(async () => {
+      const dismissed = await this.dismissedRecoveryWarnings();
+      dismissed[id] = true;
+      await this.writeDismissedRecoveryWarnings(dismissed);
+    });
   }
 
   async revoke(id: string): Promise<HostedShareRecord> {
@@ -433,7 +495,7 @@ export class HostedShareClient {
   }
 
   private validateUpload(input: HostedShareUpload, artifacts: HostedShareArtifacts): void {
-    if (!TOKEN.test(input.pairingToken))
+    if (input.pairingToken !== '' && !TOKEN.test(input.pairingToken))
       throw new NativeWorkflowError(
         'invalid-input',
         'Paste the complete one-use pairing code from app.imnota.xyz.',
@@ -458,6 +520,31 @@ export class HostedShareClient {
         'The finalized prompt bundle is too large to share.',
         false,
       );
+    if (artifacts.bundles) {
+      if (artifacts.bundles.length === 0 || artifacts.bundles.length > 20)
+        throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
+      const bundleNumbers = new Set<number>();
+      let structuredMarkdownBytes = 0;
+      for (const bundle of artifacts.bundles) {
+        if (
+          !Number.isInteger(bundle.bundleNumber) ||
+          bundle.bundleNumber < 1 ||
+          bundle.bundleNumber > 999 ||
+          bundleNumbers.has(bundle.bundleNumber) ||
+          !safeMarkdown(bundle.markdown, MAX_MARKDOWN_BYTES) ||
+          (bundle.imageFilename !== null && !SAFE_PNG.test(bundle.imageFilename))
+        )
+          throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
+        bundleNumbers.add(bundle.bundleNumber);
+        structuredMarkdownBytes += Buffer.byteLength(bundle.markdown, 'utf8');
+      }
+      if (structuredMarkdownBytes > MAX_MARKDOWN_BYTES)
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'The finalized prompt bundle is too large to share.',
+          false,
+        );
+    }
     const names = new Set<string>();
     let decodedBytes = markdownBytes;
     for (const image of artifacts.images) {
@@ -473,6 +560,10 @@ export class HostedShareClient {
           false,
         );
     }
+    if (
+      artifacts.bundles?.some((bundle) => bundle.imageFilename !== null && !names.has(bundle.imageFilename))
+    )
+      throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
   }
 
   private async requestJson(
@@ -480,6 +571,7 @@ export class HostedShareClient {
     init: RequestInit,
     timeoutMs: number,
     timeoutMessage: string,
+    abortSignal?: AbortSignal,
   ): Promise<{ response: Response; body: JsonObject }> {
     const controller = new AbortController();
     let response: Response | undefined;
@@ -488,6 +580,9 @@ export class HostedShareClient {
       timedOut = true;
       controller.abort();
     }, timeoutMs);
+    const abort = () => controller.abort();
+    abortSignal?.addEventListener('abort', abort, { once: true });
+    if (abortSignal?.aborted) controller.abort();
     try {
       response = await this.fetchTransport(target, { ...init, signal: controller.signal, redirect: 'error' });
       validateResponseDestination(response, target);
@@ -502,6 +597,7 @@ export class HostedShareClient {
       throw networkFailure(error);
     } finally {
       clearTimeout(deadline);
+      abortSignal?.removeEventListener('abort', abort);
     }
   }
 
@@ -513,7 +609,11 @@ export class HostedShareClient {
     return path.join(this.userDataPath, 'hosted-share-pending.json');
   }
 
-  private recoverPending(): Promise<string[]> {
+  private dismissedRecoveryWarningsFile(): string {
+    return path.join(this.userDataPath, 'hosted-share-recovery-dismissals.json');
+  }
+
+  private recoverPending(): Promise<HostedShareRecoveryWarning[]> {
     if (this.recovery) return this.recovery;
     const operation = this.recoverPendingNow().finally(() => {
       if (this.recovery === operation) this.recovery = undefined;
@@ -522,21 +622,25 @@ export class HostedShareClient {
     return operation;
   }
 
-  private async recoverPendingNow(): Promise<string[]> {
+  private async recoverPendingNow(): Promise<HostedShareRecoveryWarning[]> {
     let all: Record<string, PendingShare>;
     try {
       all = await this.pending();
     } catch (error) {
-      return [error instanceof Error ? error.message : 'Hosted-share recovery metadata could not be read.'];
+      const message =
+        error instanceof Error ? error.message : 'Hosted-share recovery metadata could not be read.';
+      const warnings = [recoveryWarning('pending-metadata', 'read-failure', message)];
+      this.currentRecoveryWarningIds = new Set(warnings.map((warning) => warning.id));
+      return warnings;
     }
-    const errors: string[] = [];
+    const warnings: HostedShareRecoveryWarning[] = [];
     for (const pending of Object.values(all)) {
       if (this.active.has(pending.requestId)) continue;
       if (Date.parse(pending.deadlineAt) <= Date.now()) {
         await this.clearPending(pending.requestId);
-        errors.push(
-          'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.',
-        );
+        const message =
+          'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.';
+        warnings.push(recoveryWarning(pending.requestId, 'deadline-expired', message));
         continue;
       }
       try {
@@ -549,11 +653,13 @@ export class HostedShareClient {
         );
         if (response.status === 410) {
           await this.clearPending(pending.requestId);
-          errors.push('A previous share upload could not be recovered because its receipt expired.');
+          const message = 'A previous share upload could not be recovered because its receipt expired.';
+          warnings.push(recoveryWarning(pending.requestId, 'receipt-expired', message));
           continue;
         }
         if (response.status === 404) {
-          errors.push('A previous share receipt is not ready yet. Recovery will retry later.');
+          const message = 'A previous share receipt is not ready yet. Recovery will retry later.';
+          warnings.push(recoveryWarning(pending.requestId, 'receipt-not-ready', message));
           continue;
         }
         if (!response.ok) {
@@ -565,9 +671,28 @@ export class HostedShareClient {
           );
           if (isDefinitiveNonCommitStatus(response.status)) {
             await this.clearPending(pending.requestId);
-            errors.push(`${responseError.message} Its local recovery capability was cleared.`);
+            const message = `${responseError.message} Its local recovery capability was cleared.`;
+            warnings.push(
+              recoveryWarning(
+                pending.requestId,
+                `http-${response.status}-${safeServerMessage(
+                  isObject(body.error) ? body.error.code : undefined,
+                  'unknown',
+                )}`,
+                message,
+              ),
+            );
           } else {
-            errors.push(responseError.message);
+            warnings.push(
+              recoveryWarning(
+                pending.requestId,
+                `http-${response.status}-${safeServerMessage(
+                  isObject(body.error) ? body.error.code : undefined,
+                  'unknown',
+                )}`,
+                responseError.message,
+              ),
+            );
           }
           continue;
         }
@@ -578,33 +703,101 @@ export class HostedShareClient {
         if (error instanceof NativeWorkflowError && error.details?.requestMayHaveCommitted === false) {
           try {
             await this.clearPending(pending.requestId);
-            errors.push(`${error.message} Its local recovery capability was cleared.`);
+            const message = `${error.message} Its local recovery capability was cleared.`;
+            warnings.push(recoveryWarning(pending.requestId, `${error.code}-noncommit`, message));
           } catch (clearError) {
-            errors.push(
+            const message =
               clearError instanceof Error
                 ? clearError.message
-                : 'A previous share recovery capability could not be cleared.',
-            );
+                : 'A previous share recovery capability could not be cleared.';
+            warnings.push(recoveryWarning(pending.requestId, 'clear-failure', message));
           }
           continue;
         }
-        errors.push(
+        const message =
           error instanceof NativeWorkflowError
             ? error.message
-            : 'A previous share upload could not be recovered.',
-        );
+            : 'A previous share upload could not be recovered.';
+        const discriminator = error instanceof NativeWorkflowError ? error.code : 'unknown-recovery-failure';
+        warnings.push(recoveryWarning(pending.requestId, discriminator, message));
       }
     }
-    return [...new Set(errors)];
+    const uniqueWarnings = [...new Map(warnings.map((warning) => [warning.id, warning])).values()];
+    this.currentRecoveryWarningIds = new Set(uniqueWarnings.map((warning) => warning.id));
+    return uniqueWarnings;
   }
 
-  private async savePending(input: HostedShareUpload, payloadFingerprint: string): Promise<void> {
+  private async resolvePairingToken(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+    abortSignal: AbortSignal,
+  ): Promise<string> {
+    const existing = await this.pendingFor(input, payloadFingerprint);
+    if (existing) return existing.pairingToken;
+    const pairingToken = input.pairingToken || (await this.mintPairingToken(abortSignal));
+    await this.savePending(input, payloadFingerprint, pairingToken);
+    return pairingToken;
+  }
+
+  private async pendingFor(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+  ): Promise<PendingShare | undefined> {
+    return this.enqueueState(async () => {
+      const existing = (await this.pending())[input.requestId];
+      if (!existing) return undefined;
+      if (
+        !existing.payloadFingerprint ||
+        existing.payloadFingerprint !== payloadFingerprint ||
+        (input.pairingToken !== '' && existing.pairingToken !== input.pairingToken)
+      )
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'This request has an unresolved upload with its original pairing code and artifacts. Recover it from local share history before changing the code or publishing options.',
+          false,
+        );
+      return existing;
+    });
+  }
+
+  private async mintPairingToken(abortSignal: AbortSignal): Promise<string> {
+    const target = `${originForTests()}/api/pairing`;
+    const { response, body } = await this.requestJson(
+      target,
+      {
+        method: 'POST',
+        headers: { Origin: originForTests(), 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: '{}',
+      },
+      15_000,
+      'Automatic pairing did not answer within 15 seconds.',
+      abortSignal,
+    );
+    if (!response.ok)
+      throw errorFor(
+        response.status,
+        isObject(body.error) ? body.error.code : undefined,
+        isObject(body.error) ? body.error.message : undefined,
+        'Could not create a one-use sharing capability.',
+      );
+    if (!TOKEN.test(typeof body.uploadToken === 'string' ? body.uploadToken : ''))
+      throw invalidResponse('The share service returned an invalid pairing capability.');
+    if (!validTimestamp(body.expiresAt) || Date.parse(body.expiresAt) <= Date.now())
+      throw invalidResponse('The share service returned an invalid pairing expiration.');
+    return body.uploadToken as string;
+  }
+
+  private async savePending(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+    pairingToken: string,
+  ): Promise<void> {
     await this.enqueueState(async () => {
       const all = await this.pending();
       const existing = all[input.requestId];
       if (existing) {
         if (
-          existing.pairingToken !== input.pairingToken ||
+          (input.pairingToken !== '' && existing.pairingToken !== input.pairingToken) ||
           !existing.payloadFingerprint ||
           existing.payloadFingerprint !== payloadFingerprint
         )
@@ -618,7 +811,7 @@ export class HostedShareClient {
       const createdAt = new Date().toISOString();
       all[input.requestId] = {
         requestId: input.requestId,
-        pairingToken: input.pairingToken,
+        pairingToken,
         createdAt,
         deadlineAt: new Date(Date.parse(createdAt) + PENDING_RECOVERY_MS).toISOString(),
         payloadFingerprint,
@@ -706,6 +899,38 @@ export class HostedShareClient {
 
   private async writePending(value: Record<string, PendingShare>): Promise<void> {
     await this.atomicWrite(this.pendingFile(), JSON.stringify(value));
+  }
+
+  private async dismissedRecoveryWarnings(): Promise<DismissedRecoveryWarnings> {
+    const dismissalsFile = this.dismissedRecoveryWarningsFile();
+    const raw = await fs.readFile(dismissalsFile, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return '{}';
+      throw persistenceFailure('access');
+    });
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new NativeWorkflowError(
+        'io-failure',
+        'Hosted-share recovery dismissals are corrupt. The local file was preserved for inspection.',
+        false,
+      );
+    }
+    if (
+      !isObject(value) ||
+      Object.keys(value).some((id) => !RECOVERY_WARNING_ID.test(id) || value[id] !== true)
+    )
+      throw new NativeWorkflowError(
+        'io-failure',
+        'Hosted-share recovery dismissals are corrupt. The local file was preserved for inspection.',
+        false,
+      );
+    return value as DismissedRecoveryWarnings;
+  }
+
+  private async writeDismissedRecoveryWarnings(value: DismissedRecoveryWarnings): Promise<void> {
+    await this.atomicWrite(this.dismissedRecoveryWarningsFile(), JSON.stringify(value));
   }
 
   private async read(): Promise<StoredShare[]> {

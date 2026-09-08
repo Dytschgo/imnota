@@ -1135,7 +1135,8 @@ function registerIpc(): void {
           z
             .object({
               requestId: z.string().uuid(),
-              pairingToken: z.string().min(32).max(512),
+              pairingToken: z.string().max(512),
+              senderName: z.string().max(256).optional(),
               sessionId: workflowSessionId,
               bundleNumbers: z.array(workflowBundleNumber).min(1).max(20),
               includeArchive: z.boolean(),
@@ -1172,6 +1173,12 @@ function registerIpc(): void {
   handleWorkflow('workflow:hosted-share:list', async (_event, ...args) => {
     z.tuple([]).parse(args);
     return hostedShareClient!.list();
+  });
+  handleWorkflow('workflow:hosted-share:recovery-warning:dismiss', async (_event, ...args) => {
+    const [input] = z
+      .tuple([z.object({ id: z.string().regex(/^recovery:[a-f0-9]{64}$/) }).strict()])
+      .parse(args);
+    await hostedShareClient!.dismissRecoveryWarning(input.id);
   });
   handleWorkflow(
     'workflow:hosted-share:revoke',

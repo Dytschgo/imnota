@@ -25,7 +25,11 @@ function artifactUrl(path, kind, locationObject = globalThis.location) {
   if (url.origin !== locationObject.origin || url.username || url.password || url.search || url.hash) {
     throw new Error('The requested artifact is not a same-origin share artifact.');
   }
-  if (kind === 'markdown' && url.pathname !== `${basePath}/markdown`)
+  if (
+    kind === 'markdown' &&
+    url.pathname !== `${basePath}/markdown` &&
+    !new RegExp(`^${basePath}/bundles/[1-9][0-9]{0,2}/markdown$`, 'u').test(url.pathname)
+  )
     throw new Error('The requested artifact is not this share’s Markdown.');
   if (kind === 'png') {
     const prefix = `${basePath}/assets/`;
@@ -203,12 +207,11 @@ function messageFor(error, fallback) {
   return `Couldn’t copy. ${fallback}`;
 }
 
-function boot(documentObject = globalThis.document) {
+export function boot(documentObject = globalThis.document) {
   const root = documentObject?.querySelector?.('[data-share-copy-root]');
   if (!root) return;
-  const markdownPath = root.getAttribute('data-markdown-url');
   const status = root.querySelector('[data-copy-status]');
-  const controls = root.querySelectorAll('[data-copy-markdown], [data-copy-png], [data-copy-png-markdown]');
+  const controls = root.querySelectorAll('[data-copy-markdown], [data-copy-png], [data-copy-bundle]');
   let copying = false;
   const setStatus = (message, error = false) => {
     if (!status) return;
@@ -219,47 +222,93 @@ function boot(documentObject = globalThis.document) {
     button.addEventListener('click', async () => {
       if (copying) return;
       copying = true;
+      const picker = root.querySelector('[data-bundle-picker]');
+      if (picker) picker.disabled = true;
+      button.closest('details')?.removeAttribute('open');
       for (const control of controls) control.disabled = true;
       setStatus('Copying…');
       try {
         // action reaches clipboard.write before this handler awaits its result.
         await action();
         setStatus(success);
+        if (button.hasAttribute('data-copy-bundle')) {
+          button.textContent = 'Copied';
+          button.classList.add('is-copied');
+          button.closest('.copy-split')?.classList.add('is-copied');
+        }
       } catch (error) {
         setStatus(messageFor(error, fallback), true);
       } finally {
         copying = false;
+        if (picker) picker.disabled = false;
         for (const control of controls) control.disabled = false;
       }
     });
   };
 
-  const copyMarkdown = root.querySelector('[data-copy-markdown]');
-  if (copyMarkdown && markdownPath) {
-    run(
-      copyMarkdown,
-      () => writeShareClipboard({ markdownPath }),
-      'Markdown copied.',
-      'Download Markdown instead.',
-    );
-  }
-  for (const figure of root.querySelectorAll('[data-share-image]')) {
-    const pngPath = figure.getAttribute('data-asset-url');
-    if (!pngPath) continue;
-    const copyPng = figure.querySelector('[data-copy-png]');
-    if (copyPng) {
-      run(copyPng, () => writeShareClipboard({ pngPath }), 'PNG copied.', 'Download PNG instead.');
-    }
-    const copyPngAndMarkdown = figure.querySelector('[data-copy-png-markdown]');
-    if (copyPngAndMarkdown && markdownPath) {
+  for (const scope of root.querySelectorAll('[data-copy-scope]')) {
+    const paths = () => ({
+      markdownPath: scope.getAttribute('data-markdown-url'),
+      pngPath: scope.getAttribute('data-asset-url') || undefined,
+    });
+    const copyMarkdown = scope.querySelector('[data-copy-markdown]');
+    if (copyMarkdown)
       run(
-        copyPngAndMarkdown,
-        () => writeShareClipboard({ markdownPath, pngPath }),
-        'PNG and Markdown copied.',
-        'Download the PNG and Markdown instead.',
+        copyMarkdown,
+        () => writeShareClipboard({ markdownPath: paths().markdownPath }),
+        'Markdown copied.',
+        'Try Download ZIP instead.',
+      );
+    const copyPng = scope.querySelector('[data-copy-png]');
+    if (copyPng) {
+      run(
+        copyPng,
+        () => writeShareClipboard({ pngPath: paths().pngPath }),
+        'PNG copied.',
+        'Try Download ZIP instead.',
+      );
+    }
+    const copyBundle = scope.querySelector('[data-copy-bundle]');
+    if (copyBundle) {
+      run(
+        copyBundle,
+        () => writeShareClipboard(paths()),
+        'Bundle copied.',
+        'Try the separate copy options or Download ZIP.',
       );
     }
   }
+  const picker = root.querySelector('[data-bundle-picker]');
+  const toolbar = root.querySelector('[data-top-copy]');
+  const updateSelection = () => {
+    const selected = Array.from(root.querySelectorAll('[data-bundle-number]')).find(
+      (item) => item.getAttribute('data-bundle-number') === picker?.value,
+    );
+    if (!selected || !toolbar) return;
+    for (const attribute of ['data-markdown-url', 'data-asset-url'])
+      toolbar.setAttribute(attribute, selected.getAttribute(attribute) || '');
+    const png = toolbar.querySelector('[data-copy-png]');
+    if (png) png.hidden = !selected.getAttribute('data-asset-url');
+    const primary = toolbar.querySelector('[data-copy-bundle]');
+    primary.textContent = 'Copy Bundle';
+    primary.classList.remove('is-copied');
+    primary.closest('.copy-split')?.classList.remove('is-copied');
+  };
+  picker?.addEventListener('change', updateSelection);
+  updateSelection();
+  root.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const open = root.querySelector('details.copy-options[open]');
+    if (open) {
+      open.removeAttribute('open');
+      open.querySelector('summary')?.focus();
+    }
+  });
+  documentObject.addEventListener('click', (event) => {
+    for (const details of root.querySelectorAll('details.copy-options[open]')) {
+      if (!details.contains(event.target)) details.removeAttribute('open');
+    }
+  });
 }
 
 if (typeof document !== 'undefined') boot();

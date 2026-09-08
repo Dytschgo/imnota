@@ -120,12 +120,12 @@ export const SMOKE_UI_CONTRACT = {
   ],
   shareBundles: [
     { selector: '[data-testid="share-prompt-bundles"]' },
-    { text: 'Share prompt bundles', exact: true },
+    { text: 'Share bundles', exact: true },
     { text: 'Copy AI context', exact: true },
   ],
   promptDialog: [
     { selector: '[data-testid="prompt-sharing-dialog"]' },
-    { selector: '[role="dialog"]', text: 'Share prompt bundles' },
+    { selector: '[role="dialog"]', text: 'Share bundles' },
   ],
   settings: [{ selector: '[data-testid="settings-button"]' }, { text: 'Settings', exact: true }],
 } as const satisfies Record<string, readonly SmokeLocator[]>;
@@ -1115,8 +1115,8 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     const buttons = [...card.querySelectorAll('button')];
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
-      text: card.innerText?.replace(/\\s+/g, ' ').trim() ?? '',
-      copyLabel: buttons.find((button) => /Copy (?:fresh prompt|Prompt \\d+)/i.test(button.textContent ?? ''))?.textContent?.trim()
+      text: [...card.querySelectorAll('dt, dd')].map((entry) => entry.textContent?.trim() ?? '').join(' '),
+      copyLabel: buttons.find((button) => /^Copy Bundle$/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
 }
@@ -1126,9 +1126,9 @@ async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Pro
     const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
     const card = cards[${cardIndex}];
     if (!card) throw new Error('Prompt card ${cardIndex + 1} disappeared');
-    const pattern = /Copy (?:fresh prompt|Prompt \\d+)/i;
-    const button = [...card.querySelectorAll('button')].find((candidate) => pattern.test(candidate.textContent ?? ''));
+    const button = card.querySelector('button[data-testid^="copy-bundle-"]');
     if (!button || button.disabled) throw new Error('Prompt ${cardIndex + 1} action is unavailable');
+    button.scrollIntoView({ block: 'center', inline: 'nearest' });
     const bounds = button.getBoundingClientRect();
     return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
   })()`);
@@ -1141,8 +1141,9 @@ async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number):
       const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
       const complete = cards.length === ${bundleCount} && cards.every((card) => {
         const busy = card.getAttribute('aria-busy') === 'true';
-        const fallbacks = [...card.querySelectorAll('.prompt-bundle-fallbacks button')];
-        return !busy && fallbacks.length >= 2 && fallbacks.every((button) => !button.disabled);
+        const copy = card.querySelector('button[data-testid^="copy-bundle-"]');
+        const options = card.querySelector('button[aria-label="Copy options"]');
+        return !busy && copy && !copy.disabled && options && !options.disabled;
       });
       if (complete) return resolve(true);
       if (Date.now() - started > 30000) return reject(new Error('Prompt bundle grants timed out'));
@@ -1150,6 +1151,40 @@ async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number):
     };
     check();
   })`);
+}
+
+async function verifyPromptCopyOptions(driver: NativeUiDriver, bundleCount: number): Promise<void> {
+  for (let index = 0; index < bundleCount; index += 1) {
+    const point = await driver.evaluate<SmokePoint>(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${index}];
+      const button = card?.querySelector('button[aria-label="Copy options"]');
+      if (!button || button.disabled) throw new Error('Bundle ${index + 1} options are unavailable');
+      button.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const bounds = button.getBoundingClientRect();
+      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+    })()`);
+    await driver.clickPoint(point);
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${index}];
+        const items = [...(card?.querySelectorAll('[role="menuitem"]') ?? [])];
+        const ready = ['Copy Markdown', 'Copy PNG'].every((label) => items.some((item) => item.textContent?.trim() === label && !item.disabled));
+        if (ready) return resolve(true);
+        if (Date.now() - started > 5000) return reject(new Error('Bundle ${index + 1} copy-format options were not ready.'));
+        setTimeout(check, 25);
+      };
+      check();
+    })`);
+    const closePoint = await driver.evaluate<SmokePoint>(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${index}];
+      const heading = card?.querySelector('h3');
+      if (!heading) throw new Error('Bundle ${index + 1} heading is unavailable');
+      const bounds = heading.getBoundingClientRect();
+      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+    })()`);
+    await driver.clickPoint(closePoint);
+  }
 }
 
 interface PromptSet {
@@ -1304,6 +1339,7 @@ async function exercisePromptWorkflow(
     await driver.resize(SMOKE_VIEWPORTS[3]);
     options.artifacts.push(await driver.capture(options.artifactDirectory, '3440x1440-sharing.png'));
   }
+  await verifyPromptCopyOptions(driver, cards.length);
   const copiedIndex = cards.findIndex((card) => card.copyLabel);
   if (copiedIndex < 0)
     throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
@@ -1364,7 +1400,7 @@ async function closePromptDialog(driver: NativeUiDriver): Promise<void> {
     { selector: '[data-testid="prompt-sharing-close"]' },
     { selector: '[role="dialog"] [aria-label="Close"]' },
   ]);
-  await driver.waitFor({ selector: '[role="dialog"]', text: 'Share prompt bundles' }, { absent: true });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Share bundles' }, { absent: true });
 }
 
 async function assertWorkflowFailure(

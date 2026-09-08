@@ -265,7 +265,7 @@ function markdownForBundle(
   const lines = [
     `# ${cleanHeading(collection.collectionName, 'Untitled collection')}`,
     '',
-    `Prompt ${bundle.number} of ${bundle.total}`,
+    `Bundle ${bundle.number} of ${bundle.total}`,
     '',
   ];
   if (identity)
@@ -276,7 +276,7 @@ function markdownForBundle(
     );
   const context = normalized(collection.overallContext);
   if (context.trim() && bundle.number === 1) lines.push('## Overall context', '', context, '');
-  else if (context.trim()) lines.push('Shared collection context is included in Prompt 1.', '');
+  else if (context.trim()) lines.push('Shared collection context is included in Bundle 1.', '');
   const visualById = new Map(bundle.pictures.map((picture) => [picture.screenshotId, picture]));
   for (const entry of bundle.entries) {
     if (entry.kind === 'text') {

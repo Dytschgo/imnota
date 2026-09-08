@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -12,6 +12,7 @@ import { createService } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
 import { randomToken, tokenHash } from '../src/security.js';
+import { writeShareClipboard } from '../public/share-copy.js';
 
 const origin = 'https://app.imnota.xyz';
 const receiptSecret = Buffer.alloc(32, 7).toString('base64url');
@@ -126,11 +127,38 @@ async function share(instance, overrides = {}) {
   return instance.api.post('/api/shares').set('Authorization', `Bearer ${uploadToken}`).send(body);
 }
 
+function v1Fingerprint(upload, expiresInDays = 1) {
+  const hash = createHash('sha256');
+  const append = (value) => {
+    const data = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
+    hash.update(String(data.length)).update(':').update(data).update(';');
+  };
+  append('imnota-share-upload-v1');
+  append(upload.requestId);
+  append(upload.title);
+  append(upload.markdown);
+  append(upload.includeArchive ? '1' : '0');
+  append(expiresInDays);
+  for (const image of [...upload.images].sort((left, right) =>
+    left.filename.localeCompare(right.filename, 'en'),
+  )) {
+    append(image.filename);
+    append(image.data ?? Buffer.from(image.dataBase64, 'base64'));
+  }
+  return hash.digest('hex');
+}
+
 test('health and pairing pages use restrictive security headers', async (t) => {
   const instance = await fixture();
   t.after(() => instance.destroy());
   const health = await instance.api.get('/health').expect(200);
-  assert.deepEqual(health.body, { status: 'ok', storageBytes: 0, recordedBytes: 0, reservedBytes: 0 });
+  assert.deepEqual(health.body, {
+    status: 'ok',
+    storageBytes: 0,
+    recordedBytes: 0,
+    metadataBytes: 0,
+    reservedBytes: 0,
+  });
   assert.equal(health.headers['x-powered-by'], undefined);
   assert.match(health.headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.match(health.headers['content-security-policy'], /connect-src 'self'/);
@@ -194,7 +222,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(page.text, /<script type="module" src="\/static\/share-copy\.js"><\/script>/);
   assert.match(page.text, /data-copy-markdown/);
   assert.match(page.text, /data-copy-png/);
-  assert.match(page.text, /data-copy-png-markdown/);
+  assert.match(page.text, /data-copy-bundle/);
   assert.match(page.text, /data-copy-status/);
   assert.doesNotMatch(page.text, /<script[^>]*>[^<]*(?:alert|markdown)/i);
 
@@ -236,10 +264,196 @@ test('renders no PNG copy controls for an image-free share and keeps mixed image
   });
   const mixedToken = mixed.body.url.split('/').at(-1);
   const mixedPage = await instance.api.get(`/s/${mixedToken}`).expect(200);
-  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 2);
-  assert.equal((mixedPage.text.match(/data-copy-png-markdown>/g) ?? []).length, 2);
+  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 3);
+  assert.equal((mixedPage.text.match(/data-copy-bundle>/g) ?? []).length, 3);
   for (const filename of ['prompt-001.png', 'prompt-002.png']) {
     assert.match(mixedPage.text, new RegExp(`data-asset-url="/s/${mixedToken}/assets/${filename}"`));
+  }
+});
+
+test('persists bounded structured bundles without counting database Markdown as artifact bytes', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const created = await share(instance, {
+    requestId: randomUUID(),
+    markdown: '# Aggregate',
+    images: [
+      { filename: 'bundle-one.png', dataBase64: onePixelPng.toString('base64') },
+      { filename: 'bundle-two.png', dataBase64: onePixelPng.toString('base64') },
+    ],
+    includeArchive: false,
+    senderName: '  Åda  ',
+    bundles: [
+      { bundleNumber: 2, markdown: 'Second bundle', imageFilename: 'bundle-two.png' },
+      { bundleNumber: 1, markdown: 'First bundle', imageFilename: 'bundle-one.png' },
+      { bundleNumber: 3, markdown: 'Text only bundle', imageFilename: null },
+    ],
+  });
+  assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.expiresAt, new Date(Date.UTC(2026, 8, 9, 12)).toISOString());
+  const record = instance.db
+    .prepare('SELECT sender_name, byte_size FROM shares WHERE id = ?')
+    .get(created.body.id);
+  assert.equal(record.sender_name, 'Åda');
+  const bundles = instance.db
+    .prepare(
+      'SELECT bundle_number, markdown, image_filename FROM share_bundles WHERE share_id = ? ORDER BY bundle_number',
+    )
+    .all(created.body.id)
+    .map((bundle) => ({ ...bundle }));
+  assert.deepEqual(bundles, [
+    { bundle_number: 1, markdown: 'First bundle', image_filename: 'bundle-one.png' },
+    { bundle_number: 2, markdown: 'Second bundle', image_filename: 'bundle-two.png' },
+    { bundle_number: 3, markdown: 'Text only bundle', image_filename: null },
+  ]);
+  const assets = instance.db.prepare('SELECT byte_size FROM assets WHERE share_id = ?').all(created.body.id);
+  assert.equal(
+    record.byte_size,
+    Buffer.byteLength('# Aggregate') + assets.reduce((sum, asset) => sum + asset.byte_size, 0),
+  );
+
+  const publicToken = created.body.url.split('/').at(-1);
+  const first = await instance.api.get(`/s/${publicToken}/bundles/1/markdown`).expect(200);
+  assert.match(first.headers['content-type'], /^text\/markdown/);
+  assert.equal(first.headers['content-disposition'], 'attachment; filename="bundle-1.md"');
+  assert.equal(first.text, 'First bundle');
+  let copied;
+  await writeShareClipboard({
+    markdownPath: `/s/${publicToken}/bundles/1/markdown`,
+    locationObject: { href: created.body.url, origin },
+    ClipboardItemCtor: class {
+      constructor(parts) {
+        this.parts = parts;
+      }
+    },
+    clipboard: {
+      async write(items) {
+        copied = await items[0].parts['text/plain'].then((blob) => blob.text());
+      },
+    },
+    fetchImpl: async (url) => {
+      const result = await instance.api.get(new URL(url).pathname).expect(200);
+      return new Response(result.text, { headers: { 'Content-Type': result.headers['content-type'] } });
+    },
+  });
+  assert.equal(copied, 'First bundle');
+  await instance.api.get(`/s/${publicToken}/bundles/01/markdown`).expect(404);
+  await instance.api.get(`/s/${publicToken}/bundles/4/markdown`).expect(404);
+});
+
+test('keeps legacy fingerprints unchanged and binds structured metadata to idempotency', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const uploadToken = await pair(instance);
+  const legacy = {
+    requestId: randomUUID(),
+    title: 'Legacy upload',
+    markdown: 'Aggregate',
+    images: [{ filename: 'legacy.png', dataBase64: onePixelPng.toString('base64') }],
+    includeArchive: false,
+  };
+  const created = await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${uploadToken}`)
+    .send(legacy)
+    .expect(201);
+  const row = instance.db.prepare('SELECT payload_hash FROM shares WHERE id = ?').get(created.body.id);
+  const storedImage = await fsp.readFile(
+    path.join(instance.config.uploadsDir, created.body.id, 'legacy.png'),
+  );
+  assert.equal(
+    row.payload_hash,
+    v1Fingerprint({ ...legacy, images: [{ ...legacy.images[0], data: storedImage }] }),
+  );
+
+  const structuredToken = await pair(instance);
+  const structured = {
+    requestId: randomUUID(),
+    title: 'Structured upload',
+    markdown: 'Aggregate',
+    images: [{ filename: 'bundle.png', dataBase64: onePixelPng.toString('base64') }],
+    includeArchive: false,
+    senderName: 'Ada',
+    bundles: [{ bundleNumber: 1, markdown: 'Bundle source', imageFilename: 'bundle.png' }],
+  };
+  await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${structuredToken}`)
+    .send(structured)
+    .expect(201);
+  await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${structuredToken}`)
+    .send({ ...structured, senderName: 'Grace' })
+    .expect(409)
+    .expect(({ body }) => assert.equal(body.error.code, 'idempotency_conflict'));
+  await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${structuredToken}`)
+    .send({ ...structured, bundles: [{ ...structured.bundles[0], markdown: 'Changed bundle source' }] })
+    .expect(409)
+    .expect(({ body }) => assert.equal(body.error.code, 'idempotency_conflict'));
+});
+
+test('charges persisted bundle metadata to quota and releases it with expired shares', async (t) => {
+  const instance = await fixture({ maxStorageBytes: 150, cleanupGraceMs: 1 });
+  t.after(() => instance.destroy());
+  const structuredText = 'm'.repeat(90);
+  const upload = {
+    markdown: '',
+    images: [],
+    includeArchive: false,
+    bundles: [{ bundleNumber: 1, markdown: structuredText, imageFilename: null }],
+  };
+  const first = await share(instance, upload);
+  assert.equal(first.status, 201, first.text);
+  const health = await instance.api.get('/health').expect(200);
+  assert.equal(health.body.recordedBytes, 0);
+  assert.equal(health.body.storageBytes, 0);
+  assert.equal(health.body.metadataBytes, Buffer.byteLength(structuredText));
+
+  const second = await share(instance, upload);
+  assert.equal(second.status, 507, second.text);
+  assert.equal(second.body.error.code, 'quota_exceeded');
+
+  const cleanup = await cleanupExpired({
+    db: instance.db,
+    config: instance.config,
+    now: Date.UTC(2026, 8, 9, 12) + 2,
+  });
+  assert.equal(cleanup.deletedShares, 1);
+  const afterCleanup = await instance.api.get('/health').expect(200);
+  assert.equal(afterCleanup.body.metadataBytes, 0);
+});
+
+test('rejects unsafe sender metadata, unmapped images, and oversized combined Markdown', async (t) => {
+  const instance = await fixture({ maxMarkdownBytes: 16, maxBundleBytes: 128 });
+  t.after(() => instance.destroy());
+  const base = {
+    requestId: randomUUID(),
+    title: 'Structured validation',
+    markdown: 'short',
+    images: [{ filename: 'bundle.png', dataBase64: onePixelPng.toString('base64') }],
+    includeArchive: false,
+    bundles: [{ bundleNumber: 1, markdown: 'source', imageFilename: 'bundle.png' }],
+  };
+  for (const [body, status] of [
+    [{ ...base, senderName: 'Ada\u202E' }, 400],
+    [{ ...base, bundles: [{ ...base.bundles[0], imageFilename: null }] }, 400],
+    [
+      { ...base, bundles: [{ ...base.bundles[0], markdown: 'this makes aggregate Markdown too large' }] },
+      413,
+    ],
+  ]) {
+    const token = await pair(instance);
+    await instance.api
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...body, requestId: randomUUID() })
+      .expect(status)
+      .expect(({ body: responseBody }) =>
+        assert.match(responseBody.error.code, /invalid_request|payload_too_large/),
+      );
   }
 });
 

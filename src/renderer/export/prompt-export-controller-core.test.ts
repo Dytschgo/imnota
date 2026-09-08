@@ -463,8 +463,8 @@ describe('prompt export controller orchestration', () => {
       { bundleNumber: 2, width: 164, height: 352 },
     ]);
     expect(native.writes).toHaveLength(2);
-    expect(native.writes[0].markdown).toContain('Prompt 1 of 2');
-    expect(native.writes[1].markdown).toContain('Shared collection context is included in Prompt 1.');
+    expect(native.writes[0].markdown).toContain('Bundle 1 of 2');
+    expect(native.writes[1].markdown).toContain('Shared collection context is included in Bundle 1.');
     expect(native.writes[1].markdown).not.toContain('## Overall context');
   });
 
@@ -584,6 +584,23 @@ describe('prompt export controller orchestration', () => {
     expect(card.state).toBe('error');
     expect(card.artifactSessionId).toBe('session-1');
   });
+
+  test.each(['markdown', 'image'] as const)(
+    'prepares the selected format from the first dropdown copy: %s',
+    async (target) => {
+      const native = fakeBridge();
+      const renderer = fakeRendering();
+      const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+      await controller.open();
+      const card = controller.getState().cards[0];
+      const result = await (target === 'markdown'
+        ? controller.copyMarkdown(card)
+        : controller.copyImage(card));
+      expect(result.ok).toBe(true);
+      expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target }]);
+      expect(controller.getState().cards[0].state).not.toBe('copied');
+    },
+  );
 
   test('loads one committed full preview and clears it without closing the dialog', async () => {
     const native = fakeBridge();

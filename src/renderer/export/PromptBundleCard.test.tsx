@@ -41,12 +41,13 @@ function model(overrides: Partial<PromptBundleCardModel> = {}): PromptBundleCard
 it('sends plan and artifact freshness identity with the primary action', () => {
   const onCopyFresh = vi.fn();
   render(<PromptBundleCard bundle={model()} onCopyFresh={onCopyFresh} onPrepareFreshFiles={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: /copy fresh prompt/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Copy Bundle' }));
   expect(onCopyFresh).toHaveBeenCalledWith({
     planId: 'plan-current',
     artifactSessionId: 'session-current',
     bundleNumber: 2,
   });
+  expect(screen.getByRole('heading', { name: 'Bundle 2' })).toBeInTheDocument();
   expect(screen.getByText('Pictures 3, 4')).toBeInTheDocument();
   expect(screen.getByText('2.0 MB estimated')).toBeInTheDocument();
 });
@@ -63,10 +64,57 @@ it('uses an honest file action for oversized prompts and disables fallbacks befo
       onOpenFiles={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: /prepare fresh files/i }));
+  fireEvent.click(screen.getByRole('button', { name: /prepare files/i }));
   expect(onPrepareFreshFiles).toHaveBeenCalledOnce();
   expect(screen.getByText('Use saved files.')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /markdown/i })).toBeDisabled();
-  expect(screen.getByRole('button', { name: /image/i })).toBeDisabled();
-  expect(screen.getByRole('button', { name: /^files$/i })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /options/i })).toBeEnabled();
+});
+
+it('keeps individual formats in an accessible options menu', () => {
+  const onCopyMarkdown = vi.fn();
+  const onCopyImage = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model()}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyMarkdown={onCopyMarkdown}
+      onCopyImage={onCopyImage}
+      onOpenFiles={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Markdown' }));
+  expect(onCopyMarkdown).toHaveBeenCalledWith({
+    planId: 'plan-current',
+    artifactSessionId: 'session-current',
+    bundleNumber: 2,
+  });
+  expect(menu).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy PNG' }));
+  expect(onCopyImage).toHaveBeenCalledWith({
+    planId: 'plan-current',
+    artifactSessionId: 'session-current',
+    bundleNumber: 2,
+  });
+});
+
+it('shows a gray copied state while leaving Copy Bundle available again', () => {
+  const onCopyFresh = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model({ state: 'copied' })}
+      onCopyFresh={onCopyFresh}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+
+  const button = screen.getByRole('button', { name: 'Copied' });
+  expect(button).toHaveClass('is-copied');
+  fireEvent.click(button);
+  expect(onCopyFresh).toHaveBeenCalledOnce();
 });

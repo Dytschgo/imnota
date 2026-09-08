@@ -17,6 +17,8 @@ const bridge: ImnotaBridge = {
   createHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:create', input),
   cancelHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:cancel', input),
   listHostedShares: () => ipcRenderer.invoke('workflow:hosted-share:list'),
+  dismissHostedShareRecoveryWarning: (input) =>
+    ipcRenderer.invoke('workflow:hosted-share:recovery-warning:dismiss', input),
   revokeHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:revoke', input),
   startProjectWatch: (input) => ipcRenderer.invoke('workflow:project-watch:start', input),
   stopProjectWatch: (input) => ipcRenderer.invoke('workflow:project-watch:stop', input),

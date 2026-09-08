@@ -47,6 +47,7 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
     })),
     createHostedShare: vi.fn(async () => ({ ok: true as const, value: active })),
     cancelHostedShare: vi.fn(async () => ({ ok: true as const, value: undefined })),
+    dismissHostedShareRecoveryWarning: vi.fn(async () => ({ ok: true as const, value: undefined })),
     revokeHostedShare: vi.fn(async () => ({
       ok: true as const,
       value: { ...active, revokedAt: '2026-01-02T00:00:00.000Z' },
@@ -60,32 +61,80 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
 }
 
 function approveAndPublish() {
-  fireEvent.change(screen.getByLabelText('2. One-use pairing code'), {
+  fireEvent.change(screen.getByLabelText('Pairing code'), {
     target: { value: 'a'.repeat(43) },
   });
-  fireEvent.click(screen.getByLabelText(/I understand that anyone with the link can read these files/i));
-  fireEvent.click(screen.getByRole('button', { name: 'Publish HTTPS link' }));
+  fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/i));
+  fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
 }
 
 describe('HostedShareDialog', () => {
+  it('creates a one-day link with the sender name without requiring a pairing code', async () => {
+    const native = bridge();
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByLabelText('Expires after')).toHaveValue('1');
+    fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
+    fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/));
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByRole('heading', { name: 'Your link is ready' });
+    expect(native.createHostedShare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pairingToken: '',
+        senderName: 'Dylan',
+        expiresInDays: 1,
+        includeArchive: true,
+      }),
+    );
+  });
+
+  it('waits for durable dismissal and only acknowledges the displayed warning IDs', async () => {
+    const id = `recovery:${'a'.repeat(64)}`;
+    let finish!: (result: Awaited<ReturnType<ImnotaBridge['dismissHostedShareRecoveryWarning']>>) => void;
+    const dismiss = vi.fn<ImnotaBridge['dismissHostedShareRecoveryWarning']>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const native = bridge({
+      dismissHostedShareRecoveryWarning: dismiss,
+      listHostedShares: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          records: [active],
+          recoveryErrors: ['Earlier upload failed.'],
+          recoveryWarnings: [{ id, message: 'Earlier upload failed.' }],
+        },
+      })),
+    });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await screen.findByText('Earlier upload failed.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(dismiss).toHaveBeenCalledWith({ id });
+    expect(screen.getByText('Earlier upload failed.')).toBeInTheDocument();
+    finish({ ok: true, value: undefined });
+    await waitFor(() => expect(screen.queryByText('Earlier upload failed.')).not.toBeInTheDocument());
+    expect(native.revokeHostedShare).not.toHaveBeenCalled();
+  });
+
   it('requires explicit approval and never uploads artifacts on mount or pairing-code entry', async () => {
     const native = bridge();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     await waitFor(() => expect(native.listHostedShares).toHaveBeenCalledOnce());
 
-    const publish = screen.getByRole('button', { name: 'Publish HTTPS link' });
-    expect(screen.getByText(/hosting provider may record visits and share URLs/i)).toBeInTheDocument();
+    const publish = screen.getByRole('button', { name: 'Create link' });
+    expect(screen.getByText(/hosting provider may keep access logs/i)).toBeInTheDocument();
     expect(screen.getByText('prompt.md')).toBeInTheDocument();
     expect(screen.getByText('prompt-001.png')).toBeInTheDocument();
     expect(screen.queryByText(/prompt-002\.png/)).not.toBeInTheDocument();
     expect(screen.queryByText(/or text-only/i)).not.toBeInTheDocument();
     expect(publish).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('2. One-use pairing code'), {
+    fireEvent.change(screen.getByLabelText('Pairing code'), {
       target: { value: 'a'.repeat(43) },
     });
     expect(native.createHostedShare).not.toHaveBeenCalled();
     expect(publish).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/I understand that anyone with the link can read these files/i));
+    fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/i));
     expect(publish).toBeEnabled();
     expect(native.createHostedShare).not.toHaveBeenCalled();
   });
@@ -108,8 +157,8 @@ describe('HostedShareDialog', () => {
     approveAndPublish();
     expect(await screen.findByRole('alert')).toHaveTextContent('The upload was too large.');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish HTTPS link' }));
-    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByRole('heading', { name: 'Your link is ready' });
 
     expect(createHostedShare).toHaveBeenCalledTimes(2);
     expect(createHostedShare.mock.calls[1]![0].requestId).not.toBe(
@@ -136,7 +185,7 @@ describe('HostedShareDialog', () => {
 
     const requestId = createHostedShare.mock.calls[0]![0].requestId;
     await waitFor(() => expect(native.cancelHostedShare).toHaveBeenCalledWith({ requestId }));
-    expect(screen.getByRole('dialog', { name: 'Publish a hosted prompt' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Share your bundle' })).toBeInTheDocument();
     finish({
       ok: false,
       error: { code: 'session-cancelled', message: 'Hosted share upload cancelled.', retryable: true },
@@ -156,7 +205,7 @@ describe('HostedShareDialog', () => {
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
 
-    const history = await screen.findByText('Local share history (3)');
+    const history = await screen.findByText('Your shared links (3)');
     const details = history.closest('details');
     expect(details).not.toBeNull();
     expect(within(details!).getByText(/Active prompt · expires/)).toBeInTheDocument();
@@ -180,10 +229,10 @@ describe('HostedShareDialog', () => {
     expect(await screen.findByText('A previous receipt timed out.')).toBeInTheDocument();
 
     approveAndPublish();
-    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    await screen.findByRole('heading', { name: 'Your link is ready' });
     await waitFor(() => expect(native.listHostedShares).toHaveBeenCalledTimes(2));
     expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument();
-    expect(screen.getByText('Local share history (1)')).toBeInTheDocument();
+    expect(screen.getByText('Your shared links (1)')).toBeInTheDocument();
   });
 
   it('keeps a successful upload ready when its follow-up history refresh fails', async () => {
@@ -200,7 +249,7 @@ describe('HostedShareDialog', () => {
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledOnce());
 
     approveAndPublish();
-    expect(await screen.findByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Your link is ready' })).toBeInTheDocument();
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledTimes(2));
     expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false');
     finishRefresh({
@@ -210,7 +259,7 @@ describe('HostedShareDialog', () => {
     await waitFor(() =>
       expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false'),
     );
-    expect(screen.getByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your link is ready' })).toBeInTheDocument();
     expect(screen.queryByText('History refresh is offline.')).not.toBeInTheDocument();
   });
 
@@ -227,13 +276,13 @@ describe('HostedShareDialog', () => {
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     approveAndPublish();
 
-    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    await screen.findByRole('heading', { name: 'Your link is ready' });
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledTimes(2));
     resolveInitial({
       ok: true,
       value: { records: [expired], recoveryErrors: ['A stale recovery warning.'] },
     });
-    await waitFor(() => expect(screen.getByText('Local share history (1)')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Your shared links (1)')).toBeInTheDocument());
     expect(screen.queryByText('A stale recovery warning.')).not.toBeInTheDocument();
     expect(screen.queryByText(/Expired prompt · expired/)).not.toBeInTheDocument();
   });
@@ -250,7 +299,7 @@ describe('HostedShareDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByText('A previous receipt timed out.')).not.toBeInTheDocument();
-    expect(screen.getByText('Local share history (1)')).toBeInTheDocument();
+    expect(screen.getByText('Your shared links (1)')).toBeInTheDocument();
     expect(native.cancelHostedShare).not.toHaveBeenCalled();
     expect(native.revokeHostedShare).not.toHaveBeenCalled();
   });
@@ -291,7 +340,7 @@ describe('HostedShareDialog', () => {
     const native = bridge({ revokeHostedShare });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     approveAndPublish();
-    await screen.findByRole('heading', { name: 'Hosted prompt is ready' });
+    await screen.findByRole('heading', { name: 'Your link is ready' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Revoke link' }));
     const confirmation = screen.getByRole('dialog', { name: 'Revoke this hosted link?' });
@@ -308,7 +357,7 @@ describe('HostedShareDialog', () => {
     );
     await waitFor(() => expect(native.revokeHostedShare).toHaveBeenCalledWith({ id: active.id }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Revocation service is offline.');
-    expect(screen.getByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your link is ready' })).toBeInTheDocument();
   });
 
   it('keeps history visible and reports an error when revoking a historical link fails', async () => {
@@ -329,20 +378,20 @@ describe('HostedShareDialog', () => {
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
 
-    const historySummary = await screen.findByText('Local share history (1)');
+    const historySummary = await screen.findByText('Your shared links (1)');
     const history = historySummary.closest('details')!;
     fireEvent.click(within(history).getByRole('button', { name: 'Revoke' }));
     const confirmation = screen.getByRole('dialog', { name: 'Revoke this hosted link?' });
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Revoke link' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Historical link could not be revoked.');
-    expect(screen.getByText('Local share history (1)')).toBeInTheDocument();
+    expect(screen.getByText('Your shared links (1)')).toBeInTheDocument();
     expect(within(history).getByText(/Active prompt · expires/)).toBeInTheDocument();
   });
 
   it.each([
-    [expired, 'Hosted prompt has expired', /can no longer be opened/],
-    [revoked, 'Hosted prompt was revoked', /can no longer be opened/],
+    [expired, 'Link expired', /can no longer be opened/],
+    [revoked, 'Link revoked', /can no longer be opened/],
   ])('does not describe an unavailable successful share as ready: %s', async (record, heading, message) => {
     bridge({ createHostedShare: vi.fn(async () => ({ ok: true as const, value: record })) });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);

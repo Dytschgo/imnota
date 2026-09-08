@@ -46,6 +46,7 @@ export async function collectHostedShareArtifacts(
 
   const bundles = await Promise.all(unique.map((bundleNumber) => reader.read(sessionId, bundleNumber)));
   const images: { filename: string; dataBase64: string }[] = [];
+  const structuredBundles: { bundleNumber: number; markdown: string; imageFilename: string | null }[] = [];
   let totalPixels = 0;
   for (let index = 0; index < bundles.length; index++) {
     const bundle = bundles[index];
@@ -55,7 +56,14 @@ export async function collectHostedShareArtifacts(
         'bundle-not-found',
         'A finalized prompt bundle grant did not match its request.',
       );
-    if (!bundle.imageDataUrl) continue;
+    if (!bundle.imageDataUrl) {
+      structuredBundles.push({
+        bundleNumber: expectedNumber,
+        markdown: bundle.markdown,
+        imageFilename: null,
+      });
+      continue;
+    }
     const prefix = 'data:image/png;base64,';
     if (!bundle.imageDataUrl.startsWith(prefix))
       throw new NativeWorkflowError('io-failure', 'A finalized prompt image is not a PNG artifact.');
@@ -71,9 +79,15 @@ export async function collectHostedShareArtifacts(
         'invalid-input',
         'The finalized PNGs exceed the hosted-sharing aggregate limit of 64 million pixels.',
       );
+    const filename = `prompt-${String(expectedNumber).padStart(3, '0')}.png`;
     images.push({
-      filename: `prompt-${String(expectedNumber).padStart(3, '0')}.png`,
+      filename,
       dataBase64: normalized.dataBase64,
+    });
+    structuredBundles.push({
+      bundleNumber: expectedNumber,
+      markdown: bundle.markdown,
+      imageFilename: filename,
     });
   }
 
@@ -81,5 +95,6 @@ export async function collectHostedShareArtifacts(
     title: 'Imnota prompt',
     markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
     images,
+    bundles: structuredBundles,
   };
 }

@@ -110,6 +110,106 @@ describe('HostedShareClient request boundary', () => {
     });
   });
 
+  it('mints and persists an automatic pairing capability before uploading', async () => {
+    const { root } = await fixture();
+    const transport = vi.fn<HostedShareFetch>(async (target) =>
+      target.endsWith('/api/pairing')
+        ? json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201)
+        : json(receipt(), 201),
+    );
+    const client = new HostedShareClient(root, async () => undefined, transport);
+    await client.create({ ...upload(), pairingToken: '' }, artifacts());
+
+    expect(transport.mock.calls.map(([target]) => target)).toEqual([
+      'https://app.imnota.xyz/api/pairing',
+      'https://app.imnota.xyz/api/shares',
+    ]);
+    expect(transport.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { Origin: 'https://app.imnota.xyz', 'Content-Type': 'application/json' },
+    });
+    expect((transport.mock.calls[1]?.[1] as RequestInit).headers).toMatchObject({
+      Authorization: `Bearer ${'z'.repeat(43)}`,
+    });
+  });
+
+  it('does not persist a pending upload when automatic pairing fails', async () => {
+    const { root } = await fixture();
+    const client = new HostedShareClient(
+      root,
+      async () => undefined,
+      vi.fn(async () => json({}, 503)),
+    );
+    await expect(client.create({ ...upload(), pairingToken: '' }, artifacts())).rejects.toMatchObject({
+      code: 'network-failure',
+    });
+    await expect(fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('reuses a minted pairing capability after a lost upload response', async () => {
+    const { root } = await fixture();
+    let uploadAttempts = 0;
+    const transport = vi.fn<HostedShareFetch>(async (target) => {
+      if (target.endsWith('/api/pairing'))
+        return json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201);
+      uploadAttempts += 1;
+      if (uploadAttempts === 1) throw new TypeError('lost response');
+      return json(receipt(), 201);
+    });
+    const initial = new HostedShareClient(root, async () => undefined, transport);
+    await expect(initial.create({ ...upload(), pairingToken: '' }, artifacts())).rejects.toMatchObject({
+      code: 'network-failure',
+    });
+    await expect(
+      new HostedShareClient(root, async () => undefined, transport).create(
+        { ...upload(), pairingToken: '' },
+        artifacts(),
+      ),
+    ).resolves.toMatchObject({ id: firstShare });
+    expect(transport.mock.calls.filter(([target]) => target.endsWith('/api/pairing'))).toHaveLength(1);
+  });
+
+  it('sends normalized sender and structured bundle metadata only when supplied', async () => {
+    const fetch = vi.fn().mockResolvedValue(json(receipt(), 201));
+    vi.stubGlobal('fetch', fetch);
+    await (
+      await fixture()
+    ).client.create(
+      { ...upload(), senderName: '  Zoë  ' },
+      {
+        ...artifacts(),
+        bundles: [{ bundleNumber: 1, markdown: '# prompt', imageFilename: 'prompt-001.png' }],
+      },
+    );
+    expect(JSON.parse(String((fetch.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({
+      senderName: 'Zoë',
+      bundles: [{ bundleNumber: 1, markdown: '# prompt', imageFilename: 'prompt-001.png' }],
+    });
+  });
+
+  it('accepts multiline Unicode structured Markdown with automatic pairing', async () => {
+    const transport = vi.fn<HostedShareFetch>(async (target) =>
+      target.endsWith('/api/pairing')
+        ? json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201)
+        : json(receipt(), 201),
+    );
+    const { root } = await fixture();
+    const markdown = '# Grüezi\r\n\r\n\t– multilingual prompt\n\n```txt\n😀\n```';
+    await new HostedShareClient(root, async () => undefined, transport).create(
+      { ...upload(), pairingToken: '' },
+      {
+        ...artifacts(),
+        markdown,
+        bundles: [{ bundleNumber: 1, markdown, imageFilename: 'prompt-001.png' }],
+      },
+    );
+    expect(JSON.parse(String((transport.mock.calls[1]?.[1] as RequestInit).body)).bundles[0].markdown).toBe(
+      markdown,
+    );
+  });
+
   it('uses the injected transport for upload, receipt recovery, and revocation', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-transport-'));
     roots.push(root);
@@ -220,9 +320,23 @@ describe('HostedShareClient request boundary', () => {
     await expect(guarded.create(upload(), artifacts())).rejects.toMatchObject({
       code: 'io-failure',
       message: expect.stringMatching(/save local hosted-share data/i),
-      details: { requestMayHaveCommitted: false },
     });
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('does not mark a failed pending recovery read as safe to retry', async () => {
+    const { root } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(pendingFile, '{broken');
+    const transport = vi.fn<HostedShareFetch>();
+    const error = await new HostedShareClient(root, async () => undefined, transport)
+      .create(upload(), artifacts())
+      .catch((failure: unknown) => failure);
+
+    expect(error).toMatchObject({ code: 'io-failure' });
+    expect((error as { details?: Record<string, unknown> }).details?.requestMayHaveCommitted).not.toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    expect(await fs.readFile(pendingFile, 'utf8')).toBe('{broken');
   });
 
   it('preserves pending recovery metadata when local history is saved but pending cleanup fails', async () => {
@@ -485,7 +599,7 @@ describe('HostedShareClient persistence and recovery', () => {
     const settled = uploadOperation.catch((error: unknown) => error);
     await requestStarted;
 
-    await expect(client.list()).resolves.toEqual({ records: [], recoveryErrors: [] });
+    await expect(client.list()).resolves.toMatchObject({ records: [], recoveryErrors: [] });
     expect(fetch).toHaveBeenCalledTimes(1);
     await client.cancel(firstRequest);
     await expect(settled).resolves.toMatchObject({ code: 'session-cancelled' });
@@ -611,6 +725,75 @@ describe('HostedShareClient persistence and recovery', () => {
     const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
     expect(pending).not.toHaveProperty(firstRequest);
     expect(pending).toHaveProperty(secondRequest);
+  });
+
+  it('persists dismissal for a recovery incident without changing its capability or local history', async () => {
+    const { root, client } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(
+      pendingFile,
+      JSON.stringify({ [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) } }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        json({ error: { code: 'service_unavailable', message: 'Recovery is unavailable.' } }, 503),
+      ),
+    );
+
+    const initial = await client.list();
+    const warning = initial.recoveryWarnings?.[0];
+    expect(warning).toMatchObject({
+      id: expect.stringMatching(/^recovery:[a-f0-9]{64}$/),
+      message: 'Recovery is unavailable.',
+    });
+    const pendingBeforeDismissal = await fs.readFile(pendingFile, 'utf8');
+
+    await client.dismissRecoveryWarning(warning!.id);
+    expect(await fs.readFile(pendingFile, 'utf8')).toBe(pendingBeforeDismissal);
+    await expect(fs.readFile(path.join(root, 'hosted-shares.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    await expect(client.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+    const reopened = new HostedShareClient(root, async () => undefined);
+    await expect(reopened.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+
+    const pending = JSON.parse(await fs.readFile(pendingFile, 'utf8'));
+    pending[secondRequest] = { requestId: secondRequest, pairingToken: 'b'.repeat(43) };
+    await fs.writeFile(pendingFile, JSON.stringify(pending));
+
+    const later = await reopened.list();
+    expect(later.recoveryWarnings).toHaveLength(1);
+    expect(later.recoveryWarnings?.[0]).toMatchObject({ message: 'Recovery is unavailable.' });
+    expect(later.recoveryWarnings?.[0]?.id).not.toBe(warning!.id);
+  });
+
+  it('rejects a stale warning ID after recovery reports a later error episode', async () => {
+    const { root, client } = await fixture();
+    await fs.writeFile(
+      path.join(root, 'hosted-share-pending.json'),
+      JSON.stringify({ [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) } }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          json({ error: { code: 'service_unavailable', message: 'First recovery error.' } }, 503),
+        )
+        .mockResolvedValueOnce(
+          json({ error: { code: 'service_unavailable', message: 'Later recovery error.' } }, 503),
+        ),
+    );
+
+    const initial = await client.list();
+    const later = await client.list();
+    expect(later.recoveryWarnings?.[0]?.id).not.toBe(initial.recoveryWarnings?.[0]?.id);
+    await expect(client.dismissRecoveryWarning(initial.recoveryWarnings![0]!.id)).rejects.toMatchObject({
+      code: 'invalid-input',
+      message: expect.stringMatching(/no longer available/i),
+    });
   });
 
   it('preserves corrupt local files and reports actionable history and recovery errors', async () => {

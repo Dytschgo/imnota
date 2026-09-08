@@ -9,10 +9,11 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "build": "node --check src/hostinger.cjs && node --check src/server.js && node --check src/app.js && node --check public/share-copy.js",
+    "build": "node --check src/hostinger.cjs && node --check src/server.js && node --check src/app.js && node --check src/owner.js && node --check src/provision-owner-key.js && node --check public/share-copy.js && node --check public/owner.js",
     "backup": "node src/backup.js",
     "start": "node src/server.js",
     "cleanup": "node src/cleanup.js",
+    "provision-owner": "node src/provision-owner-key.js",
     "test": "node --test --test-concurrency=1"
   },
   "dependencies": {
