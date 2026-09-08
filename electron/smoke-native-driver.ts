@@ -232,9 +232,20 @@ export class NativeUiDriver {
 
   async fill(locator: SmokeLocator, value: string): Promise<void> {
     await this.click(locator);
-    const modifier = process.platform === 'darwin' ? 'meta' : 'control';
-    // Let the renderer process Select All before insertText replaces the selection.
-    await this.press('A', [modifier]);
+    // macOS routes Cmd+A through the application menu, which synthetic renderer
+    // key events do not invoke. Use Electron's native editing command instead.
+    this.window.webContents.selectAll();
+    await this.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const check = () => {
+        const field = document.activeElement;
+        if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+            field.selectionStart === 0 && field.selectionEnd === field.value.length) return resolve(true);
+        if (Date.now() >= deadline) return reject(new Error('Native Select All did not select the focused field.'));
+        requestAnimationFrame(check);
+      };
+      check();
+    })`);
     await this.window.webContents.insertText(value);
     await wait(40);
   }
