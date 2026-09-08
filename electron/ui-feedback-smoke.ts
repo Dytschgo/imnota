@@ -97,6 +97,7 @@ export async function exerciseUiFeedback(
   await driver.evaluate(`(async () => {
     const projectPath=${JSON.stringify(fixture.projectPath)};
     let snapshot=await window.imnota.loadProject(projectPath);
+    if(snapshot.project.name!=='Feedback Edited' || snapshot.project.icon!=='target' || snapshot.project.description!=='Edited through the project dialog') throw new Error('Project edit dialog did not persist all three fields.');
     const stale=snapshot.projectRevision;
     snapshot=await window.imnota.updateProjectMetadata({projectPath,expectedRevision:stale,patch:{name:'Feedback Renamed',description:'Edited description',icon:'target'}});
     if(snapshot.project.icon!=='target' || snapshot.projectPath!==projectPath) throw new Error('Project edit lost icon or folder identity.');
