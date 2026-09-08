@@ -1,5 +1,10 @@
 import type { WorkflowBridge } from './workflow-bridge.js';
 import type { ContentBridge, ContentItem } from './content-items.js';
+import type { ProjectIconKey } from './project-icons.js';
+import type {
+  ProjectSearchInput,
+  ProjectSearchResponse,
+} from './project-search.js';
 
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';
@@ -89,6 +94,8 @@ export interface ProjectData {
   updatedAt: string;
   status: ProjectStatus;
   favourite: boolean;
+  /** Stable allowlisted icon key. Older projects omit it and render as `layers`. */
+  icon?: ProjectIconKey;
   screenshots: ScreenshotRecord[];
   /** Drawing and text records. Screenshots remain authoritative in `screenshots`. */
   contentItems?: ContentItem[];
@@ -185,7 +192,12 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge {
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;
   listProjects(): Promise<ProjectListItem[]>;
-  createProject(input: { name: string; description: string }): Promise<ProjectSnapshot>;
+  searchProjects(input: ProjectSearchInput): Promise<ProjectSearchResponse>;
+  createProject(input: {
+    name: string;
+    description: string;
+    icon?: ProjectIconKey;
+  }): Promise<ProjectSnapshot>;
   openProjectDialog(): Promise<ProjectSnapshot | null>;
   loadProject(projectPath: string): Promise<ProjectSnapshot>;
   saveProject(projectPath: string, project: ProjectData): Promise<void>;
@@ -218,6 +230,16 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge {
   undoDeleteScreenshot(input: { projectPath: string; undoToken: string }): Promise<ProjectSnapshot>;
   duplicateProject(projectPath: string): Promise<ProjectSnapshot>;
   archiveProject(projectPath: string): Promise<void>;
+  updateProjectMetadata(input: {
+    projectPath: string;
+    expectedRevision: string;
+    patch: { name?: string; description?: string; icon?: ProjectIconKey };
+  }): Promise<ProjectSnapshot>;
+  setProjectArchived(input: {
+    projectPath: string;
+    expectedRevision: string;
+    archived: boolean;
+  }): Promise<ProjectSnapshot>;
   deleteProject(projectPath: string): Promise<void>;
   exportAnnotatedImage(input: {
     projectPath: string;

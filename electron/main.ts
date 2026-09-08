@@ -30,6 +30,8 @@ import type {
   ScreenshotRecord,
   WorkspaceSettings,
 } from '../src/shared/types.js';
+import type { ProjectIconKey } from '../src/shared/project-icons.js';
+import { PROJECT_ICON_KEYS } from '../src/shared/project-icons.js';
 import type { PreferenceSettingsResult } from '../src/shared/preferences.js';
 import {
   mergePreferenceSettings,
@@ -101,6 +103,7 @@ import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
 import { runSmokeWorkflow } from './smoke-workflow.js';
 import { pathIsWithin, validateCreatedSmokeDirectory } from './smoke-native-driver.js';
+import { ProjectSearchService } from './project-search.js';
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -118,6 +121,7 @@ let updateController: UpdateController;
 let projectWatchManager: ProjectWatchManager | undefined;
 let promptBundleWorkflow: PromptBundleWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
+let projectSearchService: ProjectSearchService | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -131,16 +135,19 @@ let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettin
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
   await writeAtomically(filePath, content);
+  projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfWrite(filePath, content);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
   await fs.copyFile(filePath, targetPath);
+  projectSearchService?.invalidateForPath(targetPath);
   projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
 }
 
 async function unlinkTracked(filePath: string): Promise<void> {
   await fs.unlink(filePath);
+  projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfDelete(filePath);
 }
 
@@ -180,6 +187,7 @@ async function persistApplicationSettings(
 const projectInput = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(3000),
+  icon: z.enum(PROJECT_ICON_KEYS).optional(),
 });
 const pathInput = z.string().min(1).max(2000);
 
@@ -725,14 +733,49 @@ function registerIpc(): void {
     )
     .min(1)
     .max(999);
+  const searchInput = z
+    .object({
+      query: z.string().max(200),
+      scope: z.enum(['active', 'archived']).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    })
+    .strict();
+  const projectRevision = z.string().regex(/^[a-f0-9]{64}$/);
+  const projectIcon = z.enum(PROJECT_ICON_KEYS);
   const contracts: Record<string, z.ZodTypeAny> = {
     'settings:get': z.tuple([]),
     'settings:choose-workspace': z.tuple([]),
     'settings:set': z.tuple([settingsPatchSchema]),
     'projects:list': z.tuple([]),
+    'projects:search': z.tuple([searchInput]),
     'projects:create': z.tuple([projectInput]),
     'projects:open-dialog': z.tuple([]),
     'projects:save': z.tuple([pathInput, projectSchema]),
+    'projects:update-metadata': z.tuple([
+      z
+        .object({
+          projectPath: pathInput,
+          expectedRevision: projectRevision,
+          patch: z
+            .object({
+              name: z.string().trim().min(1).max(120).optional(),
+              description: z.string().max(3000).optional(),
+              icon: projectIcon.optional(),
+            })
+            .strict()
+            .refine((patch) => Object.keys(patch).length > 0, 'Enter a project change.'),
+        })
+        .strict(),
+    ]),
+    'projects:set-archived': z.tuple([
+      z
+        .object({
+          projectPath: pathInput,
+          expectedRevision: projectRevision,
+          archived: z.boolean(),
+        })
+        .strict(),
+    ]),
     'projects:save-screenshot': z.tuple([
       screenshotInput.extend({
         annotations: z.array(annotationSchema).max(10000),
@@ -839,6 +882,15 @@ function registerIpc(): void {
       return result;
     });
   };
+  const handleConcurrent: typeof ipcMain.handle = (channel, listener) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+        throw new Error('Untrusted IPC sender.');
+      const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
+      if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
+      return listener(event, ...validated);
+    });
+  };
   const handleWorkflow = (
     channel: string,
     listener: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown> | unknown,
@@ -874,6 +926,11 @@ function registerIpc(): void {
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('workflow:project-watch-event', event);
     },
+  });
+  projectSearchService = new ProjectSearchService({
+    workspace: () => settings.workspacePath,
+    authorizeProject: assertProjectPath,
+    assertNoLinks,
   });
   const contentPersistence = new ContentPersistenceService({
     snapshot: makeSnapshot,
@@ -1251,6 +1308,7 @@ function registerIpc(): void {
     }
     return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   });
+  handleConcurrent('projects:search', async (_event, input) => projectSearchService!.search(input));
   handle('projects:create', async (_event, raw) => {
     const input = projectInput.parse(raw);
     const workspace = workspaceOrThrow();
@@ -1263,6 +1321,7 @@ function registerIpc(): void {
       JSON.stringify(
         {
           ...emptyProject(input.name, input.description, path.basename(workspace)),
+          ...(input.icon ? { icon: input.icon } : {}),
           schemaVersion: 4,
           contentItems: [],
         },
@@ -1294,6 +1353,36 @@ function registerIpc(): void {
     });
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
   });
+  const mutateProjectMetadata = async (
+    projectPath: string,
+    expectedRevision: string,
+    mutate: (project: ProjectData) => ProjectData,
+  ): Promise<ProjectSnapshot> => {
+    const safePath = await assertProjectPath(projectPath);
+    const baseline = await readProjectMutationBaseline(safePath);
+    if (baseline.projectRevision !== expectedRevision)
+      throw new Error('The project changed before this update. Reload it and try again.');
+    const next = validateProject({
+      ...mutate(baseline.project),
+      id: baseline.project.id,
+      updatedAt: nextProjectMutationTimestamp(baseline.project.updatedAt),
+    });
+    await assertProjectRevision(safePath, expectedRevision);
+    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
+    return makeSnapshot(safePath);
+  };
+  handle('projects:update-metadata', async (_event, input) =>
+    mutateProjectMetadata(input.projectPath, input.expectedRevision, (project) => ({
+      ...project,
+      ...(input.patch as { name?: string; description?: string; icon?: ProjectIconKey }),
+    })),
+  );
+  handle('projects:set-archived', async (_event, input) =>
+    mutateProjectMetadata(input.projectPath, input.expectedRevision, (project) => ({
+      ...project,
+      status: input.archived ? 'archived' : 'active',
+    })),
+  );
   handle('projects:save-screenshot', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const baseline = await readProjectMutationBaseline(safePath);
@@ -1609,10 +1698,11 @@ function registerIpc(): void {
   });
   handle('projects:archive', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
-    const p = await readProject(safePath);
-    p.status = 'archived';
-    p.updatedAt = nowIso();
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(p, null, 2));
+    const baseline = await readProjectMutationBaseline(safePath);
+    await mutateProjectMetadata(safePath, baseline.projectRevision, (project) => ({
+      ...project,
+      status: 'archived',
+    }));
   });
   handle('projects:delete', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
