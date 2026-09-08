@@ -125,6 +125,7 @@ let settings: WorkspaceSettings = {
   openRecentOnLaunch: true,
   confirmBeforeDeletion: true,
   updateChannel: 'stable',
+  sharingSenderName: '',
 };
 let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
 

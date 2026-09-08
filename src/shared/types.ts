@@ -126,6 +126,8 @@ export interface WorkspaceSettings {
   openRecentOnLaunch: boolean;
   confirmBeforeDeletion: boolean;
   updateChannel: UpdateChannel;
+  /** Optional plain-text attribution used for newly created hosted shares. */
+  sharingSenderName?: string;
 }
 
 export type UpdateChannel = 'stable' | 'nightly';
