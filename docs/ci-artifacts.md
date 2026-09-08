@@ -16,6 +16,20 @@ The preceding documentation-only [PR run 34276483712](https://github.com/Dytschg
 | `ubuntu-latest`                           |    600,723,798 |         28s |
 | `macos-latest` (arm64, universal package) |  1,315,661,684 |         80s |
 
-The macOS upload contained 814 files. Times use GitHub job-step timestamps rounded to seconds; the workflow-level queue delay was zero at API timestamp resolution. The installer contents have not changed in this experiment. Record the candidate run's bytes, upload times, scheduling delay, and reruns in its PR before merging. A single comparison is evidence for this run, not a promise about every runner or upload.
+The macOS upload contained 814 files. Times use GitHub job-step timestamps rounded to seconds; the workflow-level queue delay was zero at API timestamp resolution. The installer contents have not changed in this experiment. Candidate measurements are recorded below and in PR #37. A single comparison is evidence for this run, not a promise about every runner or upload.
 
 To recover the previous artifact shape, revert the Validate upload step to `path: release/` and its default compression. No application data or release-channel migration is involved.
+
+## Verified result
+
+[PR #37](https://github.com/Dytschgo/imnota/pull/37), head `b4eb869e3ffecff70f3db8bb36200c13c99251d9`, passed [Validate run 34278871246](https://github.com/Dytschgo/imnota/actions/runs/34278871246) and CodeQL on its first attempt. Independent review accepted that revision. The closest baseline is the successful preceding [PR #36 run 34277727340](https://github.com/Dytschgo/imnota/actions/runs/34277727340), head `1791b495bc0dded1bfda45387ac65f7ce52a7b9d`, with the same application and test routing.
+
+| Runner  |  Before bytes | After bytes | Before upload | After upload | Before package job | After package job |
+| ------- | ------------: | ----------: | ------------: | -----------: | -----------------: | ----------------: |
+| Windows |   593,500,705 | 356,457,764 |           29s |           6s |               364s |              355s |
+| Linux   |   600,724,420 | 388,581,619 |           29s |           4s |               303s |              254s |
+| macOS   | 1,315,661,924 | 599,707,488 |           83s |           8s |               538s |              396s |
+
+Total stored package bytes fell about 46%. Both runs were PR events with zero workflow-level queue delay at API timestamp resolution; runner scheduling, build, and native-check times vary. The whole package-job difference must not be attributed solely to uploading. Neither comparison run required a rerun.
+
+Remote ZIP directory inspection confirmed five Windows members (NSIS and portable EXEs, NSIS blockmap, manifest, debug YAML), four Linux members (AppImage, deb, manifest, debug YAML), and six macOS members (universal ZIP/DMG, both blockmaps, manifest, debug YAML). All members were top-level and nonempty. The optional effective-config YAML was not emitted in this run. Separate Windows visual evidence remained present.
