@@ -2,6 +2,8 @@
 
 This change implements the desktop and hosted-service portions of [the design plan](../../appUIoverhaul.md), starting from `main` at `3475c2d`. The original working checkout and its unrelated changes were left untouched.
 
+Main advanced during implementation. Sidebar collection history/grouped favourites (#29) and update notifications/macOS rollback handling (#31) were merged through `00827cd`, preserving their behavior. AppShell retains the new SideNav and collection title tooltip alongside the overhaul's item count and handoff action. Settings retains the new download callback. Tests and native captures were rerun after integration.
+
 ## Delivered surfaces
 
 - Desktop workbench: project/collection breadcrumbs, included-item counts, a persistent prompt-bundle action, keyboard-accessible Add item and More menus, task-oriented toolbar groups, clearer context/export inspector sections, separate destructive controls, settings navigation, and first-use guidance.
