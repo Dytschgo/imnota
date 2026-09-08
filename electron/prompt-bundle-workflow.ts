@@ -25,6 +25,7 @@ const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 const MAX_PNG_DATA_URL_CHARACTERS =
   PNG_DATA_URL_PREFIX.length + Math.ceil(MAX_PROMPT_BUNDLE_PNG_BYTES / 3) * 4;
 const PNG_DATA_URL = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/;
+const MAX_FINALIZED_GRANTS = 128;
 
 export interface AuthorizedPromptCollection {
   projectPath: string;
@@ -269,6 +270,9 @@ export class PromptBundleWorkflow {
     stored: FinalizedPromptBundleSession,
   ): PromptExportFinalized {
     const result = publicFinalized(stored);
+    // Map replacement preserves the active session's old insertion position. Reinsert so retention
+    // follows finalization order and a long-running export does not evict itself as soon as it finishes.
+    this.grants.delete(sessionId);
     this.grants.set(sessionId, {
       ...active,
       phase: 'final',
@@ -277,6 +281,15 @@ export class PromptBundleWorkflow {
       bundles: new Map(stored.bundles.map((bundle) => [bundle.bundleNumber, bundle])),
       result,
     });
+    let finalizedCount = 0;
+    for (const grant of this.grants.values()) if (grant.phase === 'final') finalizedCount++;
+    if (finalizedCount > MAX_FINALIZED_GRANTS) {
+      for (const [storedSessionId, grant] of this.grants) {
+        if (grant.phase !== 'final') continue;
+        this.grants.delete(storedSessionId);
+        break;
+      }
+    }
     return result;
   }
 

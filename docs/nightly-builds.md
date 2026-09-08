@@ -12,7 +12,7 @@ Channel switching is disabled while checking, downloading or awaiting native ins
 
 Switching back to Stable never automatically downgrades. If the installed nightly is newer, Imnota explains that and offers the selected stable release page. Back up before manually replacing a newer app; an older version may not understand a future project's schema.
 
-Current collection-based nightlies migrate schema 1/2 projects to schema 3 when opened. Back up the whole workspace folder before trying them. Reinstalling an older app does not reverse that migration; see the [migration and rollback procedure](data-format.md) before returning to an older stable version.
+Current builds migrate schema 1/2 projects to schema 3 when opened. Adding a drawing or text block upgrades schema 3 to schema 4 while retaining a versioned metadata backup. Back up the whole workspace folder before trying a newer build. Reinstalling an older app does not reverse migration; see the [migration and rollback procedure](data-format.md) before returning to an older version.
 
 ## Build a nightly after merge
 
@@ -20,7 +20,7 @@ The **Build nightly prerelease** workflow is manual only. There is no nightly sc
 
 Current branch protection enforces an up-to-date `quality` check, but does not enforce approving reviews or every platform job. For this release process, the release owner must also obtain an independent review and verify all PR platform package and security checks for the exact head before merging. Do not use an administrator bypass. The nightly workflow separately gates publication on quality and all three platform builds. Stronger remote enforcement is a separate repository-policy change, not part of publishing a nightly.
 
-After this implementation is merged into main, an authorised maintainer can dispatch a build for an exact reviewed main commit:
+An authorised maintainer can dispatch a build for an exact reviewed main commit:
 
 ```bash
 git fetch origin main
@@ -52,6 +52,6 @@ Stable tags must point to a commit in main's history. Assets are validated befor
 
 ## Verification and remaining rollout steps
 
-Local tests cover channel validation, version comparison, missing/invalid releases, pagination, network failure, confirmation/cancellation, settings persistence, download-state locking, exact asset URLs, native rejection and no automatic downgrade. The real Electron smoke includes Settings interaction and a persisted channel readback. Windows nightly packaging and packaged-app smoke can be run locally; Mac/Linux runners still need their first real workflow run after merge.
+Local tests cover channel validation, version comparison, missing/invalid releases, pagination, network failure, confirmation/cancellation, settings persistence, download-state locking, exact asset URLs, native rejection and no automatic downgrade. The real Electron smoke includes Settings interaction and a persisted channel readback. The [September 8 nightly run](https://github.com/Dytschgo/imnota/actions/runs/34169995806) passed quality, Windows/macOS/Linux package verification and all 14 approved Windows visual comparisons. Its 13 public assets, three nightly manifests and exact release commit were verified; stable v0.2.5 remained Latest.
 
-This implementation does not itself publish the first nightly, change branch protection, enable a schedule, or configure signing. Before broader rollout, run the workflow on an accepted main SHA and verify public downloads and update installation on the supported platforms. The former [channel plan](stable-nightly-release-plan.md) records the original decisions.
+A normal merge does not publish a nightly, change branch protection, enable a schedule or configure signing. Each intended publication needs a fresh workflow run on an accepted SHA and public-download verification. Broader clean-machine update/install and receiving-editor checks remain separate from CI. The former [channel plan](stable-nightly-release-plan.md) records the original decisions.

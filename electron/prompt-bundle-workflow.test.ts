@@ -124,4 +124,38 @@ describe('main-owned prompt bundle grants', () => {
       imageDataUrl: undefined,
     });
   });
+
+  it('caps grants by finalization order while retaining a long-running session that finishes last', async () => {
+    const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-grants-')));
+    temporary.push(projectPath);
+    const collectionId = '001-collection';
+    await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
+    let nextId = 0;
+    const workflow = new PromptBundleWorkflow(
+      {
+        authorize: async () => ({ projectPath, collectionId, collectionName: 'Collection' }),
+        copyContext: () => undefined,
+        copyText: () => undefined,
+        copyImage: () => undefined,
+        openPath: async () => undefined,
+      },
+      new PromptBundleStore({
+        randomId: () => `session-${nextId++}`,
+        now: () => new Date(2026, 8, 7, 12, 0, 0),
+        validateDecodedPng: () => undefined,
+      }),
+    );
+    const held = await workflow.start(projectPath, collectionId, manifest);
+    let earliestFinalizedSessionId = '';
+    for (let index = 0; index < 128; index++) {
+      const session = await workflow.start(projectPath, collectionId, manifest);
+      if (index === 0) earliestFinalizedSessionId = session.sessionId;
+      await workflow.cancel(session.sessionId);
+    }
+    const heldResult = await workflow.cancel(held.sessionId);
+
+    await expect(workflow.cancel(earliestFinalizedSessionId)).rejects.toThrow(/not found|closed/);
+    await expect(workflow.cancel(held.sessionId)).resolves.toEqual(heldResult);
+    // This exercises 129 real filesystem sessions, including Windows file operations.
+  }, 30_000);
 });

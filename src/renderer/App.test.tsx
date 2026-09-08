@@ -530,6 +530,142 @@ describe('feedback controls', () => {
     expect(installUpdate).not.toHaveBeenCalled();
   });
 
+  it('restores guarded close handling when update installation rejects', async () => {
+    let emitUpdate: Parameters<ImnotaBridge['onUpdateStatus']>[0] = () => {};
+    const installUpdate = vi.fn(async () => {
+      throw new Error('Installation could not start');
+    });
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Installation could not start');
+
+    fireEvent.change(note, { target: { value: 'Edit after rejected install' } });
+    const beforeUnload = new Event('beforeunload', { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(false);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshot: expect.objectContaining({ description: 'Edit after rejected install' }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    close.mockRestore();
+  });
+
+  it('restores guarded close handling when native installation rolls back after handoff', async () => {
+    let emitUpdate: Parameters<ImnotaBridge['onUpdateStatus']>[0] = () => {};
+    let finishInstall!: () => void;
+    const installUpdate = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishInstall = resolve;
+        }),
+    );
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledOnce());
+    act(() =>
+      emitUpdate({
+        state: 'downloaded',
+        version: '0.3.0',
+        installing: false,
+        message: 'Installation could not start. Your current app is unchanged.',
+      }),
+    );
+
+    fireEvent.change(note, { target: { value: 'Edit after native rollback' } });
+    const beforeUnload = new Event('beforeunload', { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(false);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshot: expect.objectContaining({ description: 'Edit after native rollback' }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    finishInstall();
+    close.mockRestore();
+  });
+
+  it('restores guarded close handling when the native handoff resolves without closing', async () => {
+    let emitUpdate: Parameters<ImnotaBridge['onUpdateStatus']>[0] = () => {};
+    const installUpdate = vi.fn(async () => {});
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledOnce());
+
+    fireEvent.change(note, { target: { value: 'Edit after completed handoff' } });
+    const beforeUnload = new Event('beforeunload', { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(false);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshot: expect.objectContaining({ description: 'Edit after completed handoff' }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    close.mockRestore();
+  });
+
+  it('allows the native close after a successful update handoff with no newer edits', async () => {
+    let emitUpdate: Parameters<ImnotaBridge['onUpdateStatus']>[0] = () => {};
+    const installUpdate = vi.fn(async () => {});
+    const { save, note } = await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdate = handler;
+        return () => {};
+      },
+      installUpdate,
+    });
+
+    fireEvent.change(note, { target: { value: 'Saved before successful handoff' } });
+    act(() => emitUpdate({ state: 'downloaded', version: '0.3.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        screenshot: expect.objectContaining({ description: 'Saved before successful handoff' }),
+      }),
+    );
+
+    const beforeUnload = new Event('beforeunload', { cancelable: true });
+    expect(window.dispatchEvent(beforeUnload)).toBe(true);
+    expect(beforeUnload.defaultPrevented).toBe(false);
+  });
+
   it('keeps the editor available when project refresh fails', async () => {
     const { note, editingSnapshot } = await renderEditingProject();
     vi.mocked(window.imnota.listProjects).mockRejectedValueOnce(new Error('Refresh unavailable'));

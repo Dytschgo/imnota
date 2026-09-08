@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { atomicWrite } from './files.js';
 import {
   budgetPromptCollectionName,
@@ -130,6 +130,217 @@ describe('prompt bundle store', () => {
       'Collection 02 - 260907-184205 - 01.md',
       'Collection 02 - 260907-184205 - 01.png',
     ]);
+  });
+
+  it('recovers a journalled abandoned session when its owning process is gone', async () => {
+    const input = await fixture();
+    const oldStore = promptStore({
+      randomId: () => 'abandoned-session',
+      ownerProcessId: () => 101,
+      isProcessAlive: () => true,
+    });
+    const abandoned = await oldStore.startSession(startInput(input, 'Abandoned'));
+    await oldStore.commitBundle({
+      sessionId: abandoned.sessionId,
+      bundleNumber: 1,
+      png: png(),
+      markdown: '# Abandoned\n',
+    });
+    const exportsDirectory = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    const abandonedStaging = path.join(exportsDirectory, `.prompt-staging-${abandoned.sessionId}`);
+    const abandonedReservation = path.join(exportsDirectory, `.${abandoned.setName}.reservation`);
+
+    const nextStore = promptStore({
+      randomId: () => 'next-session',
+      ownerProcessId: () => 202,
+      isProcessAlive: (processId) => processId === 202,
+    });
+    const next = await nextStore.startSession(startInput(input, 'Next'));
+
+    expect(await fs.lstat(abandonedStaging).catch(() => null)).toBeNull();
+    expect(await fs.lstat(abandonedReservation).catch(() => null)).toBeNull();
+    await nextStore.cancelSession(next.sessionId);
+  });
+
+  it('recovers a journalled reservation abandoned before staging was created', async () => {
+    const input = await fixture();
+    const oldStore = promptStore({
+      randomId: () => 'reservation-only-session',
+      ownerProcessId: () => 101,
+    });
+    const abandoned = await oldStore.startSession(startInput(input, 'Reservation only'));
+    const exportsDirectory = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    const abandonedStaging = path.join(exportsDirectory, `.prompt-staging-${abandoned.sessionId}`);
+    const abandonedReservation = path.join(exportsDirectory, `.${abandoned.setName}.reservation`);
+    await fs.rm(abandonedStaging, { recursive: true });
+
+    const nextStore = promptStore({
+      randomId: () => 'after-reservation-session',
+      ownerProcessId: () => 202,
+      isProcessAlive: () => false,
+    });
+    const next = await nextStore.startSession(startInput(input, 'After reservation'));
+
+    expect(await fs.lstat(abandonedReservation).catch(() => null)).toBeNull();
+    await nextStore.cancelSession(next.sessionId);
+  });
+
+  it('preserves an orphan reservation when staging absence cannot be proven', async () => {
+    const input = await fixture();
+    const oldStore = promptStore({
+      randomId: () => 'inaccessible-session',
+      ownerProcessId: () => 101,
+    });
+    const abandoned = await oldStore.startSession(startInput(input, 'Inaccessible'));
+    const exportsDirectory = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    const abandonedStaging = path.join(exportsDirectory, `.prompt-staging-${abandoned.sessionId}`);
+    const abandonedReservation = path.join(exportsDirectory, `.${abandoned.setName}.reservation`);
+    await fs.rm(abandonedStaging, { recursive: true });
+    const realLstat = fs.lstat.bind(fs);
+    const lstat = vi.spyOn(fs, 'lstat').mockImplementation(async (candidate) => {
+      if (path.resolve(String(candidate)) === path.resolve(abandonedStaging))
+        throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+      return await realLstat(candidate);
+    });
+
+    const nextStore = promptStore({
+      randomId: () => 'after-inaccessible-session',
+      ownerProcessId: () => 202,
+      isProcessAlive: () => false,
+    });
+    const next = await nextStore.startSession(startInput(input, 'After inaccessible'));
+    lstat.mockRestore();
+
+    expect(await fs.lstat(abandonedReservation)).toBeTruthy();
+    await nextStore.cancelSession(next.sessionId);
+  });
+
+  it('keeps published exports when a later session performs orphan recovery', async () => {
+    const input = await fixture();
+    const oldStore = promptStore({
+      randomId: () => 'published-session',
+      ownerProcessId: () => 101,
+    });
+    const session = await oldStore.startSession(startInput(input, 'Published'));
+    await oldStore.commitBundle({
+      sessionId: session.sessionId,
+      bundleNumber: 1,
+      png: png(),
+      markdown: '# Published\n',
+    });
+    const published = await oldStore.finishSession(session.sessionId);
+
+    const nextStore = promptStore({
+      randomId: () => 'later-session',
+      ownerProcessId: () => 202,
+      isProcessAlive: () => false,
+    });
+    const next = await nextStore.startSession(startInput(input, 'Later'));
+
+    expect(await fs.readFile(published.bundles[0].markdownPath, 'utf8')).toBe('# Published\n');
+    expect(await fs.readdir(published.folderPath!)).toEqual([
+      expect.stringMatching(/ - 01\.md$/),
+      expect.stringMatching(/ - 01\.png$/),
+    ]);
+    await nextStore.cancelSession(next.sessionId);
+  });
+
+  it('leaves foreign, live-owner, and linked staging entries untouched', async () => {
+    const input = await fixture();
+    const exportsDirectory = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    await fs.mkdir(exportsDirectory, { recursive: true });
+    const foreignStaging = path.join(exportsDirectory, '.prompt-staging-legacy');
+    const foreignReservation = path.join(exportsDirectory, '.Legacy - 260907-120000.reservation');
+    await fs.mkdir(foreignStaging);
+    await fs.writeFile(path.join(foreignStaging, 'user-file.txt'), 'keep');
+    await fs.writeFile(foreignReservation, '');
+
+    const liveStore = promptStore({
+      randomId: () => 'live-session',
+      ownerProcessId: () => 101,
+      isProcessAlive: (processId) => processId === 101,
+    });
+    const live = await liveStore.startSession(startInput(input, 'Live'));
+    const linkedStore = promptStore({
+      randomId: () => 'linked-session',
+      ownerProcessId: () => 202,
+      isProcessAlive: (processId) => processId === 101 || processId === 202,
+    });
+    const linked = await linkedStore.startSession(startInput(input, 'Linked'));
+    const linkedStaging = path.join(exportsDirectory, `.prompt-staging-${linked.sessionId}`);
+    const outside = path.join(input.projectPath, 'outside-staging-target');
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, 'outside.txt'), 'keep');
+    await fs.symlink(
+      outside,
+      path.join(linkedStaging, 'linked-child'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const nextStore = promptStore({
+      randomId: () => 'new-session',
+      ownerProcessId: () => 303,
+      isProcessAlive: (processId) => processId === 101 || processId === 303,
+    });
+    const next = await nextStore.startSession(startInput(input, 'New'));
+
+    expect(await fs.readFile(path.join(foreignStaging, 'user-file.txt'), 'utf8')).toBe('keep');
+    expect(await fs.lstat(foreignReservation)).toBeTruthy();
+    expect(await fs.lstat(path.join(exportsDirectory, `.prompt-staging-${live.sessionId}`))).toBeTruthy();
+    expect(await fs.lstat(linkedStaging)).toBeTruthy();
+    expect(await fs.readFile(path.join(outside, 'outside.txt'), 'utf8')).toBe('keep');
+    await Promise.all([
+      liveStore.cancelSession(live.sessionId),
+      linkedStore.cancelSession(linked.sessionId),
+      nextStore.cancelSession(next.sessionId),
+    ]);
+  });
+
+  it('does not remove a pre-existing directory, live session, or link when a new ID collides', async () => {
+    const input = await fixture();
+    const exportsDirectory = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    await fs.mkdir(exportsDirectory, { recursive: true });
+
+    const foreignStaging = path.join(exportsDirectory, '.prompt-staging-foreign-collision');
+    await fs.mkdir(foreignStaging);
+    await fs.writeFile(path.join(foreignStaging, 'user-file.txt'), 'keep');
+    const foreignCollision = promptStore({
+      randomId: () => 'foreign-collision',
+      ownerProcessId: () => 301,
+      isProcessAlive: () => false,
+    });
+    await expect(foreignCollision.startSession(startInput(input, 'Foreign collision'))).rejects.toThrow();
+    expect(await fs.readFile(path.join(foreignStaging, 'user-file.txt'), 'utf8')).toBe('keep');
+
+    const outside = path.join(input.projectPath, 'linked-collision-target');
+    const linkedStaging = path.join(exportsDirectory, '.prompt-staging-linked-collision');
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, 'outside.txt'), 'keep');
+    await fs.symlink(outside, linkedStaging, process.platform === 'win32' ? 'junction' : 'dir');
+    const linkedCollision = promptStore({
+      randomId: () => 'linked-collision',
+      ownerProcessId: () => 302,
+      isProcessAlive: () => false,
+    });
+    await expect(linkedCollision.startSession(startInput(input, 'Linked collision'))).rejects.toThrow();
+    expect((await fs.lstat(linkedStaging)).isSymbolicLink()).toBe(true);
+    expect(await fs.readFile(path.join(outside, 'outside.txt'), 'utf8')).toBe('keep');
+
+    const liveStore = promptStore({
+      randomId: () => 'live-collision',
+      ownerProcessId: () => 101,
+      isProcessAlive: (processId) => processId === 101,
+    });
+    const live = await liveStore.startSession(startInput(input, 'Live collision'));
+    const liveStaging = path.join(exportsDirectory, `.prompt-staging-${live.sessionId}`);
+    const liveCollision = promptStore({
+      randomId: () => live.sessionId,
+      ownerProcessId: () => 303,
+      isProcessAlive: (processId) => processId === 101,
+    });
+    await expect(liveCollision.startSession(startInput(input, 'Live collision'))).rejects.toThrow();
+    expect(await fs.lstat(liveStaging)).toBeTruthy();
+    await liveStore.cancelSession(live.sessionId);
   });
 
   it('removes a partial pair when its second atomic write fails', async () => {
