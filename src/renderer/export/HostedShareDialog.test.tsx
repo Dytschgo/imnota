@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge } from '../../shared/types';
 import type { HostedShareRecord } from '../../shared/workflow-bridge';
 import { HostedShareDialog } from './HostedShareDialog';
+import { useAppStore } from '../store';
 
 const active: HostedShareRecord = {
   id: 'active-share',
@@ -37,6 +38,7 @@ const artifacts = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  useAppStore.setState({ settings: { ...useAppStore.getState().settings, sharingSenderName: undefined } });
 });
 
 function bridge(overrides: Partial<ImnotaBridge> = {}) {
@@ -54,6 +56,10 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
     })),
     openHostedSharePairing: vi.fn(async () => ({ ok: true as const, value: undefined })),
     copyText: vi.fn(async () => undefined),
+    setSettings: vi.fn(async (patch: Parameters<ImnotaBridge['setSettings']>[0]) => ({
+      ...useAppStore.getState().settings,
+      ...patch,
+    })),
     ...overrides,
   } as unknown as ImnotaBridge;
   window.imnota = value;
@@ -61,20 +67,111 @@ function bridge(overrides: Partial<ImnotaBridge> = {}) {
 }
 
 function approveAndPublish() {
+  fireEvent.click(screen.getByRole('button', { name: 'Pairing code' }));
   fireEvent.change(screen.getByLabelText('Pairing code'), {
     target: { value: 'a'.repeat(43) },
   });
-  fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/i));
+  fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
   fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
 }
 
 describe('HostedShareDialog', () => {
+  it.each([false, true])(
+    'locks the form while saving the name and honours cancellation (%s)',
+    async (cancel) => {
+      let finish!: (value: Awaited<ReturnType<ImnotaBridge['setSettings']>>) => void;
+      const setSettings = vi.fn<ImnotaBridge['setSettings']>(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const native = bridge({ setSettings });
+      render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+      fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
+      fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+      await waitFor(() => expect(setSettings).toHaveBeenCalledOnce());
+      expect(screen.getByRole('switch', { name: 'I understand' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: '7 days' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Pairing code' })).toBeDisabled();
+      expect(native.createHostedShare).not.toHaveBeenCalled();
+      if (cancel) fireEvent.click(screen.getByRole('button', { name: /Cancel upload/i }));
+      finish({ ...useAppStore.getState().settings, sharingSenderName: 'Dylan' });
+      if (cancel) {
+        await screen.findByText('Link creation cancelled.');
+        expect(native.createHostedShare).not.toHaveBeenCalled();
+        expect(native.cancelHostedShare).not.toHaveBeenCalled();
+      } else {
+        await screen.findByRole('heading', { name: 'Your link is ready' });
+        expect(native.createHostedShare).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it('keeps pairing on the action row, removes owner controls, and always includes ZIP', async () => {
+    const native = bridge();
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    const create = screen.getByRole('button', { name: 'Create link' });
+    expect(screen.queryByRole('link', { name: /Site owner/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /ZIP/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/ZIP included/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Pairing code')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pairing code' }).closest('footer')).toBe(
+      create.closest('footer'),
+    );
+    fireEvent.click(screen.getByRole('radio', { name: '7 days' }));
+    expect(create).toBeDisabled();
+    fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
+    fireEvent.click(create);
+    await screen.findByRole('heading', { name: 'Your link is ready' });
+    expect(native.createHostedShare).toHaveBeenCalledWith(
+      expect.objectContaining({ includeArchive: true, expiresInDays: 7 }),
+    );
+    expect(screen.queryByRole('link', { name: /Site owner/ })).not.toBeInTheDocument();
+  });
+
+  it('remembers the name after blur and reopen but never remembers sharing consent', async () => {
+    const native = bridge();
+    const view = render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    const input = screen.getByLabelText('Your name (optional)');
+    fireEvent.change(input, { target: { value: ' Dylan ' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(useAppStore.getState().settings.sharingSenderName).toBe('Dylan'));
+    fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
+    view.unmount();
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByLabelText('Your name (optional)')).toHaveValue('Dylan');
+    expect(screen.getByRole('switch', { name: 'I understand' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
+    expect(native.createHostedShare).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed name save without uploading, then lets the user retry', async () => {
+    const setSettings = vi
+      .fn<ImnotaBridge['setSettings']>()
+      .mockRejectedValueOnce(new Error('disk unavailable'))
+      .mockImplementation(async (patch) => ({ ...useAppStore.getState().settings, ...patch }));
+    const native = bridge({ setSettings });
+    render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByRole('alert');
+    expect(native.createHostedShare).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Your name (optional)')).toHaveValue('Dylan');
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByRole('heading', { name: 'Your link is ready' });
+    expect(native.createHostedShare).toHaveBeenCalledOnce();
+  });
+
   it('creates a one-day link with the sender name without requiring a pairing code', async () => {
     const native = bridge();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
-    expect(screen.getByLabelText('Expires after')).toHaveValue('1');
+    expect(screen.getByRole('radio', { name: '1 day' })).toBeChecked();
     fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
-    fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/));
+    fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
     await screen.findByRole('heading', { name: 'Your link is ready' });
     expect(native.createHostedShare).toHaveBeenCalledWith(
@@ -129,12 +226,13 @@ describe('HostedShareDialog', () => {
     expect(screen.queryByText(/prompt-002\.png/)).not.toBeInTheDocument();
     expect(screen.queryByText(/or text-only/i)).not.toBeInTheDocument();
     expect(publish).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Pairing code' }));
     fireEvent.change(screen.getByLabelText('Pairing code'), {
       target: { value: 'a'.repeat(43) },
     });
     expect(native.createHostedShare).not.toHaveBeenCalled();
     expect(publish).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/Anyone with the link can view and download this bundle/i));
+    fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
     expect(publish).toBeEnabled();
     expect(native.createHostedShare).not.toHaveBeenCalled();
   });

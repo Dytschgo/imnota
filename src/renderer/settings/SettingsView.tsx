@@ -9,6 +9,8 @@ import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
 import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
+import { SharingSettings } from './SharingSettings';
+import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 
 export interface SettingsViewProps {
   preferences?: PreferenceSettings;
@@ -41,12 +43,18 @@ export function SettingsView({
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
   const [legacyError, setLegacyError] = useState('');
-  const groups = ['Appearance', 'Editing & shortcuts', 'Workspace & privacy', 'Updates & help'] as const;
+  const groups = [
+    'Appearance',
+    'Editing & shortcuts',
+    'Workspace & privacy',
+    'Sharing',
+    'Updates & help',
+  ] as const;
   const [group, setGroup] = useState<(typeof groups)[number]>('Appearance');
   const saveLegacy = async (patch: Partial<typeof settings>) => {
     setLegacyError('');
     try {
-      set({ settings: await window.imnota.setSettings(patch) });
+      set({ settings: await saveWorkspaceSettingsPatch(patch) });
     } catch {
       setLegacyError('This preference could not be saved. Your previous setting is still active.');
     }
@@ -196,6 +204,7 @@ export function SettingsView({
             </div>
           </section>
         </div>
+        {group === 'Sharing' && <SharingSettings />}
       </div>
     </section>
   );

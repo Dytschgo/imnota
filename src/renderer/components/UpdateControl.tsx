@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import type { UpdateChannel, UpdateStatus } from '../../shared/types';
 import { Button, Modal } from './ui';
 import { useAppStore } from '../store';
+import { saveWorkspaceSettingsPatch } from '../settings/sharing-preferences';
 
 export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }) {
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' });
@@ -49,7 +50,7 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
   async function changeChannel(next: UpdateChannel) {
     setConfirmNightly(false);
     await run(async () => {
-      const settings = await window.imnota.setSettings({ updateChannel: next });
+      const settings = await saveWorkspaceSettingsPatch({ updateChannel: next });
       useAppStore.getState().set({ settings });
       const revision = statusRevision.current;
       const current = await window.imnota.getUpdateStatus();

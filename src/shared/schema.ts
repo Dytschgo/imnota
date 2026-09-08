@@ -330,6 +330,14 @@ export const annotationSchema = z.object({
   arrowhead: z.boolean().optional(),
   blurIntensity: z.number().nonnegative().optional(),
 });
+export const sharingSenderNameSchema = z
+  .string()
+  .transform((value) => value.normalize('NFC').trim())
+  .refine((value) => [...value].length <= 80, 'Sharing sender name must contain at most 80 characters.')
+  .refine(
+    (value) => !/[\p{C}\u202A-\u202E\u2066-\u2069]/u.test(value),
+    'Sharing sender name must contain printable characters.',
+  );
 export const settingsPatchSchema = z
   .object({
     theme: z.enum(['system', 'light', 'dark']).optional(),
@@ -337,5 +345,6 @@ export const settingsPatchSchema = z
     openRecentOnLaunch: z.boolean().optional(),
     confirmBeforeDeletion: z.boolean().optional(),
     updateChannel: z.enum(['stable', 'nightly']).optional(),
+    sharingSenderName: sharingSenderNameSchema.optional(),
   })
   .strict();

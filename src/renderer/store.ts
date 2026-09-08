@@ -52,6 +52,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     openRecentOnLaunch: true,
     confirmBeforeDeletion: true,
     updateChannel: 'stable',
+    sharingSenderName: '',
   },
   projects: [],
   snapshot: null,

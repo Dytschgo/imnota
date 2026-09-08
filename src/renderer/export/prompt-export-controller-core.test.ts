@@ -707,6 +707,44 @@ describe('prompt export controller orchestration', () => {
     expect((await controller.loadPreview(1)).ok).toBe(false);
   });
 
+  test('prepares and opens files on the first request without changing the clipboard', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    const result = await controller.openFiles({
+      planId: 'planned-card',
+      bundleNumber: 1,
+    });
+
+    expect(result).toMatchObject({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
+    expect(native.starts).toHaveLength(1);
+    expect(native.copies).toEqual([]);
+    expect(native.opens).toEqual([
+      { sessionId: 'session-1', bundleNumber: 1, target: 'png' },
+      { sessionId: 'session-1', bundleNumber: 1, target: 'markdown' },
+    ]);
+  });
+
+  test('prepares and opens the export folder on the first request without copying', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    const result = await controller.openFolder();
+
+    expect(result).toMatchObject({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
+    expect(native.starts).toHaveLength(1);
+    expect(native.copies).toEqual([]);
+    expect(native.opens).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'folder' }]);
+  });
+
   test('reports the exact finalized bundles that contain PNG artifacts for hosted review', async () => {
     const visualNative = fakeBridge();
     const visualController = engine(
