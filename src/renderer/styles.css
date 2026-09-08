@@ -1500,9 +1500,6 @@ button.icon-button.new-collection-button svg {
   justify-content: center;
   overflow: hidden;
   padding: 0;
-  background: #0b0d12;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 16px 16px;
 }
 .crop-actions {
   position: absolute;
@@ -1530,10 +1527,6 @@ button.icon-button.new-collection-button svg {
 .crop-actions button:last-child {
   background: var(--imnota-accent);
   color: var(--imnota-on-accent);
-}
-:root[data-theme='light'] .canvas-wrap {
-  background-color: #e9ebef;
-  background-image: radial-gradient(rgba(20, 24, 32, 0.08) 1px, transparent 1px);
 }
 .canvas-meta {
   position: absolute;
