@@ -337,7 +337,7 @@ function estimatedBytes(encodedCharacters: number | undefined): number | undefin
 function renderLimitMessage(bundle: PromptBundle): string {
   const pixels = bundle.layout.width * bundle.layout.height;
   return (
-    `Prompt ${bundle.number} would be ${bundle.layout.width} × ${bundle.layout.height} ` +
+    `Bundle ${bundle.number} would be ${bundle.layout.width} × ${bundle.layout.height} ` +
     `(${(pixels / 1_000_000).toFixed(1)} MP), above the safe renderer limit of ` +
     `${HARD_BUNDLE_MAX_EDGE}px per side and ${HARD_BUNDLE_MAX_PIXELS / 1_000_000} MP. ` +
     'Move distant annotations closer, reduce oversized text, or reduce the screenshots in this collection.'
@@ -374,7 +374,7 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
   lines.push('## Prompt bundles', '');
   for (const bundle of plan.bundles)
     lines.push(
-      `- ${bundle.reference ?? `Prompt ${bundle.number}`}: ${bundle.pictureNumbers.map((number) => `Picture ${number}`).join(', ')}`,
+      `- ${bundle.reference ?? `Bundle ${bundle.number}`}: ${bundle.pictureNumbers.map((number) => `Picture ${number}`).join(', ')}`,
     );
   lines.push('');
   lines.push('## Collection content', '');
@@ -863,7 +863,7 @@ export class PromptBundleControllerEngine {
             phase: 'rendering',
             bundleNumber: bundle.number,
             totalBundles: prepared.plan.bundles.length,
-            message: `Checking Prompt ${bundle.number} of ${prepared.plan.bundles.length}`,
+            message: `Checking Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
           },
         });
         const composition = await this.compose(prepared, bundle, run.controller.signal);
@@ -1005,7 +1005,7 @@ export class PromptBundleControllerEngine {
           phase: 'writing',
           bundleNumber: bundle.number,
           totalBundles: prepared.plan.bundles.length,
-          message: `Writing Prompt ${bundle.number} of ${prepared.plan.bundles.length}`,
+          message: `Writing Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
         },
       });
       const composition = await this.compose(prepared, bundle, run.controller.signal);
@@ -1160,7 +1160,7 @@ export class PromptBundleControllerEngine {
             phase: 'copying',
             bundleNumber: bundle.number,
             totalBundles: prepared.plan.bundles.length,
-            message: `Copying Prompt ${bundle.number}`,
+            message: `Copying Bundle ${bundle.number}`,
           },
         });
         const copy = await this.bridge.copyPromptExportBundle({

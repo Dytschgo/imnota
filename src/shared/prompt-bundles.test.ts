@@ -89,7 +89,7 @@ describe('prompt bundle planning', () => {
     expect(result.bundles[1].markdown).toContain('Picture 3 / Note 1\n\nFirst note');
     expect(result.bundles[1].markdown).toContain('Picture 3 / Note 2\n\nSecond note');
     expect(result.bundles[0].markdown).toContain('## Overall context');
-    expect(result.bundles[1].markdown).toContain('Shared collection context is included in Prompt 1.');
+    expect(result.bundles[1].markdown).toContain('Shared collection context is included in Bundle 1.');
   });
 
   it('splits at native dimensions and never silently resizes', () => {
