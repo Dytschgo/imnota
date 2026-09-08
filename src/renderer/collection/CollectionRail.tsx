@@ -155,7 +155,7 @@ export function CollectionControls({
   return (
     <div className="round-controls">
       <div className="collection-control-heading">
-        <span className="field-label">Collection outline</span>
+        <span className="field-label">Collection</span>
         <span
           className="collection-count"
           aria-label={`${includedItemCount} included items out of ${collectionItems.length}`}

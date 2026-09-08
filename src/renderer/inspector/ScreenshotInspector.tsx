@@ -299,7 +299,7 @@ export function ScreenshotInspector({
         <details className="danger-zone">
           <summary>
             <span>Danger zone</span>
-            <small>Delete this evidence or the whole project</small>
+            <small>Delete item or project</small>
           </summary>
           <div className="danger-zone-actions">
             <Button variant="danger" onClick={() => void onDeleteScreenshot()}>
