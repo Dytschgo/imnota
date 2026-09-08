@@ -123,7 +123,9 @@ function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
       width: rect.width,
       height: rect.height,
       text: normalized(found.getAttribute('aria-label') || found.textContent || found.value),
-      disabled: Boolean(found.disabled || found.getAttribute('aria-disabled') === 'true')
+      disabled: Boolean(found.matches(':disabled') ||
+        (found instanceof HTMLLabelElement && found.control?.matches(':disabled')) ||
+        found.getAttribute('aria-disabled') === 'true')
     };
   })()`;
 }
@@ -176,20 +178,20 @@ export class NativeUiDriver {
 
   async waitFor(
     locator: SmokeLocator,
-    options: { timeoutMs?: number; absent?: boolean } = {},
+    options: { timeoutMs?: number; absent?: boolean; enabled?: boolean } = {},
   ): Promise<Rectangle & { text: string; disabled: boolean }> {
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
     const started = Date.now();
     do {
       const found = await this.bounds(locator);
-      if (options.absent ? !found : found) {
+      if (options.absent ? !found : found && (!options.enabled || !found.disabled)) {
         if (options.absent) return { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false };
         return found!;
       }
       await wait(50);
     } while (Date.now() - started < timeout);
     throw new Error(
-      `Timed out waiting for ${options.absent ? 'absence of ' : ''}${JSON.stringify(locator)}.`,
+      `Timed out waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)}.`,
     );
   }
 
@@ -198,10 +200,9 @@ export class NativeUiDriver {
   }
 
   async click(locator: SmokeLocator, clickCount = 1): Promise<SmokePoint> {
-    await this.waitFor(locator);
+    await this.waitFor(locator, { enabled: true });
     await this.evaluate(locatorScript(locator, true));
-    const bounds = await this.waitFor(locator);
-    if (bounds.disabled) throw new Error(`Cannot click disabled control ${JSON.stringify(locator)}.`);
+    const bounds = await this.waitFor(locator, { enabled: true });
     const point = {
       x: Math.round(bounds.x + bounds.width / 2),
       y: Math.round(bounds.y + bounds.height / 2),
