@@ -77,6 +77,49 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('shows image controls when the current theme image overrides stored desktop glass', () => {
+    const value = {
+      ...DEFAULT_APPEARANCE,
+      mode: 'system' as const,
+      desktopGlass: true,
+      useSameBackdropForBoth: false,
+      themeBackdropsInitialized: true,
+      lightBackgroundImage: 'preset:mist-light',
+      darkBackgroundImage: '',
+    };
+    const effective = {
+      theme: 'light' as const,
+      accent: 'indigo' as const,
+      requestedGlassLevel: 'strong' as const,
+      glassLevel: 'strong' as const,
+      glassFallbackReason: 'none' as const,
+      desktopGlassStatus: 'off' as const,
+    };
+    const { rerender } = render(
+      <AppearanceSettings value={value} effectiveAppearance={effective} onChange={vi.fn()} />,
+    );
+    expect(screen.getByRole('slider', { name: /Background opacity/ })).toBeEnabled();
+    expect(screen.queryByText(/Solid fallback is active/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    rerender(
+      <AppearanceSettings
+        value={value}
+        effectiveAppearance={{ ...effective, theme: 'dark', desktopGlassStatus: 'active' }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('slider', { name: /Glass tint/ })).toBeEnabled();
+    expect(screen.getByText(/Desktop glass \(Beta\) is active/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
   it('keeps the selected character and offers generic artwork as explicit choices', async () => {
     const onChange = vi.fn();
     renderSettings(onChange, 'preset:emerald');

@@ -183,6 +183,7 @@ export function AppearanceSettings({
   const controlsDisabled = disabled || busy;
   const activeTheme = effectiveAppearance?.theme ?? (value.mode === 'light' ? 'light' : 'dark');
   const activeBackdrop = appearanceBackdrop(value, activeTheme);
+  const desktopBackdrop = Boolean(value.desktopGlass && !activeBackdrop.image);
   const updateBackdrop = (image: string) => {
     if (value.useSameBackdropForBoth) return update({ backgroundImage: image });
     return activeTheme === 'dark'
@@ -425,7 +426,7 @@ export function AppearanceSettings({
             Desktop glass (Beta)
           </button>
         </div>
-        {value.desktopGlass && (
+        {desktopBackdrop && (
           <p className="imnota-background-hint" role="status">
             {effectiveAppearance?.desktopGlassStatus === 'active'
               ? 'Desktop glass (Beta) is active. '
@@ -437,9 +438,9 @@ export function AppearanceSettings({
         )}
         <label className="imnota-range-row">
           <span>
-            <strong>{value.desktopGlass ? 'Glass tint' : 'Background opacity'}</strong>
+            <strong>{desktopBackdrop ? 'Glass tint' : 'Background opacity'}</strong>
             <small>
-              {value.desktopGlass
+              {desktopBackdrop
                 ? 'Lower the tint to reveal more of the desktop material.'
                 : 'Lower the image when it competes with screenshot details.'}
             </small>

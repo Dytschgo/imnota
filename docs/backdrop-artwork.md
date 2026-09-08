@@ -21,18 +21,18 @@ The exact variable portions were:
 
 The images are cosmetic and must not be composited into exported screenshot prompts. Reduced-transparency and host performance fallbacks take precedence over the decorative backdrop. Light mode with a selected image derives in-app glass without changing the saved glass preset; dark mode continues to use that saved preset.
 
-## Generic collection � 9 September 2026
+## Generic collection - 9 September 2026
 
 Four additional originals were generated with the built-in GPT ImageGen tool, one call per image, without references or CLI fallback. They were copied unchanged into the repository; the four original character files and their saved IDs are unchanged. No selection is replaced automatically. The picker separates Generic and Characters, with uploads still available.
 
 | Preset ID    | Repository asset                  | Decoded dimensions | PNG bytes | Intended theme |
 | ------------ | --------------------------------- | ------------------ | --------- | -------------- |
-| `mist-light` | `public/backdrops/mist-light.png` | 1672 � 941         | 1,513,106 | Light          |
-| `sand-light` | `public/backdrops/sand-light.png` | 1672 � 941         | 1,752,321 | Light          |
-| `slate-dark` | `public/backdrops/slate-dark.png` | 1672 � 941         | 1,864,042 | Dark           |
-| `dusk-dark`  | `public/backdrops/dusk-dark.png`  | 1672 � 941         | 1,227,549 | Dark           |
+| `mist-light` | `public/backdrops/mist-light.png` | 1672 × 941         | 1,513,106 | Light          |
+| `sand-light` | `public/backdrops/sand-light.png` | 1672 × 941         | 1,752,321 | Light          |
+| `slate-dark` | `public/backdrops/slate-dark.png` | 1672 × 941         | 1,864,042 | Dark           |
+| `dusk-dark`  | `public/backdrops/dusk-dark.png`  | 1672 × 941         | 1,227,549 | Dark           |
 
-Combined added PNG size is 6,357,018 bytes (6.06 MiB). The tool returned approximately 16:9 originals at 1672 � 941 despite the requested approximate 2560 � 1440 size; no synthetic upscaling was applied. Vite copies the local public assets into the packaged `dist/backdrops` directory. Offscreen picker thumbnails use lazy loading.
+Combined added PNG size is 6,357,018 bytes (6.06 MiB). The tool returned approximately 16:9 originals at 1672 × 941 despite the requested approximate 2560 × 1440 size; no synthetic upscaling was applied. Vite copies the local public assets into the packaged `dist/backdrops` directory. Offscreen picker thumbnails use lazy loading.
 
 [Exact generation prompts](generic-backdrop-prompts.md) record the final inputs. Source outputs were `exec-17e0d60f-e52d-46ad-bfb9-a316f99142b3.png` (Mist), `exec-bd3914a8-8954-4adc-9bfa-594b809d1708.png` (Sand), `exec-b49813c6-24b6-4856-b74f-6fe8840052b8.png` (Slate), and `exec-b70464c1-803b-4558-af2e-49c982c434dd.png` (Dusk), in generation session `01a0834f-6f69-7d42-aedd-7abea993cd55`.
 
