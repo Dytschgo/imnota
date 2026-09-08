@@ -1622,6 +1622,9 @@ export async function runSmokeWorkflow(
   await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
   await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
   await driver.waitFor({ selector: '[role="dialog"]' }, { absent: true });
+  const namedProject = await host.readProject(projectPath);
+  if (!namedProject.collections.some((collection) => collection.name === 'Verification collection'))
+    throw new Error('Native Select All and replacement did not persist the exact collection name.');
   await importImages(driver, projectPath, sources, 10);
   assertions.push('real new-project prompt and collection import');
 

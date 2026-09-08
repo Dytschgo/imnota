@@ -233,16 +233,8 @@ export class NativeUiDriver {
   async fill(locator: SmokeLocator, value: string): Promise<void> {
     await this.click(locator);
     const modifier = process.platform === 'darwin' ? 'meta' : 'control';
-    this.window.webContents.sendInputEvent({
-      type: 'keyDown',
-      keyCode: 'A',
-      modifiers: [modifier],
-    });
-    this.window.webContents.sendInputEvent({
-      type: 'keyUp',
-      keyCode: 'A',
-      modifiers: [modifier],
-    });
+    // Let the renderer process Select All before insertText replaces the selection.
+    await this.press('A', [modifier]);
     await this.window.webContents.insertText(value);
     await wait(40);
   }
