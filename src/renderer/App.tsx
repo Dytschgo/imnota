@@ -1141,10 +1141,13 @@ export default function App() {
           window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
         }
         onInstall={async () => {
-          if (await flushAll()) {
-            checkpointSession();
-            allowClose.current = true;
-            await window.imnota.installUpdate();
+          try {
+            if (await flushAll()) {
+              checkpointSession();
+              await installUpdate();
+            }
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : 'The update could not be installed.');
           }
         }}
       />
