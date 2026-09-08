@@ -88,6 +88,7 @@ test('real git history classifies docs and exposes both sides of source renames'
   });
   assert.equal(cli.status, 0, cli.stderr);
   assert.equal(await readFile(output, 'utf8'), 'docs_only=true\n');
+  await rm(output);
   for (const override of [
     { eventName: 'push' },
     { eventName: undefined },
