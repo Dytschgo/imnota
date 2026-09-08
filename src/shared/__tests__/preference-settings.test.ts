@@ -78,4 +78,51 @@ describe('profile-aware preference settings', () => {
     );
     expect(preset.settings.appearance.backgroundImage).toBe('preset:amber');
   });
+
+  it('migrates a shared backdrop into the new per-theme format without changing its result', () => {
+    const base = resolvePreferenceSettings(undefined, false).settings;
+    const legacy = resolvePreferenceSettings(
+      {
+        preferences: {
+          ...base,
+          appearance: {
+            mode: 'system',
+            accent: 'indigo',
+            glassLevel: 'balanced',
+            allowPerformanceFallback: true,
+            backgroundImage: 'preset:indigo',
+            backgroundOpacity: 0.55,
+          },
+        },
+      },
+      true,
+    );
+    expect(legacy.settings.appearance).toMatchObject({
+      backgroundImage: 'preset:indigo',
+      backgroundOpacity: 0.55,
+      useSameBackdropForBoth: true,
+      lightBackgroundImage: '',
+      darkBackgroundImage: '',
+    });
+  });
+
+  it('keeps per-theme local backdrops while removing only unsafe remote values', () => {
+    const base = resolvePreferenceSettings(undefined, false).settings;
+    const result = resolvePreferenceSettings(
+      {
+        preferences: {
+          ...base,
+          appearance: {
+            ...base.appearance,
+            useSameBackdropForBoth: false,
+            lightBackgroundImage: 'preset:emerald',
+            darkBackgroundImage: 'https://example.com/unsafe.png',
+          },
+        },
+      },
+      true,
+    );
+    expect(result.settings.appearance.lightBackgroundImage).toBe('preset:emerald');
+    expect(result.settings.appearance.darkBackgroundImage).toBe('');
+  });
 });

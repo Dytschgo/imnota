@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_IMAGE_MAX_BYTES, DEFAULT_APPEARANCE } from '../../shared/preferences';
 import { AppearanceSettings } from './AppearanceSettings';
@@ -77,6 +77,44 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('keeps separate backdrop choices and opacity scoped to the effective theme', async () => {
+    const onChange = vi.fn();
+    const separate = {
+      ...DEFAULT_APPEARANCE,
+      useSameBackdropForBoth: false,
+      darkBackgroundImage: 'preset:graphite',
+      darkBackgroundOpacity: 0.35,
+    };
+    render(
+      <AppearanceSettings
+        value={separate}
+        effectiveAppearance={{
+          theme: 'dark',
+          accent: 'indigo',
+          requestedGlassLevel: 'balanced',
+          glassLevel: 'balanced',
+          glassFallbackReason: 'none',
+        }}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('backdrop-preset-emerald'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        useSameBackdropForBoth: false,
+        darkBackgroundImage: 'preset:emerald',
+        lightBackgroundImage: '',
+      }),
+    );
+    await waitFor(() => expect(screen.getByRole('slider')).not.toBeDisabled());
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '0.65' } });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ darkBackgroundOpacity: 0.65, lightBackgroundOpacity: 0.42 }),
+      ),
+    );
+  });
+
   it('offers native desktop glass without forgetting uploaded thumbnails', async () => {
     vi.mocked(savedBackgrounds).mockResolvedValueOnce([
       { id: 'one', name: 'My image', dataUrl: 'data:image/png;base64,AA==', addedAt: 1 },

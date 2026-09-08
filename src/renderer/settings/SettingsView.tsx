@@ -12,7 +12,18 @@ import { ShortcutSettings } from './ShortcutSettings';
 import { SharingSettings } from './SharingSettings';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 
+export const SETTINGS_CATEGORIES = [
+  'Appearance',
+  'Editing & shortcuts',
+  'Workspace & privacy',
+  'Sharing',
+  'Updates & help',
+] as const;
+export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
+
 export interface SettingsViewProps {
+  activeCategory?: SettingsCategory;
+  onCategoryChange?(category: SettingsCategory): void;
   preferences?: PreferenceSettings;
   effectiveAppearance?: EffectiveAppearance;
   savingPreferences?: boolean;
@@ -26,6 +37,8 @@ export interface SettingsViewProps {
 }
 
 export function SettingsView({
+  activeCategory,
+  onCategoryChange,
   preferences = DEFAULT_PREFERENCE_SETTINGS,
   effectiveAppearance = {
     theme: 'dark',
@@ -45,14 +58,12 @@ export function SettingsView({
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
   const [legacyError, setLegacyError] = useState('');
-  const groups = [
-    'Appearance',
-    'Editing & shortcuts',
-    'Workspace & privacy',
-    'Sharing',
-    'Updates & help',
-  ] as const;
-  const [group, setGroup] = useState<(typeof groups)[number]>('Appearance');
+  const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
+  const group = activeCategory ?? uncontrolledCategory;
+  const selectCategory = (category: SettingsCategory) => {
+    if (activeCategory === undefined) setUncontrolledCategory(category);
+    onCategoryChange?.(category);
+  };
   const saveLegacy = async (patch: Partial<typeof settings>) => {
     setLegacyError('');
     try {
@@ -68,12 +79,12 @@ export function SettingsView({
         <p>Preferences stay on this device. Project files remain in your local workspace.</p>
       </div>
       <nav className="settings-navigation" aria-label="Settings categories">
-        {groups.map((name) => (
+        {SETTINGS_CATEGORIES.map((name) => (
           <button
             key={name}
             type="button"
             aria-current={group === name ? 'page' : undefined}
-            onClick={() => setGroup(name)}
+            onClick={() => selectCategory(name)}
           >
             {name}
           </button>

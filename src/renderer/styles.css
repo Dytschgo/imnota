@@ -109,9 +109,13 @@ button:disabled {
    or dimming it twice behind chrome; the screenshot canvas stays opaque. */
 :root[data-background='active']:not([data-glass-level='off'])
   :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  /* One wallpaper belongs to the shell, never to individual panels. */
-  background: color-mix(in srgb, var(--surface) 18%, transparent);
-  backdrop-filter: none;
+  /* Uploaded images can have any luminance. Keep application chrome readable. */
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  backdrop-filter: blur(var(--imnota-glass-blur)) saturate(var(--imnota-glass-saturation));
+}
+:root[data-theme='light'][data-background='active']:not([data-glass-level='off'])
+  :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 :root[data-desktop-glass='active'],
 :root[data-desktop-glass='active'] body,
@@ -168,6 +172,11 @@ button:disabled {
   background-size: cover;
   background-repeat: no-repeat;
   opacity: var(--imnota-background-opacity, 0);
+}
+/* The bundled artwork is intentionally composed differently in light mode.
+   Uploaded images keep their original luminance so the user's choice is not altered. */
+:root[data-theme='light'][data-background-source='preset'] .app-shell::after {
+  filter: brightness(1.22) saturate(0.76);
 }
 .app-shell > * {
   position: relative;
@@ -932,7 +941,7 @@ button.icon-button.new-collection-button svg {
   margin-bottom: 28px;
 }
 .settings-navigation {
-  position: sticky;
+  position: static;
   top: -1px;
   z-index: 2;
   display: flex;

@@ -6,6 +6,7 @@ import {
   BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH,
   BACKGROUND_IMAGE_MAX_DIMENSION,
   BACKGROUND_IMAGE_MAX_PIXELS,
+  appearanceBackdrop,
   backdropPresetValue,
   type BackdropPreset,
 } from '../../shared/preferences';
@@ -175,6 +176,20 @@ export function AppearanceSettings({
   };
 
   const controlsDisabled = disabled || busy;
+  const activeTheme = effectiveAppearance?.theme ?? (value.mode === 'light' ? 'light' : 'dark');
+  const activeBackdrop = appearanceBackdrop(value, activeTheme);
+  const updateBackdrop = (image: string) => {
+    if (value.useSameBackdropForBoth) return update({ backgroundImage: image });
+    return activeTheme === 'dark'
+      ? update({ darkBackgroundImage: image })
+      : update({ lightBackgroundImage: image });
+  };
+  const updateBackdropOpacity = (opacity: number) => {
+    if (value.useSameBackdropForBoth) return update({ backgroundOpacity: opacity });
+    return activeTheme === 'dark'
+      ? update({ darkBackgroundOpacity: opacity })
+      : update({ lightBackgroundOpacity: opacity });
+  };
   const fallbackMessage =
     effectiveAppearance?.glassFallbackReason === 'reduced-transparency'
       ? 'Solid surfaces are active because the operating system requests reduced transparency.'
@@ -301,12 +316,12 @@ export function AppearanceSettings({
               <ImagePlus size={14} aria-hidden="true" />
               Choose image
             </Button>
-            {value.backgroundImage && (
+            {activeBackdrop.image && (
               <Button
                 variant="ghost"
                 disabled={controlsDisabled}
                 data-testid="backdrop-remove"
-                onClick={() => void update({ backgroundImage: '' })}
+                onClick={() => void updateBackdrop('')}
               >
                 <Trash2 size={14} aria-hidden="true" />
                 Remove
@@ -343,8 +358,7 @@ export function AppearanceSettings({
                       await saveBackground(file.name, normalized);
                       if (generation !== readGeneration.current) return;
                       setLibrary(await savedBackgrounds());
-                      if (generation === readGeneration.current)
-                        await update({ backgroundImage: normalized }, { invalidateUpload: false });
+                      if (generation === readGeneration.current) await updateBackdrop(normalized);
                     })
                     .catch((failure: unknown) => {
                       if (generation === readGeneration.current)
@@ -368,21 +382,39 @@ export function AppearanceSettings({
           <button
             type="button"
             disabled={controlsDisabled}
-            aria-pressed={!value.backgroundImage && !value.desktopGlass}
-            onClick={() => void update({ backgroundImage: '', desktopGlass: false })}
+            aria-pressed={!activeBackdrop.image && !value.desktopGlass}
+            onClick={() =>
+              void (value.useSameBackdropForBoth
+                ? update({ backgroundImage: '', desktopGlass: false })
+                : activeTheme === 'dark'
+                  ? update({ darkBackgroundImage: '', desktopGlass: false })
+                  : update({ lightBackgroundImage: '', desktopGlass: false }))
+            }
           >
             No image
           </button>
           <button
             type="button"
             disabled={controlsDisabled}
-            aria-pressed={!value.backgroundImage && Boolean(value.desktopGlass)}
+            aria-pressed={!activeBackdrop.image && Boolean(value.desktopGlass)}
             onClick={() =>
-              void update({
-                backgroundImage: '',
-                desktopGlass: true,
-                glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-              })
+              void (value.useSameBackdropForBoth
+                ? update({
+                    backgroundImage: '',
+                    desktopGlass: true,
+                    glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+                  })
+                : activeTheme === 'dark'
+                  ? update({
+                      darkBackgroundImage: '',
+                      desktopGlass: true,
+                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+                    })
+                  : update({
+                      lightBackgroundImage: '',
+                      desktopGlass: true,
+                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+                    }))
             }
           >
             Desktop glass (Beta)
@@ -413,18 +445,54 @@ export function AppearanceSettings({
               min="0"
               max="1"
               step="0.05"
-              value={value.backgroundOpacity}
-              disabled={controlsDisabled || (!value.backgroundImage && !value.desktopGlass)}
-              onChange={(event) => void update({ backgroundOpacity: Number(event.target.value) })}
+              value={activeBackdrop.opacity}
+              disabled={controlsDisabled || (!activeBackdrop.image && !value.desktopGlass)}
+              onChange={(event) => void updateBackdropOpacity(Number(event.target.value))}
             />
-            <output>{Math.round(value.backgroundOpacity * 100)}%</output>
+            <output>{Math.round(activeBackdrop.opacity * 100)}%</output>
+          </span>
+        </label>
+        <label className="imnota-check-row imnota-backdrop-theme-link">
+          <input
+            type="checkbox"
+            checked={value.useSameBackdropForBoth}
+            disabled={controlsDisabled}
+            onChange={(event) => {
+              if (event.target.checked) {
+                void update({
+                  useSameBackdropForBoth: true,
+                  backgroundImage: activeBackdrop.image,
+                  backgroundOpacity: activeBackdrop.opacity,
+                });
+              } else {
+                void update({
+                  useSameBackdropForBoth: false,
+                  ...(activeTheme === 'dark'
+                    ? {
+                        darkBackgroundImage: activeBackdrop.image,
+                        darkBackgroundOpacity: activeBackdrop.opacity,
+                      }
+                    : {
+                        lightBackgroundImage: activeBackdrop.image,
+                        lightBackgroundOpacity: activeBackdrop.opacity,
+                      }),
+                });
+              }
+            }}
+          />
+          <span>
+            <strong>Use the same image and opacity in light and dark themes</strong>
+            <small>
+              Turn this off to choose a separate backdrop for {activeTheme} mode. System mode follows the
+              current operating-system theme.
+            </small>
           </span>
         </label>
         <div className="imnota-backdrop-presets" role="group" aria-label="Bundled backdrops">
-          <span>Bundled backdrops</span>
+          <span>Bundled backdrops{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
           <div>
             {BACKDROP_PRESETS.map((preset) => {
-              const selected = value.backgroundImage === backdropPresetValue(preset);
+              const selected = activeBackdrop.image === backdropPresetValue(preset);
               return (
                 <button
                   type="button"
@@ -433,7 +501,7 @@ export function AppearanceSettings({
                   data-testid={`backdrop-preset-${preset}`}
                   aria-pressed={selected}
                   disabled={controlsDisabled}
-                  onClick={() => void update({ backgroundImage: backdropPresetValue(preset) })}
+                  onClick={() => void updateBackdrop(backdropPresetValue(preset))}
                 >
                   <img src={backdropPresetUrl(preset)} alt="" />
                   <span>{BACKDROP_LABELS[preset]}</span>
@@ -443,7 +511,7 @@ export function AppearanceSettings({
           </div>
         </div>
         <div className="imnota-backdrop-presets" role="group" aria-label="Uploaded backdrops">
-          <span>Your images</span>
+          <span>Your images{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
           <div>
             {library.map((entry) => (
               <div key={entry.id} className="imnota-uploaded-backdrop">
@@ -451,8 +519,8 @@ export function AppearanceSettings({
                   type="button"
                   className="imnota-backdrop-preset"
                   disabled={controlsDisabled}
-                  aria-pressed={value.backgroundImage === entry.dataUrl}
-                  onClick={() => void update({ backgroundImage: entry.dataUrl })}
+                  aria-pressed={activeBackdrop.image === entry.dataUrl}
+                  onClick={() => void updateBackdrop(entry.dataUrl)}
                 >
                   <img src={entry.preview ?? entry.dataUrl} alt="" loading="lazy" />
                   <span title={entry.name}>{entry.name}</span>
@@ -478,14 +546,14 @@ export function AppearanceSettings({
           {!library.length && (
             <p>Uploaded images stay on this device so you can select them again. Up to 12 images.</p>
           )}
-          {value.backgroundImage.startsWith('data:') &&
-            !library.some((entry) => entry.dataUrl === value.backgroundImage) && (
+          {activeBackdrop.image.startsWith('data:') &&
+            !library.some((entry) => entry.dataUrl === activeBackdrop.image) && (
               <Button
                 variant="soft"
                 disabled={controlsDisabled}
                 onClick={async () => {
                   try {
-                    await saveBackground('Previous uploaded image', value.backgroundImage);
+                    await saveBackground('Previous uploaded image', activeBackdrop.image);
                     setLibrary(await savedBackgrounds());
                   } catch {
                     setError(
