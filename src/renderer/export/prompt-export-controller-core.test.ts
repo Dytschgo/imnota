@@ -585,6 +585,23 @@ describe('prompt export controller orchestration', () => {
     expect(card.artifactSessionId).toBe('session-1');
   });
 
+  test.each(['markdown', 'image'] as const)(
+    'prepares the selected format from the first dropdown copy: %s',
+    async (target) => {
+      const native = fakeBridge();
+      const renderer = fakeRendering();
+      const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+      await controller.open();
+      const card = controller.getState().cards[0];
+      const result = await (target === 'markdown'
+        ? controller.copyMarkdown(card)
+        : controller.copyImage(card));
+      expect(result.ok).toBe(true);
+      expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target }]);
+      expect(controller.getState().cards[0].state).not.toBe('copied');
+    },
+  );
+
   test('loads one committed full preview and clears it without closing the dialog', async () => {
     const native = fakeBridge();
     const read = vi.spyOn(native.bridge, 'readPromptExportBundle');

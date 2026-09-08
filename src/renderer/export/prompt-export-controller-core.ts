@@ -1124,6 +1124,7 @@ export class PromptBundleControllerEngine {
   private async fresh(
     requestedBundleNumber: number | undefined,
     copyAfterExport: boolean,
+    copyTarget: PromptExportCopyTarget = 'context',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.pendingCleanup) {
       const cleanup = await this.retryCleanup();
@@ -1165,7 +1166,7 @@ export class PromptBundleControllerEngine {
         const copy = await this.bridge.copyPromptExportBundle({
           sessionId: session.sessionId,
           bundleNumber: bundle.number,
-          target: 'context',
+          target: copyTarget,
         });
         if (!copy.ok) {
           const detail = nativeFailure(copy.error, true).detail;
@@ -1173,7 +1174,7 @@ export class PromptBundleControllerEngine {
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
-        this.setCardState(bundle.number, 'copied');
+        this.setCardState(bundle.number, copyTarget === 'context' ? 'copied' : 'idle');
       }
       this.emit({
         progress: { phase: 'complete', bundleNumber, totalBundles: prepared.plan.bundles.length },
@@ -1238,12 +1239,16 @@ export class PromptBundleControllerEngine {
   }
 
   copyMarkdown(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    if (typeof selection !== 'number' && !selection.artifactSessionId)
+      return this.fresh(selectionNumber(selection), true, 'markdown');
     return this.nativeArtifactAction(selection, (sessionId, bundleNumber) =>
       this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' }),
     );
   }
 
   copyImage(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    if (typeof selection !== 'number' && !selection.artifactSessionId)
+      return this.fresh(selectionNumber(selection), true, 'image');
     return this.nativeArtifactAction(selection, (sessionId, bundleNumber) =>
       this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'image' }),
     );

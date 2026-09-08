@@ -156,6 +156,52 @@ export function PromptBundleCard({
               Prepare files
             </Button>
           )}
+          <div className="prompt-bundle-options" ref={optionsRef}>
+            <Button
+              variant="ghost"
+              aria-label="Copy options"
+              aria-haspopup="menu"
+              aria-expanded={optionsOpen}
+              aria-controls={optionsOpen ? optionsMenuId : undefined}
+              disabled={busy || disabled}
+              onClick={() => setOptionsOpen((open) => !open)}
+            >
+              <ChevronDown size={14} aria-hidden="true" />
+            </Button>
+            {optionsOpen && (
+              <div
+                id={optionsMenuId}
+                className="prompt-bundle-options-menu"
+                role="menu"
+                aria-label={`Bundle ${bundle.bundleNumber} options`}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyMarkdown}
+                  onClick={() => runOption(onCopyMarkdown)}
+                >
+                  <FileText size={14} aria-hidden="true" /> Copy Markdown
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyImage || !bundle.pictureNumbers.length}
+                  onClick={() => runOption(onCopyImage)}
+                >
+                  <FileImage size={14} aria-hidden="true" /> Copy PNG
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onOpenFiles || !fallbacksReady}
+                  onClick={() => runOption(onOpenFiles)}
+                >
+                  <FolderOpen size={14} aria-hidden="true" /> Open files
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="prompt-bundle-body">
@@ -165,25 +211,28 @@ export function PromptBundleCard({
             <p>{bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'}</p>
           </div>
         </div>
-        <dl className="prompt-bundle-facts">
-          <div>
-            <dt>Visuals</dt>
-            <dd>{bundle.screenshotCount}</dd>
-          </div>
-          <div>
-            <dt>Text</dt>
-            <dd>{bundle.textCount ?? 0}</dd>
-          </div>
-          <div>
-            <dt>Excluded</dt>
-            <dd>{bundle.excludedCount}</dd>
-          </div>
-          <div>
-            <dt>Canvas</dt>
-            <dd>{bundle.width && bundle.height ? `${bundle.width} × ${bundle.height}` : 'None'}</dd>
-          </div>
-        </dl>
-        <p className="prompt-bundle-size">{formatBytes(bundle.estimatedBytes)}</p>
+        <details className="prompt-bundle-details">
+          <summary>Bundle details</summary>
+          <dl className="prompt-bundle-facts">
+            <div>
+              <dt>Visuals</dt>
+              <dd>{bundle.screenshotCount}</dd>
+            </div>
+            <div>
+              <dt>Text</dt>
+              <dd>{bundle.textCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Excluded</dt>
+              <dd>{bundle.excludedCount}</dd>
+            </div>
+            <div>
+              <dt>Canvas</dt>
+              <dd>{bundle.width && bundle.height ? `${bundle.width} × ${bundle.height}` : 'None'}</dd>
+            </div>
+          </dl>
+          <p className="prompt-bundle-size">{formatBytes(bundle.estimatedBytes)}</p>
+        </details>
         {(bundle.warning || bundle.delivery === 'file-only') && (
           <p className="prompt-bundle-warning">
             <AlertTriangle size={14} aria-hidden="true" />
@@ -198,51 +247,6 @@ export function PromptBundleCard({
             {bundle.error}
           </p>
         )}
-        <div className="prompt-bundle-options" ref={optionsRef}>
-          <Button
-            variant="ghost"
-            aria-haspopup="menu"
-            aria-expanded={optionsOpen}
-            aria-controls={optionsOpen ? optionsMenuId : undefined}
-            disabled={!fallbacksReady}
-            onClick={() => setOptionsOpen((open) => !open)}
-          >
-            Options <ChevronDown size={14} aria-hidden="true" />
-          </Button>
-          {optionsOpen && (
-            <div
-              id={optionsMenuId}
-              className="prompt-bundle-options-menu"
-              role="menu"
-              aria-label={`Bundle ${bundle.bundleNumber} options`}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!onCopyMarkdown}
-                onClick={() => runOption(onCopyMarkdown)}
-              >
-                <FileText size={14} aria-hidden="true" /> Copy Markdown
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!onCopyImage || !bundle.pictureNumbers.length}
-                onClick={() => runOption(onCopyImage)}
-              >
-                <FileImage size={14} aria-hidden="true" /> Copy PNG
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!onOpenFiles}
-                onClick={() => runOption(onOpenFiles)}
-              >
-                <FolderOpen size={14} aria-hidden="true" /> Open files
-              </button>
-            </div>
-          )}
-        </div>
         <details className="prompt-bundle-info">
           <summary>About copying</summary>
           <p>Copy Bundle uses the latest image and Markdown. Options copies one format.</p>

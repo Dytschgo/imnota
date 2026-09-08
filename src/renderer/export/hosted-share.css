@@ -4,6 +4,38 @@
   gap: 14px;
   padding: 16px;
 }
+.hosted-share-step {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.hosted-share-info,
+.hosted-share-file-details {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.hosted-share-info summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  width: fit-content;
+}
+.hosted-share-file-details summary {
+  margin-top: 9px;
+  cursor: pointer;
+}
+.hosted-share-info summary:focus-visible,
+.hosted-share-file-details summary:focus-visible {
+  outline: 2px solid var(--success);
+  outline-offset: 3px;
+}
+.hosted-share .hosted-share-create {
+  background: var(--success);
+  border-color: var(--success);
+  color: #102419;
+}
 .hosted-share-privacy,
 .hosted-share-pair {
   display: flex;
@@ -127,6 +159,14 @@
 }
 .hosted-share-history summary {
   cursor: pointer;
+}
+.hosted-share-owner-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--ink-3);
 }
 .hosted-share-history p {
   margin-left: 8px;

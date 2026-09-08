@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Copy, ExternalLink, ShieldCheck, Square, Trash2 } from 'lucide-react';
-import type { HostedShareRecord } from '../../shared/workflow-bridge';
+import { AlertTriangle, Check, Copy, ExternalLink, Info, Square, Trash2 } from 'lucide-react';
+import type { HostedShareRecord, HostedShareRecoveryWarning } from '../../shared/workflow-bridge';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import { Button, Modal, TextInput } from '../components/ui';
 import './hosted-share.css';
@@ -32,13 +32,15 @@ export function HostedShareDialog({
   const [token, setToken] = useState('');
   const [approved, setApproved] = useState(false);
   const [includeArchive, setIncludeArchive] = useState(true);
-  const [expiresInDays, setExpiresInDays] = useState(30);
+  const [expiresInDays, setExpiresInDays] = useState(1);
+  const [senderName, setSenderName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [record, setRecord] = useState<HostedShareRecord>();
   const [request, setRequest] = useState<string>();
   const [history, setHistory] = useState<readonly HostedShareRecord[]>([]);
   const [recoveryErrors, setRecoveryErrors] = useState<readonly string[]>([]);
+  const [recoveryWarnings, setRecoveryWarnings] = useState<readonly HostedShareRecoveryWarning[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<HostedShareRecord>();
   const mounted = useRef(true);
   const historyRequest = useRef(0);
@@ -57,6 +59,7 @@ export function HostedShareDialog({
     if (result.ok) {
       setHistory(result.value.records);
       setRecoveryErrors(result.value.recoveryErrors);
+      setRecoveryWarnings(result.value.recoveryWarnings ?? []);
       return true;
     }
     if (reportError) setError(result.error.message);
@@ -85,6 +88,7 @@ export function HostedShareDialog({
       bundleNumbers: artifacts.bundleNumbers,
       includeArchive,
       expiresInDays,
+      senderName: senderName.trim() || undefined,
     });
     if (!mounted.current) return;
     if (!result.ok) {
@@ -105,6 +109,29 @@ export function HostedShareDialog({
     setError(undefined);
     try {
       await refreshHistory();
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  };
+  const dismissRecovery = async () => {
+    if (busy) return;
+    setBusy(true);
+    historyRequest.current += 1;
+    try {
+      for (const warning of recoveryWarnings) {
+        const result = await window.imnota.dismissHostedShareRecoveryWarning({ id: warning.id });
+        if (!result.ok) {
+          if (mounted.current) setError('Could not dismiss this warning. Try again.');
+          return;
+        }
+      }
+      if (mounted.current) {
+        setRecoveryWarnings([]);
+        setRecoveryErrors([]);
+        setError(undefined);
+      }
+    } catch {
+      if (mounted.current) setError('Could not dismiss this warning. Try again.');
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -133,38 +160,39 @@ export function HostedShareDialog({
   const recordUnavailable = Boolean(record?.revokedAt) || recordExpired;
   return (
     <Modal
-      title="Publish a hosted prompt"
-      description="A read-only HTTPS copy is created only after you approve the finalized artifacts below."
+      title="Share your bundle"
       onClose={busy ? () => undefined : onClose}
       closeTestId="hosted-share-close"
     >
       <section className="hosted-share" aria-busy={busy}>
         {!record ? (
           <>
-            <div className="hosted-share-privacy">
-              <ShieldCheck size={18} aria-hidden="true" />
-              <div>
-                <strong>Review before upload</strong>
-                <p>
-                  Imnota will upload only the listed generated Markdown and rendered PNG artifacts. Review
-                  their contents before publishing the link.
-                </p>
-                <p>The hosting provider may record visits and share URLs in access logs.</p>
-              </div>
-            </div>
+            <h3 className="hosted-share-step">1. Check your bundle</h3>
             <div className="hosted-share-manifest">
               <strong>{artifacts.title}</strong>
               <span>
-                1 Markdown file · {imageCount} rendered PNG
+                Markdown · {imageCount} PNG
                 {imageCount === 1 ? '' : 's'}
               </span>
-              <ul>
-                <li>prompt.md</li>
-                {artifacts.imageBundleNumbers.map((number) => (
-                  <li key={number}>prompt-{String(number).padStart(3, '0')}.png</li>
-                ))}
-              </ul>
+              <details className="hosted-share-file-details">
+                <summary>Included files</summary>
+                <ul>
+                  <li>prompt.md</li>
+                  {artifacts.imageBundleNumbers.map((number) => (
+                    <li key={number}>prompt-{String(number).padStart(3, '0')}.png</li>
+                  ))}
+                </ul>
+              </details>
             </div>
+            <TextInput
+              label="Your name (optional)"
+              value={senderName}
+              maxLength={80}
+              disabled={busy}
+              onChange={(event) => setSenderName(event.target.value)}
+              placeholder="e.g. Dylan"
+            />
+            <h3 className="hosted-share-step">2. Choose who can open it</h3>
             {quotaProblem && (
               <p className="hosted-share-error" role="alert">
                 <AlertTriangle size={15} />
@@ -178,7 +206,7 @@ export function HostedShareDialog({
                 checked={approved}
                 onChange={(event) => setApproved(event.target.checked)}
               />{' '}
-              I understand that anyone with the link can read these files until it expires or I revoke it.
+              Anyone with the link can view and download this bundle until it expires or I revoke it.
             </label>
             <div className="hosted-share-options">
               <label>
@@ -187,6 +215,7 @@ export function HostedShareDialog({
                   value={expiresInDays}
                   onChange={(event) => setExpiresInDays(Number(event.target.value))}
                 >
+                  <option value={1}>1 day</option>
                   <option value={7}>7 days</option>
                   <option value={14}>14 days</option>
                   <option value={30}>30 days</option>
@@ -201,14 +230,17 @@ export function HostedShareDialog({
                 Include downloadable ZIP
               </label>
             </div>
-            <div className="hosted-share-pair">
-              <div>
-                <strong>1. Pair this upload</strong>
-                <p>
-                  Open app.imnota.xyz in your browser, then paste its one-use code here. The code expires in
-                  about 10 minutes.
-                </p>
-              </div>
+            <details className="hosted-share-info">
+              <summary>
+                <Info size={14} aria-hidden="true" /> About sharing
+              </summary>
+              <p>
+                Only this bundle is uploaded. Copies already saved by someone else stay with them. The site
+                records views and downloads; the hosting provider may keep access logs.
+              </p>
+            </details>
+            <details className="hosted-share-info">
+              <summary>Use a pairing code instead</summary>
               <Button
                 variant="soft"
                 disabled={Boolean(quotaProblem)}
@@ -218,20 +250,20 @@ export function HostedShareDialog({
                     .then((result) => !result.ok && onError(result.error.message))
                 }
               >
-                <ExternalLink size={14} /> Open pairing page
+                <ExternalLink size={14} /> Get a pairing code
               </Button>
-            </div>
-            <TextInput
-              label="2. One-use pairing code"
-              disabled={Boolean(quotaProblem)}
-              autoComplete="off"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder="Paste code from app.imnota.xyz/new"
-            />
+              <TextInput
+                label="Pairing code"
+                disabled={Boolean(quotaProblem)}
+                autoComplete="off"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder="Paste your code"
+              />
+            </details>
             {busy && (
               <p className="hosted-share-progress" role="status">
-                Uploading approved artifacts securely…
+                Creating your link…
               </p>
             )}
             <footer className="hosted-share-actions">
@@ -245,10 +277,11 @@ export function HostedShareDialog({
               ) : (
                 <Button
                   variant="primary"
-                  disabled={Boolean(quotaProblem) || !approved || !token.trim()}
+                  className="hosted-share-create"
+                  disabled={Boolean(quotaProblem) || !approved}
                   onClick={() => void upload()}
                 >
-                  Publish HTTPS link
+                  Create link
                 </Button>
               )}
             </footer>
@@ -261,18 +294,14 @@ export function HostedShareDialog({
               <Check size={22} aria-hidden="true" />
             )}
             <h3>
-              {record.revokedAt
-                ? 'Hosted prompt was revoked'
-                : recordExpired
-                  ? 'Hosted prompt has expired'
-                  : 'Hosted prompt is ready'}
+              {record.revokedAt ? 'Link revoked' : recordExpired ? 'Link expired' : 'Your link is ready'}
             </h3>
             <p>
               {record.revokedAt
                 ? 'The published link can no longer be opened.'
                 : recordExpired
                   ? `The published link expired ${formatExpiry(record.expiresAt)} and can no longer be opened.`
-                  : `It expires ${formatExpiry(record.expiresAt)}. Anyone with this link can view the approved artifacts until then.`}
+                  : `Anyone with the link can open it until ${formatExpiry(record.expiresAt)}.`}
             </p>
             <TextInput label="Share link" readOnly value={record.url} />
             <div className="hosted-share-actions">
@@ -308,7 +337,7 @@ export function HostedShareDialog({
           <div className="hosted-share-recovery-errors" role="alert">
             <AlertTriangle size={15} aria-hidden="true" />
             <div>
-              <strong>Some previous uploads could not be recovered</strong>
+              <strong>An earlier share needs attention</strong>
               {recoveryErrors.map((message) => (
                 <p key={message}>{message}</p>
               ))}
@@ -316,15 +345,7 @@ export function HostedShareDialog({
                 <Button variant="ghost" disabled={busy} onClick={() => void retryRecovery()}>
                   Retry recovery
                 </Button>
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    historyRequest.current += 1;
-                    setRecoveryErrors([]);
-                    setError(undefined);
-                  }}
-                >
+                <Button variant="ghost" disabled={busy} onClick={() => void dismissRecovery()}>
                   Dismiss
                 </Button>
               </div>
@@ -333,7 +354,7 @@ export function HostedShareDialog({
         )}
         {history.length > 0 && (
           <details className="hosted-share-history">
-            <summary>Local share history ({history.length})</summary>
+            <summary>Your shared links ({history.length})</summary>
             {history.map((item) => {
               const expired = isExpired(item);
               const unavailable = Boolean(item.revokedAt) || expired;
@@ -369,6 +390,14 @@ export function HostedShareDialog({
             })}
           </details>
         )}
+        <a
+          className="hosted-share-owner-link"
+          href="https://app.imnota.xyz/owner"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Site owner dashboard <ExternalLink size={12} aria-hidden="true" />
+        </a>
         {revokeTarget && (
           <Modal
             title="Revoke this hosted link?"

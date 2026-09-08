@@ -67,7 +67,7 @@ it('uses an honest file action for oversized prompts and disables fallbacks befo
   fireEvent.click(screen.getByRole('button', { name: /prepare files/i }));
   expect(onPrepareFreshFiles).toHaveBeenCalledOnce();
   expect(screen.getByText('Use saved files.')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /options/i })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /options/i })).toBeEnabled();
 });
 
 it('keeps individual formats in an accessible options menu', () => {
