@@ -68,13 +68,13 @@ The green **Copy Bundle** button below the image copies Markdown and PNG togethe
 
 ## Share a hosted link
 
-Choose **Share online**, check the bundle, and optionally enter your name. New links expire after **1 day** by default; 7, 14 and 30 days are also available. A downloadable ZIP is included by default. Confirm that anyone with the link can view and download the bundle.
+Choose **Share online**, check the bundle, and optionally enter your name. Imnota remembers the name on this device; you can edit or clear it in **Settings → Sharing**. New links expire after **1 day** by default; 7, 14 and 30 days are also available. Every new desktop share includes a downloadable ZIP. Turn on **I understand** to confirm that everyone with the link can open the bundle. This acknowledgement resets for each share.
 
-Choose **Create link**. Imnota handles pairing and returns a link to copy or open. **Use a pairing code instead** retains the manual browser option when needed. Local copy and export remain available offline.
+Choose **Create link**. Imnota handles pairing and returns a link to copy or open. **Pairing code**, beside Back and Create link, opens the manual fallback when needed. Local copy and export remain available offline. **Open files** prepares the export if needed before opening it, without changing the clipboard.
 
 The shared page shows your name when supplied, for example, “Dylan shared this prompt bundle with you.” Use **Copy Bundle** at the top or below an image, its dropdown for individual formats, and **Download ZIP** for the complete share. For a multi-bundle share, select the bundle at the top; each copy uses its matching Markdown and PNG. Older shares without bundle metadata still include the full share Markdown with each image, as explained in **Copying help**. Downloads remain available if clipboard access fails.
 
-Use **Revoke link** on the result or in **Your shared links** to stop access. Revocation cannot remove copies someone already saved. **Retry recovery** checks uploads interrupted by a network failure. **Dismiss** remembers the specific warning across dialog reopening and app restarts without deleting history or recovery information. A different failure or a new failed upload can still show a warning.
+Open **Settings → Sharing** to copy, open or revoke links created on this device, even when no bundle is open. You can also use **Revoke link** on the share result or in **Your shared links**. Revocation cannot remove copies someone already saved. **Retry recovery** checks uploads interrupted by a network failure. **Dismiss** remembers the specific warning across dialog reopening and app restarts without deleting history or recovery information. A different failure or a new failed upload can still show a warning.
 
 Editable drawing sources, original project folders, local paths and recovery journals are not uploaded. Inspect the generated content itself before sharing: annotations, screenshot pixels and Markdown can contain sensitive information even when project metadata is excluded. The hosting provider may retain access logs; see the [service privacy and operations notes](../share-service/docs/hostinger-deployment.md).
 

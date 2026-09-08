@@ -1188,23 +1188,46 @@ async function verifyPromptCopyOptions(driver: NativeUiDriver, bundleCount: numb
       const started = Date.now();
       const check = () => {
         const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${index}];
-        const items = [...(card?.querySelectorAll('[role="menuitem"]') ?? [])];
-        const ready = ['Copy Markdown', 'Copy PNG'].every((label) => items.some((item) => item.textContent?.trim() === label && !item.disabled));
+        const menuId = card?.querySelector('button[aria-label="Copy options"]')?.getAttribute('aria-controls');
+        const menu = menuId ? document.getElementById(menuId) : null;
+        const items = [...(menu?.querySelectorAll('[role="menuitem"]') ?? [])];
+        const bounds = menu?.getBoundingClientRect();
+        const visible = bounds && bounds.width > 0 && bounds.height > 0 && bounds.left >= 0 && bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight;
+        const ready = visible && ['Copy Markdown', 'Copy PNG', 'Open files'].every((label) => items.some((item) => item.textContent?.trim() === label && !item.disabled));
         if (ready) return resolve(true);
         if (Date.now() - started > 5000) return reject(new Error('Bundle ${index + 1} copy-format options were not ready.'));
         setTimeout(check, 25);
       };
       check();
     })`);
-    const closePoint = await driver.evaluate<SmokePoint>(`(() => {
-      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${index}];
-      const heading = card?.querySelector('h3');
-      if (!heading) throw new Error('Bundle ${index + 1} heading is unavailable');
-      const bounds = heading.getBoundingClientRect();
-      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
-    })()`);
-    await driver.clickPoint(closePoint);
+    await driver.press('Escape');
+    await driver.waitFor({ selector: '[role="menu"]' }, { absent: true });
+    await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"]' });
   }
+}
+
+async function exerciseSharingPreferences(driver: NativeUiDriver, host: SmokeWorkflowHost): Promise<void> {
+  await driver.click({ text: 'Sharing', exact: true });
+  const input = { selector: '[data-testid="sharing-sender-name"]' };
+  await driver.fill(input, 'Native Sharing');
+  await driver.press('Tab');
+  const started = Date.now();
+  while ((await host.readSettings()).sharingSenderName !== 'Native Sharing') {
+    if (Date.now() - started > 10_000) throw new Error('Sharing sender name was not persisted.');
+    await delay(50);
+  }
+  driver.setWindow(await host.reopenWindow());
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
+  await driver.click({ text: 'Sharing', exact: true });
+  await driver.waitFor(input);
+  const remembered = await driver.evaluate<string>(
+    `document.querySelector('[data-testid="sharing-sender-name"]').value`,
+  );
+  if (remembered !== 'Native Sharing') throw new Error('Sharing sender name was lost on window reopen.');
+  const hasOwnerLink = await driver.evaluate<boolean>(
+    `Boolean(document.querySelector('a[href="https://app.imnota.xyz/owner"]'))`,
+  );
+  if (hasOwnerLink) throw new Error('Owner administration leaked into desktop Sharing settings.');
 }
 
 interface PromptSet {
@@ -1647,6 +1670,8 @@ export async function runSmokeWorkflow(
   await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
+  await exerciseSharingPreferences(driver, host);
+  assertions.push('Sharing settings sender name persists across window reopen');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });

@@ -1,8 +1,19 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
-afterEach(cleanup);
+const initialShowPopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'showPopover');
+const initialHidePopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hidePopover');
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  if (initialShowPopover) Object.defineProperty(HTMLElement.prototype, 'showPopover', initialShowPopover);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>).showPopover;
+  if (initialHidePopover) Object.defineProperty(HTMLElement.prototype, 'hidePopover', initialHidePopover);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>).hidePopover;
+});
 
 it('disables preview while another prompt operation is running', () => {
   const onLoadPreview = vi.fn();
@@ -70,6 +81,28 @@ it('uses an honest file action for oversized prompts and disables fallbacks befo
   expect(screen.getByRole('button', { name: /options/i })).toBeEnabled();
 });
 
+it('offers Open files before an artifact exists so the controller can prepare it', () => {
+  const onOpenFiles = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model({ artifactSessionId: undefined })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onOpenFiles={onOpenFiles}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  const openFiles = screen.getByRole('menuitem', { name: 'Open files' });
+  expect(openFiles).toBeEnabled();
+  fireEvent.click(openFiles);
+  expect(onOpenFiles).toHaveBeenCalledWith({
+    planId: 'plan-current',
+    artifactSessionId: undefined,
+    bundleNumber: 2,
+  });
+});
+
 it('keeps individual formats in an accessible options menu', () => {
   const onCopyMarkdown = vi.fn();
   const onCopyImage = vi.fn();
@@ -86,13 +119,16 @@ it('keeps individual formats in an accessible options menu', () => {
 
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Markdown' }));
+  const copyMarkdown = screen.getByRole('menuitem', { name: 'Copy Markdown' });
+  copyMarkdown.focus();
+  fireEvent.click(copyMarkdown);
   expect(onCopyMarkdown).toHaveBeenCalledWith({
     planId: 'plan-current',
     artifactSessionId: 'session-current',
     bundleNumber: 2,
   });
   expect(menu).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: /options/i }));
 
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Copy PNG' }));
@@ -101,6 +137,34 @@ it('keeps individual formats in an accessible options menu', () => {
     artifactSessionId: 'session-current',
     bundleNumber: 2,
   });
+});
+
+function BusyTransitionCard() {
+  const [state, setState] = useState<PromptBundleCardModel['state']>('idle');
+  return (
+    <section role="dialog" tabIndex={-1}>
+      <button type="button">Dialog fallback</button>
+      <PromptBundleCard
+        bundle={model({ state })}
+        onCopyFresh={vi.fn()}
+        onPrepareFreshFiles={vi.fn()}
+        onCopyMarkdown={() => setState('copying')}
+      />
+    </section>
+  );
+}
+
+it('keeps focus inside the dialog when an option makes its trigger busy', () => {
+  render(<BusyTransitionCard />);
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  const copyMarkdown = screen.getByRole('menuitem', { name: 'Copy Markdown' });
+  copyMarkdown.focus();
+  fireEvent.click(copyMarkdown);
+
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /options/i })).toBeDisabled();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dialog fallback' }));
 });
 
 it('shows a gray copied state while leaving Copy Bundle available again', () => {
@@ -117,4 +181,75 @@ it('shows a gray copied state while leaving Copy Bundle available again', () => 
   expect(button).toHaveClass('is-copied');
   fireEvent.click(button);
   expect(onCopyFresh).toHaveBeenCalledOnce();
+});
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+it('uses a native top-layer popover inside the dialog and keeps it within the viewport', async () => {
+  let triggerTop = 132;
+  const order: string[] = [];
+  const showPopover = vi.fn(function (this: HTMLElement) {
+    order.push('show');
+    this.setAttribute('data-popover-open', 'true');
+  });
+  const hidePopover = vi.fn(function (this: HTMLElement) {
+    order.push('hide');
+    this.removeAttribute('data-popover-open');
+  });
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: showPopover });
+  Object.defineProperty(HTMLElement.prototype, 'hidePopover', { configurable: true, value: hidePopover });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.getAttribute('role') === 'dialog') return rect(40, 20, 260, 140);
+    if (this.getAttribute('aria-label') === 'Copy options') return rect(260, triggerTop, 36, 32);
+    if (this.getAttribute('role') === 'menu') {
+      order.push('measure');
+      return rect(0, 0, 160, 100);
+    }
+    return rect(0, 0, 0, 0);
+  });
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 180 });
+  render(
+    <section role="dialog" style={{ backdropFilter: 'blur(18px)' }}>
+      <PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />
+    </section>,
+  );
+
+  const dialog = screen.getByRole('dialog');
+  const options = screen.getByRole('button', { name: /options/i });
+  fireEvent.click(options);
+  const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
+  expect(dialog).toContainElement(menu);
+  expect(menu).toHaveAttribute('popover', 'manual');
+  await waitFor(() => expect(menu).toHaveStyle({ left: '136px', top: '26px' }));
+  expect(menu).toHaveClass('prompt-bundle-options-menu');
+  expect(showPopover).toHaveBeenCalledOnce();
+  expect(order.indexOf('show')).toBeLessThan(order.indexOf('measure'));
+
+  triggerTop = 28;
+  fireEvent.scroll(dialog);
+  await waitFor(() => expect(menu).toHaveStyle({ top: '20px' }));
+
+  fireEvent.keyDown(menu, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  expect(document.activeElement).toBe(options);
+  expect(hidePopover).toHaveBeenCalledOnce();
+
+  fireEvent.click(options);
+  fireEvent.pointerDown(document.body);
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  expect(showPopover).toHaveBeenCalledTimes(2);
+  expect(hidePopover).toHaveBeenCalledTimes(2);
 });
