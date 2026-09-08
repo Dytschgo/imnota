@@ -223,7 +223,10 @@ export function SearchDialog({
               {response.warnings?.length ? ' Some local content could not be searched.' : ''}
             </p>
           ) : response?.truncated ? (
-            <p>Showing the best {results.length} matches. Refine your search for more specific results.</p>
+            <p>
+              Showing {results.length} matches within search limits. Some content or results may not be shown.
+              {response.warnings?.length ? ' Some local files were unavailable or too large to search.' : ''}
+            </p>
           ) : response ? (
             <p>
               {results.length} {results.length === 1 ? 'match' : 'matches'}
