@@ -1,6 +1,6 @@
 # Imnota UI Overhaul Plan
 
-**Status:** Implementation in progress on `feature/ui-overhaul-20260908`, based on `origin/main` at `3475c2d`. The original audit below is retained as the design brief; the execution notes supersede its assumptions about missing service code.
+**Status:** Desktop and hosted-service scope implemented in [PR #32](https://github.com/Dytschgo/imnota/pull/32), initially based on `3475c2d` and integrated with main through `00827cd`. The original audit below is retained as the design brief; the execution notes supersede its assumptions about missing service code.
 
 **Audit date:** 2026-09-08
 
