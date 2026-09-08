@@ -1,14 +1,8 @@
 .hosted-share {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-}
-.hosted-share-step {
-  margin: 4px 0 0;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink);
+  gap: 20px;
+  padding: 22px;
 }
 .hosted-share-info,
 .hosted-share-file-details {
@@ -36,19 +30,6 @@
   border-color: var(--success);
   color: #102419;
 }
-.hosted-share-privacy,
-.hosted-share-pair {
-  display: flex;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--indigo-light) 35%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--indigo-light) 8%, var(--surface));
-}
-.hosted-share-privacy svg {
-  color: var(--indigo-light);
-  flex: none;
-}
 .hosted-share p {
   margin: 4px 0 0;
   color: var(--ink-3);
@@ -74,36 +55,140 @@
   overflow: auto;
   color: var(--ink-2);
 }
-.hosted-share-check {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.4;
+.hosted-share-expiry {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.hosted-share-options {
-  display: flex;
-  align-items: end;
-  gap: 16px;
-}
-.hosted-share-options label:first-child {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.hosted-share-expiry legend {
+  padding: 0 0 8px;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: 12px;
 }
-.hosted-share-options select {
-  min-height: 30px;
+.hosted-share-expiry-choices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
   background: var(--input);
-  color: var(--ink);
   border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.hosted-share-expiry-choices label {
+  position: relative;
+  cursor: pointer;
+}
+.hosted-share-expiry-choices input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.hosted-share-expiry-choices span {
+  display: block;
+  padding: 9px 4px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  border: 1px solid transparent;
   border-radius: 6px;
 }
-.hosted-share-pair {
+.hosted-share-expiry-choices input:checked + span {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: 0 1px 3px #0002;
+}
+.hosted-share-expiry-choices input:focus-visible + span {
+  outline: 2px solid var(--success);
+  outline-offset: 2px;
+}
+.hosted-share-expiry:disabled {
+  opacity: 0.6;
+}
+.hosted-share-consent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 0;
+  border-block: 1px solid var(--line);
+}
+.hosted-share-consent p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.hosted-share-consent-switch {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hosted-share-consent-switch:focus-visible {
+  outline: 2px solid var(--success);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.hosted-share-consent-switch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.hosted-share-switch-track {
+  display: flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--ink-4);
+  transition: background 140ms ease;
+}
+.hosted-share-switch-track > span {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0003;
+  transition: transform 140ms ease;
+}
+.hosted-share-consent-switch[aria-checked='true'] .hosted-share-switch-track {
+  background: var(--success);
+}
+.hosted-share-consent-switch[aria-checked='true'] .hosted-share-switch-track > span {
+  transform: translateX(16px);
+}
+.hosted-share-pairing-fallback {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input);
+}
+.hosted-share-pairing-fallback > button {
+  justify-self: start;
+}
+.hosted-share-create-actions {
+  align-items: center;
+}
+.hosted-share-create-actions .hosted-share-pairing-toggle {
+  margin-right: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hosted-share-switch-track,
+  .hosted-share-switch-track > span {
+    transition: none;
+  }
 }
 .hosted-share-actions {
   display: flex;
@@ -160,25 +245,18 @@
 .hosted-share-history summary {
   cursor: pointer;
 }
-.hosted-share-owner-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  align-self: flex-start;
-  font-size: 11px;
-  color: var(--ink-3);
-}
 .hosted-share-history p {
   margin-left: 8px;
 }
 @media (max-width: 520px) {
-  .hosted-share-pair {
-    align-items: flex-start;
-    flex-direction: column;
+  .hosted-share {
+    padding: 16px;
+    gap: 16px;
   }
-  .hosted-share-options {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 9px;
+  .hosted-share-create-actions {
+    gap: 4px;
+  }
+  .hosted-share-create-actions .btn {
+    padding-inline: 9px;
   }
 }

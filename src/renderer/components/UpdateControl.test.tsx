@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { UpdateControl } from './UpdateControl';
 import type { ImnotaBridge, UpdateStatus } from '../../shared/types';
 import { useAppStore } from '../store';
+import { saveWorkspaceSettingsPatch } from '../settings/sharing-preferences';
 afterEach(cleanup);
 function setup() {
   useAppStore.setState({ settings: { ...useAppStore.getState().settings, updateChannel: 'stable' } });
@@ -53,6 +54,47 @@ it('requires confirmation before nightly and supports cancelling without changin
   fireEvent.click(screen.getByRole('button', { name: 'Use Nightly' }));
   await waitFor(() => expect(api.setSettings).toHaveBeenCalledWith({ updateChannel: 'nightly' }));
   expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
+});
+
+it('serializes a channel change behind a pending sender-name save and preserves both settings', async () => {
+  const api = setup();
+  let persisted = { ...useAppStore.getState().settings };
+  let finishName!: () => void;
+  const setSettings = vi.fn((patch: Partial<typeof persisted>) => {
+    if (setSettings.mock.calls.length === 1) {
+      return new Promise<typeof persisted>((resolve) => {
+        finishName = () => {
+          persisted = { ...persisted, ...patch };
+          resolve({ ...persisted });
+        };
+      });
+    }
+    persisted = { ...persisted, ...patch };
+    return Promise.resolve({ ...persisted });
+  });
+  window.imnota.setSettings = setSettings;
+
+  const nameSave = saveWorkspaceSettingsPatch({ sharingSenderName: 'Dylan' }).then((settings) => {
+    useAppStore.getState().set({ settings });
+  });
+  render(<UpdateControl />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Update channel' }), {
+    target: { value: 'nightly' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Use Nightly' }));
+
+  await waitFor(() => expect(setSettings).toHaveBeenCalledOnce());
+  expect(api.setSettings).not.toHaveBeenCalled();
+  finishName();
+  await nameSave;
+  await waitFor(() => expect(setSettings).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(useAppStore.getState().settings).toMatchObject({
+      sharingSenderName: 'Dylan',
+      updateChannel: 'nightly',
+    }),
+  );
+  expect(setSettings.mock.calls).toEqual([[{ sharingSenderName: 'Dylan' }], [{ updateChannel: 'nightly' }]]);
 });
 
 it('disables channel changes while checking, downloading or awaiting installation', async () => {

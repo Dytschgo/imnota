@@ -5,8 +5,8 @@ Updated 2026-09-08 after the published nightly. This is the current delivery sta
 ## Released baseline
 
 - Stable: [v0.2.5](https://github.com/Dytschgo/imnota/releases/tag/v0.2.5).
-- Verified nightly baseline: [v0.2.6-nightly.20260908.34218700571](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260908.34218700571), commit `5deb20c43c06396a2b3c71beba1aa7a6438f5984`.
-- Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/34218700571) passed Windows, macOS and Linux checks. All 13 public assets, three channel manifests and the release tag were verified. Stable remained Latest. This baseline includes the cleanup fixes and system-aware networking for hosted shares.
+- Verified nightly baseline: [v0.2.6-nightly.20260908.34226568161](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260908.34226568161), commit `f0d2609e8624f86cea080ea7a5c88a92ee866d42`.
+- Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/34226568161) passed Windows, macOS and Linux checks. All 13 public assets, three channel manifests and the release tag were verified. Stable remained Latest. This baseline includes the cleanup fixes, system-aware networking and Collection 10 sharing improvements.
 - Hosted static sharing is deployed at `app.imnota.xyz`; see the [deployment evidence](share-service/docs/deployment-verification.md).
 
 The product remains an open-source, local-first handoff tool. Screenshots, drawings and Markdown text blocks form one ordered collection. Local editing, copy and export require neither an account nor the sharing service. Hosted sharing is an explicit upload of finalized artifacts, with expiry and revocation; it is not project synchronization or an AI integration.
@@ -30,7 +30,9 @@ The former plan's ban on all server work was superseded by its later hosted-stat
 
 ## Remaining acceptance and operational work
 
-The next nightly adds the Collection 10 sharing feedback: green **Copy Bundle** split buttons, separate format options, **Bundle 1** labels, a simpler hosted page and upload dialog, one-day default links, automatic pairing, optional sender names, matching per-bundle Markdown, persistent dismissal of individual recovery warnings, and an owner-only dashboard with aggregate usage and revocation. Owner access uses a privately provisioned high-entropy key and short-lived secure sessions; it does not add general user accounts. Structured Markdown and sender metadata count toward service storage quota.
+The released Collection 10 update includes green **Copy Bundle** split buttons, separate format options, **Bundle 1** labels, one-day default links, automatic pairing, optional sender names, matching per-bundle Markdown, persistent dismissal of individual recovery warnings, and an owner-only dashboard with aggregate usage and revocation. Owner access uses a privately provisioned high-entropy key and short-lived secure sessions; it does not add general user accounts. Structured Markdown and sender metadata count toward service storage quota.
+
+The Collection 11 follow-up keeps copy menus within the visible dialog, prepares exports when **Open files** is used before copying, and adds **Settings → Sharing** for this device's links and saved sender name. The upload form always includes a ZIP, uses a fresh **I understand** switch for each share, and puts the optional pairing-code fallback beside Back and Create link. Owner administration is accessed separately on the website and is no longer linked from the desktop share dialog.
 
 These are open verification or operating tasks, not claims that the implementation is absent.
 
