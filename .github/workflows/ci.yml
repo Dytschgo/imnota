@@ -9,7 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: classify
+        name: Classify the exact PR changes
+        run: node scripts/ci-changes.mjs
+        env:
+          IMNOTA_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          IMNOTA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   share-service:
+    needs: changes
+    if: ${{ always() && !cancelled() }}
+    env:
+      RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
     name: Share service security (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -20,19 +42,38 @@ jobs:
       run:
         working-directory: share-service
     steps:
+      - name: Documentation-only PR
+        if: env.RUN_APPLICATION != 'true'
+        working-directory: .
+        shell: bash
+        run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
+        if: env.RUN_APPLICATION == 'true'
       - uses: actions/setup-node@v4
+        if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: share-service/package-lock.json
       - run: npm ci
+        if: env.RUN_APPLICATION == 'true'
       - run: npm test
+        if: env.RUN_APPLICATION == 'true'
       - run: npm audit --omit=dev --audit-level=high
+        if: env.RUN_APPLICATION == 'true'
 
   quality:
+    needs: changes
+    if: ${{ always() && !cancelled() }}
+    env:
+      RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Documentation-only PR
+        if: env.RUN_APPLICATION != 'true'
+        working-directory: .
+        shell: bash
+        run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
@@ -44,20 +85,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm typecheck
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm test
+        if: env.RUN_APPLICATION == 'true'
       - run: npm ci --prefix share-service
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm test:share-contract
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm build
+        if: env.RUN_APPLICATION == 'true'
       - run: bash -n scripts/install.sh
+        if: env.RUN_APPLICATION == 'true'
       - name: Configure Electron sandbox helper
+        if: env.RUN_APPLICATION == 'true'
         run: |
           sandbox_helper="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
           sudo chown root:root "$sandbox_helper"
           sudo chmod 4755 "$sandbox_helper"
       - run: xvfb-run --auto-servernum pnpm smoke
+        if: env.RUN_APPLICATION == 'true'
 
   package:
+    needs: changes
+    if: ${{ always() && !cancelled() }}
+    env:
+      RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,39 +124,52 @@ jobs:
             command: pnpm package:mac
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Documentation-only PR
+        if: env.RUN_APPLICATION != 'true'
+        working-directory: .
+        shell: bash
+        run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
+        if: env.RUN_APPLICATION == 'true'
       - uses: pnpm/action-setup@v4
+        if: env.RUN_APPLICATION == 'true'
         with:
           version: 11.25.0
       - uses: actions/setup-node@v4
+        if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_APPLICATION == 'true'
       - run: ${{ matrix.command }}
+        if: env.RUN_APPLICATION == 'true'
       - name: Test platform-specific behavior
+        if: env.RUN_APPLICATION == 'true'
         run: pnpm test:platform
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - run: npm ci --prefix share-service
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm test:share-contract
+        if: env.RUN_APPLICATION == 'true'
       - name: Verify packaged Mac application
-        if: matrix.os == 'macos-latest'
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
         env:
           IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
         run: |
           node --test scripts/update-macos.test.mjs
           bash scripts/verify-mac.sh
       - name: Smoke packaged Windows application
-        if: matrix.os == 'windows-latest'
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: node scripts/verify-packaged.mjs windows
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-windows
       - name: Compare approved Windows visuals
-        if: matrix.os == 'windows-latest'
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
-        if: always() && matrix.os == 'windows-latest'
+        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'windows-latest')
         uses: actions/upload-artifact@v7
         with:
           name: windows-visual-evidence
@@ -110,10 +177,11 @@ jobs:
             ${{ runner.temp }}/imnota-verification-artifacts-windows/
             ${{ runner.temp }}/imnota-visual-differences/
       - name: Smoke packaged Linux application
-        if: matrix.os == 'ubuntu-latest'
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
       - name: Retain review installers and build diagnostics
         uses: actions/upload-artifact@v7
+        if: env.RUN_APPLICATION == 'true'
         with:
           name: imnota-${{ matrix.os }}
           path: |
