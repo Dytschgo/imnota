@@ -121,7 +121,12 @@ export interface ProjectSnapshot {
   recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
-export type ProjectListItem = ProjectData & { projectPath: string; searchText?: string };
+export type ProjectListItem = ProjectData & {
+  projectPath: string;
+  searchText?: string;
+  /** Present on native list responses; optional for older bridge implementations and fixtures. */
+  projectRevision?: string;
+};
 
 export interface WorkspaceSettings {
   workspacePath: string | null;

@@ -1293,14 +1293,20 @@ function registerIpc(): void {
       try {
         const projectPath = path.join(settings.workspacePath, entry.name);
         if (existsSync(path.join(projectPath, 'project.json'))) {
-          const project = await readProject(projectPath);
+          const baseline = await readProjectMutationBaseline(projectPath);
+          const project = baseline.project;
           const searchable = [project.name, project.description, project.status];
           for (const shot of project.screenshots) {
             searchable.push(shot.title, shot.description, shot.priority);
           }
           for (const item of project.contentItems ?? [])
             searchable.push(item.kind === 'drawing' ? item.title : (item.preview ?? ''));
-          projects.push({ ...project, projectPath, searchText: searchable.join(' ').toLowerCase() });
+          projects.push({
+            ...project,
+            projectPath,
+            projectRevision: baseline.projectRevision,
+            searchText: searchable.join(' ').toLowerCase(),
+          });
         }
       } catch {
         /* corrupt projects stay discoverable through open */
