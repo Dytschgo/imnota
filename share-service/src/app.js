@@ -13,6 +13,7 @@ import sanitizeHtml from 'sanitize-html';
 import { loadConfig } from './config.js';
 import { openDatabase } from './database.js';
 import { directorySize } from './maintenance.js';
+import { installOwnerRoutes, recordUsage } from './owner.js';
 import {
   deriveToken,
   isSafePngFilename,
@@ -430,6 +431,8 @@ export function createService(overrides = {}) {
   const pairingJsonParser = express.json({ limit: '1kb', strict: true });
   const uploadJsonParser = express.json({ limit: config.jsonLimit, strict: true });
 
+  installOwnerRoutes({ app, db, config, now });
+
   app.get(
     '/health',
     publicLimiter,
@@ -814,7 +817,7 @@ export function createService(overrides = {}) {
     }
   });
 
-  app.use('/s', publicLimiter, (request, response, next) => {
+  app.use('/s', publicLimiter, recordUsage({ db, now }), (request, response, next) => {
     response.set({
       'X-Robots-Tag': 'noindex, nofollow',
       'Cache-Control': 'private, no-store, no-transform',
