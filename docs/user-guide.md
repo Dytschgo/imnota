@@ -78,6 +78,12 @@ Use **Revoke link** on the result or in **Your shared links** to stop access. Re
 
 Editable drawing sources, original project folders, local paths and recovery journals are not uploaded. Inspect the generated content itself before sharing: annotations, screenshot pixels and Markdown can contain sensitive information even when project metadata is excluded. The hosting provider may retain access logs; see the [service privacy and operations notes](../share-service/docs/hostinger-deployment.md).
 
+## Manage the sharing site
+
+The site owner can sign in at [app.imnota.xyz/owner](https://app.imnota.xyz/owner) with the private owner access key. The dashboard lists hosted shares, filters active/expired/revoked links, and lets the owner revoke access. It is not a public account system.
+
+Usage counts start when this feature is deployed. They count successful page loads and Markdown, PNG and ZIP requests, not unique people. PNGs can load automatically when a page opens, and copying can request files too. No visitor IP addresses or browser identifiers are stored by these counters. Entries and counts disappear when the share is removed by the existing expiry/revocation cleanup policy.
+
 ## Appearance, settings and onboarding
 
 Appearance follows the operating-system theme by default. Settings also provides Light, Dark and curated color presets. Glass is cosmetic, respects reduced-transparency preferences and falls back to solid surfaces when transparency is unavailable or reduced.

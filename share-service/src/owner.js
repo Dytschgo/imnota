@@ -54,10 +54,7 @@ function setSessionCookie(response, token, maxAgeMs) {
 }
 
 function clearSessionCookie(response) {
-  response.append(
-    'Set-Cookie',
-    `${sessionCookie}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict`,
-  );
+  response.append('Set-Cookie', `${sessionCookie}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict`);
 }
 
 function error(response, status, code, message) {
@@ -147,9 +144,7 @@ function resetLoginThrottle(db) {
 }
 
 function encodeCursor(row) {
-  return Buffer.from(JSON.stringify({ createdAt: row.created_at, id: row.id }), 'utf8').toString(
-    'base64url',
-  );
+  return Buffer.from(JSON.stringify({ createdAt: row.created_at, id: row.id }), 'utf8').toString('base64url');
 }
 
 function decodeCursor(value) {
@@ -188,6 +183,8 @@ function serializeShare(row, timestamp) {
     expiresAt: new Date(row.expires_at).toISOString(),
     revokedAt: row.revoked_at === null ? null : new Date(row.revoked_at).toISOString(),
     byteSize: row.byte_size,
+    metadataBytes: row.metadata_byte_size,
+    storedBytes: row.byte_size + row.metadata_byte_size,
     hasArchive: row.has_archive === 1,
     status,
     usage: {
@@ -195,8 +192,7 @@ function serializeShare(row, timestamp) {
       markdownRequests: row.markdown_requests,
       pngRequests: row.asset_requests,
       zipRequests: row.archive_requests,
-      lastAccessedAt:
-        row.last_accessed_at === null ? null : new Date(row.last_accessed_at).toISOString(),
+      lastAccessedAt: row.last_accessed_at === null ? null : new Date(row.last_accessed_at).toISOString(),
     },
   };
 }
@@ -330,7 +326,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     parameters.push(limit + 1);
     const rows = db
       .prepare(
-        `SELECT s.id, s.title, s.created_at, s.expires_at, s.revoked_at, s.byte_size, s.has_archive,
+        `SELECT s.id, s.title, s.created_at, s.expires_at, s.revoked_at, s.byte_size, s.metadata_byte_size, s.has_archive,
           COALESCE(u.page_views, 0) AS page_views,
           COALESCE(u.markdown_requests, 0) AS markdown_requests,
           COALESCE(u.asset_requests, 0) AS asset_requests,
@@ -350,6 +346,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
           COALESCE(SUM(CASE WHEN s.revoked_at IS NULL AND s.expires_at <= ? THEN 1 ELSE 0 END), 0) AS expired,
           COALESCE(SUM(CASE WHEN s.revoked_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS revoked,
           COALESCE(SUM(s.byte_size), 0) AS byte_size,
+          COALESCE(SUM(s.metadata_byte_size), 0) AS metadata_byte_size,
           COALESCE(SUM(u.page_views), 0) AS page_views,
           COALESCE(SUM(u.markdown_requests), 0) AS markdown_requests,
           COALESCE(SUM(u.asset_requests), 0) AS asset_requests,
@@ -365,6 +362,8 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
         expired: totals.expired,
         revoked: totals.revoked,
         byteSize: totals.byte_size,
+        metadataBytes: totals.metadata_byte_size,
+        storedBytes: totals.byte_size + totals.metadata_byte_size,
         usage: {
           pageViews: totals.page_views,
           markdownRequests: totals.markdown_requests,
@@ -390,9 +389,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     return response.json({ id, revokedAt: new Date(revokedAt).toISOString() });
   });
 
-  app.use('/api/owner', (_request, response) =>
-    error(response, 404, 'not_found', 'Endpoint not found.'),
-  );
+  app.use('/api/owner', (_request, response) => error(response, 404, 'not_found', 'Endpoint not found.'));
 }
 
 export function recordUsage({ db, now = () => Date.now() }) {
@@ -413,6 +410,13 @@ export function recordUsage({ db, now = () => Date.now() }) {
     let column;
     if (parts.length === 1) column = 'page_views';
     else if (parts.length === 2 && parts[1] === 'markdown') column = 'markdown_requests';
+    else if (
+      parts.length === 4 &&
+      parts[1] === 'bundles' &&
+      /^[1-9][0-9]{0,2}$/u.test(parts[2]) &&
+      parts[3] === 'markdown'
+    )
+      column = 'markdown_requests';
     else if (parts.length === 3 && parts[1] === 'assets') column = 'asset_requests';
     else if (parts.length === 2 && parts[1] === 'archive.zip') column = 'archive_requests';
     if (!column) return next();

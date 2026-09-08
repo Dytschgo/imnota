@@ -3,9 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const dataDir = path.resolve(
-  process.env.IMNOTA_SHARE_DATA_DIR ?? path.join(os.homedir(), '.imnota-shares'),
-);
+const dataDir = path.resolve(process.env.IMNOTA_SHARE_DATA_DIR ?? path.join(os.homedir(), '.imnota-shares'));
 const hashPath = path.resolve(dataDir, 'owner-access-key.sha256');
 if (path.dirname(hashPath) !== dataDir)
   throw new Error('The owner access-key hash file must remain inside the private data directory.');

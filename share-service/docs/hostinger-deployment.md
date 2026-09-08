@@ -74,7 +74,19 @@ To restore, stop the process, preserve the failed data directory for investigati
 
 ## Rollback
 
-If health or the manual flow fails, remove traffic from the candidate, stop it, point the `app.imnota.xyz` application back to the recorded prior release, restore the prior environment, and restart. Do not roll back the data directory unless the new release changed its schema incompatibly or corrupted data; this version only creates its own initial tables. If data rollback is necessary, keep the failed copy and follow the restore procedure so metadata and artifact files stay paired. Verify health, a known active share, creation/revocation, and parent-domain availability after rollback.
+The bundle-sharing update adds sender and logical metadata byte columns plus bundle, owner-session, login-throttle and aggregate-usage tables. Migrations are additive and transactional. Keep the private owner hash file and matching receipt secret alongside recovery material. `storageBytes` and `recordedBytes` still describe downloadable artifacts; effective quota use is `max(storageBytes, recordedBytes) + metadataBytes + reservedBytes`. Metadata includes the per-bundle Markdown stored in SQLite. Older service code can read the new database but does not charge those bytes; stop new uploads during an old-code rollback until quota enforcement is restored.
+
+If health or the manual flow fails, remove traffic from the candidate, stop it, point the `app.imnota.xyz` application back to the recorded prior release, restore the prior environment, and restart. Do not roll back the data directory unless the new release changed its schema incompatibly or corrupted data. If data rollback is necessary, keep the failed copy and follow the restore procedure so metadata and artifact files stay paired. Verify health, a known active share, creation/revocation, and parent-domain availability after rollback.
+
+## Owner dashboard
+
+`/owner` is restricted to the site owner. Provision a random 32-byte access key privately and store only its lowercase SHA-256 hex digest in `<dataDir>/owner-access-key.sha256`, mode `0600`. The environment variable `IMNOTA_OWNER_ACCESS_KEY_SHA256` is a fallback when the file is absent. Missing configuration disables owner access. Do not replace the existing receipt secret or copy masked environment values.
+
+`npm run provision-owner` creates a new hash file without overwriting an existing one and prints the key once. Run this only in a private terminal whose output is not retained or published, then save the key in the owner's password manager. Do not run it in CI, an output-capturing cron job, or a public deployment log. A reviewed provisioning process may instead generate the key locally and transfer only its hash to the private directory.
+
+Owner sessions use a Secure, HttpOnly, SameSite=Strict cookie, with an eight-hour absolute expiry and a thirty-minute idle expiry by default. Logout and revocation require both the exact configured Origin and a per-session CSRF token. Changing the owner hash and restarting invalidates existing sessions. Keep the access key private; it grants management access to all hosted shares.
+
+The dashboard reports successful GET requests, excludes HEAD requests, and does not claim unique visitors. Image requests include automatic page rendering, and Markdown requests include copying. Counters store no IP address or user-agent identifier and are deleted with their share. Old links start at zero when tracking begins. Provider access logs remain separate.
 
 ## Release limits requiring follow-up
 

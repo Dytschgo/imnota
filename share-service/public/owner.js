@@ -9,6 +9,7 @@ const filter = document.querySelector('[data-status-filter]');
 const loadMore = document.querySelector('[data-load-more]');
 let csrfToken;
 let nextCursor;
+let requestGeneration = 0;
 
 async function api(path, options = {}) {
   const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin', ...options });
@@ -29,7 +30,11 @@ async function api(path, options = {}) {
 }
 
 function showLogin() {
+  requestGeneration += 1;
   csrfToken = undefined;
+  nextCursor = undefined;
+  shareList.replaceChildren();
+  totals.replaceChildren();
   dashboard.hidden = true;
   loginPanel.hidden = false;
 }
@@ -39,9 +44,13 @@ function number(value) {
 }
 
 function bytes(value) {
-  return new Intl.NumberFormat(undefined, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 1 }).format(
-    value / (1024 * 1024),
-  );
+  if (value < 1024) return `${number(value)} B`;
+  if (value < 1024 * 1024) return `${number(Math.round(value / 1024))} KB`;
+  return new Intl.NumberFormat(undefined, {
+    style: 'unit',
+    unit: 'megabyte',
+    maximumFractionDigits: 1,
+  }).format(value / (1024 * 1024));
 }
 
 function date(value) {
@@ -58,7 +67,7 @@ function renderTotals(value) {
     ['Revoked', value.revoked],
     ['Page loads', value.usage.pageViews],
     ['PNG requests', value.usage.pngRequests],
-    ['Stored', bytes(value.byteSize)],
+    ['Stored', bytes(value.storedBytes)],
   ]) {
     const item = document.createElement('div');
     const strong = document.createElement('strong');
@@ -129,11 +138,13 @@ function renderShare(share) {
 }
 
 async function loadShares(append) {
+  const generation = ++requestGeneration;
   dashboardError.textContent = '';
   let target = `/api/owner/shares?status=${encodeURIComponent(filter.value)}&limit=50`;
   if (append && nextCursor) target += `&cursor=${encodeURIComponent(nextCursor)}`;
   try {
     const body = await api(target);
+    if (generation !== requestGeneration) return;
     if (!append) {
       shareList.replaceChildren();
       renderTotals(body.totals);
@@ -148,6 +159,7 @@ async function loadShares(append) {
     nextCursor = body.nextCursor;
     loadMore.hidden = !nextCursor;
   } catch (error) {
+    if (generation !== requestGeneration) return;
     if (error.status === 401) return showLogin();
     dashboardError.textContent = error.message;
   }

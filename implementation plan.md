@@ -30,6 +30,8 @@ The former plan's ban on all server work was superseded by its later hosted-stat
 
 ## Remaining acceptance and operational work
 
+The next nightly adds the Collection 10 sharing feedback: green **Copy Bundle** split buttons, separate format options, **Bundle 1** labels, a simpler hosted page and upload dialog, one-day default links, automatic pairing, optional sender names, matching per-bundle Markdown, persistent dismissal of individual recovery warnings, and an owner-only dashboard with aggregate usage and revocation. Owner access uses a privately provisioned high-entropy key and short-lived secure sessions; it does not add general user accounts. Structured Markdown and sender metadata count toward service storage quota.
+
 These are open verification or operating tasks, not claims that the implementation is absent.
 
 1. **Recipient and clipboard checks.** Manually exercise the hosted recipient page in a private browser and test actual paste into the target coding editors on Windows, macOS and Linux. Record exact versions, image/Markdown results and fallbacks. Automated HTTP and Electron clipboard checks do not establish receiving-app behavior. Follow the [clipboard matrix](docs/clipboard-images-plan.md).

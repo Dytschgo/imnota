@@ -78,6 +78,7 @@ async function createShare(instance, title = 'Private dashboard row') {
       requestId: randomUUID(),
       title,
       markdown: '# Prompt',
+      bundles: [{ bundleNumber: 1, markdown: '# Prompt\n\nDetails', imageFilename: 'prompt-001.png' }],
       images: [{ filename: 'prompt-001.png', dataBase64: png.toString('base64') }],
       includeArchive: true,
       expiresInDays: 1,
@@ -88,10 +89,16 @@ async function createShare(instance, title = 'Private dashboard row') {
 test('owner routes fail closed when the access-key hash is not configured', async (t) => {
   const instance = await fixture({ ownerAccessKeyHash: null });
   t.after(() => instance.destroy());
-  await instance.api.get('/owner').expect(404).expect('Cache-Control', /no-store/);
-  await instance.api.get('/api/owner/session').expect(404).expect(({ body }) => {
-    assert.equal(body.error.code, 'not_found');
-  });
+  await instance.api
+    .get('/owner')
+    .expect(404)
+    .expect('Cache-Control', /no-store/);
+  await instance.api
+    .get('/api/owner/session')
+    .expect(404)
+    .expect(({ body }) => {
+      assert.equal(body.error.code, 'not_found');
+    });
   await instance.api.get('/health').expect(200);
 });
 
@@ -121,7 +128,10 @@ test('owner sign-in uses a strict host cookie and rejects bad origins, types, an
   assert.match(session.body.csrfToken, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(session.body.authenticated, true);
   assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM owner_sessions').get().count, 1);
-  assert.equal(JSON.stringify(instance.db.prepare('SELECT * FROM owner_sessions').get()).includes(accessKey), false);
+  assert.equal(
+    JSON.stringify(instance.db.prepare('SELECT * FROM owner_sessions').get()).includes(accessKey),
+    false,
+  );
 });
 
 test('owner sessions enforce idle and absolute expiry and key rotation invalidates old sessions', async (t) => {
@@ -150,6 +160,7 @@ test('owner list exposes only bounded metadata and honest aggregate request coun
   await instance.api.head(`/s/${publicToken}`).expect(200);
   await instance.api.get(`/s/${publicToken}`).expect(200);
   await instance.api.get(`/s/${publicToken}/markdown`).expect(200);
+  await instance.api.get(`/s/${publicToken}/bundles/1/markdown`).expect(200);
   await instance.api.get(`/s/${publicToken}/assets/prompt-001.png`).expect(200);
   await instance.api.get(`/s/${publicToken}/archive.zip`).expect(200);
   const cookie = await login(instance);
@@ -161,12 +172,18 @@ test('owner list exposes only bounded metadata and honest aggregate request coun
   assert.equal(listing.body.shares.length, 1);
   assert.deepEqual(listing.body.shares[0].usage, {
     pageViews: 1,
-    markdownRequests: 1,
+    markdownRequests: 2,
     pngRequests: 1,
     zipRequests: 1,
     lastAccessedAt: new Date(Date.UTC(2026, 8, 8, 12)).toISOString(),
   });
   assert.equal(listing.body.totals.usage.pageViews, 1);
+  assert.equal(listing.body.totals.metadataBytes, Buffer.byteLength('# Prompt\n\nDetails'));
+  assert.equal(
+    listing.body.totals.storedBytes,
+    created.body.byteSize + Buffer.byteLength('# Prompt\n\nDetails'),
+  );
+  assert.equal(listing.body.shares[0].storedBytes, listing.body.totals.storedBytes);
   const serialized = JSON.stringify(listing.body);
   assert.equal(serialized.includes(publicToken), false);
   assert.equal(serialized.includes(created.body.managementToken), false);
@@ -215,7 +232,11 @@ test('persistent owner throttle is bounded and owner page contains login and das
   assert.match(page.text, /do not identify people/);
   const wrong = randomBytes(32).toString('base64url');
   for (let attempt = 0; attempt < 2; attempt += 1)
-    await instance.api.post('/api/owner/session').set('Origin', origin).send({ accessKey: wrong }).expect(401);
+    await instance.api
+      .post('/api/owner/session')
+      .set('Origin', origin)
+      .send({ accessKey: wrong })
+      .expect(401);
   await instance.api
     .post('/api/owner/session')
     .set('Origin', origin)
