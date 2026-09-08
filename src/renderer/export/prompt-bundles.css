@@ -200,17 +200,18 @@
   cursor: pointer;
 }
 
-.prompt-bundle-copy {
+.prompt-bundle-primary .prompt-bundle-copy {
   background: var(--success);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--success) 22%, transparent);
+  color: #102419;
+  box-shadow: none;
 }
 
-.prompt-bundle-copy:hover {
+.prompt-bundle-primary .prompt-bundle-copy:hover {
   background: color-mix(in srgb, var(--success) 84%, #000);
 }
 
-.prompt-bundle-copy.is-copied,
-.prompt-bundle-copy.is-copied:hover {
+.prompt-bundle-primary .prompt-bundle-copy.is-copied,
+.prompt-bundle-primary .prompt-bundle-copy.is-copied:hover {
   background: var(--surface-3);
   color: var(--ink-2);
   box-shadow: none;

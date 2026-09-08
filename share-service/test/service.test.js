@@ -12,6 +12,7 @@ import { createService } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
 import { randomToken, tokenHash } from '../src/security.js';
+import { writeShareClipboard } from '../public/share-copy.js';
 
 const origin = 'https://app.imnota.xyz';
 const receiptSecret = Buffer.alloc(32, 7).toString('base64url');
@@ -215,7 +216,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(page.text, /<script type="module" src="\/static\/share-copy\.js"><\/script>/);
   assert.match(page.text, /data-copy-markdown/);
   assert.match(page.text, /data-copy-png/);
-  assert.match(page.text, /data-copy-png-markdown/);
+  assert.match(page.text, /data-copy-bundle/);
   assert.match(page.text, /data-copy-status/);
   assert.doesNotMatch(page.text, /<script[^>]*>[^<]*(?:alert|markdown)/i);
 
@@ -257,8 +258,8 @@ test('renders no PNG copy controls for an image-free share and keeps mixed image
   });
   const mixedToken = mixed.body.url.split('/').at(-1);
   const mixedPage = await instance.api.get(`/s/${mixedToken}`).expect(200);
-  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 2);
-  assert.equal((mixedPage.text.match(/data-copy-png-markdown>/g) ?? []).length, 2);
+  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 3);
+  assert.equal((mixedPage.text.match(/data-copy-bundle>/g) ?? []).length, 3);
   for (const filename of ['prompt-001.png', 'prompt-002.png']) {
     assert.match(mixedPage.text, new RegExp(`data-asset-url="/s/${mixedToken}/assets/${filename}"`));
   }
@@ -307,9 +308,29 @@ test('persists bounded structured bundles without counting database Markdown as 
 
   const publicToken = created.body.url.split('/').at(-1);
   const first = await instance.api.get(`/s/${publicToken}/bundles/1/markdown`).expect(200);
-  assert.match(first.headers['content-type'], /^text\/plain/);
+  assert.match(first.headers['content-type'], /^text\/markdown/);
   assert.equal(first.headers['content-disposition'], 'attachment; filename="bundle-1.md"');
   assert.equal(first.text, 'First bundle');
+  let copied;
+  await writeShareClipboard({
+    markdownPath: `/s/${publicToken}/bundles/1/markdown`,
+    locationObject: { href: created.body.url, origin },
+    ClipboardItemCtor: class {
+      constructor(parts) {
+        this.parts = parts;
+      }
+    },
+    clipboard: {
+      async write(items) {
+        copied = await items[0].parts['text/plain'].then((blob) => blob.text());
+      },
+    },
+    fetchImpl: async (url) => {
+      const result = await instance.api.get(new URL(url).pathname).expect(200);
+      return new Response(result.text, { headers: { 'Content-Type': result.headers['content-type'] } });
+    },
+  });
+  assert.equal(copied, 'First bundle');
   await instance.api.get(`/s/${publicToken}/bundles/01/markdown`).expect(404);
   await instance.api.get(`/s/${publicToken}/bundles/4/markdown`).expect(404);
 });

@@ -825,7 +825,7 @@ export function createService(overrides = {}) {
         .get(record.id, Number(numberText));
       if (!bundle) return response.status(404).type('html').send(unavailablePage());
       response.set({
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/markdown; charset=utf-8',
         'Content-Disposition': `attachment; filename="bundle-${bundle.bundle_number}.md"`,
       });
       return response.send(bundle.markdown);
