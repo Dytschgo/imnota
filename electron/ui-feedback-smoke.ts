@@ -31,7 +31,11 @@ export async function exerciseUiFeedback(
   await driver.click({ selector: '[data-testid="search-trigger"]' });
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzmarkdownprobe');
   await driver.waitFor({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-search.png'));
+  if (artifactDirectory) {
+    // Move focus off the input so its blinking caret cannot keep capture pixels changing.
+    await driver.press('Tab');
+    captures.push(await driver.capture(artifactDirectory, 'feedback-search.png'));
+  }
   await driver.click({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
   await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
   const fullTextOpened = await driver.evaluate<boolean>(

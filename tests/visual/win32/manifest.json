@@ -18,8 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-08",
   "platform": "win32",
-  "sourceRevision": "9bd369fea828f08cc15763bac5b95f058c3d534f",
+  "sourceRevision": "536f9b23d34fb2bbd22f3de73b2e538c83882bd2",
   "electron": "39.8.10",
-  "sourceRun": "local-packaged-feedback5",
-  "environment": "Windows packaged Electron, 1x scale; individually reviewed deterministic UI feedback captures. Full native walkthrough passed."
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34259747270",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed deterministic UI feedback captures"
 }
