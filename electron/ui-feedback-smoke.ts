@@ -81,6 +81,7 @@ export async function exerciseUiFeedback(
   );
   await driver.click({ text: 'Use target icon', exact: true });
   await driver.click({ text: 'Save changes', exact: true });
+  await driver.waitFor({ selector: '[data-testid="project-edit-dialog"]' }, { absent: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
   await driver.click({ selector: `[data-testid="project-archive-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
