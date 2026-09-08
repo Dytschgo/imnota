@@ -16,10 +16,10 @@
     "backdrop-collapsed.png"
   ],
   "devicePixelRatio": 1,
-  "reviewedAt": "2026-09-08",
+  "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "536f9b23d34fb2bbd22f3de73b2e538c83882bd2",
+  "sourceRevision": "a2e275c04d09eba2589a8b0bfadda2a4bc2221cf",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34259747270",
-  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed deterministic UI feedback captures"
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291433176",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed removal of Annotate label and resulting toolbar reflow"
 }
