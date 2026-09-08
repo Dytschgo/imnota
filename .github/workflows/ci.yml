@@ -140,10 +140,23 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Cache Electron and builder downloads
+        if: env.RUN_APPLICATION == 'true'
+        uses: actions/cache@v5
+        with:
+          key: imnota-downloads-v1-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: |
+            ~/.cache/electron/
+            ~/Library/Caches/electron/
+            ~/AppData/Local/electron/Cache/
+            ${{ runner.temp }}/imnota-builder-cache/downloads/
       - run: pnpm install --frozen-lockfile
         if: env.RUN_APPLICATION == 'true'
       - run: ${{ matrix.command }}
         if: env.RUN_APPLICATION == 'true'
+        env:
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/imnota-builder-cache
+          DEBUG: '@electron/get*'
       - name: Test platform-specific behavior
         if: env.RUN_APPLICATION == 'true'
         run: pnpm test:platform
