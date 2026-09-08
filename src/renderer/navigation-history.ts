@@ -1,4 +1,48 @@
 import type { ProjectListItem } from '../shared/types';
+import type { AppView } from './store';
+
+export interface NavigationLocation {
+  view: AppView;
+  projectPath: string | null;
+  collectionId: string;
+  itemId: string | null;
+  search: string;
+  settingsCategory?: string;
+  scrollTop?: number;
+}
+
+export interface NavigationStack {
+  back: NavigationLocation[];
+  forward: NavigationLocation[];
+}
+
+export function pushNavigationLocation(
+  stack: NavigationStack,
+  location: NavigationLocation,
+): NavigationStack {
+  const current = stack.back.at(-1);
+  if (current && JSON.stringify(current) === JSON.stringify(location)) return stack;
+  return { back: [...stack.back, location], forward: [] };
+}
+
+export function moveNavigationLocation(
+  stack: NavigationStack,
+  direction: 'back' | 'forward',
+): { stack: NavigationStack; location: NavigationLocation | null } {
+  const source = direction === 'back' ? stack.back : stack.forward;
+  if (source.length < 2 && direction === 'back') return { stack, location: null };
+  if (!source.length && direction === 'forward') return { stack, location: null };
+  if (direction === 'back') {
+    const current = source.at(-1)!;
+    const location = source.at(-2)!;
+    return { stack: { back: source.slice(0, -1), forward: [current, ...stack.forward] }, location };
+  }
+  const location = source[0]!;
+  return {
+    stack: { back: [...stack.back, location], forward: source.slice(1) },
+    location,
+  };
+}
 
 export interface RecentCollection {
   projectPath: string;
@@ -62,7 +106,7 @@ export function resolveRecentCollections(projects: ProjectListItem[], history: R
     const collection = project?.collections.find(
       (candidate) => candidate.id === entry.collectionId && !candidate.archived,
     );
-    return project && collection
+    return project && project.status !== 'archived' && collection
       ? [{ ...entry, id: collection.id, name: collection.name, projectName: project.name }]
       : [];
   });

@@ -1,4 +1,4 @@
-import { FolderOpen, Heart, PanelLeft, Plus, Search, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FolderOpen, Heart, PanelLeft, Plus, Search, Sparkles } from 'lucide-react';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Button, IconButton } from '../components/ui';
 import { useAppStore, type AppView } from '../store';
@@ -12,6 +12,10 @@ export interface AppShellProps {
   onOpenProject(): void | Promise<void>;
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onSearch(): void | Promise<void>;
+  onBack?(): void | Promise<void>;
+  onForward?(): void | Promise<void>;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   onOpenPromptBundles(): void | Promise<void>;
   onToggleFavourite(): void | Promise<void>;
   onAbout(): void;
@@ -28,6 +32,10 @@ export function AppShell({
   onOpenProject,
   onOpenCollection,
   onSearch,
+  onBack,
+  onForward,
+  canGoBack = false,
+  canGoForward = false,
   onOpenPromptBundles,
   onToggleFavourite,
   onAbout,
@@ -82,6 +90,14 @@ export function AppShell({
       />
       <main className="main-shell">
         <header className="topbar">
+          <div className="topbar-navigation" aria-label="Navigation history">
+            <IconButton label="Back" disabled={!canGoBack} onClick={() => void onBack?.()}>
+              <ArrowLeft size={16} aria-hidden="true" />
+            </IconButton>
+            <IconButton label="Forward" disabled={!canGoForward} onClick={() => void onForward?.()}>
+              <ArrowRight size={16} aria-hidden="true" />
+            </IconButton>
+          </div>
           <div className="crumbs">
             {!store.navigationOpen && (
               <IconButton
@@ -109,12 +125,13 @@ export function AppShell({
           <div className="topbar-actions">
             <button
               className="search-trigger"
+              data-testid="search-trigger"
               onClick={() => void onSearch()}
               disabled={!store.settings.workspacePath}
-              aria-label={`Search projects (${searchShortcut})`}
+              aria-label={`Search (${searchShortcut})`}
             >
               <Search size={15} aria-hidden="true" />
-              <span>Search projects</span>
+              <span>Search</span>
               <kbd>{searchShortcut}</kbd>
             </button>
             {store.snapshot ? (
@@ -125,7 +142,7 @@ export function AppShell({
                   data-testid="share-prompt-bundles"
                 >
                   <Sparkles size={15} aria-hidden="true" />
-                  Prompt bundles
+                  Copy Bundle
                 </Button>
                 <IconButton
                   label={store.snapshot.project.favourite ? 'Remove from favourites' : 'Add to favourites'}

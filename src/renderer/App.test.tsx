@@ -226,7 +226,7 @@ describe('feedback controls', () => {
   it('saves current notes before opening and focusing project search', async () => {
     const { save, note } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Latest note' } });
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
+    fireEvent.click(screen.getByTestId('search-trigger'));
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     await waitFor(() => expect(search).toHaveFocus());
     expect(save).toHaveBeenCalledWith(
@@ -499,7 +499,7 @@ describe('feedback controls', () => {
     const { save, note, editingSnapshot } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Unsaved note' } });
     save.mockRejectedValueOnce(new Error('Workspace unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
+    fireEvent.click(screen.getByTestId('search-trigger'));
     expect(await screen.findByRole('alert')).toHaveTextContent(/cancelled|Workspace unavailable/i);
     expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
     expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
@@ -749,7 +749,7 @@ describe('feedback controls', () => {
   it('keeps the editor available when project refresh fails', async () => {
     const { note, editingSnapshot } = await renderEditingProject();
     vi.mocked(window.imnota.listProjects).mockRejectedValueOnce(new Error('Refresh unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
+    fireEvent.click(screen.getByTestId('search-trigger'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Refresh unavailable');
     expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
     expect(note).toHaveValue('Original note');
@@ -974,7 +974,7 @@ describe('feedback controls', () => {
     renderApp();
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     fireEvent.change(search, { target: { value: '  design  ' } });
-    fireEvent.click(screen.getByRole('button', { name: /Search projects/ }));
+    fireEvent.click(screen.getByTestId('search-trigger'));
     await waitFor(() => expect(search).toHaveFocus());
     expect(search).toHaveValue('  design  ');
   });

@@ -4,6 +4,7 @@ import {
   Clock,
   Heart,
   Info,
+  Archive,
   Layers3,
   PanelLeft,
   Plus,
@@ -35,7 +36,7 @@ export interface SideNavProps {
   navigationOpen: boolean;
   projects: ProjectListItem[];
   recentCollections: RecentCollectionHistory[];
-  navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites', string>>;
+  navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites' | 'archived', string>>;
   view: AppView;
   onAbout(): void;
   onNavigate(view: AppView): void | Promise<void>;
@@ -96,7 +97,11 @@ export function SideNav({
     () => resolveRecentCollections(projects, recentHistory).slice(0, 6),
     [projects, recentHistory],
   );
-  const favouriteProjects = useMemo(() => projects.filter((project) => project.favourite), [projects]);
+  const activeProjects = useMemo(() => projects.filter((project) => project.status !== 'archived'), [projects]);
+  const favouriteProjects = useMemo(
+    () => activeProjects.filter((project) => project.favourite),
+    [activeProjects],
+  );
   const lastActiveIdentity = useRef<string | null>(null);
   const revealedActiveIdentity = useRef<string | null>(null);
 
@@ -197,6 +202,15 @@ export function SideNav({
           >
             <Clock size={16} aria-hidden="true" />
             <span>Recent</span>
+          </button>
+          <button
+            className={`nav-item ${view === 'archived' ? 'active' : ''}`}
+            aria-current={view === 'archived' ? 'page' : undefined}
+            title={navigationShortcuts?.archived ? `Archived (${navigationShortcuts.archived})` : 'Archived'}
+            onClick={() => void onNavigate('archived')}
+          >
+            <Archive size={16} aria-hidden="true" />
+            <span>Archived</span>
           </button>
           <button
             className={`nav-item ${view === 'favourites' ? 'active' : ''}`}
