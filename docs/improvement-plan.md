@@ -26,41 +26,40 @@ Acceptance: both documents agree, commands and local links are valid, and it is 
 
 ## 2. Completed: remove redundant PR test execution
 
-[PR #36](https://github.com/Dytschgo/imnota/pull/36) mapped all tests and retained the full suite in Linux quality. Each package job now repeats the 37 unexcluded application test files and all script tests. The 41 exact renderer exclusions were reviewed for simulated or platform-independent behavior; new tests remain in platform runs by default. See the [coverage map](pr-test-coverage.md).
+[PR #36](https://github.com/Dytschgo/imnota/pull/36) mapped all tests and retained the full suite in Linux quality. Each package job now repeats the 37 unexcluded application test files and all script tests. The 41 exact renderer exclusions were reviewed for simulated or platform-independent behavior; new or unlisted test files remain in platform runs by default. Cases added to an excluded file follow its existing policy until review reclassifies it. See the [coverage map](pr-test-coverage.md).
 
 In one successful PR-run comparison ([before](https://github.com/Dytschgo/imnota/actions/runs/34276483712), [after](https://github.com/Dytschgo/imnota/actions/runs/34277727340)), the package test step fell from 82s to 36s on Windows, 85s to 52s on macOS, and 42s to 20s on Linux. All native, visual, security, and quality checks passed. Workflow-level queue delay was zero at API timestamp resolution in both runs; runner scheduling and total job times vary. No test cases were deleted and release gates were unchanged.
 
-The experiment used these requirements:
-
-Before changing the matrix, map the current tests by the behavior they protect and record their durations. Include Electron, renderer, shared-code, script, and service tests. A directory name or jsdom environment alone does not prove OS independence.
-
-Proposed change after that map is reviewed: run the full application suite once in Linux quality; keep the identified OS-sensitive subset on Windows/macOS. Retain native packaged walkthroughs and necessary filesystem, clipboard, path, update, and recovery coverage. Preserve service-specific checks. Do not remove all macOS launch verification because Linux smoke passed.
-
-Deliver one CI PR containing the coverage map and the narrowly scoped routing change. If the map finds no safe reduction, retain the checks and report the evidence instead.
-
-Acceptance:
-
-- Every existing test has an execution location; tests removed from a repeated OS run still run in the full suite.
-- A new test cannot silently escape both the full suite and the applicable platform checks. Document how OS-sensitive additions are classified and reviewed.
-- Unknown or broadly affecting changes use the broader checks; required-check names still report a result.
-- No release/publish gate is weakened. Compare representative successful PR runs before and after, recording runner queue time separately.
+The reviewed coverage map accounts for every existing test and defaults new or unlisted test files to full platform coverage. Full packaged walkthroughs, Windows visuals, hosted sharing contracts, and service security checks remain. No required check or publication gate was removed.
 
 ## 3. Follow-up speed and reliability work
 
 Choose the next item from measured cost and failure frequency, rather than implementing this entire list automatically.
 
-Current experiment: reduce [CI review artifacts](ci-artifacts.md) to useful distributables and diagnostics. The macOS baseline uploaded 814 files and 1.32 GB in about 80s, including duplicate unpacked output. Validate still builds and tests the same packages. Candidate measurements and independent review must be recorded before merge.
+Completed follow-up experiments:
+
+- [PR #37](https://github.com/Dytschgo/imnota/pull/37) retains useful [CI review artifacts](ci-artifacts.md) without duplicate unpacked folders. All three archive inventories were inspected after native verification. Stored package bytes fell about 46%; upload steps fell from 29s to 6s on Windows, 29s to 4s on Linux, and 83s to 8s on macOS in one successful before/after PR comparison.
+- [PR #38](https://github.com/Dytschgo/imnota/pull/38) introduces conservative [documentation-only PR routing](ci-routing.md). Every original check name still reports. Full formatting, CodeQL, and dependency review remain; main pushes and uncertain or mixed changes retain full application/platform verification. The first prose-only results revision in [PR #39](https://github.com/Dytschgo/imnota/pull/39) verified the hosted shortcut: Validate completed its jobs in 40s, and CodeQL finished in 61s from the first job start. All original check contexts reported success.
+
+Both changes received independent review. Measurements and limitations are recorded in the linked documents and PRs. These completed slices establish a faster release process without turning the remaining candidates into automatic refactors.
 
 | Candidate                     | Investigation and acceptance                                                                                                                                                                                                                                                                                       |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| PR artifact uploads           | Identify consumers. Upload useful failure evidence and review artifacts; avoid redundant unpacked output when nobody uses it. Keep the complete release asset set, including updater blockmaps. Measure upload duration and bytes.                                                                                 |
+| PR artifact uploads           | Completed in PR #37; monitor artifact usefulness and upload measurements.                                                                                                                                                                                                                                          |
 | Electron/build caches         | Inspect actual per-OS cache locations, hit rates, restore cost, and downloaded bytes. Key caches for the relevant OS, architecture, and dependency versions; retain integrity checks. Compare cold and warm runs before promising savings.                                                                         |
-| Documentation-only CI routing | Specify safe path classification, including changes to instructions, build docs, and workflows. Skip application work only for changes proven to be prose-only; preserve required-check reporting.                                                                                                                 |
+| Documentation-only CI routing | Completed in PR #38 and exercised by PR #39; retain conservative classification.                                                                                                                                                                                                                                   |
 | Stable release duplication    | Stable release currently repeats static checks and the full suite per platform. Evaluate one quality job alongside packaging, preserving exact-candidate gating, platform tests, public-install verification, and promotion checks. Nightly already has concurrent quality; do not reintroduce its old dependency. |
 | Slow or flaky tests           | Collect test durations and failure traces on each OS. Replace unnecessary waiting or oversized fixtures while retaining real locking, atomic-write, recovery, and native-input coverage. Track failed attempts as well as green-run speed.                                                                         |
 | Reduced PR macOS package      | Pilot a single-architecture ZIP only if the architecture/signature verifier and artifact contract are adapted together. Keep relevant native launch coverage and full universal DMG/ZIP verification for release candidates. Treat lost PR architecture coverage as an explicit tradeoff.                          |
 
 For each implemented experiment, record the before/after commit and run URLs, event type, runner/architecture, check coverage, job durations, queue delay, artifact sizes, and reruns. Use multiple comparable runs when possible; label single-run comparisons and estimates clearly. Roll back an optimization that creates coverage gaps or unreliable evidence.
+
+Deferred after this pass:
+
+- The observed macOS dependency cache already restored about 230 MB and reused all 802 packages without package downloads. Electron/build-helper downloads remain a separate candidate, but no cold/warm pilot establishes that another cache would repay its restore and maintenance cost yet.
+- Stable-release deduplication needs its own tag/public-install/promotion validation. This pass changes no stable release contract and does not publish a stable version just to benchmark it.
+- Keep universal macOS PR packaging and all native verification. Reducing architecture coverage is a separate tradeoff, not necessary for these measured savings.
+- Structural work below remains conditional on a demonstrated defect or maintenance boundary. No mass IPC, persistence, state, lint, or test-runner migration is required to release the current improvements.
 
 ## 4. Structural improvements, driven by recurring problems
 

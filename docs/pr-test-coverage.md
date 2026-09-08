@@ -1,18 +1,18 @@
 # PR test coverage map
 
-Policy introduced after documentation PR #35. The full suite remains in Linux `quality`. Package jobs run `test:platform`: the same default discovery minus the 41 exact renderer paths in [the policy](../tests/platform-test-policy.json), followed by all script tests. All 37 other application test files remain on Linux, Windows, and macOS. Hosted share contracts, the three service jobs, actual packaged walkthroughs, and Windows visual checks remain unchanged. Nightly and stable release keep their existing full-suite commands.
+Policy introduced in PR #36. This map describes application-impact PRs and full validation runs; [prose-only PRs](ci-routing.md) use the separately reviewed documentation route. The full suite remains in Linux `quality`. Package jobs run `test:platform`: the same default discovery minus the 41 exact renderer paths in [the policy](../tests/platform-test-policy.json), followed by all script tests. All 37 other application test files remain on Linux, Windows, and macOS. Hosted share contracts, the three service jobs, actual packaged walkthroughs, and Windows visual checks remain unchanged. Nightly and stable release keep their existing full-suite commands.
 
 ## Why the renderer exclusions are safe
 
 These current tests exercise pure geometry/state/planning or jsdom interactions. Their native bridges, clipboard calls, persistence, theme queries, images, and canvas operations are mocked or injected. Platform values are explicit test inputs. Repeating them on a different host does not make those mocks native: for example, jsdom's navigator platform is empty, while the App fixture reports Windows. Actual host behavior stays covered by retained Electron/shared tests and packaged native walkthroughs.
 
-Every exclusion is an exact reviewed file path; wildcard patterns, stale paths, and duplicates are rejected by the platform configuration. New and unlisted tests retain all-platform execution automatically. Existing excluded tests must be reclassified if they gain host-dependent behavior. Review production dependencies as well as test mocks when changing the policy. Shared tests are retained because several exercise real filesystem, recovery, path and update behavior despite living outside `electron/`.
+Every exclusion is an exact reviewed file path; wildcard patterns, stale paths, and duplicates are rejected by the platform configuration. New and unlisted test files retain all-platform execution automatically. New cases in an excluded file follow that file's policy until it is reclassified. Existing excluded tests must be reclassified if they gain host-dependent behavior. Review production dependencies as well as test mocks when changing the policy. Shared tests are retained because several exercise real filesystem, recovery, path and update behavior despite living outside `electron/`.
 
-Unknown or broad behavior retains the existing platform and packaged checks; this change introduces no changed-path job skipping. For a broad platform investigation, `IMNOTA_FULL_PLATFORM_TESTS=1` restores the entire application suite in the platform command. The full quality suite always runs regardless of that setting.
+Unknown or broad behavior retains the existing platform and packaged checks. Only the narrowly classified prose-only PR route skips application work; main pushes and release validation remain full. For a broad platform investigation, `IMNOTA_FULL_PLATFORM_TESTS=1` restores the entire application suite in the platform command. The full quality suite remains unaffected by that setting whenever application validation runs.
 
 ## Inventory and measurements
 
-Each application test below was collected by Vitest, with discovery checked against the platform configuration: full 78 files, platform 37, and the difference exactly equals the 41 reviewed policy entries. Nothing is removed from full-suite execution. The table records a local Windows baseline at `e127d47` (567 passing tests), measured per-file execution time; parallel file times are not additive wall time. Hosted PR job timings are the release-speed evidence, and should be recorded after validation.
+Each application test below was collected by Vitest, with discovery checked against the platform configuration: full 78 files, platform 37, and the difference exactly equals the 41 reviewed policy entries. Nothing is removed from full-suite execution. The table records a local Windows baseline at `e127d47` (567 passing tests), measured per-file execution time; parallel file times are not additive wall time. Hosted PR job timings are recorded in the [improvement plan](improvement-plan.md); these local times are a coverage baseline, not a promise about release speed.
 
 | Test file                                                   | PR execution            | Local baseline seconds |
 | ----------------------------------------------------------- | ----------------------- | ---------------------: |
@@ -97,22 +97,23 @@ Each application test below was collected by Vitest, with discovery checked agai
 
 ## Other test runners and native coverage
 
-| Test / check                             | Execution retained                                                             |
-| ---------------------------------------- | ------------------------------------------------------------------------------ |
-| `scripts/dev-electron.test.mjs`          | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/smoke-process.node.test.mjs`    | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/release-readiness.test.mjs`     | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/release-channel.test.mjs`       | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/stage-release-assets.test.mjs`  | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/update-macos.test.mjs`          | Quality + every package job; macOS updater also verifies the built Mac package |
-| `scripts/visual-regression.test.mjs`     | Quality + every package job; macOS updater also verifies the built Mac package |
-| `electron/hosted-share-contract.test.ts` | Quality + every package job via `test:share-contract`                          |
-| `share-service/test/owner.test.js`       | Service security job on Linux, Windows and macOS                               |
-| `share-service/test/pairing-ui.test.js`  | Service security job on Linux, Windows and macOS                               |
-| `share-service/test/service.test.js`     | Service security job on Linux, Windows and macOS                               |
-| `share-service/test/share-copy.test.js`  | Service security job on Linux, Windows and macOS                               |
-| Unpackaged native walkthrough            | Linux quality                                                                  |
-| Packaged native walkthrough              | Linux AppImage, Windows executable, macOS universal archive                    |
-| Approved visual comparison               | Windows, all 14 baselines with unchanged tolerances                            |
+| Test / check                             | Execution retained                                                                      |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `scripts/dev-electron.test.mjs`          | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/smoke-process.node.test.mjs`    | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/release-readiness.test.mjs`     | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/release-channel.test.mjs`       | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/stage-release-assets.test.mjs`  | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/update-macos.test.mjs`          | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/visual-regression.test.mjs`     | Quality + every package job; macOS updater also verifies the built Mac package          |
+| `scripts/ci-changes.test.mjs`            | Quality + every package job; real Git history and fail-closed routing regression checks |
+| `electron/hosted-share-contract.test.ts` | Quality + every package job via `test:share-contract`                                   |
+| `share-service/test/owner.test.js`       | Service security job on Linux, Windows and macOS                                        |
+| `share-service/test/pairing-ui.test.js`  | Service security job on Linux, Windows and macOS                                        |
+| `share-service/test/service.test.js`     | Service security job on Linux, Windows and macOS                                        |
+| `share-service/test/share-copy.test.js`  | Service security job on Linux, Windows and macOS                                        |
+| Unpackaged native walkthrough            | Linux quality                                                                           |
+| Packaged native walkthrough              | Linux AppImage, Windows executable, macOS universal archive                             |
+| Approved visual comparison               | Windows, all 14 baselines with unchanged tolerances                                     |
 
-No test cases or assertions were deleted. The shared script command is reused by `test` and `test:platform`; the default `test` still runs the complete Vitest and Node suites. Required job names, release gating, artifact publication, and dependencies are unchanged.
+No test cases or assertions were deleted. The shared script command is reused by `test` and `test:platform`; the default `test` still runs the complete Vitest and Node suites. Existing required job names and release gating remain unchanged. Validate artifact scope and job dependencies are documented in [CI artifacts](ci-artifacts.md) and [CI routing](ci-routing.md).
