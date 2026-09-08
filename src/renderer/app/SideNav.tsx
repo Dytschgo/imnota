@@ -156,6 +156,7 @@ export function SideNav({
       className={`sidebar side-nav ${navigationOpen ? '' : 'sidebar-collapsed'}`}
       aria-label="Side navigation"
       hidden={!navigationOpen}
+      onKeyDown={moveShortcutFocus}
     >
       <div className="sidebar-top">
         <IconButton
@@ -167,7 +168,7 @@ export function SideNav({
         </IconButton>
         <Logo />
       </div>
-      <div className="side-nav-scroll" onKeyDown={moveShortcutFocus}>
+      <div className="side-nav-scroll">
         <nav className="side-nav-primary" aria-labelledby="library-navigation-heading">
           <h2 className="nav-label" id="library-navigation-heading">
             Library
@@ -380,11 +381,7 @@ export function SideNav({
           </div>
         </section>
       </div>
-      <nav
-        className="side-nav-footer"
-        aria-labelledby="workspace-navigation-heading"
-        onKeyDown={moveShortcutFocus}
-      >
+      <nav className="side-nav-footer" aria-labelledby="workspace-navigation-heading">
         <h2 className="nav-label" id="workspace-navigation-heading">
           Workspace
         </h2>

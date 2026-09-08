@@ -114,6 +114,10 @@ describe('AppShell navigation', () => {
     fireEvent.keyDown(disclosure, { key: 'ArrowDown' });
 
     expect(screen.getByRole('button', { name: 'Collapse favourite projects' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(screen.getByRole('button', { name: 'About' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(screen.getByRole('button', { name: 'Hide navigation' })).toHaveFocus();
   });
 
   it('does not reopen an active favourite group when project metadata refreshes', () => {
