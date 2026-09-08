@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { Toolbar, type ToolbarProps } from './Toolbar';
 
@@ -40,6 +40,38 @@ describe('annotation toolbar', () => {
     const menu = screen.getByRole('menu', { name: 'More annotation tools' });
     fireEvent.click(within(menu).getByRole('menuitemradio', { name: /Pixelation/ }));
     expect(setTool).toHaveBeenCalledWith('pixelate');
+  });
+
+  test('keeps More keyboard navigable and restores focus after dismissal or selection', async () => {
+    const setTool = vi.fn();
+    const { container } = render(<Toolbar {...props({ setTool })} />);
+    const toolbar = within(container);
+
+    const trigger = toolbar.getByRole('button', { name: 'More annotation tools' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    await waitFor(() => expect(redaction).toHaveFocus());
+
+    fireEvent.keyDown(redaction, { key: 'End' });
+    const deleteAnnotation = toolbar.getByRole('menuitemradio', { name: /Delete annotation/ });
+    await waitFor(() => expect(deleteAnnotation).toHaveFocus());
+    fireEvent.keyDown(deleteAnnotation, { key: 'Home' });
+    await waitFor(() => expect(redaction).toHaveFocus());
+    fireEvent.keyDown(redaction, { key: 'ArrowUp' });
+    await waitFor(() => expect(deleteAnnotation).toHaveFocus());
+    fireEvent.keyDown(deleteAnnotation, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    await waitFor(() =>
+      expect(toolbar.getByRole('menuitemradio', { name: /Delete annotation/ })).toHaveFocus(),
+    );
+    fireEvent.click(toolbar.getByRole('menuitemradio', { name: /Delete annotation/ }));
+    expect(setTool).toHaveBeenCalledWith('eraser');
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('renders the optional ten-color quick palette and reports selection', () => {

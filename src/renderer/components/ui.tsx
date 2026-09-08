@@ -31,18 +31,16 @@ export const Button = forwardRef<
   );
 });
 
-export function IconButton({
-  label,
-  children,
-  className = '',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+export const IconButton = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & { label: string }
+>(function IconButton({ label, children, className = '', ...props }, ref) {
   return (
-    <button className={`icon-button ${className}`} aria-label={label} title={label} {...props}>
+    <button ref={ref} className={`icon-button ${className}`} aria-label={label} title={label} {...props}>
       {children}
     </button>
   );
-}
+});
 
 export function TextInput({
   label,

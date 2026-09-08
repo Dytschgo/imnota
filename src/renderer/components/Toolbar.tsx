@@ -159,25 +159,54 @@ function MoreToolSection({
   tools,
   activeTool,
   onSelect,
+  focusedIndex,
+  onFocusedIndexChange,
+  onClose,
+  onItemRef,
 }: {
   label: string;
   tools: ToolDefinition[];
   activeTool: ToolChoice;
   onSelect(tool: ToolChoice): void;
+  focusedIndex: number;
+  onFocusedIndexChange(index: number): void;
+  onClose(): void;
+  onItemRef(index: number, element: HTMLButtonElement | null): void;
 }) {
   return (
     <div className={label === 'Remove' ? 'annotation-menu-section is-danger' : 'annotation-menu-section'}>
       <span className="annotation-menu-label">{label}</span>
       {tools.map((definition) => {
         const Icon = definition.icon;
+        const index = MORE_TOOLS.indexOf(definition);
         return (
           <button
             key={definition.id}
+            ref={(element) => onItemRef(index, element)}
             type="button"
             role="menuitemradio"
             aria-checked={activeTool === definition.id}
             className={activeTool === definition.id ? 'is-active' : ''}
+            tabIndex={index === focusedIndex ? 0 : -1}
             onClick={() => onSelect(definition.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                onFocusedIndexChange((index + 1) % MORE_TOOLS.length);
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                onFocusedIndexChange((index - 1 + MORE_TOOLS.length) % MORE_TOOLS.length);
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                onFocusedIndexChange(0);
+              } else if (event.key === 'End') {
+                event.preventDefault();
+                onFocusedIndexChange(MORE_TOOLS.length - 1);
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                onClose();
+              }
+            }}
           >
             <Icon size={16} />
             <span>
@@ -222,24 +251,35 @@ export function Toolbar({
   shortcutLabels = {},
 }: ToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const [moreFocusedIndex, setMoreFocusedIndex] = useState(0);
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const moreMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const moreMenuId = useId().replace(/:/g, '');
   const moreActive = MORE_TOOLS.some((definition) => definition.id === tool);
+
+  const closeMoreMenu = (restoreFocus = false) => {
+    setMoreOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => moreTriggerRef.current?.focus());
+  };
+
+  const openMoreMenu = (focusedIndex = 0) => {
+    setMoreFocusedIndex(Math.min(Math.max(focusedIndex, 0), MORE_TOOLS.length - 1));
+    setMoreOpen(true);
+  };
 
   useEffect(() => {
     if (!moreOpen) return;
     const pointerDown = (event: PointerEvent) => {
-      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
-    };
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMoreOpen(false);
+      if (!moreRef.current?.contains(event.target as Node)) closeMoreMenu();
     };
     document.addEventListener('pointerdown', pointerDown);
-    document.addEventListener('keydown', keydown);
+    const frame = window.requestAnimationFrame(() => moreMenuItemRefs.current[moreFocusedIndex]?.focus());
     return () => {
       document.removeEventListener('pointerdown', pointerDown);
-      document.removeEventListener('keydown', keydown);
+      window.cancelAnimationFrame(frame);
     };
-  }, [moreOpen]);
+  }, [moreFocusedIndex, moreOpen]);
 
   return (
     <div className="toolbar annotation-toolbar" role="toolbar" aria-label="Annotation tools">
@@ -256,12 +296,26 @@ export function Toolbar({
         <div className="annotation-more" ref={moreRef}>
           <span className="annotation-tooltip-anchor">
             <IconButton
+              ref={moreTriggerRef}
               data-testid="more-annotation-tools"
               label="More annotation tools"
               className={moreActive ? 'is-active' : ''}
               aria-expanded={moreOpen}
               aria-haspopup="menu"
-              onClick={() => setMoreOpen((open) => !open)}
+              aria-controls={moreMenuId}
+              onClick={() => (moreOpen ? closeMoreMenu() : openMoreMenu())}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'Home') {
+                  event.preventDefault();
+                  openMoreMenu(0);
+                } else if (event.key === 'ArrowUp' || event.key === 'End') {
+                  event.preventDefault();
+                  openMoreMenu(MORE_TOOLS.length - 1);
+                } else if (event.key === 'Escape' && moreOpen) {
+                  event.preventDefault();
+                  closeMoreMenu(true);
+                }
+              }}
             >
               <span className="annotation-more-icon">
                 <span>More</span>
@@ -276,14 +330,25 @@ export function Toolbar({
             )}
           </span>
           {moreOpen && (
-            <div className="annotation-more-menu" role="menu" aria-label="More annotation tools">
+            <div
+              className="annotation-more-menu"
+              id={moreMenuId}
+              role="menu"
+              aria-label="More annotation tools"
+            >
               <MoreToolSection
                 label="Transform"
                 tools={TRANSFORM_TOOLS}
                 activeTool={tool}
                 onSelect={(next) => {
                   setTool(next);
-                  setMoreOpen(false);
+                  closeMoreMenu(true);
+                }}
+                focusedIndex={moreFocusedIndex}
+                onFocusedIndexChange={setMoreFocusedIndex}
+                onClose={() => closeMoreMenu(true)}
+                onItemRef={(index, element) => {
+                  moreMenuItemRefs.current[index] = element;
                 }}
               />
               <MoreToolSection
@@ -292,7 +357,13 @@ export function Toolbar({
                 activeTool={tool}
                 onSelect={(next) => {
                   setTool(next);
-                  setMoreOpen(false);
+                  closeMoreMenu(true);
+                }}
+                focusedIndex={moreFocusedIndex}
+                onFocusedIndexChange={setMoreFocusedIndex}
+                onClose={() => closeMoreMenu(true)}
+                onItemRef={(index, element) => {
+                  moreMenuItemRefs.current[index] = element;
                 }}
               />
               <MoreToolSection
@@ -301,7 +372,13 @@ export function Toolbar({
                 activeTool={tool}
                 onSelect={(next) => {
                   setTool(next);
-                  setMoreOpen(false);
+                  closeMoreMenu(true);
+                }}
+                focusedIndex={moreFocusedIndex}
+                onFocusedIndexChange={setMoreFocusedIndex}
+                onClose={() => closeMoreMenu(true)}
+                onItemRef={(index, element) => {
+                  moreMenuItemRefs.current[index] = element;
                 }}
               />
             </div>
