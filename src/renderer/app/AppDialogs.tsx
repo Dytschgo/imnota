@@ -1,24 +1,42 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { BriefcaseBusiness, Code2, Folder, Layers3, Lightbulb, Plus, Rocket, Sparkles, Trash2 } from 'lucide-react';
 import type { ShortcutPreferences } from '../../shared/preferences';
 import { version as appVersion } from '../../../package.json';
 import { Logo } from '../components/Logo';
 import { Button, Modal, TextArea, TextInput } from '../components/ui';
 import { ShortcutSettings } from '../settings';
 
-export type AppDialog = 'new-project' | 'shortcuts' | 'about' | 'delete-project' | null;
+export type AppDialog = 'new-project' | 'edit-project' | 'shortcuts' | 'about' | 'delete-project' | null;
 
 export interface NewProjectDraft {
   name: string;
   description: string;
 }
 
+export interface ProjectEditDraft extends NewProjectDraft {
+  icon: 'layers' | 'briefcase' | 'code-2' | 'folder' | 'lightbulb' | 'rocket' | 'sparkles' | 'target';
+}
+
+const projectIcons = {
+  layers: Layers3,
+  briefcase: BriefcaseBusiness,
+  'code-2': Code2,
+  folder: Folder,
+  lightbulb: Lightbulb,
+  rocket: Rocket,
+  sparkles: Sparkles,
+  target: Layers3,
+} as const;
+
 export interface AppDialogsProps {
   dialog: AppDialog;
   newProject: NewProjectDraft;
+  editProject?: ProjectEditDraft;
   shortcuts: ShortcutPreferences;
   currentVersion?: string;
   busy?: boolean;
   onNewProjectChange(value: NewProjectDraft): void;
+  onEditProjectChange?(value: ProjectEditDraft): void;
+  onSaveProjectEdits?(): void | Promise<void>;
   onCreateProject(): void | Promise<void>;
   onDeleteProject(): void | Promise<void>;
   onShortcutChange(value: ShortcutPreferences): void | Promise<void>;
@@ -28,10 +46,13 @@ export interface AppDialogsProps {
 export function AppDialogs({
   dialog,
   newProject,
+  editProject,
   shortcuts,
   currentVersion,
   busy = false,
   onNewProjectChange,
+  onEditProjectChange,
+  onSaveProjectEdits,
   onCreateProject,
   onDeleteProject,
   onShortcutChange,
@@ -81,6 +102,54 @@ export function AppDialogs({
               <Plus size={16} aria-hidden="true" />
               Create project
             </Button>
+          </div>
+        </form>
+      </Modal>
+    );
+  if (dialog === 'edit-project' && editProject && onEditProjectChange && onSaveProjectEdits)
+    return (
+      <Modal title="Edit project" description="Update the local project details." onClose={onClose}>
+        <form
+          className="modal-form"
+          data-testid="project-edit-dialog"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onSaveProjectEdits();
+          }}
+        >
+          <TextInput
+            data-autofocus
+            data-testid="project-name-input"
+            label="Project name"
+            value={editProject.name}
+            onChange={(event) => onEditProjectChange({ ...editProject, name: event.target.value })}
+          />
+          <TextArea
+            data-testid="project-description-input"
+            label="Description"
+            rows={3}
+            value={editProject.description}
+            onChange={(event) => onEditProjectChange({ ...editProject, description: event.target.value })}
+          />
+          <fieldset className="project-icon-picker">
+            <legend>Project icon</legend>
+            <div>
+              {Object.entries(projectIcons).map(([key, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-label={`Use ${key} icon`}
+                  aria-pressed={editProject.icon === key}
+                  onClick={() => onEditProjectChange({ ...editProject, icon: key as ProjectEditDraft['icon'] })}
+                >
+                  <Icon size={16} aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <div className="modal-actions">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!editProject.name.trim()}>Save changes</Button>
           </div>
         </form>
       </Modal>

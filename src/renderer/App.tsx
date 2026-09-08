@@ -19,7 +19,7 @@ import type {
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
-import { AppDialogs, type AppDialog, type NewProjectDraft } from './app/AppDialogs';
+import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
 import { usePreferences } from './app/usePreferences';
@@ -45,6 +45,7 @@ import {
 } from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -78,6 +79,9 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [dialog, setDialog] = useState<AppDialog>(null);
   const [newProject, setNewProject] = useState<NewProjectDraft>({ name: '', description: '' });
+  const [editProject, setEditProject] = useState<ProjectEditDraft | null>(null);
+  const [editProjectPath, setEditProjectPath] = useState<string | null>(null);
+  const [editProjectRevision, setEditProjectRevision] = useState<string | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
@@ -94,6 +98,9 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [snapshotNotice, setSnapshotNotice] = useState<SnapshotNotice | null>(null);
   const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<ProjectSearchScope>('active');
+  const [pendingSearchAnnotationId, setPendingSearchAnnotationId] = useState<string | null>(null);
   const [navigationStack, setNavigationStack] = useState({ back: [] as NavigationLocation[], forward: [] as NavigationLocation[] });
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -479,41 +486,53 @@ export default function App() {
   }
 
   async function restoreNavigation(direction: 'back' | 'forward') {
-    const moved = moveNavigationLocation(
-      replaceNavigationLocation(navigationStack, currentLocation()),
-      direction,
-    );
+    let candidateStack = replaceNavigationLocation(navigationStack, currentLocation());
+    let moved = moveNavigationLocation(candidateStack, direction);
     if (!moved.location) return;
     const identity = ++navigationIdentity.current;
     if (!(await flushAll())) {
       setError('Navigation was cancelled so your unsaved work stays open.');
       return;
     }
-    const target = moved.location;
     try {
-      if (target.projectPath && ['workspace', 'context'].includes(target.view)) {
+      while (moved.location) {
+        const target = moved.location;
+        if (target.projectPath && ['workspace', 'context'].includes(target.view)) {
         const project = useAppStore
           .getState()
           .projects.find((candidate) => candidate.projectPath === target.projectPath);
         if (!project || project.status === 'archived') {
-          setNavigationStack(moved.stack);
-          return;
+          candidateStack = moved.stack;
+          moved = moveNavigationLocation(candidateStack, direction);
+          continue;
         }
         const nativeMutationToken = persistence.beginNativeMutation();
-        const snapshot = await window.imnota.loadProject(target.projectPath);
+        let adopted = false;
+        let snapshot: ProjectSnapshot;
+        try {
+          snapshot = await window.imnota.loadProject(target.projectPath);
+        } catch (reason) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          if (reason instanceof Error && /(enoent|not found|missing)/i.test(reason.message)) {
+            candidateStack = moved.stack;
+            moved = moveNavigationLocation(candidateStack, direction);
+            continue;
+          }
+          throw reason;
+        }
         if (identity !== navigationIdentity.current) {
           await persistence.cancelNativeMutation(nativeMutationToken);
           return;
         }
-        const collection = snapshot.project.collections.find(
-          (entry) => entry.id === target.collectionId && !entry.archived,
-        );
+        const collection = snapshot.project.collections.find((entry) => entry.id === target.collectionId);
         if (!collection) {
           await persistence.cancelNativeMutation(nativeMutationToken);
-          setNavigationStack(moved.stack);
-          return;
+          candidateStack = moved.stack;
+          moved = moveNavigationLocation(candidateStack, direction);
+          continue;
         }
-        if (!(await persistence.adoptAuthoritativeSnapshot(snapshot, nativeMutationToken))) return;
+        adopted = await persistence.adoptAuthoritativeSnapshot(snapshot, nativeMutationToken);
+        if (!adopted) return;
         if (identity !== navigationIdentity.current) return;
         const state = useAppStore.getState();
         state.setActiveCollection(collection.id);
@@ -523,17 +542,20 @@ export default function App() {
         )
           state.set({ activeScreenshotId: target.itemId });
         useAppStore.getState().set({ view: target.view, search: target.search });
-      } else {
+        } else {
         if (['projects', 'recent', 'favourites', 'archived'].includes(target.view)) await refreshProjects();
         if (identity !== navigationIdentity.current) return;
         useAppStore.getState().set({ view: target.view, snapshot: null, search: target.search });
+        }
+        setNavigationStack(moved.stack);
+        if (target.scrollTop !== undefined)
+          window.requestAnimationFrame(() => {
+            const container = document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace');
+            if (container) container.scrollTop = target.scrollTop!;
+          });
+        return;
       }
-      setNavigationStack(moved.stack);
-      if (target.scrollTop !== undefined)
-        window.requestAnimationFrame(() => {
-          const container = document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace');
-          if (container) container.scrollTop = target.scrollTop!;
-        });
+      setNavigationStack(candidateStack);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The saved location is no longer available.');
     }
@@ -894,6 +916,47 @@ export default function App() {
       setDialogBusy(false);
     }
   }
+  type ProjectManagementBridge = {
+    updateProjectMetadata(input: { projectPath: string; expectedRevision: string; patch: ProjectEditDraft }): Promise<ProjectSnapshot>;
+    setProjectArchived(input: { projectPath: string; expectedRevision: string; archived: boolean }): Promise<ProjectSnapshot>;
+  };
+  async function beginProjectEdit(projectPath: string) {
+    if (!(await flushAll())) return;
+    const snapshot = await window.imnota.loadProject(projectPath);
+    if (!snapshot.projectRevision) { setError('Project metadata cannot be edited until its revision is available.'); return; }
+    setEditProjectPath(projectPath);
+    setEditProjectRevision(snapshot.projectRevision);
+    setEditProject({ name: snapshot.project.name, description: snapshot.project.description, icon: (snapshot.project as typeof snapshot.project & { icon?: ProjectEditDraft['icon'] }).icon ?? 'layers' });
+    setDialog('edit-project');
+  }
+  async function saveProjectEdits() {
+    if (!editProject || !editProjectPath || !editProjectRevision) return;
+    setDialogBusy(true);
+    try {
+      const result = await (window.imnota as typeof window.imnota & ProjectManagementBridge).updateProjectMetadata({
+        projectPath: editProjectPath,
+        expectedRevision: editProjectRevision,
+        patch: editProject,
+      });
+      if (useAppStore.getState().snapshot?.projectPath === editProjectPath) adoptSnapshot(result);
+      await refreshProjects();
+      setDialog(null); setEditProject(null); showToast('Project details saved');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Project details could not be saved.'); }
+    finally { setDialogBusy(false); }
+  }
+  async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
+    if (!(await flushAll())) return;
+    try {
+      const loaded = expectedRevision ? null : await window.imnota.loadProject(projectPath);
+      const revision = expectedRevision ?? loaded?.projectRevision;
+      if (!revision) throw new Error('Project revision is unavailable.');
+      const result = await (window.imnota as typeof window.imnota & ProjectManagementBridge).setProjectArchived({ projectPath, expectedRevision: revision, archived });
+      if (useAppStore.getState().snapshot?.projectPath === projectPath) useAppStore.getState().setProject(null);
+      await refreshProjects();
+      showToast(archived ? 'Project archived' : 'Project restored');
+      if (archived && result.projectRevision) setToast({ message: 'Project archived', action: { label: 'Undo', run: () => void setProjectArchived(projectPath, false, result.projectRevision) } });
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Project archive state could not be changed.'); }
+  }
 
   const checkpointSession = useCallback(() => {
     const current = useAppStore.getState();
@@ -952,12 +1015,22 @@ export default function App() {
       setError('Choose a workspace before searching projects.');
       return;
     }
-    if (!store.snapshot && ['projects', 'recent', 'favourites'].includes(store.view)) {
-      setProjectSearchFocusRequest((value) => value + 1);
-      return;
-    }
-    await navigate('projects');
-    if (!useAppStore.getState().snapshot) setProjectSearchFocusRequest((value) => value + 1);
+    if (!(await flushAll())) return;
+    setPendingSearchAnnotationId(null);
+    setSearchDialogOpen(true);
+  }
+  async function openSearchTarget(target: ProjectSearchTarget) {
+    const previousLocation = currentLocation();
+    if (!(await guardedSnapshot(() => window.imnota.loadProject(target.projectPath), 'Opening the search result', false)))
+      throw new Error('The result could not be opened.');
+    const state = useAppStore.getState();
+    if (target.collectionId && state.snapshot?.project.collections.some((entry) => entry.id === target.collectionId))
+      state.setActiveCollection(target.collectionId);
+    if (target.itemId && state.snapshot && orderedCollectionItems(state.snapshot.project, state.activeCollectionId).some((item) => item.id === target.itemId))
+      state.set({ activeScreenshotId: target.itemId });
+    setSelectedAnnotationId(target.annotationId ?? null);
+    setPendingSearchAnnotationId(target.annotationId ?? null);
+    setNavigationStack((stack) => pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()));
   }
 
   const platform = detectShortcutPlatform();
@@ -1197,6 +1270,9 @@ export default function App() {
             onNew={() => setDialog('new-project')}
             onOpen={openProjectDialog}
             onSelect={openProject}
+            onEdit={beginProjectEdit}
+            onArchive={(path) => void setProjectArchived(path, true)}
+            onRestore={(path) => void setProjectArchived(path, false)}
             searchInputRef={projectSearchInputRef}
           />
         ) : (
@@ -1339,10 +1415,13 @@ export default function App() {
       <AppDialogs
         dialog={dialog}
         newProject={newProject}
+        editProject={editProject ?? undefined}
         shortcuts={preferences.settings.shortcuts}
         currentVersion={updateStatus?.currentVersion}
         busy={dialogBusy}
         onNewProjectChange={setNewProject}
+        onEditProjectChange={setEditProject}
+        onSaveProjectEdits={saveProjectEdits}
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         onShortcutChange={preferences.saveShortcuts}
@@ -1378,6 +1457,13 @@ export default function App() {
         </Modal>
       )}
       <PromptBundleDialogHost controller={promptBundles} onError={setError} />
+      <SearchDialog
+        open={searchDialogOpen}
+        scope={searchScope}
+        onScopeChange={setSearchScope}
+        onClose={() => setSearchDialogOpen(false)}
+        onOpenResult={openSearchTarget}
+      />
       {showOnboarding && (
         <OnboardingDemo
           onCopyBundle={({ markdown, imageDataUrl }) => window.imnota.copyContext({ markdown, imageDataUrl })}
@@ -1434,12 +1520,18 @@ function Library({
   onNew,
   onOpen,
   onSelect,
+  onEdit,
+  onArchive,
+  onRestore,
   searchInputRef,
 }: {
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onNew(): void;
   onOpen(): void;
   onSelect(projectPath: string): void;
+  onEdit(projectPath: string): void;
+  onArchive(projectPath: string): void;
+  onRestore(projectPath: string): void;
   searchInputRef: RefObject<HTMLInputElement>;
 }) {
   const { projects, search, set, view, settings, recentCollections } = useAppStore();
@@ -1537,7 +1629,8 @@ function Library({
       ) : filtered.length ? (
         <div className="project-list">
           {filtered.map((project) => (
-            <button className="project-row" key={project.id} onClick={() => onSelect(project.projectPath)}>
+            <div className="project-row" key={project.id}>
+              <button className="project-row-main" onClick={() => onSelect(project.projectPath)}>
               <div className="project-symbol">
                 <Layers3 size={18} aria-hidden="true" />
               </div>
@@ -1552,7 +1645,16 @@ function Library({
               <div className="project-row-meta">
                 {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
               </div>
-            </button>
+              </button>
+              <div className="project-row-actions">
+                <button type="button" data-testid={`project-edit-${project.id}`} aria-label={`Edit ${project.name}`} onClick={() => onEdit(project.projectPath)}>Edit</button>
+                {project.status === 'archived' ? (
+                  <button type="button" data-testid={`project-restore-${project.id}`} onClick={() => onRestore(project.projectPath)}>Restore</button>
+                ) : (
+                  <button type="button" data-testid={`project-archive-${project.id}`} onClick={() => onArchive(project.projectPath)}>Archive</button>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       ) : (
