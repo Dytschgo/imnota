@@ -625,6 +625,7 @@ async function exerciseNativeCanvas(
   );
   if (cancelledWidth !== croppedWidth) throw new Error('Cancel crop changed committed bounds.');
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
+  await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
   await selectTool(driver, 'Redaction mask');
   await driver.drag(
