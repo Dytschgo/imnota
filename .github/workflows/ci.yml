@@ -149,17 +149,14 @@ jobs:
         run: pnpm test:platform
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          IMNOTA_REQUIRE_MAC_UPDATE_TEST: ${{ matrix.os == 'macos-latest' && '1' || '0' }}
       - run: npm ci --prefix share-service
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm test:share-contract
         if: env.RUN_APPLICATION == 'true'
       - name: Verify packaged Mac application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
-        env:
-          IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
-        run: |
-          node --test scripts/update-macos.test.mjs
-          bash scripts/verify-mac.sh
+        run: bash scripts/verify-mac.sh
       - name: Smoke packaged Windows application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: node scripts/verify-packaged.mjs windows
