@@ -5,8 +5,8 @@ Updated 2026-09-08 after the published nightly. This is the current delivery sta
 ## Released baseline
 
 - Stable: [v0.2.5](https://github.com/Dytschgo/imnota/releases/tag/v0.2.5).
-- Nightly: [v0.2.6-nightly.20260907.34169995806](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806), commit `107fc5920a6e829ec1b8dec10a21ad8a711e0fe8`.
-- Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/34169995806) passed Windows, macOS and Linux checks. All 13 public assets, three channel manifests and the release tag were verified. Stable remained Latest.
+- Verified nightly baseline: [v0.2.6-nightly.20260908.34210189958](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260908.34210189958), commit `81a9e860dd30bcae883dc4662b500f38c6256183`.
+- Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/34210189958) passed Windows, macOS and Linux checks. All 13 public assets, three channel manifests and the release tag were verified. Stable remained Latest. This baseline includes the cleanup fixes and system-aware networking for hosted shares.
 - Hosted static sharing is deployed at `app.imnota.xyz`; see the [deployment evidence](share-service/docs/deployment-verification.md).
 
 The product remains an open-source, local-first handoff tool. Screenshots, drawings and Markdown text blocks form one ordered collection. Local editing, copy and export require neither an account nor the sharing service. Hosted sharing is an explicit upload of finalized artifacts, with expiry and revocation; it is not project synchronization or an AI integration.

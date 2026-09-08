@@ -72,7 +72,9 @@ In the prompt sharing dialog, choose **Share online**. Review the exact generate
 
 Choose **Open pairing page**, obtain a one-use code in the browser, and paste it into Imnota. The code expires after about 10 minutes. **Publish HTTPS link** uploads the approved artifacts and returns a link you can copy or open. Local copy and export remain available without pairing or internet access.
 
-Use **Revoke link** on the result or in local share history to stop access. Expired and revoked links cannot be reopened through the service. Revocation cannot remove files a recipient has already downloaded. The app retains pending-upload information to recover a response interrupted by a network failure; a reported recovery problem remains visible rather than silently creating a second share.
+On the shared page, use **Copy Markdown**, **Copy PNG**, or **Copy PNG + Markdown** beside an image. Combined copy contains that PNG and the share's full Markdown. If the receiving editor pastes only one format, use the separate buttons. Downloads remain available when the browser denies clipboard access or does not support it.
+
+Use **Revoke link** on the result or in local share history to stop access. Expired and revoked links cannot be reopened through the service. Revocation cannot remove files a recipient has already downloaded or copied. The app retains pending-upload information to recover a response interrupted by a network failure. **Retry recovery** checks those uploads again; **Dismiss** clears the visible warnings without deleting history or pending recovery information. Warnings refresh after a successful upload and may return if an unresolved upload still fails recovery.
 
 Editable drawing sources, original project folders, local paths and recovery journals are not uploaded. Inspect the generated content itself before sharing: annotations, screenshot pixels and Markdown can contain sensitive information even when project metadata is excluded. The hosting provider may retain access logs; see the [service privacy and operations notes](../share-service/docs/hostinger-deployment.md).
 

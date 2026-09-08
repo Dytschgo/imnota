@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Copy, ExternalLink, ShieldCheck, Square, Trash2 } from 'lucide-react';
 import type { HostedShareRecord } from '../../shared/workflow-bridge';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
@@ -40,21 +40,35 @@ export function HostedShareDialog({
   const [history, setHistory] = useState<readonly HostedShareRecord[]>([]);
   const [recoveryErrors, setRecoveryErrors] = useState<readonly string[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<HostedShareRecord>();
-  useEffect(() => {
-    let mounted = true;
-    void window.imnota.listHostedShares().then((result) => {
-      if (!mounted) return;
-      if (result.ok) {
-        setHistory(result.value.records);
-        setRecoveryErrors(result.value.recoveryErrors);
-      } else {
-        setError(result.error.message);
+  const mounted = useRef(true);
+  const historyRequest = useRef(0);
+  const refreshHistory = useCallback(async ({ reportError = true } = {}) => {
+    const request = ++historyRequest.current;
+    let result: Awaited<ReturnType<typeof window.imnota.listHostedShares>>;
+    try {
+      result = await window.imnota.listHostedShares();
+    } catch {
+      if (mounted.current && request === historyRequest.current && reportError) {
+        setError('Could not refresh hosted share history. Try again.');
       }
-    });
-    return () => {
-      mounted = false;
-    };
+      return false;
+    }
+    if (!mounted.current || request !== historyRequest.current) return false;
+    if (result.ok) {
+      setHistory(result.value.records);
+      setRecoveryErrors(result.value.recoveryErrors);
+      return true;
+    }
+    if (reportError) setError(result.error.message);
+    return false;
   }, []);
+  useEffect(() => {
+    mounted.current = true;
+    void refreshHistory();
+    return () => {
+      mounted.current = false;
+    };
+  }, [refreshHistory]);
   const upload = async () => {
     if (quotaProblem) {
       setError(quotaProblem);
@@ -72,14 +86,28 @@ export function HostedShareDialog({
       includeArchive,
       expiresInDays,
     });
-    setBusy(false);
+    if (!mounted.current) return;
     if (!result.ok) {
+      setBusy(false);
       setError(result.error.message);
       if (result.error.details?.requestMayHaveCommitted === false) setRequest(undefined);
       return;
     }
     setRecord(result.value);
     setHistory((items) => [result.value, ...items.filter((item) => item.id !== result.value.id)]);
+    setError(undefined);
+    setBusy(false);
+    void refreshHistory({ reportError: false });
+  };
+  const retryRecovery = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await refreshHistory();
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
   };
   const cancel = async () => {
     if (request) await window.imnota.cancelHostedShare({ requestId: request });
@@ -91,12 +119,14 @@ export function HostedShareDialog({
     setBusy(true);
     setError(undefined);
     const result = await window.imnota.revokeHostedShare({ id });
+    if (!mounted.current) return;
     setBusy(false);
     if (!result.ok) {
       setError(result.error.message);
       return;
     }
     if (record?.id === result.value.id) setRecord(result.value);
+    historyRequest.current += 1;
     setHistory((items) => items.map((item) => (item.id === result.value.id ? result.value : item)));
   };
   const recordExpired = record ? isExpired(record) : false;
@@ -282,6 +312,22 @@ export function HostedShareDialog({
               {recoveryErrors.map((message) => (
                 <p key={message}>{message}</p>
               ))}
+              <div className="hosted-share-actions">
+                <Button variant="ghost" disabled={busy} onClick={() => void retryRecovery()}>
+                  Retry recovery
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    historyRequest.current += 1;
+                    setRecoveryErrors([]);
+                    setError(undefined);
+                  }}
+                >
+                  Dismiss
+                </Button>
+              </div>
             </div>
           </div>
         )}

@@ -78,6 +78,24 @@ nav {
   cursor: wait;
   opacity: 0.6;
 }
+.button:focus-visible {
+  outline: 3px solid #b8c7ff;
+  outline-offset: 3px;
+}
+.copy-status {
+  min-height: 1.65em;
+  margin: -25px 0 25px;
+  color: #99a5c6;
+  font-size: 0.9rem;
+}
+.copy-status.error {
+  color: #ff9c9c;
+}
+.copy-note {
+  margin: -14px 0 25px;
+  color: #99a5c6;
+  font-size: 0.82rem;
+}
 article {
   padding: 24px;
   border: 1px solid #262c3b;
@@ -118,6 +136,16 @@ figcaption {
   margin-top: 9px;
   color: #99a5c6;
   font-size: 0.85rem;
+}
+.image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.image-actions .button {
+  padding: 7px 11px;
+  font-size: 0.82rem;
 }
 footer {
   margin-top: 48px;

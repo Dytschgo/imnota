@@ -322,19 +322,20 @@ function unavailablePage() {
 }
 
 function sharePage(record, markdownHtml, assets, publicToken, publicOrigin) {
+  const markdownPath = `/s/${publicToken}/markdown`;
   const imageHtml =
     assets.length === 0
       ? ''
       : `<section><h2>Images</h2><div class="images">${assets
           .map((asset) => {
-            const encoded = encodeURIComponent(asset.filename);
-            return `<figure><a href="/s/${publicToken}/assets/${encoded}" download><img src="/s/${publicToken}/assets/${encoded}" alt="${escapeHtml(asset.filename)}" loading="lazy"></a><figcaption>${escapeHtml(asset.filename)} · ${asset.width} × ${asset.height}</figcaption></figure>`;
+            const assetPath = `/s/${publicToken}/assets/${encodeURIComponent(asset.filename)}`;
+            return `<figure data-share-image data-asset-url="${assetPath}"><a href="${assetPath}" download><img src="${assetPath}" alt="${escapeHtml(asset.filename)}" loading="lazy"></a><figcaption>${escapeHtml(asset.filename)} · ${asset.width} × ${asset.height}</figcaption><div class="image-actions"><a class="button secondary" href="${assetPath}" download>Download PNG</a><button class="button secondary" type="button" data-copy-png>Copy PNG</button><button class="button" type="button" data-copy-png-markdown>Copy PNG + Markdown</button></div></figure>`;
           })
           .join('')}</div></section>`;
   const archive = record.has_archive
     ? `<a class="button" href="/s/${publicToken}/archive.zip">Download ZIP</a>`
     : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${escapeHtml(record.title)} · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Intentionally published with Imnota</p><h1>${escapeHtml(record.title)}</h1><p class="expiry">Available until <time datetime="${new Date(record.expires_at).toISOString()}">${new Date(record.expires_at).toLocaleString('en-GB', { timeZone: 'UTC', timeZoneName: 'short' })}</time></p><nav><a class="button" href="/s/${publicToken}/markdown">Download Markdown</a>${archive}</nav><article>${markdownHtml}</article>${imageHtml}<footer>Read-only share hosted at ${escapeHtml(new URL(publicOrigin).host)}.</footer></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${escapeHtml(record.title)} · Imnota</title><link rel="stylesheet" href="/static/share.css"><script type="module" src="/static/share-copy.js"></script></head><body><main data-share-copy-root data-markdown-url="${markdownPath}"><p class="eyebrow">Intentionally published with Imnota</p><h1>${escapeHtml(record.title)}</h1><p class="expiry">Available until <time datetime="${new Date(record.expires_at).toISOString()}">${new Date(record.expires_at).toLocaleString('en-GB', { timeZone: 'UTC', timeZoneName: 'short' })}</time></p><nav><button class="button" type="button" data-copy-markdown>Copy Markdown</button><a class="button secondary" href="${markdownPath}" download>Download Markdown</a>${archive}</nav><p class="copy-status" role="status" aria-live="polite" data-copy-status></p><p class="copy-note">Some editors paste only one clipboard format. Use the separate copy buttons if a combined paste is incomplete.</p><article>${markdownHtml}</article>${imageHtml}<footer>Read-only share hosted at ${escapeHtml(new URL(publicOrigin).host)}.</footer></main></body></html>`;
 }
 
 export function createService(overrides = {}) {
