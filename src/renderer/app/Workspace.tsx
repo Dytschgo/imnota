@@ -35,6 +35,7 @@ export interface WorkspaceProps {
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
+  revealAnnotationId?: string | null;
   tool: ToolChoice;
   annotationColor: string;
   paletteColor: string;
@@ -241,6 +242,7 @@ export function Workspace(props: WorkspaceProps) {
             image={props.image}
             annotations={props.annotations}
             selectedId={props.selectedAnnotationId}
+            revealAnnotationId={props.revealAnnotationId}
             tool={props.tool}
             onChange={props.onChangeAnnotations}
             onSelect={props.onSelectAnnotation}
