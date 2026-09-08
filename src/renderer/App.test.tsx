@@ -1242,6 +1242,57 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument();
   });
 
+  it('closes the edit modal before refreshing the renamed row so archive is immediately actionable', async () => {
+    const updatedProject = {
+      ...snapshot.project,
+      name: 'Feedback Edited',
+      description: 'Edited through the project dialog',
+      icon: 'target' as const,
+    };
+    let resolveEditRefresh!: (value: Awaited<ReturnType<ImnotaBridge['listProjects']>>) => void;
+    const listProjects = vi
+      .fn<ImnotaBridge['listProjects']>()
+      .mockResolvedValueOnce([{ ...snapshot.project, projectPath: snapshot.projectPath }])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveEditRefresh = resolve;
+          }),
+      )
+      .mockResolvedValueOnce([]);
+    const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async () => ({
+      ...snapshot,
+      project: updatedProject,
+      projectRevision: 'project-2',
+    }));
+    const setProjectArchived = vi.fn<ImnotaBridge['setProjectArchived']>(async () => ({
+      ...snapshot,
+      project: { ...updatedProject, status: 'archived' },
+      projectRevision: 'project-3',
+    }));
+    const loadProject = vi
+      .fn<ImnotaBridge['loadProject']>()
+      .mockResolvedValueOnce({ ...snapshot, projectRevision: 'project-1' })
+      .mockResolvedValueOnce({ ...snapshot, project: updatedProject, projectRevision: 'project-2' });
+    renderApp({ listProjects, loadProject, updateProjectMetadata, setProjectArchived });
+
+    fireEvent.click(await screen.findByTestId('project-edit-project-id'));
+    fireEvent.change(await screen.findByTestId('project-name-input'), {
+      target: { value: 'Feedback Edited' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument(),
+    );
+
+    await act(async () => resolveEditRefresh([{ ...updatedProject, projectPath: snapshot.projectPath }]));
+    await screen.findByText('Feedback Edited');
+    fireEvent.click(screen.getByTestId('project-archive-project-id'));
+    await waitFor(() => expect(setProjectArchived).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByText('Feedback Edited')).not.toBeInTheDocument());
+  });
+
   it('archives a project and restores it from the Undo action with the returned revision', async () => {
     let archived = false;
     const listProjects = vi.fn(async () => [
