@@ -928,30 +928,44 @@ export default function App() {
   async function saveProjectEdits() {
     if (!editProject || !editProjectPath || !editProjectRevision) return;
     setDialogBusy(true);
+    const identity = ++navigationIdentity.current;
+    const nativeMutationToken = persistence.beginNativeMutation();
     try {
       const result = await window.imnota.updateProjectMetadata({
         projectPath: editProjectPath,
         expectedRevision: editProjectRevision,
         patch: editProject,
       });
-      if (useAppStore.getState().snapshot?.projectPath === editProjectPath) adoptSnapshot(result);
+      if (identity !== navigationIdentity.current) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        return;
+      }
+      if (useAppStore.getState().snapshot?.projectPath === editProjectPath) {
+        if (!(await persistence.adoptAuthoritativeSnapshot(result, nativeMutationToken))) return;
+      } else await persistence.cancelNativeMutation(nativeMutationToken);
       await refreshProjects();
       setDialog(null); setEditProject(null); showToast('Project details saved');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Project details could not be saved.'); }
+    } catch (reason) { await persistence.cancelNativeMutation(nativeMutationToken); setError(reason instanceof Error ? reason.message : 'Project details could not be saved.'); }
     finally { setDialogBusy(false); }
   }
   async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
     if (!(await flushAll())) return;
+    const identity = ++navigationIdentity.current;
+    const nativeMutationToken = persistence.beginNativeMutation();
     try {
       const loaded = expectedRevision ? null : await window.imnota.loadProject(projectPath);
       const revision = expectedRevision ?? loaded?.projectRevision;
       if (!revision) throw new Error('Project revision is unavailable.');
       const result = await window.imnota.setProjectArchived({ projectPath, expectedRevision: revision, archived });
-      if (useAppStore.getState().snapshot?.projectPath === projectPath) useAppStore.getState().setProject(null);
+      if (identity !== navigationIdentity.current) { await persistence.cancelNativeMutation(nativeMutationToken); return; }
+      if (useAppStore.getState().snapshot?.projectPath === projectPath) {
+        if (!(await persistence.adoptAuthoritativeSnapshot(result, nativeMutationToken))) return;
+        useAppStore.getState().setProject(null);
+      } else await persistence.cancelNativeMutation(nativeMutationToken);
       await refreshProjects();
       showToast(archived ? 'Project archived' : 'Project restored');
       if (archived && result.projectRevision) setToast({ message: 'Project archived', action: { label: 'Undo', run: () => void setProjectArchived(projectPath, false, result.projectRevision) } });
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Project archive state could not be changed.'); }
+    } catch (reason) { await persistence.cancelNativeMutation(nativeMutationToken); setError(reason instanceof Error ? reason.message : 'Project archive state could not be changed.'); }
   }
 
   const checkpointSession = useCallback(() => {
