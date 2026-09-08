@@ -902,7 +902,7 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).toBeNull();
   });
 
-  it('surfaces nonfatal snapshot warnings and recovered delete grants', async () => {
+  it('keeps nonfatal warnings without the stale delete-undo banner', async () => {
     const recovered = {
       ...snapshot,
       projectRevision: 'project-recovered',
@@ -916,13 +916,24 @@ describe('feedback controls', () => {
     expect(await screen.findByTestId('snapshot-notice')).toHaveTextContent(
       'A screenshot transaction was recovered',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Undo delete' }));
-    await waitFor(() =>
-      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
-        projectPath: snapshot.projectPath,
-        undoToken: 'undo-token',
-      }),
-    );
+    expect(screen.queryByRole('button', { name: 'Undo delete' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/previously deleted/)).not.toBeInTheDocument();
+    expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+  });
+
+  it('does not create a notice from persisted delete grants alone when reopening a project', async () => {
+    const recovered = {
+      ...snapshot,
+      recoveredDeletes: [{ undoToken: 'screenshot-token', screenshotId: 'shot' }],
+      recoveredContentDeletes: [{ undoToken: 'content-token', itemId: 'text' }],
+    };
+    renderApp({ openProjectDialog: async () => recovered });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot).toBe(recovered));
+    expect(screen.queryByTestId('snapshot-notice')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo delete' })).not.toBeInTheDocument();
+    expect(recovered.recoveredDeletes).toHaveLength(1);
+    expect(recovered.recoveredContentDeletes).toHaveLength(1);
   });
 
   it('keeps Description Undo separate from canvas annotation history', async () => {
