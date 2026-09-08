@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
+import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import {
   NativeUiDriver,
   SMOKE_VIEWPORTS,
@@ -250,9 +251,8 @@ async function exerciseOnboarding(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
-): Promise<boolean> {
-  const present = await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog);
-  if (!present) return false;
+): Promise<void> {
+  await driver.waitFor(SMOKE_UI_CONTRACT.onboardingDialog[0]);
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png'));
@@ -275,7 +275,6 @@ async function exerciseOnboarding(
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
   await driver.click({ text: 'Copy PNG + Markdown', exact: true });
   await driver.waitFor({ text: 'PNG and Markdown copied together' });
-  return true;
 }
 
 async function importImages(
@@ -399,8 +398,8 @@ async function createBenchmarkProject(
   // Fixtures created through IPC have never been visited in the renderer. Open the
   // project explicitly so relaunch resumes this fixture through real visit history.
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
-  await driver.waitFor({ selector: '.project-row', text: name });
-  await driver.click({ selector: '.project-row', text: name });
+  await driver.waitFor({ selector: '.project-row-main', text: name });
+  await driver.click({ selector: '.project-row-main', text: name });
   await driver.waitFor({ selector: '.crumb-muted', text: name, exact: true });
   return { projectPath, importMs, reopenMs };
 }
@@ -626,6 +625,7 @@ async function exerciseNativeCanvas(
   );
   if (cancelledWidth !== croppedWidth) throw new Error('Cancel crop changed committed bounds.');
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
+  await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
   await selectTool(driver, 'Redaction mask');
   await driver.drag(
@@ -639,17 +639,77 @@ async function exerciseNativeCanvas(
     },
   );
   await selectTool(driver, 'Arrow');
+  const imageRight = geometry.image.x + geometry.image.width;
+  const imageBottom = geometry.image.y + geometry.image.height;
+  const rightMargin = geometry.stage.x + geometry.stage.width - imageRight;
+  const bottomMargin = geometry.stage.y + geometry.stage.height - imageBottom;
+  const arrowTarget =
+    rightMargin >= 16
+      ? {
+          x: Math.round(imageRight + Math.min(24, rightMargin / 2)),
+          y: Math.round(geometry.image.y + geometry.image.height * 0.8),
+        }
+      : bottomMargin >= 16
+        ? {
+            x: Math.round(geometry.image.x + geometry.image.width * 0.9),
+            y: Math.round(imageBottom + Math.min(24, bottomMargin / 2)),
+          }
+        : null;
+  if (!arrowTarget)
+    throw new Error(
+      `Cropped image has no canvas margin for an outside-bound arrow: ${JSON.stringify(geometry)}.`,
+    );
   await driver.drag(
     {
       x: Math.round(geometry.image.x + geometry.image.width * 0.9),
       y: Math.round(geometry.image.y + geometry.image.height * 0.8),
     },
-    {
-      x: Math.round(geometry.image.x + geometry.image.width + 80),
-      y: Math.round(geometry.image.y + geometry.image.height + 50),
-    },
+    arrowTarget,
   );
   await delay(900);
+}
+
+async function assertNativeCanvasAnnotationsPersisted(
+  driver: NativeUiDriver,
+  projectPath: string,
+): Promise<void> {
+  await driver.evaluate(`(async () => {
+    const started = Date.now();
+    let diagnostic = 'annotations unavailable';
+    while (Date.now() - started < 10000) {
+      const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+      const screenshot = snapshot.project.screenshots[0];
+      const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot });
+      const annotations = content.annotations;
+      const crops = annotations.filter((annotation) => annotation.kind === 'crop');
+      const crop = crops[crops.length - 1];
+      const blur = annotations.find((annotation) => annotation.kind === 'blur');
+      const text = annotations.find(
+        (annotation) => annotation.kind === 'text' && annotation.text === 'Trusted pointer note'
+      );
+      const arrow = annotations.find((annotation) => annotation.kind === 'arrow');
+      const points = arrow?.points;
+      const endpoint = arrow && Array.isArray(points) && points.length >= 4
+        ? { x: arrow.x + points[points.length - 2], y: arrow.y + points[points.length - 1] }
+        : null;
+      const outsideCrop = Boolean(
+        crop && endpoint &&
+        (endpoint.x < crop.x || endpoint.x > crop.x + crop.width ||
+          endpoint.y < crop.y || endpoint.y > crop.y + crop.height)
+      );
+      if (crop && blur && text && arrow && endpoint && outsideCrop) return true;
+      diagnostic = JSON.stringify({
+        kinds: annotations.map((annotation) => annotation.kind),
+        crop,
+        arrow,
+        endpoint,
+        outsideCrop,
+        trustedText: text?.text ?? null
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Native canvas annotations did not persist before fixture replacement: ' + diagnostic);
+  })()`);
 }
 
 async function installDeterministicExportAnnotations(
@@ -1611,9 +1671,9 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
-  const onboardingPresent = await exerciseOnboarding(driver, artifactDirectory, artifacts);
-  if (onboardingPresent) assertions.push('onboarding sample and native clipboard action');
-  const projectPath = await createProjectThroughUi(driver, 'Native Verification', onboardingPresent);
+  await exerciseOnboarding(driver, artifactDirectory, artifacts);
+  assertions.push('onboarding sample and native clipboard action');
+  const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: 'button[aria-label="Rename"]' });
@@ -1621,6 +1681,9 @@ export async function runSmokeWorkflow(
   await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
   await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
   await driver.waitFor({ selector: '[role="dialog"]' }, { absent: true });
+  const namedProject = await host.readProject(projectPath);
+  if (!namedProject.collections.some((collection) => collection.name === 'Verification collection'))
+    throw new Error('Native Select All and replacement did not persist the exact collection name.');
   await importImages(driver, projectPath, sources, 10);
   assertions.push('real new-project prompt and collection import');
 
@@ -1628,6 +1691,7 @@ export async function runSmokeWorkflow(
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
+  await assertNativeCanvasAnnotationsPersisted(driver, projectPath);
   assertions.push(
     'trusted pan, crop, redaction, outside-bound arrow creation, double-click, Enter and Escape',
   );
@@ -1667,6 +1731,14 @@ export async function runSmokeWorkflow(
   if (!pickerFocusRestored) throw new Error('Collection picker did not restore focus after Escape.');
   assertions.push('native collection picker keyboard focus and Escape restoration');
 
+  // Keep the native crop/redaction/arrow checks above tied to real pointer input,
+  // then replace their gesture-dependent endpoints before recording visual baselines.
+  // Native move events can be coalesced before mouseup, so the committed crop is
+  // intentionally not used as a cross-run screenshot fixture.
+  if (artifactDirectory) {
+    await installDeterministicExportAnnotations(driver, projectPath);
+    assertions.push('deterministic workspace annotations after native pointer checks');
+  }
   await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
@@ -1861,6 +1933,10 @@ export async function runSmokeWorkflow(
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
+  );
+  artifacts.push(...(await exerciseUiFeedback(driver, artifactDirectory)));
+  assertions.push(
+    'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
 
   const report: SmokeWorkflowReport = {

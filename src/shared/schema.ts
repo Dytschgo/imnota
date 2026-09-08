@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ProjectData } from './types.js';
 import type { ContentItem } from './content-items.js';
 import { DEFAULT_EXPORT_PREFERENCES } from './utils.js';
+import { isProjectIconKey, PROJECT_ICON_KEYS } from './project-icons.js';
 
 export const filenameSchema = z
   .string()
@@ -100,6 +101,11 @@ const projectFields = {
   updatedAt: z.string(),
   status: z.enum(['active', 'archived']),
   favourite: z.boolean(),
+  // Unknown icon values degrade to the default instead of making an otherwise valid old project unreadable.
+  icon: z.preprocess(
+    (value) => (isProjectIconKey(value) ? value : undefined),
+    z.enum(PROJECT_ICON_KEYS).optional(),
+  ),
   screenshots: z.array(screenshotSchema),
   exportPreferences: z
     .object({

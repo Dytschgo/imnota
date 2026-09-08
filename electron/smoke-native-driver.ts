@@ -123,7 +123,9 @@ function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
       width: rect.width,
       height: rect.height,
       text: normalized(found.getAttribute('aria-label') || found.textContent || found.value),
-      disabled: Boolean(found.disabled || found.getAttribute('aria-disabled') === 'true')
+      disabled: Boolean(found.matches(':disabled') ||
+        (found instanceof HTMLLabelElement && found.control?.matches(':disabled')) ||
+        found.getAttribute('aria-disabled') === 'true')
     };
   })()`;
 }
@@ -176,20 +178,20 @@ export class NativeUiDriver {
 
   async waitFor(
     locator: SmokeLocator,
-    options: { timeoutMs?: number; absent?: boolean } = {},
+    options: { timeoutMs?: number; absent?: boolean; enabled?: boolean } = {},
   ): Promise<Rectangle & { text: string; disabled: boolean }> {
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
     const started = Date.now();
     do {
       const found = await this.bounds(locator);
-      if (options.absent ? !found : found) {
+      if (options.absent ? !found : found && (!options.enabled || !found.disabled)) {
         if (options.absent) return { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false };
         return found!;
       }
       await wait(50);
     } while (Date.now() - started < timeout);
     throw new Error(
-      `Timed out waiting for ${options.absent ? 'absence of ' : ''}${JSON.stringify(locator)}.`,
+      `Timed out waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)}.`,
     );
   }
 
@@ -198,10 +200,9 @@ export class NativeUiDriver {
   }
 
   async click(locator: SmokeLocator, clickCount = 1): Promise<SmokePoint> {
-    await this.waitFor(locator);
+    await this.waitFor(locator, { enabled: true });
     await this.evaluate(locatorScript(locator, true));
-    const bounds = await this.waitFor(locator);
-    if (bounds.disabled) throw new Error(`Cannot click disabled control ${JSON.stringify(locator)}.`);
+    const bounds = await this.waitFor(locator, { enabled: true });
     const point = {
       x: Math.round(bounds.x + bounds.width / 2),
       y: Math.round(bounds.y + bounds.height / 2),
@@ -232,17 +233,20 @@ export class NativeUiDriver {
 
   async fill(locator: SmokeLocator, value: string): Promise<void> {
     await this.click(locator);
-    const modifier = process.platform === 'darwin' ? 'meta' : 'control';
-    this.window.webContents.sendInputEvent({
-      type: 'keyDown',
-      keyCode: 'A',
-      modifiers: [modifier],
-    });
-    this.window.webContents.sendInputEvent({
-      type: 'keyUp',
-      keyCode: 'A',
-      modifiers: [modifier],
-    });
+    // macOS routes Cmd+A through the application menu, which synthetic renderer
+    // key events do not invoke. Use Electron's native editing command instead.
+    this.window.webContents.selectAll();
+    await this.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const check = () => {
+        const field = document.activeElement;
+        if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+            field.selectionStart === 0 && field.selectionEnd === field.value.length) return resolve(true);
+        if (Date.now() >= deadline) return reject(new Error('Native Select All did not select the focused field.'));
+        requestAnimationFrame(check);
+      };
+      check();
+    })`);
     await this.window.webContents.insertText(value);
     await wait(40);
   }

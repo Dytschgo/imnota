@@ -51,6 +51,7 @@ import {
 import { CANVAS_COMMAND_EVENT, canvasCommandFromEvent, viewportForCanvasCommand } from '../canvas/commands';
 import { pixelatedRegion } from '../pixelate';
 import { zoomAt } from '../viewport';
+import { viewportToReveal } from '../canvas/reveal';
 import type { ToolChoice } from './Toolbar';
 import './annotation-canvas.css';
 
@@ -66,6 +67,7 @@ export interface AnnotationCanvasProps {
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedId: string | null;
+  revealAnnotationId?: string | null;
   tool: ToolChoice;
   onChange: (annotations: Annotation[]) => void;
   onSelect: (id: string | null) => void;
@@ -178,6 +180,7 @@ export function AnnotationCanvas({
   image,
   annotations,
   selectedId,
+  revealAnnotationId,
   tool,
   onChange,
   onSelect,
@@ -191,6 +194,7 @@ export function AnnotationCanvas({
   const measureText = useMemo(() => createBrowserTextMeasurer(), []);
   const wrapRef = useRef<HTMLDivElement>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
+  const revealedMatch = useRef<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [draft, setDraft] = useState<Annotation | null>(null);
@@ -452,6 +456,36 @@ export function AnnotationCanvas({
     sourceBounds.width,
     sourceBounds.height,
   ]);
+
+  useEffect(() => {
+    if (!revealAnnotationId) {
+      revealedMatch.current = null;
+      return;
+    }
+    if (!image || !imageObj) return;
+    const key = `${image.filename}:${revealAnnotationId}:${size.width}:${size.height}`;
+    if (revealedMatch.current === key) return;
+    const frame = requestAnimationFrame(() => {
+      const stage = stageRef.current;
+      const node = stage?.findOne((candidate: Konva.Node) => candidate.id() === revealAnnotationId);
+      if (!stage || !node) return;
+      const rect = node.getClientRect({ relativeTo: stage });
+      const current = viewportRef.current;
+      const next = viewportToReveal(
+        {
+          x: (rect.x - current.x) / current.scale,
+          y: (rect.y - current.y) / current.scale,
+          width: rect.width / current.scale,
+          height: rect.height / current.scale,
+        },
+        size,
+      );
+      revealedMatch.current = key;
+      viewportRef.current = next;
+      setViewport(next);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revealAnnotationId, annotations, image, imageObj, size, stageRef]);
 
   const pixelated = useMemo(
     () =>

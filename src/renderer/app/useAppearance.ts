@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  appearanceBackdrop,
   isAllowedBackgroundImage,
   isBackdropPreset,
   type AccentPreset,
@@ -194,7 +195,9 @@ export function useAppearance(
     let current = true;
     setDesktopActive(false);
     const enabled = Boolean(
-      preferences.desktopGlass && !preferences.backgroundImage && effective.glassLevel !== 'off',
+      preferences.desktopGlass &&
+      !appearanceBackdrop(preferences, effective.theme).image &&
+      effective.glassLevel !== 'off',
     );
     if (typeof window.imnota?.setDesktopGlass === 'function') {
       void window.imnota
@@ -209,7 +212,7 @@ export function useAppearance(
     return () => {
       current = false;
     };
-  }, [preferences.desktopGlass, preferences.backgroundImage, effective.glassLevel]);
+  }, [effective.glassLevel, effective.theme, preferences]);
 
   useEffect(() => {
     const root = options.root ?? (typeof document === 'undefined' ? null : document.documentElement);
@@ -233,29 +236,25 @@ export function useAppearance(
     root.style.setProperty('--imnota-glass-opacity', `${Number(glass.alpha) * 100}%`);
     root.style.setProperty('--imnota-glass-blur', glass.blur);
     root.style.setProperty('--imnota-glass-saturation', glass.saturation);
-    const backdropActive = effective.glassLevel !== 'off' && Boolean(preferences.backgroundImage);
+    const backdrop = appearanceBackdrop(preferences, effective.theme);
+    const backdropActive = effective.glassLevel !== 'off' && Boolean(backdrop.image);
     root.dataset.background = backdropActive ? 'active' : 'none';
+    root.dataset.backgroundSource = backdropActive
+      ? isBackdropPreset(backdrop.image)
+        ? 'preset'
+        : 'upload'
+      : 'none';
     root.dataset.desktopGlass = desktopActive ? 'active' : preferences.desktopGlass ? 'fallback' : 'off';
-    root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, preferences.backgroundOpacity * 100)}%`);
+    root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, backdrop.opacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',
-      backdropActive ? cssBackgroundImage(preferences.backgroundImage) : 'none',
+      backdropActive ? cssBackgroundImage(backdrop.image) : 'none',
     );
-    root.style.setProperty(
-      '--imnota-background-opacity',
-      backdropActive ? String(preferences.backgroundOpacity) : '0',
-    );
+    root.style.setProperty('--imnota-background-opacity', backdropActive ? String(backdrop.opacity) : '0');
     // Compatibility aliases let the current indigo-named shell adopt presets before its global tokens are renamed.
     root.style.setProperty('--indigo', accent.base);
     root.style.setProperty('--indigo-light', accent.hover);
-  }, [
-    effective,
-    options.root,
-    preferences.backgroundImage,
-    preferences.backgroundOpacity,
-    preferences.desktopGlass,
-    desktopActive,
-  ]);
+  }, [effective, options.root, preferences, desktopActive]);
 
   return {
     ...effective,

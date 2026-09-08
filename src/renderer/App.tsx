@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
-import { Check, FolderOpen, FolderPlus, Heart, Layers3, Plus, Search, ShieldCheck, X } from 'lucide-react';
+import { Check, FolderOpen, FolderPlus, Heart, Plus, Search, ShieldCheck, X } from 'lucide-react';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -19,7 +19,7 @@ import type {
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
-import { AppDialogs, type AppDialog, type NewProjectDraft } from './app/AppDialogs';
+import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
 import { usePreferences } from './app/usePreferences';
@@ -28,16 +28,26 @@ import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
 import { Logo } from './components/Logo';
+import { ProjectIcon } from './components/ProjectIcon';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, EmptyState, IconButton, Modal } from './components/ui';
 import { OnboardingDemo } from './onboarding';
 import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
 import { usePromptBundleController } from './export/usePromptBundleController';
-import { SettingsView, useKeyboardShortcuts } from './settings';
+import { SETTINGS_CATEGORIES, SettingsView, useKeyboardShortcuts, type SettingsCategory } from './settings';
 import { useAppStore, type AppView } from './store';
-import { resolveRecentCollections, relativeOpenedTime } from './navigation-history';
+import {
+  moveNavigationLocation,
+  pushNavigationLocation,
+  replaceNavigationLocation,
+  resolveRecentCollections,
+  relativeOpenedTime,
+  type NavigationLocation,
+} from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
+import './app/project-management.css';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -71,6 +81,9 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [dialog, setDialog] = useState<AppDialog>(null);
   const [newProject, setNewProject] = useState<NewProjectDraft>({ name: '', description: '' });
+  const [editProject, setEditProject] = useState<ProjectEditDraft | null>(null);
+  const [editProjectPath, setEditProjectPath] = useState<string | null>(null);
+  const [editProjectRevision, setEditProjectRevision] = useState<string | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
@@ -86,10 +99,16 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [snapshotNotice, setSnapshotNotice] = useState<SnapshotNotice | null>(null);
-  const [projectSearchFocusRequest, setProjectSearchFocusRequest] = useState(0);
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<ProjectSearchScope>('active');
+  const [pendingSearchAnnotationId, setPendingSearchAnnotationId] = useState<string | null>(null);
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('Appearance');
+  const [navigationStack, setNavigationStack] = useState({
+    back: [] as NavigationLocation[],
+    forward: [] as NavigationLocation[],
+  });
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const projectSearchInputRef = useRef<HTMLInputElement>(null);
   const metadataTimer = useRef<number | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
@@ -260,15 +279,6 @@ export default function App() {
     setSelectedAnnotationId(null);
   }, [persistence.loadedScreenshotId]);
 
-  useEffect(() => {
-    if (!projectSearchFocusRequest || !['projects', 'recent', 'favourites'].includes(store.view)) return;
-    const frame = window.requestAnimationFrame(() => {
-      projectSearchInputRef.current?.focus();
-      projectSearchInputRef.current?.select();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [projectSearchFocusRequest, store.view]);
-
   const flushAll = useCallback(async (): Promise<boolean> => {
     if (metadataTimer.current !== null) {
       window.clearTimeout(metadataTimer.current);
@@ -279,6 +289,20 @@ export default function App() {
     if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
     return true;
   }, [persistence, contentPersistence]);
+
+  const currentLocation = useCallback((): NavigationLocation => {
+    const current = useAppStore.getState();
+    return {
+      view: current.view,
+      projectPath: current.snapshot?.projectPath ?? null,
+      collectionId: current.activeCollectionId,
+      itemId: current.activeScreenshotId,
+      search: current.search,
+      settingsCategory: current.view === 'settings' ? settingsCategory : undefined,
+      scrollTop: document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace')
+        ?.scrollTop,
+    };
+  }, [settingsCategory]);
 
   const installUpdate = useCallback(async (): Promise<void> => {
     if (!(await flushAll())) return;
@@ -387,6 +411,11 @@ export default function App() {
     updateShot({ description: previous });
   }
 
+  function clearSearchSelection() {
+    setSelectedAnnotationId(null);
+    setPendingSearchAnnotationId(null);
+  }
+
   const guardedSnapshot = useCallback(
     async (action: () => Promise<ProjectSnapshot | null | undefined>, failure: string, recordOpen = true) => {
       const identity = ++navigationIdentity.current;
@@ -429,12 +458,13 @@ export default function App() {
 
   async function navigate(view: AppView) {
     const identity = ++navigationIdentity.current;
+    const previousLocation = currentLocation();
     if (!(await flushAll())) {
       setError('Navigation was cancelled so your unsaved work stays open.');
       return;
     }
     try {
-      const opensLibrary = ['projects', 'recent', 'favourites'].includes(view);
+      const opensLibrary = ['projects', 'recent', 'favourites', 'archived'].includes(view);
       if (opensLibrary) await refreshProjects();
       if (identity !== navigationIdentity.current) return;
       if (!(await flushAll())) {
@@ -442,14 +472,111 @@ export default function App() {
         return;
       }
       const state = useAppStore.getState();
-      const currentIsLibrary = ['projects', 'recent', 'favourites'].includes(state.view) && !state.snapshot;
+      const currentIsLibrary =
+        ['projects', 'recent', 'favourites', 'archived'].includes(state.view) && !state.snapshot;
+      clearSearchSelection();
       state.set({
         view,
         snapshot: opensLibrary || view === 'settings' ? null : state.snapshot,
         search: opensLibrary && !currentIsLibrary ? '' : state.search,
       });
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The project library could not be refreshed.');
+    }
+  }
+
+  async function restoreNavigation(direction: 'back' | 'forward') {
+    const startingStack = replaceNavigationLocation(navigationStack, currentLocation());
+    const startingLocation = startingStack.back.at(-1)!;
+    let candidateStack = startingStack;
+    let moved = moveNavigationLocation(candidateStack, direction);
+    if (!moved.location) return;
+    const identity = ++navigationIdentity.current;
+    if (!(await flushAll())) {
+      setError('Navigation was cancelled so your unsaved work stays open.');
+      return;
+    }
+    try {
+      while (moved.location) {
+        const target = moved.location;
+        if (target.projectPath && ['workspace', 'context'].includes(target.view)) {
+          const nativeMutationToken = persistence.beginNativeMutation();
+          let adopted = false;
+          let snapshot: ProjectSnapshot;
+          try {
+            snapshot = await window.imnota.loadProject(target.projectPath);
+          } catch (reason) {
+            await persistence.cancelNativeMutation(nativeMutationToken);
+            if (isMissingNavigationTargetError(reason)) {
+              candidateStack = moved.stack;
+              moved = moveNavigationLocation(candidateStack, direction);
+              continue;
+            }
+            throw reason;
+          }
+          if (identity !== navigationIdentity.current) {
+            await persistence.cancelNativeMutation(nativeMutationToken);
+            return;
+          }
+          if (snapshot.project.status === 'archived') {
+            await persistence.cancelNativeMutation(nativeMutationToken);
+            candidateStack = moved.stack;
+            moved = moveNavigationLocation(candidateStack, direction);
+            continue;
+          }
+          const collection = snapshot.project.collections.find((entry) => entry.id === target.collectionId);
+          if (!collection) {
+            await persistence.cancelNativeMutation(nativeMutationToken);
+            candidateStack = moved.stack;
+            moved = moveNavigationLocation(candidateStack, direction);
+            continue;
+          }
+          adopted = await persistence.adoptAuthoritativeSnapshot(snapshot, nativeMutationToken);
+          if (!adopted) return;
+          if (identity !== navigationIdentity.current) return;
+          const state = useAppStore.getState();
+          state.setActiveCollection(collection.id);
+          if (
+            target.itemId &&
+            orderedCollectionItems(snapshot.project, collection.id).some((item) => item.id === target.itemId)
+          )
+            state.set({ activeScreenshotId: target.itemId });
+          useAppStore.getState().set({ view: target.view, search: target.search });
+        } else {
+          if (['projects', 'recent', 'favourites', 'archived'].includes(target.view)) await refreshProjects();
+          if (identity !== navigationIdentity.current) return;
+          useAppStore.getState().set({ view: target.view, snapshot: null, search: target.search });
+          if (
+            target.view === 'settings' &&
+            SETTINGS_CATEGORIES.includes(target.settingsCategory as SettingsCategory)
+          )
+            setSettingsCategory(target.settingsCategory as SettingsCategory);
+        }
+        clearSearchSelection();
+        setNavigationStack(
+          direction === 'back'
+            ? { back: moved.stack.back, forward: [startingLocation, ...startingStack.forward] }
+            : { back: [...startingStack.back, target], forward: moved.stack.forward },
+        );
+        if (target.scrollTop !== undefined)
+          window.requestAnimationFrame(() => {
+            const container = document.querySelector<HTMLElement>(
+              '.library, [data-testid="settings-view"], .workspace',
+            );
+            if (container) container.scrollTop = target.scrollTop!;
+          });
+        return;
+      }
+      setNavigationStack(
+        direction === 'back'
+          ? { back: [startingLocation], forward: startingStack.forward }
+          : { back: startingStack.back, forward: [] },
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The saved location is no longer available.');
     }
   }
 
@@ -467,25 +594,38 @@ export default function App() {
   }
   async function createProject() {
     if (!newProject.name.trim()) return;
+    const identity = ++navigationIdentity.current;
+    const previousLocation = currentLocation();
     if (!(await flushAll())) {
-      setError('Project creation was cancelled so your unsaved work stays open.');
+      if (identity === navigationIdentity.current)
+        setError('Project creation was cancelled so your unsaved work stays open.');
       return;
     }
+    if (identity !== navigationIdentity.current) return;
     setDialogBusy(true);
     try {
       if (!store.settings.workspacePath && !(await chooseWorkspace())) return;
+      if (identity !== navigationIdentity.current) return;
       const snapshot = await window.imnota.createProject(newProject);
+      if (identity !== navigationIdentity.current) return;
       if (!(await flushAll())) {
-        setError(
-          'The project was created, but the current project stayed open because newer edits could not be saved.',
-        );
+        if (identity === navigationIdentity.current)
+          setError(
+            'The project was created, but the current project stayed open because newer edits could not be saved.',
+          );
         return;
       }
+      if (identity !== navigationIdentity.current) return;
+      await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
       setDialog(null);
       setNewProject({ name: '', description: '' });
-      await refreshProjects();
+      clearSearchSelection();
       adoptSnapshot(snapshot);
       useAppStore.getState().recordCollectionOpen();
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
       showToast('Project created');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Project could not be created.');
@@ -545,8 +685,16 @@ export default function App() {
     }
   }
   async function selectShot(id: string) {
-    if (id !== store.activeScreenshotId && (await flushAll()))
+    const identity = ++navigationIdentity.current;
+    const previousLocation = currentLocation();
+    if (id !== store.activeScreenshotId && (await flushAll())) {
+      if (identity !== navigationIdentity.current) return;
+      clearSearchSelection();
       useAppStore.getState().set({ activeScreenshotId: id });
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
+    }
   }
   async function addContent(kind: 'drawing' | 'text') {
     const token = await beginCurrentProjectMutation();
@@ -652,6 +800,7 @@ export default function App() {
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
     const identity = navigationIdentityAtStart ?? ++navigationIdentity.current;
     if (identity !== navigationIdentity.current) return;
+    clearSearchSelection();
     const before = useAppStore.getState();
     if (id !== before.activeCollectionId && (await flushAll())) {
       if (
@@ -663,6 +812,8 @@ export default function App() {
     }
   }
   async function openCollection(projectPath: string, collectionId: string) {
+    const previousLocation = currentLocation();
+    clearSearchSelection();
     if (
       !(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the collection', false))
     )
@@ -678,7 +829,26 @@ export default function App() {
         selected.activeCollectionId === collectionId
       )
         selected.recordCollectionOpen();
+      setNavigationStack((stack) =>
+        pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+      );
     }
+  }
+  async function openProject(projectPath: string) {
+    const previousLocation = currentLocation();
+    clearSearchSelection();
+    if (!(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project'))) return;
+    setNavigationStack((stack) =>
+      pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+    );
+  }
+  async function openProjectDialog() {
+    const previousLocation = currentLocation();
+    clearSearchSelection();
+    if (!(await guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project'))) return;
+    setNavigationStack((stack) =>
+      pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+    );
   }
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
@@ -767,18 +937,158 @@ export default function App() {
     }
   }
   async function deleteProject() {
-    if (!store.snapshot || !(await flushAll())) return;
+    const current = useAppStore.getState().snapshot;
+    if (!current) return;
+    const identity = ++navigationIdentity.current;
+    if (!(await flushAll()) || identity !== navigationIdentity.current) return;
     setDialogBusy(true);
     try {
-      await window.imnota.deleteProject(store.snapshot.projectPath);
+      await window.imnota.deleteProject(current.projectPath);
+      if (identity !== navigationIdentity.current) return;
       setDialog(null);
-      store.setProject(null);
+      if (useAppStore.getState().snapshot?.projectPath === current.projectPath)
+        useAppStore.getState().setProject(null);
       await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
       showToast('Project moved to the system trash');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The project could not be deleted.');
     } finally {
       setDialogBusy(false);
+    }
+  }
+  async function beginProjectEdit(projectPath: string) {
+    const identity = ++navigationIdentity.current;
+    if (!(await flushAll())) {
+      if (identity === navigationIdentity.current)
+        setError('Editing the project was cancelled so your unsaved work stays open.');
+      return;
+    }
+    if (identity !== navigationIdentity.current) return;
+    try {
+      const snapshot = await window.imnota.loadProject(projectPath);
+      if (identity !== navigationIdentity.current) return;
+      if (!snapshot.projectRevision) {
+        setError('Project metadata cannot be edited until its revision is available.');
+        return;
+      }
+      setEditProjectPath(projectPath);
+      setEditProjectRevision(snapshot.projectRevision);
+      setEditProject({
+        name: snapshot.project.name,
+        description: snapshot.project.description,
+        icon: snapshot.project.icon ?? 'layers',
+      });
+      setDialog('edit-project');
+    } catch (reason) {
+      if (identity === navigationIdentity.current)
+        setError(reason instanceof Error ? reason.message : 'Project details could not be loaded.');
+    }
+  }
+  async function saveProjectEdits() {
+    if (!editProject || !editProjectPath || !editProjectRevision) return;
+    const draft = editProject;
+    const projectPath = editProjectPath;
+    const expectedRevision = editProjectRevision;
+    const identity = ++navigationIdentity.current;
+    setDialogBusy(true);
+    let nativeMutationToken: number | null = null;
+    try {
+      if (!(await flushAll())) {
+        if (identity === navigationIdentity.current)
+          setError('Saving project details was cancelled so your unsaved work stays open.');
+        return;
+      }
+      if (identity !== navigationIdentity.current) return;
+      nativeMutationToken = persistence.beginNativeMutation();
+      const result = await window.imnota.updateProjectMetadata({
+        projectPath,
+        expectedRevision,
+        patch: draft,
+      });
+      if (identity !== navigationIdentity.current) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        return;
+      }
+      if (useAppStore.getState().snapshot?.projectPath === projectPath) {
+        const adopted = await persistence.adoptAuthoritativeSnapshot(result, nativeMutationToken);
+        nativeMutationToken = null;
+        if (!adopted || identity !== navigationIdentity.current) return;
+      } else {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        if (identity !== navigationIdentity.current) return;
+      }
+      await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
+      setDialog(null);
+      setEditProject(null);
+      setEditProjectPath(null);
+      setEditProjectRevision(null);
+      showToast('Project details saved');
+    } catch (reason) {
+      if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
+      if (identity === navigationIdentity.current)
+        setError(reason instanceof Error ? reason.message : 'Project details could not be saved.');
+    } finally {
+      setDialogBusy(false);
+    }
+  }
+  async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
+    const identity = ++navigationIdentity.current;
+    if (!(await flushAll())) {
+      if (identity === navigationIdentity.current)
+        setError('The project archive change was cancelled so your unsaved work stays open.');
+      return;
+    }
+    if (identity !== navigationIdentity.current) return;
+    let nativeMutationToken: number | null = persistence.beginNativeMutation();
+    try {
+      const loaded = expectedRevision ? null : await window.imnota.loadProject(projectPath);
+      if (identity !== navigationIdentity.current) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        return;
+      }
+      const revision = expectedRevision ?? loaded?.projectRevision;
+      if (!revision) throw new Error('Project revision is unavailable.');
+      const result = await window.imnota.setProjectArchived({
+        projectPath,
+        expectedRevision: revision,
+        archived,
+      });
+      if (identity !== navigationIdentity.current) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        return;
+      }
+      if (useAppStore.getState().snapshot?.projectPath === projectPath) {
+        const adopted = await persistence.adoptAuthoritativeSnapshot(result, nativeMutationToken);
+        nativeMutationToken = null;
+        if (!adopted || identity !== navigationIdentity.current) return;
+        if (useAppStore.getState().snapshot?.projectPath !== projectPath) return;
+        useAppStore.getState().setProject(null);
+      } else {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        if (identity !== navigationIdentity.current) return;
+      }
+      await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
+      showToast(archived ? 'Project archived' : 'Project restored');
+      if (archived && result.projectRevision)
+        setToast({
+          message: 'Project archived',
+          action: {
+            label: 'Undo',
+            run: () => void setProjectArchived(projectPath, false, result.projectRevision),
+          },
+        });
+    } catch (reason) {
+      if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
+      if (identity === navigationIdentity.current)
+        setError(reason instanceof Error ? reason.message : 'Project archive state could not be changed.');
     }
   }
 
@@ -839,12 +1149,40 @@ export default function App() {
       setError('Choose a workspace before searching projects.');
       return;
     }
-    if (!store.snapshot && ['projects', 'recent', 'favourites'].includes(store.view)) {
-      setProjectSearchFocusRequest((value) => value + 1);
-      return;
-    }
-    await navigate('projects');
-    if (!useAppStore.getState().snapshot) setProjectSearchFocusRequest((value) => value + 1);
+    if (!(await flushAll())) return;
+    setPendingSearchAnnotationId(null);
+    setSearchScope(useAppStore.getState().view === 'archived' ? 'archived' : 'active');
+    setSearchDialogOpen(true);
+  }
+  async function openSearchTarget(target: ProjectSearchTarget) {
+    const previousLocation = currentLocation();
+    if (
+      !(await guardedSnapshot(
+        () => window.imnota.loadProject(target.projectPath),
+        'Opening the search result',
+        false,
+      ))
+    )
+      throw new Error('The result could not be opened.');
+    const state = useAppStore.getState();
+    if (
+      target.collectionId &&
+      state.snapshot?.project.collections.some((entry) => entry.id === target.collectionId)
+    )
+      state.setActiveCollection(target.collectionId);
+    if (
+      target.itemId &&
+      state.snapshot &&
+      orderedCollectionItems(state.snapshot.project, state.activeCollectionId).some(
+        (item) => item.id === target.itemId,
+      )
+    )
+      state.set({ activeScreenshotId: target.itemId });
+    setSelectedAnnotationId(target.annotationId ?? null);
+    setPendingSearchAnnotationId(target.annotationId ?? null);
+    setNavigationStack((stack) =>
+      pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+    );
   }
 
   const platform = detectShortcutPlatform();
@@ -862,8 +1200,7 @@ export default function App() {
   );
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
-    'project.open': () =>
-      void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project'),
+    'project.open': () => void openProjectDialog(),
     'project.search': () => void openProjectSearch(),
     'navigation.projects': () => void navigate('projects'),
     'navigation.recent': () => void navigate('recent'),
@@ -956,19 +1293,19 @@ export default function App() {
           recent: shortcutLabel('navigation.recent'),
           favourites: shortcutLabel('navigation.favourites'),
         }}
+        canGoBack={navigationStack.back.length > 1}
+        canGoForward={navigationStack.forward.length > 0}
+        onBack={() => restoreNavigation('back')}
+        onForward={() => restoreNavigation('forward')}
         onNavigate={navigate}
         onNewProject={() => setDialog('new-project')}
-        onOpenProject={() =>
-          void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')
-        }
+        onOpenProject={openProjectDialog}
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
-        onSelectProject={(projectPath) =>
-          guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project').then(() => {})
-        }
+        onSelectProject={openProject}
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
@@ -1064,6 +1401,8 @@ export default function App() {
           <Welcome chooseWorkspace={() => void chooseWorkspace()} />
         ) : store.view === 'settings' ? (
           <SettingsView
+            activeCategory={settingsCategory}
+            onCategoryChange={setSettingsCategory}
             preferences={preferences.settings}
             effectiveAppearance={appearance}
             savingPreferences={preferences.saving}
@@ -1082,11 +1421,13 @@ export default function App() {
           <Library
             onOpenCollection={openCollection}
             onNew={() => setDialog('new-project')}
-            onOpen={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
-            onSelect={(projectPath) =>
-              guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project')
-            }
-            searchInputRef={projectSearchInputRef}
+            onOpen={openProjectDialog}
+            onSelect={openProject}
+            onEdit={beginProjectEdit}
+            onArchive={(path) => void setProjectArchived(path, true)}
+            onRestore={(path) => void setProjectArchived(path, false)}
+            onSearch={openProjectSearch}
+            onBrowseProjects={() => navigate('projects')}
           />
         ) : (
           <Workspace
@@ -1111,6 +1452,7 @@ export default function App() {
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
+            revealAnnotationId={pendingSearchAnnotationId}
             tool={tool}
             annotationColor={annotationColor}
             paletteColor={paletteColor}
@@ -1228,10 +1570,13 @@ export default function App() {
       <AppDialogs
         dialog={dialog}
         newProject={newProject}
+        editProject={editProject ?? undefined}
         shortcuts={preferences.settings.shortcuts}
         currentVersion={updateStatus?.currentVersion}
         busy={dialogBusy}
         onNewProjectChange={setNewProject}
+        onEditProjectChange={setEditProject}
+        onSaveProjectEdits={saveProjectEdits}
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         onShortcutChange={preferences.saveShortcuts}
@@ -1267,6 +1612,13 @@ export default function App() {
         </Modal>
       )}
       <PromptBundleDialogHost controller={promptBundles} onError={setError} />
+      <SearchDialog
+        open={searchDialogOpen}
+        scope={searchScope}
+        onScopeChange={setSearchScope}
+        onClose={() => setSearchDialogOpen(false)}
+        onOpenResult={openSearchTarget}
+      />
       {showOnboarding && (
         <OnboardingDemo
           onCopyBundle={({ markdown, imageDataUrl }) => window.imnota.copyContext({ markdown, imageDataUrl })}
@@ -1312,6 +1664,16 @@ function Welcome({ chooseWorkspace }: { chooseWorkspace(): void }) {
   );
 }
 
+function isMissingNavigationTargetError(reason: unknown): boolean {
+  if (!(reason instanceof Error)) return false;
+  const code = (reason as Error & { code?: unknown }).code;
+  return (
+    code === 'ENOENT' ||
+    /\b(enoent|not found|missing|no such file)\b/i.test(reason.message) ||
+    /selected project folder is unavailable/i.test(reason.message)
+  );
+}
+
 export function matchesProjectSearch(project: ProjectListItem, search: string) {
   return (project.searchText ?? `${project.name} ${project.description}`)
     .toLowerCase()
@@ -1323,21 +1685,30 @@ function Library({
   onNew,
   onOpen,
   onSelect,
-  searchInputRef,
+  onEdit,
+  onArchive,
+  onRestore,
+  onSearch,
+  onBrowseProjects,
 }: {
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onNew(): void;
   onOpen(): void;
   onSelect(projectPath: string): void;
-  searchInputRef: RefObject<HTMLInputElement>;
+  onEdit(projectPath: string): void;
+  onArchive(projectPath: string): void;
+  onRestore(projectPath: string): void;
+  onSearch(): void | Promise<void>;
+  onBrowseProjects(): void | Promise<void>;
 }) {
   const { projects, search, set, view, settings, recentCollections } = useAppStore();
   const recent = resolveRecentCollections(projects, recentCollections).filter((entry) =>
     `${entry.name} ${entry.projectName}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
-  const filtered = projects.filter(
-    (project) => (view !== 'favourites' || project.favourite) && matchesProjectSearch(project, search),
-  );
+  const filtered = projects.filter((project) => {
+    if (view === 'archived') return project.status === 'archived';
+    return project.status !== 'archived' && (view !== 'favourites' || project.favourite);
+  });
   return (
     <section className="library">
       <div className="library-heading">
@@ -1347,7 +1718,9 @@ function Library({
               ? 'Favourite projects'
               : view === 'recent'
                 ? 'Recent collections'
-                : 'Projects'}
+                : view === 'archived'
+                  ? 'Archived projects'
+                  : 'Projects'}
           </h1>
           <p>
             {projects.length} local project{projects.length === 1 ? '' : 's'} · {settings.workspacePath}
@@ -1364,25 +1737,35 @@ function Library({
           </Button>
         </div>
       </div>
-      <div className="search-line">
-        <Search size={16} aria-hidden="true" />
-        <input
-          ref={searchInputRef}
-          aria-label="Search projects"
-          placeholder={
-            view === 'recent'
-              ? 'Search recent collections and projects'
-              : 'Search projects and screenshot descriptions'
-          }
-          value={search}
-          onChange={(event) => set({ search: event.target.value })}
-        />
-        {search && (
-          <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
-            Clear search
-          </button>
-        )}
-      </div>
+      {view === 'recent' ? (
+        <div className="search-line">
+          <Search size={16} aria-hidden="true" />
+          <input
+            aria-label="Filter recent collections"
+            placeholder="Filter recent collections and projects"
+            value={search}
+            onChange={(event) => set({ search: event.target.value })}
+          />
+          {search && (
+            <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
+              Clear filter
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          className="search-line library-search-trigger"
+          type="button"
+          data-testid="library-full-search"
+          onClick={() => void onSearch()}
+        >
+          <Search size={16} aria-hidden="true" />
+          <span>
+            Search {view === 'archived' ? 'archived projects' : 'projects'}, screenshots, annotations, text,
+            and drawings
+          </span>
+        </button>
+      )}
       {view === 'recent' ? (
         recent.length ? (
           <div className="project-list">
@@ -1394,7 +1777,7 @@ function Library({
                 title={`${entry.projectName} / ${entry.name}`}
               >
                 <div className="project-symbol">
-                  <Layers3 size={18} aria-hidden="true" />
+                  <ProjectIcon icon={entry.icon} />
                 </div>
                 <div className="project-row-copy">
                   <strong>{entry.name}</strong>
@@ -1414,50 +1797,79 @@ function Library({
                 : 'Open a project or collection to find it here next time.'
             }
             action={
-              !search ? <Button onClick={() => set({ view: 'projects' })}>Browse projects</Button> : undefined
+              !search ? <Button onClick={() => void onBrowseProjects()}>Browse projects</Button> : undefined
             }
           />
         )
       ) : filtered.length ? (
         <div className="project-list">
           {filtered.map((project) => (
-            <button className="project-row" key={project.id} onClick={() => onSelect(project.projectPath)}>
-              <div className="project-symbol">
-                <Layers3 size={18} aria-hidden="true" />
+            <div className="project-row" key={project.id}>
+              <button className="project-row-main" onClick={() => onSelect(project.projectPath)}>
+                <div className="project-symbol">
+                  <ProjectIcon icon={project.icon} />
+                </div>
+                <div className="project-row-copy">
+                  <strong>{project.name}</strong>
+                  <span>{project.description || 'No description yet'}</span>
+                  <small>
+                    {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
+                    edited {new Date(project.updatedAt).toLocaleDateString()}
+                  </small>
+                </div>
+                <div className="project-row-meta">
+                  {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
+                </div>
+              </button>
+              <div className="project-row-actions">
+                <button
+                  type="button"
+                  data-testid={`project-edit-${project.id}`}
+                  aria-label={`Edit ${project.name}`}
+                  onClick={() => onEdit(project.projectPath)}
+                >
+                  Edit
+                </button>
+                {project.status === 'archived' ? (
+                  <button
+                    type="button"
+                    data-testid={`project-restore-${project.id}`}
+                    onClick={() => onRestore(project.projectPath)}
+                  >
+                    Restore
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`project-archive-${project.id}`}
+                    onClick={() => onArchive(project.projectPath)}
+                  >
+                    Archive
+                  </button>
+                )}
               </div>
-              <div className="project-row-copy">
-                <strong>{project.name}</strong>
-                <span>{project.description || 'No description yet'}</span>
-                <small>
-                  {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
-                  edited {new Date(project.updatedAt).toLocaleDateString()}
-                </small>
-              </div>
-              <div className="project-row-meta">
-                {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
-              </div>
-            </button>
+            </div>
           ))}
         </div>
       ) : (
         <EmptyState
           icon={<FolderOpen size={22} aria-hidden="true" />}
           title={
-            search
-              ? 'No matching projects'
-              : view === 'favourites'
-                ? 'No favourite projects yet'
+            view === 'favourites'
+              ? 'No favourite projects yet'
+              : view === 'archived'
+                ? 'No archived projects'
                 : 'Your project library is empty'
           }
           description={
-            search
-              ? 'Try another project name or description.'
-              : view === 'favourites'
-                ? 'Open a project and use the heart button to keep it here.'
+            view === 'favourites'
+              ? 'Open a project and use the heart button to keep it here.'
+              : view === 'archived'
+                ? 'Archived projects stay here until you restore them.'
                 : 'Create a local project, then add the screenshots that explain the work.'
           }
           action={
-            !search && view !== 'favourites' ? (
+            view !== 'favourites' && view !== 'archived' ? (
               <Button variant="primary" onClick={onNew}>
                 <Plus size={16} aria-hidden="true" />
                 Create first project

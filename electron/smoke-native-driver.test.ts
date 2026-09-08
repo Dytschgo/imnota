@@ -89,6 +89,30 @@ describe('native smoke driver', () => {
     expect(window.webContents.insertText).toHaveBeenCalledWith('Typed text');
   });
 
+  it('waits for a temporarily disabled control before sending native mouse input', async () => {
+    let reads = 0;
+    const sendInputEvent = vi.fn(() => {
+      expect(reads).toBeGreaterThan(1);
+    });
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(async () => ({
+          x: 10,
+          y: 20,
+          width: 100,
+          height: 40,
+          text: 'Save',
+          disabled: ++reads === 1,
+        })),
+        sendInputEvent,
+      },
+    } as unknown as BrowserWindow;
+    await new NativeUiDriver(window, 1_000).click({ text: 'Save' });
+    expect(sendInputEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mouseDown', button: 'left' }),
+    );
+  });
+
   it('sizes and verifies the renderer CSS viewport instead of the outer window frame', async () => {
     const setContentSize = vi.fn();
     const executeJavaScript = vi.fn(async () => ({ width: 1280, height: 800 }));

@@ -34,6 +34,20 @@ export const preferenceSettingsSchema = z
           .refine(isAllowedBackgroundImage, 'Choose a bundled backdrop or a local image file.')
           .default(''),
         backgroundOpacity: z.number().min(0).max(1).default(0.42),
+        useSameBackdropForBoth: z.boolean().default(true),
+        themeBackdropsInitialized: z.boolean().default(false),
+        lightBackgroundImage: z
+          .string()
+          .max(BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH)
+          .refine(isAllowedBackgroundImage, 'Choose a bundled backdrop or a local image file.')
+          .default(''),
+        darkBackgroundImage: z
+          .string()
+          .max(BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH)
+          .refine(isAllowedBackgroundImage, 'Choose a bundled backdrop or a local image file.')
+          .default(''),
+        lightBackgroundOpacity: z.number().min(0).max(1).default(0.42),
+        darkBackgroundOpacity: z.number().min(0).max(1).default(0.42),
         desktopGlass: z.boolean().optional(),
       })
       .strict(),
@@ -70,9 +84,15 @@ function record(value: unknown): Record<string, unknown> {
 function normalizePersistedPreferences(value: unknown): Record<string, unknown> {
   const preferences = record(value);
   const appearance = record(preferences.appearance);
-  if (typeof appearance.backgroundImage !== 'string' || isAllowedBackgroundImage(appearance.backgroundImage))
-    return preferences;
-  return { ...preferences, appearance: { ...appearance, backgroundImage: '' } };
+  const sanitized = Object.fromEntries(
+    ['backgroundImage', 'lightBackgroundImage', 'darkBackgroundImage'].map((key) => [
+      key,
+      typeof appearance[key] === 'string' && !isAllowedBackgroundImage(appearance[key])
+        ? ''
+        : appearance[key],
+    ]),
+  );
+  return { ...preferences, appearance: { ...appearance, ...sanitized } };
 }
 
 /** Resolve profile provenance before any caller persists defaults. */

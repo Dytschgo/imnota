@@ -6,6 +6,8 @@ import {
   rememberCollection,
   resolveRecentCollections,
   relativeOpenedTime,
+  moveNavigationLocation,
+  pushNavigationLocation,
 } from './navigation-history';
 
 beforeEach(() => {
@@ -54,4 +56,29 @@ it('formats opened time without negative ages', () => {
   const now = Date.parse('2026-09-08T12:00:00Z');
   expect(relativeOpenedTime('2026-09-08T13:00:00Z', now)).toBe('Just opened');
   expect(relativeOpenedTime('2026-09-08T11:00:00Z', now)).toBe('Opened 1h ago');
+});
+
+it('keeps a back and forward trail and clears forward after a new location', () => {
+  const project = {
+    view: 'projects' as const,
+    projectPath: null,
+    collectionId: '001-collection',
+    itemId: null,
+    search: '',
+  };
+  const workspace = {
+    ...project,
+    view: 'workspace' as const,
+    projectPath: '/a',
+    itemId: 'one',
+  };
+  const settings = { ...project, view: 'settings' as const };
+  let stack = pushNavigationLocation({ back: [], forward: [] }, project);
+  stack = pushNavigationLocation(stack, workspace);
+  const back = moveNavigationLocation(stack, 'back');
+  expect(back.location).toEqual(project);
+  expect(back.stack.forward).toEqual([workspace]);
+  stack = pushNavigationLocation(back.stack, settings);
+  expect(stack.forward).toEqual([]);
+  expect(moveNavigationLocation(stack, 'forward').location).toBeNull();
 });

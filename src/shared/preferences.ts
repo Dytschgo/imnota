@@ -36,6 +36,18 @@ export interface AppearancePreferences {
   allowPerformanceFallback: boolean;
   backgroundImage: string;
   backgroundOpacity: number;
+  /**
+   * A legacy shared backdrop remains the source of truth while this is true.
+   * Theme-specific values let a dark image and a light image coexist without
+   * changing existing saved preferences.
+   */
+  useSameBackdropForBoth: boolean;
+  /** Marks that empty theme fields are intentional, rather than absent legacy data. */
+  themeBackdropsInitialized: boolean;
+  lightBackgroundImage: string;
+  darkBackgroundImage: string;
+  lightBackgroundOpacity: number;
+  darkBackgroundOpacity: number;
   desktopGlass?: boolean;
 }
 
@@ -74,7 +86,27 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   allowPerformanceFallback: true,
   backgroundImage: '',
   backgroundOpacity: 0.42,
+  useSameBackdropForBoth: true,
+  themeBackdropsInitialized: false,
+  lightBackgroundImage: '',
+  darkBackgroundImage: '',
+  lightBackgroundOpacity: 0.42,
+  darkBackgroundOpacity: 0.42,
 };
+
+export type ResolvedBackdropTheme = Exclude<AppearanceMode, 'system'>;
+
+/** Resolve a backdrop without mutating the shared legacy preference. */
+export function appearanceBackdrop(
+  appearance: AppearancePreferences,
+  theme: ResolvedBackdropTheme,
+): { image: string; opacity: number } {
+  if (appearance.useSameBackdropForBoth)
+    return { image: appearance.backgroundImage, opacity: appearance.backgroundOpacity };
+  return theme === 'dark'
+    ? { image: appearance.darkBackgroundImage, opacity: appearance.darkBackgroundOpacity }
+    : { image: appearance.lightBackgroundImage, opacity: appearance.lightBackgroundOpacity };
+}
 
 export const DEFAULT_ONBOARDING: OnboardingPreferences = {
   completed: false,

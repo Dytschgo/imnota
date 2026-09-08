@@ -20,6 +20,8 @@ collections/001-collection/exports/Collection 01 - 260907-184205/
 
 `project.json` contains project identity and timestamps, ordered collections, screenshot records, schema-4 text/drawing records and local export preferences. A collection has an immutable ID, editable name, creation/update timestamps, archived state and optional Overall context. A new collection starts empty. Renaming it never changes its folder ID.
 
+Project names and descriptions can be edited without changing the project ID or folder. The optional `icon` field stores a predefined icon key, with the default project icon used for older files. Archiving changes the project's status rather than moving or deleting its content. Metadata edits and archive/restore operations check the expected project revision before committing, so a stale window cannot silently overwrite newer metadata.
+
 Each screenshot record contains:
 
 - Immutable ID and collection ID.

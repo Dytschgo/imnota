@@ -47,6 +47,35 @@ afterEach(() => {
 });
 
 describe('AppShell navigation', () => {
+  it('places Back before the location toolbar and hides Forward until history exists', () => {
+    const onBack = vi.fn();
+    render(
+      <AppShell
+        searchShortcut="Ctrl+F"
+        onNavigate={vi.fn()}
+        onNewProject={vi.fn()}
+        onOpenProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSearch={vi.fn()}
+        onBack={onBack}
+        canGoBack
+        onOpenPromptBundles={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        onAbout={vi.fn()}
+      >
+        <div>Workbench</div>
+      </AppShell>,
+    );
+
+    const back = screen.getByRole('button', { name: 'Back' });
+    const locationToolbar = document.querySelector('.crumbs')!;
+    expect(back.compareDocumentPosition(locationToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Forward' })).not.toBeInTheDocument();
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('search-trigger')).toHaveTextContent('Search');
+  });
+
   it('keeps library destinations separate from quick access disclosures', () => {
     const onNavigate = vi.fn();
     const onOpenCollection = vi.fn();
