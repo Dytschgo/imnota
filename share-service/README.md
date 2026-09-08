@@ -88,6 +88,20 @@ Expected upload codes are `invalid_token` or `pairing_expired` (401), `pairing_u
 - `GET /api/shares/receipt/:requestId` with the original upload bearer recovers a committed receipt for 24 hours without resending artifact data.
 - `POST /api/shares/:id/revoke` with that share's management bearer immediately disables public access and is idempotent.
 
+### Browser entry and owner console
+
+`GET /` explains the sharing handoff and links to `/new`. Pairing displays the code's remaining lifetime, clears an expired code, offers retry and manual-copy fallback, and directs the user back to Imnota for upload progress and the resulting link. The browser page does not poll or claim to detect code consumption.
+
+`GET /owner` retains the existing access-key session and is unavailable when owner access is not configured. The console provides Overview, Shares, Pairing, and Storage views. Share details identify the selected record and show lifecycle timestamps, artifact counts, stored bytes, and successful request totals. These counts represent requests, not unique recipients.
+
+The additional read-only routes use the same owner session checks, no-store headers, and rate limits as the existing owner API:
+
+- `GET /api/owner/overview`: bounded aggregates for shares, pairing, storage, and configured retention.
+- `GET /api/owner/pairings`: the latest 100 pairing records with lifecycle timestamps and redacted references; never one-time codes or token hashes.
+- `GET /api/owner/shares?status=expiring`: active shares expiring within 24 hours, with the existing bounded pagination.
+
+Owner data does not include bearer tokens, prompt bodies, image contents, local paths, or editable source. Revocation keeps its existing origin and CSRF checks. No schema migration or authentication reconfiguration is needed for this UI change. The console exposes the configured cleanup policy; it does not add manual cleanup or claim to have a cleanup event history.
+
 There are no public indexes, sitemaps, discovery APIs, analytics, or recipient accounts. Share pages send `X-Robots-Tag: noindex, nofollow`, `Cache-Control: private, no-store`, a restrictive CSP, frame restrictions, no-referrer policy, MIME sniffing protection, and other Helmet defaults. `/health` reports actual artifact bytes, committed metadata bytes, and reserved in-progress bytes without exposing paths or names.
 
 ## Operations

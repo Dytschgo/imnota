@@ -18,8 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-08",
   "platform": "win32",
-  "sourceRevision": "7eacfe4a5c8e726db993901048fe9d3a2d83f303",
+  "sourceRevision": "037d60e59d63ee6d72997f36e33fd8f3f220e6f3",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34166348606",
-  "environment": "GitHub Actions windows-latest, packaged Electron"
+  "sourceRun": "Local pnpm smoke, imnota-smoke-artifacts-overhaul-final, 16 assertion groups passed",
+  "environment": "Local Windows, native Electron 39.8.10; reviewed UI overhaul captures"
 }

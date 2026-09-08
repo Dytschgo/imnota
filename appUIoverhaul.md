@@ -19,7 +19,7 @@ The user authorized implementation and a new PR on 2026-09-08. Current main alre
 - Browser pairing has no upload-status subscription contract. The page directs users to Imnota for actual progress and the resulting link instead of claiming to detect upload/consumption.
 - Manual cleanup, a persistent operational audit/event log, and owner session-level pairing revocation require additional backend contracts. The console must expose only supported data/actions and explain configured retention.
 
-Validation and remaining coverage will be recorded in `docs/ui-overhaul/implementation.md` after final integration. No merge or production deployment is authorized by this PR request.
+Validation and remaining coverage are recorded in `docs/ui-overhaul/implementation.md`. The existing Imnota logo from `build/icon.svg` is reused on the public service pages; concept imagery is not a replacement identity. No merge or production deployment is authorized by this PR request.
 
 ## Outcome
 
@@ -487,7 +487,7 @@ This map describes the planned ownership; see the execution notes and PR diff fo
 - Share, pairing, expiry, replay, upload-size, path-traversal, and security-header behavior remains covered by tests.
 - The owner console is inaccessible without the approved authentication/authorization boundary.
 
-## Decisions to make before implementation
+## Original decision checklist
 
 1. What should the root of `app.imnota.xyz/` do: pairing entry page only, or pairing plus share-link explanation?
 2. Where will the owner console live, and what authentication/session model is approved?
@@ -495,4 +495,4 @@ This map describes the planned ownership; see the execution notes and PR diff fo
 4. Which hosted share-viewer routes and retention policies are in the first release?
 5. Which current keyboard shortcuts, toolbar defaults, and export dialogs are contractually stable and must not change?
 
-Once these decisions are answered, the concepts in `docs/ui-overhaul/` can be translated into annotated screen specs and then into implementation tickets. Until then, this document is the design and sequencing plan only.
+Execution decisions: the service root explains sharing and links to pairing; the existing `/owner` authentication/session boundary is retained; fonts, expiry defaults, shortcuts, export contracts, and share routes remain compatible. The execution notes above govern this implementation. Broader marketing-site work and unsupported operator actions remain deferred.
