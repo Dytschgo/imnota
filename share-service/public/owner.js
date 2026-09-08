@@ -23,6 +23,11 @@ export function mountOwnerConsole(root = document) {
   let selectedShare;
   let returnFocus;
   let activeFilter = 'all';
+  let revocationPending = false;
+  let revokeOperation = 0;
+  let loginOperation = 0;
+  let loadMoreOperation = 0;
+  let signingOut = false;
 
   const beginRequest = () => ++requestGeneration;
   const isCurrent = (generation) => generation === requestGeneration;
@@ -88,9 +93,26 @@ export function mountOwnerConsole(root = document) {
     if (dialog.open) dialog.close();
   }
 
+  function setRevocationPending(pending) {
+    revocationPending = pending;
+    revokeDialog.setAttribute('aria-busy', String(pending));
+    for (const button of revokeForm.querySelectorAll('button')) button.disabled = pending;
+  }
+
+  function setSigningOut(pending) {
+    signingOut = pending;
+    dashboard.dataset.signingOut = String(pending);
+    for (const button of dashboard.querySelectorAll(
+      '[data-view-trigger], [data-open-view], [data-share-filter], [data-refresh], [data-load-more], [data-logout], [data-close-detail]',
+    )) {
+      button.disabled = pending;
+    }
+  }
+
   function clearPrivateMetadata() {
     returnFocus = undefined;
     selectedShare = undefined;
+    setRevocationPending(false);
     closeDialog(detailDialog);
     closeDialog(revokeDialog);
     shareList.replaceChildren();
@@ -102,17 +124,22 @@ export function mountOwnerConsole(root = document) {
     root.querySelector('[data-storage-detail]').replaceChildren();
     root.querySelector('[data-share-detail]').replaceChildren();
     root.querySelector('[data-detail-actions]').replaceChildren();
+    root.querySelector('[data-detail-title]').textContent = 'Share';
     root.querySelector('[data-revoke-share]').textContent = 'This immediately disables the shared link.';
     root.querySelector('[data-revoke-error]').textContent = '';
+    dashboardError.textContent = '';
+    refreshedAt.textContent = 'Waiting for metadata';
     sharesEmpty.hidden = true;
     pairingsEmpty.hidden = true;
     loadMore.hidden = true;
+    loadMore.disabled = false;
     nextCursor = undefined;
   }
 
   function showLogin(message = '') {
     beginRequest();
     csrfToken = undefined;
+    setSigningOut(false);
     clearPrivateMetadata();
     bootScreen.hidden = true;
     dashboard.hidden = true;
@@ -181,6 +208,36 @@ export function mountOwnerConsole(root = document) {
     ]);
     refreshedAt.textContent = `Last refreshed ${date(value.checkedAt)}`;
     renderStorage(value);
+  }
+
+  function renderOverviewUnavailable(message) {
+    const status = root.querySelector('[data-overview-status]');
+    status.replaceChildren(
+      el('div', 'status-rail'),
+      el('div', 'service-state is-warning', 'Service data unavailable'),
+      el('p', 'service-copy', `Storage usage could not be refreshed: ${message}`),
+    );
+    renderReadout(root.querySelector('[data-share-pulse]'), [
+      ['Active', 'Unavailable'],
+      ['Expiring', 'Unavailable'],
+      ['Expired / revoked', 'Unavailable'],
+    ]);
+    renderReadout(root.querySelector('[data-storage-pulse]'), [
+      ['Filesystem', 'Unavailable'],
+      ['Accounted quota', 'Unavailable'],
+      ['Reserved', 'Unavailable'],
+    ]);
+    renderReadout(root.querySelector('[data-pairing-pulse]'), [
+      ['Waiting', 'Unavailable'],
+      ['Consumed', 'Unavailable'],
+      ['Expired', 'Unavailable'],
+    ]);
+    root
+      .querySelector('[data-storage-detail]')
+      .replaceChildren(
+        el('p', 'data-note', 'Storage usage is unavailable until the service snapshot can be refreshed.'),
+      );
+    refreshedAt.textContent = 'Last refreshed unavailable.';
   }
 
   function accountedStorage(value) {
@@ -343,29 +400,53 @@ export function mountOwnerConsole(root = document) {
     closeDialog(detailDialog);
   }
 
+  async function loadOverviewPanel(generation) {
+    try {
+      const overview = await api('/api/owner/overview');
+      if (isCurrent(generation)) renderOverview(overview);
+    } catch (error) {
+      if (!isCurrent(generation)) return;
+      if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
+      renderOverviewUnavailable(error.message);
+    }
+  }
+
+  async function loadSharesPanel(generation) {
+    try {
+      const body = await api(`/api/owner/shares?status=${encodeURIComponent(activeFilter)}&limit=50`);
+      if (isCurrent(generation)) renderShares(body, false);
+    } catch (error) {
+      if (!isCurrent(generation)) return;
+      if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
+      dashboardError.textContent = `Shares could not be refreshed: ${error.message}`;
+    }
+  }
+
+  async function loadPairingsPanel(generation) {
+    try {
+      const body = await api('/api/owner/pairings');
+      if (isCurrent(generation)) renderPairings(body);
+    } catch (error) {
+      if (!isCurrent(generation)) return;
+      if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
+      dashboardError.textContent = `Pairing records could not be refreshed: ${error.message}`;
+    }
+  }
+
   async function refresh({ includeLists = false } = {}) {
+    if (signingOut) return;
     const generation = beginRequest();
     dashboardError.textContent = '';
     setBusy(true, 'Refreshing metadata…', generation);
     try {
-      const overview = await api('/api/owner/overview');
-      if (!isCurrent(generation)) return;
-      renderOverview(overview);
+      const loads = [loadOverviewPanel(generation)];
       if (includeLists || !root.querySelector('[data-view="shares"]').hidden) {
-        const body = await api(`/api/owner/shares?status=${encodeURIComponent(activeFilter)}&limit=50`);
-        if (!isCurrent(generation)) return;
-        renderShares(body, false);
+        loads.push(loadSharesPanel(generation));
       }
       if (includeLists || !root.querySelector('[data-view="pairing"]').hidden) {
-        const body = await api('/api/owner/pairings');
-        if (!isCurrent(generation)) return;
-        renderPairings(body);
+        loads.push(loadPairingsPanel(generation));
       }
-    } catch (error) {
-      if (!isCurrent(generation)) return;
-      if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
-      dashboardError.textContent = error.message;
-      refreshedAt.textContent = 'Refresh failed. Try again.';
+      await Promise.all(loads);
     } finally {
       setBusy(false, undefined, generation);
     }
@@ -397,8 +478,9 @@ export function mountOwnerConsole(root = document) {
   }
 
   async function loadMoreShares() {
-    if (!nextCursor) return;
+    if (!nextCursor || signingOut) return;
     const generation = beginRequest();
+    const operation = ++loadMoreOperation;
     dashboardError.textContent = '';
     loadMore.disabled = true;
     try {
@@ -412,11 +494,12 @@ export function mountOwnerConsole(root = document) {
       if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
       dashboardError.textContent = error.message;
     } finally {
-      if (isCurrent(generation)) loadMore.disabled = false;
+      if (operation === loadMoreOperation && !signingOut) loadMore.disabled = false;
     }
   }
 
   async function establishSession() {
+    if (signingOut) return;
     const generation = beginRequest();
     setBusy(true, 'Checking owner session…', generation);
     try {
@@ -437,6 +520,7 @@ export function mountOwnerConsole(root = document) {
   }
 
   function activateView(view) {
+    if (signingOut) return;
     for (const element of root.querySelectorAll('[data-view]')) {
       const selected = element.dataset.view === view;
       element.hidden = !selected;
@@ -461,6 +545,7 @@ export function mountOwnerConsole(root = document) {
     const accessKey = loginForm.elements.accessKey.value;
     loginForm.elements.accessKey.value = '';
     const generation = beginRequest();
+    const operation = ++loginOperation;
     submit.disabled = true;
     try {
       await api('/api/owner/session', {
@@ -475,25 +560,27 @@ export function mountOwnerConsole(root = document) {
       loginError.textContent = error.message;
       loginForm.elements.accessKey.focus();
     } finally {
-      if (isCurrent(generation)) submit.disabled = false;
+      if (operation === loginOperation) submit.disabled = false;
     }
   });
 
   refreshButton.addEventListener('click', () => void refresh({ includeLists: true }));
   root.querySelector('[data-logout]').addEventListener('click', async () => {
+    if (signingOut) return;
     const generation = beginRequest();
     dashboardError.textContent = '';
+    setSigningOut(true);
     setBusy(true, 'Signing out…', generation);
     try {
       await api('/api/owner/session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } });
-      if (isCurrent(generation)) showLogin();
+      showLogin();
     } catch (error) {
-      if (!isCurrent(generation)) return;
       if (error.status === 401) return showLogin('Your owner session expired. Sign in again to continue.');
       dashboardError.textContent = `${error.message} Sign out was not completed. Try again.`;
       refreshedAt.textContent = 'Sign out failed. Try again.';
     } finally {
       setBusy(false, undefined, generation);
+      setSigningOut(false);
     }
   });
   for (const trigger of root.querySelectorAll('[data-view-trigger], [data-open-view]'))
@@ -502,6 +589,7 @@ export function mountOwnerConsole(root = document) {
     );
   for (const filter of root.querySelectorAll('[data-share-filter]')) {
     filter.addEventListener('click', () => {
+      if (signingOut) return;
       activeFilter = filter.dataset.shareFilter;
       for (const option of root.querySelectorAll('[data-share-filter]')) {
         const selected = option === filter;
@@ -515,12 +603,16 @@ export function mountOwnerConsole(root = document) {
   root.querySelector('[data-close-detail]').addEventListener('click', closeDetail);
   detailDialog.addEventListener('close', () => returnFocus?.focus());
   revokeForm.addEventListener('submit', async (event) => {
+    if (revocationPending) {
+      event.preventDefault();
+      return;
+    }
     if (event.submitter?.value !== 'confirm') return;
     event.preventDefault();
     if (!selectedShare) return;
-    const confirm = event.submitter;
     const generation = beginRequest();
-    confirm.disabled = true;
+    const operation = ++revokeOperation;
+    setRevocationPending(true);
     root.querySelector('[data-revoke-error]').textContent = '';
     try {
       await api(`/api/owner/shares/${encodeURIComponent(selectedShare.id)}/revoke`, {
@@ -528,6 +620,7 @@ export function mountOwnerConsole(root = document) {
         headers: { 'X-CSRF-Token': csrfToken },
       });
       if (!isCurrent(generation)) return;
+      setRevocationPending(false);
       closeDialog(revokeDialog);
       selectedShare = undefined;
       await refresh({ includeLists: true });
@@ -539,8 +632,11 @@ export function mountOwnerConsole(root = document) {
       }
       root.querySelector('[data-revoke-error]').textContent = error.message;
     } finally {
-      if (isCurrent(generation)) confirm.disabled = false;
+      if (operation === revokeOperation) setRevocationPending(false);
     }
+  });
+  revokeDialog.addEventListener('cancel', (event) => {
+    if (revocationPending) event.preventDefault();
   });
 
   void establishSession();

@@ -68,6 +68,12 @@ function mount(fetchMock: ReturnType<typeof vi.fn>) {
   return mountOwnerConsole();
 }
 
+function submitWith(form: HTMLFormElement, submitter: HTMLButtonElement) {
+  const event = new Event('submit', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'submitter', { value: submitter });
+  form.dispatchEvent(event);
+}
+
 function standardFetch(deleteStatus = 204) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -77,6 +83,7 @@ function standardFetch(deleteStatus = 204) {
         : response({ error: { message: 'Network problem' } }, deleteStatus);
     if (path === '/api/owner/session') return response({ authenticated: true, csrfToken: 'csrf' });
     if (path === '/api/owner/overview') return response(overview());
+    if (path === `/api/owner/shares/${shareId}/revoke`) return { status: 204 } as Response;
     if (path.startsWith('/api/owner/shares')) return response({ shares: [share()], nextCursor: null });
     if (path === '/api/owner/pairings') return response({ pairings: [] });
     throw new Error(`Unexpected request: ${path}`);
@@ -116,6 +123,8 @@ describe('owner console browser behavior', () => {
     expect(document.querySelector<HTMLDialogElement>('[data-revoke-dialog]')?.open).toBe(false);
     expect(document.querySelector('[data-share-list]')?.textContent).toBe('');
     expect(document.querySelector('[data-share-detail]')?.textContent).toBe('');
+    expect(document.querySelector('[data-detail-title]')?.textContent).toBe('Share');
+    expect(document.querySelector('[data-refreshed-at]')).toHaveTextContent('Waiting for metadata');
   });
 
   it('retains the session and offers retry feedback when sign out fails', async () => {
@@ -154,5 +163,182 @@ describe('owner console browser behavior', () => {
     expect(
       screen.getByText('Over configured limit by 4 B. New uploads may be rejected.'),
     ).toBeInTheDocument();
+  });
+
+  it('keeps a pending revoke dialog open and exposes a request failure for retry', async () => {
+    let resolveRevoke: (value: Response) => void = () => undefined;
+    const pendingRevoke = new Promise<Response>((resolve) => {
+      resolveRevoke = resolve;
+    });
+    const fallback = standardFetch();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `/api/owner/shares/${shareId}/revoke` && init?.method === 'POST')
+        return pendingRevoke;
+      return fallback(input, init);
+    });
+    mount(fetchMock);
+    await screen.findByText(unsafeTitle);
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.table-link')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke share' }));
+
+    const dialog = document.querySelector<HTMLDialogElement>('[data-revoke-dialog]')!;
+    const form = document.querySelector<HTMLFormElement>('[data-revoke-form]')!;
+    const confirm = screen.getByRole('button', { name: 'Revoke share' });
+    submitWith(form, confirm as HTMLButtonElement);
+    await waitFor(() => expect(confirm).toBeDisabled());
+
+    const cancel = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(dialog.open).toBe(true);
+
+    resolveRevoke(response({ error: { message: 'Unable to revoke share' } }, 500));
+    await waitFor(() =>
+      expect(document.querySelector('[data-revoke-error]')).toHaveTextContent('Unable to revoke share'),
+    );
+    expect(dialog.open).toBe(true);
+    expect(confirm).not.toBeDisabled();
+  });
+
+  it('loads lifecycle panels and permits revocation when storage overview is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/owner/session') return response({ authenticated: true, csrfToken: 'csrf' });
+      if (path === '/api/owner/overview') return response({ error: { message: 'Storage scan failed' } }, 500);
+      if (path.startsWith('/api/owner/shares')) {
+        if (init?.method === 'POST') return { status: 204 } as Response;
+        return response({ shares: [share()], nextCursor: null });
+      }
+      if (path === '/api/owner/pairings') return response({ pairings: [] });
+      if (path === `/api/owner/shares/${shareId}/revoke`) return { status: 204 } as Response;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    mount(fetchMock);
+
+    await screen.findByText(unsafeTitle);
+    expect(screen.getByText('Service data unavailable')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([path]) => String(path))).toContain('/api/owner/pairings');
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.table-link')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke share' }));
+    const form = document.querySelector<HTMLFormElement>('[data-revoke-form]')!;
+    submitWith(form, screen.getByRole('button', { name: 'Revoke share' }) as HTMLButtonElement);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map(([path]) => String(path))).toContain(
+        `/api/owner/shares/${shareId}/revoke`,
+      ),
+    );
+  });
+
+  it('re-enables login and revoke controls after successful nested refreshes', async () => {
+    let sessionReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/owner/session' && init?.method === 'POST') return { status: 204 } as Response;
+      if (path === '/api/owner/session' && init?.method === 'DELETE') return { status: 204 } as Response;
+      if (path === '/api/owner/session') {
+        sessionReads += 1;
+        return sessionReads === 1
+          ? response({ error: { message: 'Not signed in' } }, 401)
+          : response({ authenticated: true, csrfToken: 'csrf' });
+      }
+      if (path === '/api/owner/overview') return response(overview());
+      if (path.startsWith('/api/owner/shares')) return response({ shares: [share()], nextCursor: null });
+      if (path === '/api/owner/pairings') return response({ pairings: [] });
+      if (path === `/api/owner/shares/${shareId}/revoke`) return { status: 204 } as Response;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    mount(fetchMock);
+    const loginSubmit = await screen.findByRole('button', { name: 'Enter console' });
+    await waitFor(() => expect(loginSubmit).not.toBeDisabled());
+
+    fireEvent.change(screen.getByLabelText('Access key'), { target: { value: 'first' } });
+    fireEvent.click(loginSubmit);
+    await screen.findByText(unsafeTitle);
+    expect(loginSubmit).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(document.querySelector('[data-login]')?.hasAttribute('hidden')).toBe(false));
+    expect(loginSubmit).not.toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Access key'), { target: { value: 'second' } });
+    fireEvent.click(loginSubmit);
+    await screen.findByText(unsafeTitle);
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.table-link')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke share' }));
+    const form = document.querySelector<HTMLFormElement>('[data-revoke-form]')!;
+    submitWith(form, screen.getByRole('button', { name: 'Revoke share' }) as HTMLButtonElement);
+    await waitFor(() =>
+      expect(document.querySelector<HTMLDialogElement>('[data-revoke-dialog]')?.open).toBe(false),
+    );
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.table-link')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke share' }));
+    expect(screen.getByRole('button', { name: 'Revoke share' })).not.toBeDisabled();
+  });
+
+  it('re-enables load more after a refresh supersedes its request', async () => {
+    let resolveMore: (value: Response) => void = () => undefined;
+    const pendingMore = new Promise<Response>((resolve) => {
+      resolveMore = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/owner/session') return response({ authenticated: true, csrfToken: 'csrf' });
+      if (path === '/api/owner/overview') return response(overview());
+      if (path.startsWith('/api/owner/shares?') && path.includes('cursor=')) return pendingMore;
+      if (path.startsWith('/api/owner/shares'))
+        return response({ shares: [share()], nextCursor: 'next-page' });
+      if (path === '/api/owner/pairings') return response({ pairings: [] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    mount(fetchMock);
+    await screen.findByText(unsafeTitle);
+    fireEvent.click(screen.getByRole('button', { name: 'Shares' }));
+
+    const more = await screen.findByRole('button', { name: 'Load more' });
+    fireEvent.click(more);
+    expect(more).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    resolveMore(response({ shares: [], nextCursor: null }));
+    await waitFor(() => expect(more).not.toBeDisabled());
+  });
+
+  it('keeps logout exclusive until its delete request completes', async () => {
+    let resolveLogout: (value: Response) => void = () => undefined;
+    const pendingLogout = new Promise<Response>((resolve) => {
+      resolveLogout = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/owner/session' && init?.method === 'DELETE') return pendingLogout;
+      if (path === '/api/owner/session')
+        return Promise.resolve(response({ authenticated: true, csrfToken: 'csrf' }));
+      if (path === '/api/owner/overview') return Promise.resolve(response(overview()));
+      if (path.startsWith('/api/owner/shares'))
+        return Promise.resolve(response({ shares: [share()], nextCursor: null }));
+      if (path === '/api/owner/pairings') return Promise.resolve(response({ pairings: [] }));
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    mount(fetchMock);
+    await screen.findByText(unsafeTitle);
+    const overviewCallsBefore = fetchMock.mock.calls.filter(
+      ([path]) => path === '/api/owner/overview',
+    ).length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Shares' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Shares' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(fetchMock.mock.calls.filter(([path]) => path === '/api/owner/overview')).toHaveLength(
+      overviewCallsBefore,
+    );
+
+    resolveLogout({ status: 204 } as Response);
+    await waitFor(() => expect(document.querySelector('[data-login]')?.hasAttribute('hidden')).toBe(false));
+    expect(document.querySelector('[data-dashboard]')?.hasAttribute('hidden')).toBe(true);
   });
 });
