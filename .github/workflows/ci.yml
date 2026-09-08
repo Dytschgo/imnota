@@ -80,8 +80,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: ${{ matrix.command }}
-      - name: Test platform-specific filesystem behavior
-        run: pnpm test
+      - name: Test platform-specific behavior
+        run: pnpm test:platform
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - run: npm ci --prefix share-service
