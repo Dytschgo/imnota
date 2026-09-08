@@ -97,10 +97,21 @@ export interface HostedShareRecord {
   byteSize?: number;
 }
 
+/** An opaque, incident-specific recovery warning identifier. */
+export interface HostedShareRecoveryWarning {
+  id: string;
+  message: string;
+}
+
 export interface HostedShareList {
   records: readonly HostedShareRecord[];
   /** Recovery problems are shown alongside intact local history and can be retried later. */
   recoveryErrors: readonly string[];
+  /**
+   * Incident-specific recovery warnings. New desktop clients can acknowledge these by id.
+   * Optional while older native clients and renderer test doubles are still supported.
+   */
+  recoveryWarnings?: readonly HostedShareRecoveryWarning[];
 }
 
 /** Drawing sources are carried into the reserved export directory, never rasterized as text. */
@@ -174,6 +185,7 @@ export interface WorkflowBridge {
   createHostedShare(input: HostedShareUpload): Promise<WorkflowResult<HostedShareRecord>>;
   cancelHostedShare(input: { requestId: string }): Promise<WorkflowResult<void>>;
   listHostedShares(): Promise<WorkflowResult<HostedShareList>>;
+  dismissHostedShareRecoveryWarning(input: { id: string }): Promise<WorkflowResult<void>>;
   revokeHostedShare(input: { id: string }): Promise<WorkflowResult<HostedShareRecord>>;
 
   startProjectWatch(input: { projectPath: string }): Promise<WorkflowResult<ProjectWatchGrant>>;

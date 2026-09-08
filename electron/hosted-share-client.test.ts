@@ -485,7 +485,7 @@ describe('HostedShareClient persistence and recovery', () => {
     const settled = uploadOperation.catch((error: unknown) => error);
     await requestStarted;
 
-    await expect(client.list()).resolves.toEqual({ records: [], recoveryErrors: [] });
+    await expect(client.list()).resolves.toMatchObject({ records: [], recoveryErrors: [] });
     expect(fetch).toHaveBeenCalledTimes(1);
     await client.cancel(firstRequest);
     await expect(settled).resolves.toMatchObject({ code: 'session-cancelled' });
@@ -611,6 +611,75 @@ describe('HostedShareClient persistence and recovery', () => {
     const pending = JSON.parse(await fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8'));
     expect(pending).not.toHaveProperty(firstRequest);
     expect(pending).toHaveProperty(secondRequest);
+  });
+
+  it('persists dismissal for a recovery incident without changing its capability or local history', async () => {
+    const { root, client } = await fixture();
+    const pendingFile = path.join(root, 'hosted-share-pending.json');
+    await fs.writeFile(
+      pendingFile,
+      JSON.stringify({ [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) } }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        json({ error: { code: 'service_unavailable', message: 'Recovery is unavailable.' } }, 503),
+      ),
+    );
+
+    const initial = await client.list();
+    const warning = initial.recoveryWarnings?.[0];
+    expect(warning).toMatchObject({
+      id: expect.stringMatching(/^recovery:[a-f0-9]{64}$/),
+      message: 'Recovery is unavailable.',
+    });
+    const pendingBeforeDismissal = await fs.readFile(pendingFile, 'utf8');
+
+    await client.dismissRecoveryWarning(warning!.id);
+    expect(await fs.readFile(pendingFile, 'utf8')).toBe(pendingBeforeDismissal);
+    await expect(fs.readFile(path.join(root, 'hosted-shares.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    await expect(client.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+    const reopened = new HostedShareClient(root, async () => undefined);
+    await expect(reopened.list()).resolves.toMatchObject({ recoveryErrors: [], recoveryWarnings: [] });
+
+    const pending = JSON.parse(await fs.readFile(pendingFile, 'utf8'));
+    pending[secondRequest] = { requestId: secondRequest, pairingToken: 'b'.repeat(43) };
+    await fs.writeFile(pendingFile, JSON.stringify(pending));
+
+    const later = await reopened.list();
+    expect(later.recoveryWarnings).toHaveLength(1);
+    expect(later.recoveryWarnings?.[0]).toMatchObject({ message: 'Recovery is unavailable.' });
+    expect(later.recoveryWarnings?.[0]?.id).not.toBe(warning!.id);
+  });
+
+  it('rejects a stale warning ID after recovery reports a later error episode', async () => {
+    const { root, client } = await fixture();
+    await fs.writeFile(
+      path.join(root, 'hosted-share-pending.json'),
+      JSON.stringify({ [firstRequest]: { requestId: firstRequest, pairingToken: 'a'.repeat(43) } }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          json({ error: { code: 'service_unavailable', message: 'First recovery error.' } }, 503),
+        )
+        .mockResolvedValueOnce(
+          json({ error: { code: 'service_unavailable', message: 'Later recovery error.' } }, 503),
+        ),
+    );
+
+    const initial = await client.list();
+    const later = await client.list();
+    expect(later.recoveryWarnings?.[0]?.id).not.toBe(initial.recoveryWarnings?.[0]?.id);
+    await expect(client.dismissRecoveryWarning(initial.recoveryWarnings![0]!.id)).rejects.toMatchObject({
+      code: 'invalid-input',
+      message: expect.stringMatching(/no longer available/i),
+    });
   });
 
   it('preserves corrupt local files and reports actionable history and recovery errors', async () => {

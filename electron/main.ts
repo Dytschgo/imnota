@@ -1173,6 +1173,12 @@ function registerIpc(): void {
     z.tuple([]).parse(args);
     return hostedShareClient!.list();
   });
+  handleWorkflow('workflow:hosted-share:recovery-warning:dismiss', async (_event, ...args) => {
+    const [input] = z
+      .tuple([z.object({ id: z.string().regex(/^recovery:[a-f0-9]{64}$/) }).strict()])
+      .parse(args);
+    await hostedShareClient!.dismissRecoveryWarning(input.id);
+  });
   handleWorkflow(
     'workflow:hosted-share:revoke',
     async (_event, ...args) => {

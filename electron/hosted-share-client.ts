@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { HostedShareList, HostedShareRecord, HostedShareUpload } from '../src/shared/workflow-bridge.js';
+import type {
+  HostedShareList,
+  HostedShareRecord,
+  HostedShareRecoveryWarning,
+  HostedShareUpload,
+} from '../src/shared/workflow-bridge.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 
 const PRODUCTION_ORIGIN = 'https://app.imnota.xyz';
@@ -17,6 +22,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_STORED_SHARE_BYTES = MAX_UPLOAD_BYTES * 2 + 1024 * 1024;
 const PENDING_RECOVERY_MS = 24 * 60 * 60 * 1000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const RECOVERY_WARNING_ID = /^recovery:[a-f0-9]{64}$/;
 
 type StoredShare = HostedShareRecord & { managementToken: string };
 type PendingShare = {
@@ -27,6 +33,7 @@ type PendingShare = {
   payloadFingerprint?: string;
 };
 type JsonObject = Record<string, unknown>;
+type DismissedRecoveryWarnings = Record<string, true>;
 
 export type HostedShareFetch = (target: string, init: RequestInit) => Promise<Response>;
 
@@ -224,6 +231,15 @@ function safeServerMessage(value: unknown, fallback: string): string {
   return safeText(value, 500) ? value : fallback;
 }
 
+function recoveryWarning(
+  incident: string,
+  discriminator: string,
+  message: string,
+): HostedShareRecoveryWarning {
+  const id = createHash('sha256').update(`${incident}\u0000${discriminator}\u0000${message}`).digest('hex');
+  return { id: `recovery:${id}`, message };
+}
+
 function errorFor(status: number, code: unknown, message: unknown, fallback: string): NativeWorkflowError {
   const safeCode = safeText(code, 100) ? code : undefined;
   const safeMessage = safeServerMessage(message, fallback);
@@ -291,7 +307,9 @@ function canonicalBase64Png(value: string): Buffer | undefined {
 export class HostedShareClient {
   private readonly active = new Map<string, AbortController>();
   private stateQueue: Promise<void> = Promise.resolve();
-  private recovery?: Promise<string[]>;
+  private recovery?: Promise<HostedShareRecoveryWarning[]>;
+  /** IDs returned by the most recent recovery pass, used to reject stale renderer dismissals. */
+  private currentRecoveryWarningIds = new Set<string>();
 
   constructor(
     private readonly userDataPath: string,
@@ -400,8 +418,33 @@ export class HostedShareClient {
   }
 
   async list(): Promise<HostedShareList> {
-    const recoveryErrors = await this.recoverPending();
-    return { records: (await this.read()).map(publicRecord), recoveryErrors };
+    const recoveryWarnings = await this.recoverPending();
+    let visibleWarnings = recoveryWarnings;
+    try {
+      const dismissed = await this.dismissedRecoveryWarnings();
+      visibleWarnings = recoveryWarnings.filter((warning) => !dismissed[warning.id]);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Hosted-share recovery dismissals could not be read.';
+      const dismissalWarning = recoveryWarning('dismissals', 'read-failure', message);
+      this.currentRecoveryWarningIds.add(dismissalWarning.id);
+      visibleWarnings = [...recoveryWarnings, dismissalWarning];
+    }
+    return {
+      records: (await this.read()).map(publicRecord),
+      recoveryErrors: visibleWarnings.map((warning) => warning.message),
+      recoveryWarnings: visibleWarnings,
+    };
+  }
+
+  async dismissRecoveryWarning(id: string): Promise<void> {
+    if (!RECOVERY_WARNING_ID.test(id) || !this.currentRecoveryWarningIds.has(id))
+      throw new NativeWorkflowError('invalid-input', 'That recovery warning is no longer available.', false);
+    await this.enqueueState(async () => {
+      const dismissed = await this.dismissedRecoveryWarnings();
+      dismissed[id] = true;
+      await this.writeDismissedRecoveryWarnings(dismissed);
+    });
   }
 
   async revoke(id: string): Promise<HostedShareRecord> {
@@ -513,7 +556,11 @@ export class HostedShareClient {
     return path.join(this.userDataPath, 'hosted-share-pending.json');
   }
 
-  private recoverPending(): Promise<string[]> {
+  private dismissedRecoveryWarningsFile(): string {
+    return path.join(this.userDataPath, 'hosted-share-recovery-dismissals.json');
+  }
+
+  private recoverPending(): Promise<HostedShareRecoveryWarning[]> {
     if (this.recovery) return this.recovery;
     const operation = this.recoverPendingNow().finally(() => {
       if (this.recovery === operation) this.recovery = undefined;
@@ -522,21 +569,25 @@ export class HostedShareClient {
     return operation;
   }
 
-  private async recoverPendingNow(): Promise<string[]> {
+  private async recoverPendingNow(): Promise<HostedShareRecoveryWarning[]> {
     let all: Record<string, PendingShare>;
     try {
       all = await this.pending();
     } catch (error) {
-      return [error instanceof Error ? error.message : 'Hosted-share recovery metadata could not be read.'];
+      const message =
+        error instanceof Error ? error.message : 'Hosted-share recovery metadata could not be read.';
+      const warnings = [recoveryWarning('pending-metadata', 'read-failure', message)];
+      this.currentRecoveryWarningIds = new Set(warnings.map((warning) => warning.id));
+      return warnings;
     }
-    const errors: string[] = [];
+    const warnings: HostedShareRecoveryWarning[] = [];
     for (const pending of Object.values(all)) {
       if (this.active.has(pending.requestId)) continue;
       if (Date.parse(pending.deadlineAt) <= Date.now()) {
         await this.clearPending(pending.requestId);
-        errors.push(
-          'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.',
-        );
+        const message =
+          'A previous share upload was not resolved within 24 hours. Its local recovery capability was cleared.';
+        warnings.push(recoveryWarning(pending.requestId, 'deadline-expired', message));
         continue;
       }
       try {
@@ -549,11 +600,13 @@ export class HostedShareClient {
         );
         if (response.status === 410) {
           await this.clearPending(pending.requestId);
-          errors.push('A previous share upload could not be recovered because its receipt expired.');
+          const message = 'A previous share upload could not be recovered because its receipt expired.';
+          warnings.push(recoveryWarning(pending.requestId, 'receipt-expired', message));
           continue;
         }
         if (response.status === 404) {
-          errors.push('A previous share receipt is not ready yet. Recovery will retry later.');
+          const message = 'A previous share receipt is not ready yet. Recovery will retry later.';
+          warnings.push(recoveryWarning(pending.requestId, 'receipt-not-ready', message));
           continue;
         }
         if (!response.ok) {
@@ -565,9 +618,28 @@ export class HostedShareClient {
           );
           if (isDefinitiveNonCommitStatus(response.status)) {
             await this.clearPending(pending.requestId);
-            errors.push(`${responseError.message} Its local recovery capability was cleared.`);
+            const message = `${responseError.message} Its local recovery capability was cleared.`;
+            warnings.push(
+              recoveryWarning(
+                pending.requestId,
+                `http-${response.status}-${safeServerMessage(
+                  isObject(body.error) ? body.error.code : undefined,
+                  'unknown',
+                )}`,
+                message,
+              ),
+            );
           } else {
-            errors.push(responseError.message);
+            warnings.push(
+              recoveryWarning(
+                pending.requestId,
+                `http-${response.status}-${safeServerMessage(
+                  isObject(body.error) ? body.error.code : undefined,
+                  'unknown',
+                )}`,
+                responseError.message,
+              ),
+            );
           }
           continue;
         }
@@ -578,24 +650,28 @@ export class HostedShareClient {
         if (error instanceof NativeWorkflowError && error.details?.requestMayHaveCommitted === false) {
           try {
             await this.clearPending(pending.requestId);
-            errors.push(`${error.message} Its local recovery capability was cleared.`);
+            const message = `${error.message} Its local recovery capability was cleared.`;
+            warnings.push(recoveryWarning(pending.requestId, `${error.code}-noncommit`, message));
           } catch (clearError) {
-            errors.push(
+            const message =
               clearError instanceof Error
                 ? clearError.message
-                : 'A previous share recovery capability could not be cleared.',
-            );
+                : 'A previous share recovery capability could not be cleared.';
+            warnings.push(recoveryWarning(pending.requestId, 'clear-failure', message));
           }
           continue;
         }
-        errors.push(
+        const message =
           error instanceof NativeWorkflowError
             ? error.message
-            : 'A previous share upload could not be recovered.',
-        );
+            : 'A previous share upload could not be recovered.';
+        const discriminator = error instanceof NativeWorkflowError ? error.code : 'unknown-recovery-failure';
+        warnings.push(recoveryWarning(pending.requestId, discriminator, message));
       }
     }
-    return [...new Set(errors)];
+    const uniqueWarnings = [...new Map(warnings.map((warning) => [warning.id, warning])).values()];
+    this.currentRecoveryWarningIds = new Set(uniqueWarnings.map((warning) => warning.id));
+    return uniqueWarnings;
   }
 
   private async savePending(input: HostedShareUpload, payloadFingerprint: string): Promise<void> {
@@ -706,6 +782,38 @@ export class HostedShareClient {
 
   private async writePending(value: Record<string, PendingShare>): Promise<void> {
     await this.atomicWrite(this.pendingFile(), JSON.stringify(value));
+  }
+
+  private async dismissedRecoveryWarnings(): Promise<DismissedRecoveryWarnings> {
+    const dismissalsFile = this.dismissedRecoveryWarningsFile();
+    const raw = await fs.readFile(dismissalsFile, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return '{}';
+      throw persistenceFailure('access');
+    });
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new NativeWorkflowError(
+        'io-failure',
+        'Hosted-share recovery dismissals are corrupt. The local file was preserved for inspection.',
+        false,
+      );
+    }
+    if (
+      !isObject(value) ||
+      Object.keys(value).some((id) => !RECOVERY_WARNING_ID.test(id) || value[id] !== true)
+    )
+      throw new NativeWorkflowError(
+        'io-failure',
+        'Hosted-share recovery dismissals are corrupt. The local file was preserved for inspection.',
+        false,
+      );
+    return value as DismissedRecoveryWarnings;
+  }
+
+  private async writeDismissedRecoveryWarnings(value: DismissedRecoveryWarnings): Promise<void> {
+    await this.atomicWrite(this.dismissedRecoveryWarningsFile(), JSON.stringify(value));
   }
 
   private async read(): Promise<StoredShare[]> {
