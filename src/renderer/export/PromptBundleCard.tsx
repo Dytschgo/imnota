@@ -81,6 +81,7 @@ export function PromptBundleCard({
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number }>();
   const optionsRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const restoreFocusAfterOption = useRef(false);
   const optionsMenuId = useId().replace(/:/g, '');
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
   const request = requestFor(bundle);
@@ -162,7 +163,22 @@ export function PromptBundleCard({
     };
   }, [dialog, optionsOpen]);
 
+  useLayoutEffect(() => {
+    if (optionsOpen || !restoreFocusAfterOption.current) return;
+    restoreFocusAfterOption.current = false;
+    const trigger = optionsRef.current?.querySelector<HTMLButtonElement>('button');
+    if (trigger && !trigger.disabled) {
+      trigger.focus();
+      return;
+    }
+    const fallback = dialog?.querySelector<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+    );
+    (fallback ?? dialog)?.focus();
+  }, [busy, dialog, disabled, optionsOpen]);
+
   const runOption = (action?: (request: PromptBundleActionRequest) => void | Promise<void>) => {
+    restoreFocusAfterOption.current = true;
     setOptionsOpen(false);
     void action?.(request);
   };

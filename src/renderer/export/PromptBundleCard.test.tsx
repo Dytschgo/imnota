@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
@@ -118,13 +119,16 @@ it('keeps individual formats in an accessible options menu', () => {
 
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Markdown' }));
+  const copyMarkdown = screen.getByRole('menuitem', { name: 'Copy Markdown' });
+  copyMarkdown.focus();
+  fireEvent.click(copyMarkdown);
   expect(onCopyMarkdown).toHaveBeenCalledWith({
     planId: 'plan-current',
     artifactSessionId: 'session-current',
     bundleNumber: 2,
   });
   expect(menu).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: /options/i }));
 
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Copy PNG' }));
@@ -133,6 +137,34 @@ it('keeps individual formats in an accessible options menu', () => {
     artifactSessionId: 'session-current',
     bundleNumber: 2,
   });
+});
+
+function BusyTransitionCard() {
+  const [state, setState] = useState<PromptBundleCardModel['state']>('idle');
+  return (
+    <section role="dialog" tabIndex={-1}>
+      <button type="button">Dialog fallback</button>
+      <PromptBundleCard
+        bundle={model({ state })}
+        onCopyFresh={vi.fn()}
+        onPrepareFreshFiles={vi.fn()}
+        onCopyMarkdown={() => setState('copying')}
+      />
+    </section>
+  );
+}
+
+it('keeps focus inside the dialog when an option makes its trigger busy', () => {
+  render(<BusyTransitionCard />);
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  const copyMarkdown = screen.getByRole('menuitem', { name: 'Copy Markdown' });
+  copyMarkdown.focus();
+  fireEvent.click(copyMarkdown);
+
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /options/i })).toBeDisabled();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dialog fallback' }));
 });
 
 it('shows a gray copied state while leaving Copy Bundle available again', () => {
