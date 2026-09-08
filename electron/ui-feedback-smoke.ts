@@ -60,6 +60,27 @@ export async function exerciseUiFeedback(
 
   // Exercise the same revision-protected contracts used by project row actions.
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.click({ selector: `[data-testid="project-edit-${fixture.projectId}"]` });
+  await driver.fill({ selector: '[data-testid="project-name-input"]' }, 'Feedback Edited');
+  await driver.fill(
+    { selector: '[data-testid="project-description-input"]' },
+    'Edited through the project dialog',
+  );
+  await driver.click({ text: 'Use target icon', exact: true });
+  await driver.click({ text: 'Save changes', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
+  await driver.click({ selector: `[data-testid="project-archive-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
+  await driver.click({ selector: '.toast button', text: 'Undo', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
+  await driver.click({ selector: `[data-testid="project-archive-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Archived', exact: true });
+  await driver.click({ selector: `[data-testid="project-restore-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
+  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-projects.png'));
   await driver.evaluate(`(async () => {
     const projectPath=${JSON.stringify(fixture.projectPath)};
     let snapshot=await window.imnota.loadProject(projectPath);
