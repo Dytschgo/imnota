@@ -35,6 +35,8 @@ import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
 import { usePromptBundleController } from './export/usePromptBundleController';
 import { SettingsView, useKeyboardShortcuts } from './settings';
 import { useAppStore, type AppView } from './store';
+import { FloatingUpdateControl } from './components/FloatingUpdateControl';
+import { readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -171,8 +173,27 @@ export default function App() {
         const projects = await window.imnota.listProjects();
         if (!active) return;
         useAppStore.getState().set({ projects });
-        if (settings.openRecentOnLaunch && projects[0])
-          adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
+        if (settings.openRecentOnLaunch) {
+          const checkpoint = readSessionCheckpoint();
+          const savedProject = checkpoint?.projectPath
+            ? projects.find((project) => project.projectPath === checkpoint.projectPath)
+            : undefined;
+          if (savedProject && checkpoint?.view === 'workspace') {
+            adoptSnapshot(
+              await window.imnota.loadProject(savedProject.projectPath),
+              checkpoint.itemId ?? undefined,
+            );
+            const restored = useAppStore.getState();
+            if (
+              checkpoint.collectionId &&
+              restored.snapshot?.project.collections.some((item) => item.id === checkpoint.collectionId)
+            )
+              restored.setActiveCollection(checkpoint.collectionId);
+            restored.set({ search: checkpoint.search });
+          } else if (checkpoint?.view === 'settings') {
+            useAppStore.getState().set({ view: 'settings', search: checkpoint.search });
+          } else if (projects[0]) adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
+        }
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Imnota could not start.'))
       .finally(() => active && setBooting(false));
@@ -718,6 +739,19 @@ export default function App() {
       setDialogBusy(false);
     }
   }
+
+  const checkpointSession = useCallback(() => {
+    const current = useAppStore.getState();
+    saveSessionCheckpoint({
+      workspacePath: current.settings.workspacePath,
+      view: current.view,
+      projectPath: current.snapshot?.projectPath ?? null,
+      collectionId: current.activeCollectionId,
+      itemId: current.activeScreenshotId,
+      search: current.search,
+      savedAt: new Date().toISOString(),
+    });
+  }, []);
   async function restoreRecoveredDelete(undoToken: string, screenshotId: string) {
     const current = useAppStore.getState().snapshot;
     if (!current) return;
@@ -963,59 +997,6 @@ export default function App() {
             </div>
           </div>
         )}
-        {updateStatus?.state === 'error' && (
-          <div className="update-banner" role="alert">
-            <span>{updateStatus.message ?? 'The update check failed.'}</span>
-            <Button
-              onClick={() =>
-                void window.imnota
-                  .checkForUpdates()
-                  .catch(() => setError('Could not check for updates. Try again.'))
-              }
-            >
-              Retry update check
-            </Button>
-          </div>
-        )}
-        {updateStatus?.state === 'available' && (
-          <div className="update-banner" role="status">
-            <span>{updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is available.`}</span>
-            <Button
-              onClick={() =>
-                void window.imnota
-                  .downloadUpdate()
-                  .catch(() => setError('The update could not be downloaded.'))
-              }
-            >
-              {updateStatus.terminalCommand
-                ? 'Run update in Terminal'
-                : updateStatus.manualDownload
-                  ? 'Open download'
-                  : 'Download update'}
-            </Button>
-          </div>
-        )}
-        {updateStatus?.state === 'downloading' && (
-          <div className="update-banner" role="status">
-            <span>Downloading update… {Math.round(updateStatus.percent ?? 0)}%</span>
-            <progress max={100} value={updateStatus.percent ?? 0} aria-label="Update download progress" />
-          </div>
-        )}
-        {updateStatus?.state === 'downloaded' && (
-          <div className="update-banner" role="status">
-            <span>{updateStatus.message ?? `Imnota ${updateStatus.version ?? 'update'} is ready.`}</span>
-            <Button
-              variant="soft"
-              onClick={() =>
-                void installUpdate().catch((reason) =>
-                  setError(reason instanceof Error ? reason.message : 'The update could not be installed.'),
-                )
-              }
-            >
-              Restart to update
-            </Button>
-          </div>
-        )}
         {!store.settings.workspacePath ? (
           <Welcome chooseWorkspace={() => void chooseWorkspace()} />
         ) : store.view === 'settings' ? (
@@ -1027,7 +1008,10 @@ export default function App() {
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
             onReplayOnboarding={() => setShowOnboarding(true)}
-            onInstall={installUpdate}
+            onInstall={async () => {
+              checkpointSession();
+              await installUpdate();
+            }}
             onWorkspaceChanged={refreshProjects}
           />
         ) : !store.snapshot ? (
@@ -1148,6 +1132,22 @@ export default function App() {
           }}
         />
       </AppShell>
+      <FloatingUpdateControl
+        status={updateStatus}
+        onDownload={() =>
+          window.imnota.downloadUpdate().catch(() => setError('The update could not be downloaded.'))
+        }
+        onRetry={() =>
+          window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
+        }
+        onInstall={async () => {
+          if (await flushAll()) {
+            checkpointSession();
+            allowClose.current = true;
+            await window.imnota.installUpdate();
+          }
+        }}
+      />
       {toast && (
         <div className="toast" role="status">
           <Check size={16} aria-hidden="true" />

@@ -138,6 +138,51 @@ rm -rf "$root"
   assert.equal(result.status, 0, result.stderr);
 });
 
+test(
+  'keeps only a hidden rollback copy and cleans verified legacy backups after a successful update',
+  { skip: !bash },
+  () => {
+    const result = runBash(`
+root=$(mktemp -d)
+app_path="$root/Imnota.app"
+stage_dir="$root/.imnota-update.test"
+legacy="$root/Imnota Backup 1.2.1 20260101-010101 42.app"
+legacy_dash="$root/Imnota-backup-20260102-020202.app"
+untrusted="$root/Imnota Backup 1.2.0 20260101-010102 43.app"
+project="$root/User Project.app"
+managed="$root/.imnota-backups.noindex/Imnota.app"
+mkdir -p "$app_path" "$stage_dir/new/Imnota.app" "$legacy/Contents" "$legacy_dash/Contents" "$untrusted/Contents" "$project" "$managed/Contents"
+printf old > "$app_path/version"
+printf new > "$stage_dir/new/Imnota.app/version"
+printf older > "$managed/version"
+printf trusted > "$legacy/Contents/marker"
+printf trusted > "$legacy_dash/Contents/marker"
+printf untrusted > "$untrusted/Contents/marker"
+plist_value() {
+  if [[ "$1" == *"1.2.1 20260101-010101 42.app"* || "$1" == *"Imnota-backup-20260102-020202.app"* || "$1" == *".imnota-backups.noindex/Imnota.app"* ]]; then
+    printf 'com.dytschgo.imnota\\n'
+  else
+    printf 'com.example.unrelated\\n'
+  fi
+}
+verify_signature() { return 0; }
+launch_app() { return 0; }
+CURRENT_VERSION=1.2.2
+swap_and_launch "$stage_dir/new/Imnota.app"
+[[ "$(cat "$app_path/version")" == new ]]
+[[ "$(cat "$root/.imnota-backups.noindex/Imnota.app/version")" == old ]]
+[[ "$(find "$root/.imnota-backups.noindex" -maxdepth 1 -type d -name '*.app' | wc -l)" -eq 1 ]]
+[[ ! -e "$legacy" ]]
+[[ ! -e "$legacy_dash" ]]
+[[ -d "$untrusted" && -d "$project" ]]
+backup_count=$(find "$root" -maxdepth 1 -name 'Imnota Backup *.app' | wc -l)
+[[ "$backup_count" -eq 1 ]]
+rm -rf "$root"
+`);
+    assert.equal(result.status, 0, result.stderr);
+  },
+);
+
 test("a failed lock acquisition never removes another updater's lock", { skip: !bash }, () => {
   const result = runBash(`
 root=$(mktemp -d)
@@ -196,7 +241,7 @@ test('helper has no privileged or quarantine-bypass commands', () => {
 });
 
 test(
-  'installs and retains a backup from the real packaged macOS zip',
+  'installs and retains a hidden rollback copy from the real packaged macOS zip',
   { skip: process.platform !== 'darwin' || !bash || !fs.existsSync(packagedMacZip) },
   () => {
     const version = packageJson.version;
@@ -228,11 +273,11 @@ main "v$version" \
   "$root/Imnota.app" \
   "$version"
 /usr/bin/codesign --verify --deep --strict --all-architectures "$root/Imnota.app"
+[[ -d "$root/.imnota-backups.noindex/Imnota.app" ]]
 shopt -s nullglob
 set -- "$root"/"Imnota Backup "*.app
 shopt -u nullglob
-backup_count=$#
-[[ "$backup_count" -eq 1 ]]
+[[ "$#" -eq 0 ]]
 /bin/rm -rf "$root"
 `,
       [bashPath(packagedMacZip), version],

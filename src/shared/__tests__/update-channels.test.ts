@@ -60,6 +60,14 @@ it('strictly isolates stable and nightly and excludes drafts and missing manifes
   nightly.assets[0].browser_download_url = 'https://example.com/nightly-mac.yml';
   expect(selectRelease(nightly, 'nightly', 'darwin')).toBeNull();
 });
+it('carries release notes into update metadata', () => {
+  const candidate = selectRelease(
+    { ...release(), body: '### What changed\n\n- Better updates' },
+    'stable',
+    'darwin',
+  );
+  expect(candidate?.releaseNotes).toContain('Better updates');
+});
 it('orders stable and nightly versions without lexical comparisons or automatic downgrades', () => {
   expect(compareReleaseVersions('0.10.0', '0.9.0')).toBe(1);
   expect(compareReleaseVersions('0.3.0', nightlyVersion)).toBe(1);
