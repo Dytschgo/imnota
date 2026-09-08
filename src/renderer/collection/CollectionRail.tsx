@@ -345,27 +345,64 @@ export function CollectionRail({
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addMenuFocusedIndex, setAddMenuFocusedIndex] = useState(0);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const addMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuId = useId().replace(/:/g, '');
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
+  const addItemOptions = [
+    {
+      id: 'screenshot',
+      label: 'Screenshot',
+      description: 'Import an image into this collection',
+      icon: Upload,
+      run: onImport,
+    },
+    ...(onAddContent
+      ? [
+          {
+            id: 'drawing',
+            label: 'Drawing',
+            description: 'Sketch a visual explanation',
+            icon: Pencil,
+            run: () => void onAddContent('drawing'),
+          },
+          {
+            id: 'text',
+            label: 'Text block',
+            description: 'Add Markdown to the prompt sequence',
+            icon: FileText,
+            run: () => void onAddContent('text'),
+          },
+        ]
+      : []),
+  ];
+
+  const closeAddMenu = (restoreFocus = false) => {
+    setAddMenuOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => addMenuTriggerRef.current?.focus());
+  };
+
+  const openAddMenu = (focusedIndex = 0) => {
+    setAddMenuFocusedIndex(Math.min(Math.max(focusedIndex, 0), addItemOptions.length - 1));
+    setAddMenuOpen(true);
+  };
 
   useEffect(() => {
     if (!addMenuOpen) return;
     const closeMenu = (event: PointerEvent) => {
-      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAddMenuOpen(false);
+      if (!addMenuRef.current?.contains(event.target as Node)) closeAddMenu();
     };
     document.addEventListener('pointerdown', closeMenu);
-    document.addEventListener('keydown', closeOnEscape);
+    const frame = window.requestAnimationFrame(() => addMenuItemRefs.current[addMenuFocusedIndex]?.focus());
     return () => {
       document.removeEventListener('pointerdown', closeMenu);
-      document.removeEventListener('keydown', closeOnEscape);
+      window.cancelAnimationFrame(frame);
     };
-  }, [addMenuOpen]);
+  }, [addMenuFocusedIndex, addMenuOpen]);
 
   async function reorderScreenshot(targetIndex: number, sourceIndex = dragIndex) {
     if (sourceIndex === null || sourceIndex === targetIndex || !project) return;
@@ -524,8 +561,20 @@ export function CollectionRail({
                           ? 'Drawing'
                           : 'Markdown'}
                     </small>
-                    <span className={`item-inclusion ${item.includeInExport ? 'included' : 'excluded'}`}>
-                      {item.includeInExport ? 'Included in bundle' : 'Excluded from bundle'}
+                    <span
+                      className={`item-inclusion ${item.includeInExport ? 'included' : 'excluded'}`}
+                      aria-label={
+                        item.includeInExport
+                          ? 'Included in the next prompt bundle'
+                          : 'Excluded from the next prompt bundle'
+                      }
+                      title={
+                        item.includeInExport
+                          ? 'Included in the next prompt bundle'
+                          : 'Excluded from the next prompt bundle'
+                      }
+                    >
+                      {item.includeInExport ? 'Included' : 'Excluded'}
                     </span>
                   </span>
                 </button>
@@ -551,12 +600,26 @@ export function CollectionRail({
           <div className="rail-actions">
             <div className="add-item-menu" ref={addMenuRef}>
               <Button
+                ref={addMenuTriggerRef}
+                data-testid="add-item-trigger"
                 variant="primary"
                 disabled={collection?.archived}
                 aria-expanded={addMenuOpen}
                 aria-haspopup="menu"
                 aria-controls={addMenuId}
-                onClick={() => setAddMenuOpen((open) => !open)}
+                onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'Home') {
+                    event.preventDefault();
+                    openAddMenu(0);
+                  } else if (event.key === 'ArrowUp' || event.key === 'End') {
+                    event.preventDefault();
+                    openAddMenu(addItemOptions.length - 1);
+                  } else if (event.key === 'Escape' && addMenuOpen) {
+                    event.preventDefault();
+                    closeAddMenu(true);
+                  }
+                }}
               >
                 <Plus size={15} aria-hidden="true" />
                 Add item
@@ -564,52 +627,51 @@ export function CollectionRail({
               </Button>
               {addMenuOpen && (
                 <div className="add-item-popover" id={addMenuId} role="menu" aria-label="Add item">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      onImport();
-                      setAddMenuOpen(false);
-                    }}
-                  >
-                    <Upload size={15} aria-hidden="true" />
-                    <span>
-                      <strong>Screenshot</strong>
-                      <small>Import an image into this collection</small>
-                    </span>
-                  </button>
-                  {onAddContent && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        void onAddContent('drawing');
-                        setAddMenuOpen(false);
-                      }}
-                    >
-                      <Pencil size={15} aria-hidden="true" />
-                      <span>
-                        <strong>Drawing</strong>
-                        <small>Sketch a visual explanation</small>
-                      </span>
-                    </button>
-                  )}
-                  {onAddContent && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        void onAddContent('text');
-                        setAddMenuOpen(false);
-                      }}
-                    >
-                      <FileText size={15} aria-hidden="true" />
-                      <span>
-                        <strong>Text block</strong>
-                        <small>Add Markdown to the prompt sequence</small>
-                      </span>
-                    </button>
-                  )}
+                  {addItemOptions.map((option, index) => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.id}
+                        ref={(element) => {
+                          addMenuItemRefs.current[index] = element;
+                        }}
+                        type="button"
+                        role="menuitem"
+                        tabIndex={index === addMenuFocusedIndex ? 0 : -1}
+                        data-testid={`add-item-${option.id}`}
+                        onClick={() => {
+                          option.run();
+                          closeAddMenu();
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex((current) => (current + 1) % addItemOptions.length);
+                          } else if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(
+                              (current) => (current - 1 + addItemOptions.length) % addItemOptions.length,
+                            );
+                          } else if (event.key === 'Home') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(0);
+                          } else if (event.key === 'End') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(addItemOptions.length - 1);
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault();
+                            closeAddMenu(true);
+                          }
+                        }}
+                      >
+                        <Icon size={15} aria-hidden="true" />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

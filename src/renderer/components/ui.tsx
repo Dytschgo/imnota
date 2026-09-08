@@ -1,4 +1,5 @@
 import {
+  forwardRef,
   useEffect,
   useId,
   useRef,
@@ -9,19 +10,17 @@ import {
 } from 'react';
 import { LoaderCircle } from 'lucide-react';
 
-export function Button({
-  className = '',
-  variant = 'default',
-  busy,
-  children,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'default' | 'primary' | 'ghost' | 'danger' | 'soft';
-  busy?: boolean;
-}) {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: 'default' | 'primary' | 'ghost' | 'danger' | 'soft';
+    busy?: boolean;
+  }
+>(function Button({ className = '', variant = 'default', busy, children, ...props }, ref) {
   return (
     <button
       {...props}
+      ref={ref}
       className={`btn btn-${variant} ${className}`}
       disabled={Boolean(busy || props.disabled)}
       aria-busy={busy || undefined}
@@ -30,7 +29,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 export function IconButton({
   label,

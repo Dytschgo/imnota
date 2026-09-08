@@ -262,6 +262,36 @@ describe('CollectionRail', () => {
     expect(screen.getByRole('menuitem', { name: /Text block/ })).toBeVisible();
   });
 
+  it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {
+    const onImport = vi.fn();
+    const onAddContent = vi.fn();
+    render(<CollectionRail {...props({ onImport, onAddContent })} />);
+
+    const trigger = screen.getByRole('button', { name: 'Add item' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const screenshot = await screen.findByTestId('add-item-screenshot');
+    await waitFor(() => expect(screenshot).toHaveFocus());
+
+    fireEvent.keyDown(screenshot, { key: 'End' });
+    const text = screen.getByTestId('add-item-text');
+    await waitFor(() => expect(text).toHaveFocus());
+    fireEvent.keyDown(text, { key: 'Home' });
+    await waitFor(() => expect(screenshot).toHaveFocus());
+    fireEvent.keyDown(screenshot, { key: 'ArrowUp' });
+    await waitFor(() => expect(text).toHaveFocus());
+    fireEvent.keyDown(text, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    await waitFor(() => expect(screen.getByTestId('add-item-text')).toHaveFocus());
+    fireEvent.click(screen.getByTestId('add-item-drawing'));
+    expect(onAddContent).toHaveBeenCalledWith('drawing');
+    expect(onImport).not.toHaveBeenCalled();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('excludes a text block without altering screenshots', async () => {
     const current = projectSnapshot();
     current.project.contentItems = [
