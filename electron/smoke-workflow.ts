@@ -400,8 +400,8 @@ async function createBenchmarkProject(
   // Fixtures created through IPC have never been visited in the renderer. Open the
   // project explicitly so relaunch resumes this fixture through real visit history.
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
-  await driver.waitFor({ selector: '.project-row', text: name });
-  await driver.click({ selector: '.project-row', text: name });
+  await driver.waitFor({ selector: '.project-row-main', text: name });
+  await driver.click({ selector: '.project-row-main', text: name });
   await driver.waitFor({ selector: '.crumb-muted', text: name, exact: true });
   return { projectPath, importMs, reopenMs };
 }

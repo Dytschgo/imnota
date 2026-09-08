@@ -18,8 +18,8 @@ export async function exerciseMixedContent(
     return snapshot.projectPath;
   })()`);
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
-  await driver.waitFor({ selector: '.project-row', text: 'Mixed Content Verification' });
-  await driver.click({ selector: '.project-row', text: 'Mixed Content Verification' });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Mixed Content Verification' });
+  await driver.click({ selector: '.project-row-main', text: 'Mixed Content Verification' });
   await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
   driver.setWindow(await host.reopenWindow());
   await driver.fill(
