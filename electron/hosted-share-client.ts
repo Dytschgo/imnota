@@ -41,6 +41,7 @@ export interface HostedShareArtifacts {
   title: string;
   markdown: string;
   images: readonly { filename: string; dataBase64: string }[];
+  bundles?: readonly { bundleNumber: number; markdown: string; imageFilename: string | null }[];
 }
 
 function publicRecord(record: StoredShare): HostedShareRecord {
@@ -231,6 +232,17 @@ function safeServerMessage(value: unknown, fallback: string): string {
   return safeText(value, 500) ? value : fallback;
 }
 
+function normalizedSenderName(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string')
+    throw new NativeWorkflowError('invalid-input', 'The sender name is invalid.', false);
+  const name = value.normalize('NFC').trim();
+  if (!name) return undefined;
+  if (!safeText(name, 80))
+    throw new NativeWorkflowError('invalid-input', 'The sender name is invalid.', false);
+  return name;
+}
+
 function recoveryWarning(
   incident: string,
   discriminator: string,
@@ -334,6 +346,7 @@ export class HostedShareClient {
       controller.abort();
     }, 60_000);
     try {
+      const senderName = normalizedSenderName(input.senderName);
       const payload = {
         requestId: input.requestId,
         title: artifacts.title,
@@ -341,23 +354,25 @@ export class HostedShareClient {
         images: artifacts.images,
         includeArchive: input.includeArchive,
         expiresInDays: input.expiresInDays,
+        ...(senderName ? { senderName } : {}),
+        ...(artifacts.bundles ? { bundles: artifacts.bundles } : {}),
       };
       const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-      try {
-        await this.savePending(input, payloadFingerprint);
-      } catch (error) {
-        if (error instanceof NativeWorkflowError && error.code === 'io-failure')
-          throw new NativeWorkflowError(error.code, error.message, error.retryable, {
-            ...error.details,
-            requestMayHaveCommitted: false,
-          });
-        throw error;
-      }
+      const pairingToken = await this.resolvePairingToken(input, payloadFingerprint, controller.signal).catch(
+        (error: unknown) => {
+          if (error instanceof NativeWorkflowError && error.code === 'io-failure')
+            throw new NativeWorkflowError(error.code, error.message, error.retryable, {
+              ...error.details,
+              requestMayHaveCommitted: false,
+            });
+          throw error;
+        },
+      );
       const target = `${originForTests()}/api/shares`;
       const response = await this.fetchTransport(target, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${input.pairingToken}`,
+          Authorization: `Bearer ${pairingToken}`,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -476,7 +491,7 @@ export class HostedShareClient {
   }
 
   private validateUpload(input: HostedShareUpload, artifacts: HostedShareArtifacts): void {
-    if (!TOKEN.test(input.pairingToken))
+    if (input.pairingToken !== '' && !TOKEN.test(input.pairingToken))
       throw new NativeWorkflowError(
         'invalid-input',
         'Paste the complete one-use pairing code from app.imnota.xyz.',
@@ -501,6 +516,31 @@ export class HostedShareClient {
         'The finalized prompt bundle is too large to share.',
         false,
       );
+    if (artifacts.bundles) {
+      if (artifacts.bundles.length === 0 || artifacts.bundles.length > 20)
+        throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
+      const bundleNumbers = new Set<number>();
+      let structuredMarkdownBytes = 0;
+      for (const bundle of artifacts.bundles) {
+        if (
+          !Number.isInteger(bundle.bundleNumber) ||
+          bundle.bundleNumber < 1 ||
+          bundle.bundleNumber > 999 ||
+          bundleNumbers.has(bundle.bundleNumber) ||
+          !safeText(bundle.markdown, MAX_MARKDOWN_BYTES) ||
+          (bundle.imageFilename !== null && !SAFE_PNG.test(bundle.imageFilename))
+        )
+          throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
+        bundleNumbers.add(bundle.bundleNumber);
+        structuredMarkdownBytes += Buffer.byteLength(bundle.markdown, 'utf8');
+      }
+      if (structuredMarkdownBytes > MAX_MARKDOWN_BYTES)
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'The finalized prompt bundle is too large to share.',
+          false,
+        );
+    }
     const names = new Set<string>();
     let decodedBytes = markdownBytes;
     for (const image of artifacts.images) {
@@ -516,6 +556,10 @@ export class HostedShareClient {
           false,
         );
     }
+    if (
+      artifacts.bundles?.some((bundle) => bundle.imageFilename !== null && !names.has(bundle.imageFilename))
+    )
+      throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
   }
 
   private async requestJson(
@@ -523,6 +567,7 @@ export class HostedShareClient {
     init: RequestInit,
     timeoutMs: number,
     timeoutMessage: string,
+    abortSignal?: AbortSignal,
   ): Promise<{ response: Response; body: JsonObject }> {
     const controller = new AbortController();
     let response: Response | undefined;
@@ -531,6 +576,9 @@ export class HostedShareClient {
       timedOut = true;
       controller.abort();
     }, timeoutMs);
+    const abort = () => controller.abort();
+    abortSignal?.addEventListener('abort', abort, { once: true });
+    if (abortSignal?.aborted) controller.abort();
     try {
       response = await this.fetchTransport(target, { ...init, signal: controller.signal, redirect: 'error' });
       validateResponseDestination(response, target);
@@ -545,6 +593,7 @@ export class HostedShareClient {
       throw networkFailure(error);
     } finally {
       clearTimeout(deadline);
+      abortSignal?.removeEventListener('abort', abort);
     }
   }
 
@@ -674,13 +723,77 @@ export class HostedShareClient {
     return uniqueWarnings;
   }
 
-  private async savePending(input: HostedShareUpload, payloadFingerprint: string): Promise<void> {
+  private async resolvePairingToken(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+    abortSignal: AbortSignal,
+  ): Promise<string> {
+    const existing = await this.pendingFor(input, payloadFingerprint);
+    if (existing) return existing.pairingToken;
+    const pairingToken = input.pairingToken || (await this.mintPairingToken(abortSignal));
+    await this.savePending(input, payloadFingerprint, pairingToken);
+    return pairingToken;
+  }
+
+  private async pendingFor(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+  ): Promise<PendingShare | undefined> {
+    return this.enqueueState(async () => {
+      const existing = (await this.pending())[input.requestId];
+      if (!existing) return undefined;
+      if (
+        !existing.payloadFingerprint ||
+        existing.payloadFingerprint !== payloadFingerprint ||
+        (input.pairingToken !== '' && existing.pairingToken !== input.pairingToken)
+      )
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'This request has an unresolved upload with its original pairing code and artifacts. Recover it from local share history before changing the code or publishing options.',
+          false,
+        );
+      return existing;
+    });
+  }
+
+  private async mintPairingToken(abortSignal: AbortSignal): Promise<string> {
+    const target = `${originForTests()}/api/pairing`;
+    const { response, body } = await this.requestJson(
+      target,
+      {
+        method: 'POST',
+        headers: { Origin: originForTests(), 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: '{}',
+      },
+      15_000,
+      'Automatic pairing did not answer within 15 seconds.',
+      abortSignal,
+    );
+    if (!response.ok)
+      throw errorFor(
+        response.status,
+        isObject(body.error) ? body.error.code : undefined,
+        isObject(body.error) ? body.error.message : undefined,
+        'Could not create a one-use sharing capability.',
+      );
+    if (!TOKEN.test(typeof body.uploadToken === 'string' ? body.uploadToken : ''))
+      throw invalidResponse('The share service returned an invalid pairing capability.');
+    if (!validTimestamp(body.expiresAt) || Date.parse(body.expiresAt) <= Date.now())
+      throw invalidResponse('The share service returned an invalid pairing expiration.');
+    return body.uploadToken as string;
+  }
+
+  private async savePending(
+    input: HostedShareUpload,
+    payloadFingerprint: string,
+    pairingToken: string,
+  ): Promise<void> {
     await this.enqueueState(async () => {
       const all = await this.pending();
       const existing = all[input.requestId];
       if (existing) {
         if (
-          existing.pairingToken !== input.pairingToken ||
+          (input.pairingToken !== '' && existing.pairingToken !== input.pairingToken) ||
           !existing.payloadFingerprint ||
           existing.payloadFingerprint !== payloadFingerprint
         )
@@ -694,7 +807,7 @@ export class HostedShareClient {
       const createdAt = new Date().toISOString();
       all[input.requestId] = {
         requestId: input.requestId,
-        pairingToken: input.pairingToken,
+        pairingToken,
         createdAt,
         deadlineAt: new Date(Date.parse(createdAt) + PENDING_RECOVERY_MS).toISOString(),
         payloadFingerprint,

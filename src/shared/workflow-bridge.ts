@@ -80,7 +80,9 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
 /** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
 export interface HostedShareUpload {
   requestId: string;
+  /** Empty requests a private one-use pairing capability from the share service. */
   pairingToken: string;
+  senderName?: string;
   sessionId: string;
   bundleNumbers: readonly number[];
   includeArchive: boolean;

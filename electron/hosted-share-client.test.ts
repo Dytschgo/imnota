@@ -110,6 +110,85 @@ describe('HostedShareClient request boundary', () => {
     });
   });
 
+  it('mints and persists an automatic pairing capability before uploading', async () => {
+    const { root } = await fixture();
+    const transport = vi.fn<HostedShareFetch>(async (target) =>
+      target.endsWith('/api/pairing')
+        ? json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201)
+        : json(receipt(), 201),
+    );
+    const client = new HostedShareClient(root, async () => undefined, transport);
+    await client.create({ ...upload(), pairingToken: '' }, artifacts());
+
+    expect(transport.mock.calls.map(([target]) => target)).toEqual([
+      'https://app.imnota.xyz/api/pairing',
+      'https://app.imnota.xyz/api/shares',
+    ]);
+    expect(transport.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { Origin: 'https://app.imnota.xyz', 'Content-Type': 'application/json' },
+    });
+    expect((transport.mock.calls[1]?.[1] as RequestInit).headers).toMatchObject({
+      Authorization: `Bearer ${'z'.repeat(43)}`,
+    });
+  });
+
+  it('does not persist a pending upload when automatic pairing fails', async () => {
+    const { root } = await fixture();
+    const client = new HostedShareClient(
+      root,
+      async () => undefined,
+      vi.fn(async () => json({}, 503)),
+    );
+    await expect(client.create({ ...upload(), pairingToken: '' }, artifacts())).rejects.toMatchObject({
+      code: 'network-failure',
+    });
+    await expect(fs.readFile(path.join(root, 'hosted-share-pending.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('reuses a minted pairing capability after a lost upload response', async () => {
+    const { root } = await fixture();
+    let uploadAttempts = 0;
+    const transport = vi.fn<HostedShareFetch>(async (target) => {
+      if (target.endsWith('/api/pairing'))
+        return json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201);
+      uploadAttempts += 1;
+      if (uploadAttempts === 1) throw new TypeError('lost response');
+      return json(receipt(), 201);
+    });
+    const initial = new HostedShareClient(root, async () => undefined, transport);
+    await expect(initial.create({ ...upload(), pairingToken: '' }, artifacts())).rejects.toMatchObject({
+      code: 'network-failure',
+    });
+    await expect(
+      new HostedShareClient(root, async () => undefined, transport).create(
+        { ...upload(), pairingToken: '' },
+        artifacts(),
+      ),
+    ).resolves.toMatchObject({ id: firstShare });
+    expect(transport.mock.calls.filter(([target]) => target.endsWith('/api/pairing'))).toHaveLength(1);
+  });
+
+  it('sends normalized sender and structured bundle metadata only when supplied', async () => {
+    const fetch = vi.fn().mockResolvedValue(json(receipt(), 201));
+    vi.stubGlobal('fetch', fetch);
+    await (
+      await fixture()
+    ).client.create(
+      { ...upload(), senderName: '  Zoë  ' },
+      {
+        ...artifacts(),
+        bundles: [{ bundleNumber: 1, markdown: '# prompt', imageFilename: 'prompt-001.png' }],
+      },
+    );
+    expect(JSON.parse(String((fetch.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({
+      senderName: 'Zoë',
+      bundles: [{ bundleNumber: 1, markdown: '# prompt', imageFilename: 'prompt-001.png' }],
+    });
+  });
+
   it('uses the injected transport for upload, receipt recovery, and revocation', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-transport-'));
     roots.push(root);

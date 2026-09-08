@@ -1135,7 +1135,8 @@ function registerIpc(): void {
           z
             .object({
               requestId: z.string().uuid(),
-              pairingToken: z.string().min(32).max(512),
+              pairingToken: z.string().max(512),
+              senderName: z.string().max(256).optional(),
               sessionId: workflowSessionId,
               bundleNumbers: z.array(workflowBundleNumber).min(1).max(20),
               includeArchive: z.boolean(),

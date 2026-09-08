@@ -32,6 +32,11 @@ describe('collectHostedShareArtifacts', () => {
     expect(artifacts.markdown).toBe('# Prompt 1\n\n---\n\n# Prompt 2\n\n---\n\n# Prompt 3');
     expect(artifacts.images.map((image) => image.filename)).toEqual(['prompt-001.png', 'prompt-003.png']);
     expect(artifacts.images[0].dataBase64).toBe('bm9ybWFsaXplZA==');
+    expect(artifacts.bundles).toEqual([
+      { bundleNumber: 1, markdown: '# Prompt 1', imageFilename: 'prompt-001.png' },
+      { bundleNumber: 2, markdown: '# Prompt 2', imageFilename: null },
+      { bundleNumber: 3, markdown: '# Prompt 3', imageFilename: 'prompt-003.png' },
+    ]);
   });
 
   it('does not bypass the workflow final-session grant', async () => {
