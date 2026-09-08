@@ -1671,6 +1671,14 @@ export async function runSmokeWorkflow(
   if (!pickerFocusRestored) throw new Error('Collection picker did not restore focus after Escape.');
   assertions.push('native collection picker keyboard focus and Escape restoration');
 
+  // Keep the native crop/redaction/arrow checks above tied to real pointer input,
+  // then replace their gesture-dependent endpoints before recording visual baselines.
+  // Native move events can be coalesced before mouseup, so the committed crop is
+  // intentionally not used as a cross-run screenshot fixture.
+  if (artifactDirectory) {
+    await installDeterministicExportAnnotations(driver, projectPath);
+    assertions.push('deterministic workspace annotations after native pointer checks');
+  }
   await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
