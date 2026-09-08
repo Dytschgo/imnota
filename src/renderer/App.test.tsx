@@ -192,6 +192,36 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
+  it('keeps the library open when launch restoration is disabled', async () => {
+    localStorage.removeItem('imnota:last-session');
+    const loadProject = vi.fn(async () => snapshot);
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+    });
+    await screen.findByRole('textbox', { name: 'Search projects' });
+    expect(loadProject).not.toHaveBeenCalled();
+  });
+
+  it('restores a settings checkpoint even when recent launch is disabled', async () => {
+    localStorage.setItem(
+      'imnota:last-session',
+      JSON.stringify({
+        workspacePath: '/workspace',
+        view: 'settings',
+        projectPath: null,
+        collectionId: '001-collection',
+        itemId: null,
+        search: 'saved search',
+        savedAt: new Date().toISOString(),
+      }),
+    );
+    renderApp();
+    await screen.findByTestId('settings-view');
+    expect(useAppStore.getState().search).toBe('saved search');
+    expect(localStorage.getItem('imnota:last-session')).toBeNull();
+  });
+
   it('saves current notes before opening and focusing project search', async () => {
     const { save, note } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Latest note' } });

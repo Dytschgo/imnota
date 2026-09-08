@@ -5,7 +5,13 @@ import { Button, Modal } from './ui';
 import { useAppStore } from '../store';
 import { saveWorkspaceSettingsPatch } from '../settings/sharing-preferences';
 
-export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }) {
+export function UpdateControl({
+  onInstall,
+  onDownload,
+}: {
+  onInstall?: () => Promise<void>;
+  onDownload?: () => Promise<void>;
+}) {
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' });
   const [busy, setBusy] = useState(false);
   const [confirmNightly, setConfirmNightly] = useState(false);
@@ -103,7 +109,10 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
         Check for updates
       </Button>
       {status.state === 'available' && (
-        <Button disabled={locked} onClick={() => void run(() => window.imnota.downloadUpdate())}>
+        <Button
+          disabled={locked}
+          onClick={() => void run(onDownload ?? (() => window.imnota.downloadUpdate()))}
+        >
           {status.terminalCommand
             ? 'Run update in Terminal'
             : status.manualDownload
@@ -141,7 +150,10 @@ export function UpdateControl({ onInstall }: { onInstall?: () => Promise<void> }
         </div>
       )}
       {status.state === 'not-available' && status.manualDownload && (
-        <Button disabled={locked} onClick={() => void run(() => window.imnota.downloadUpdate())}>
+        <Button
+          disabled={locked}
+          onClick={() => void run(onDownload ?? (() => window.imnota.downloadUpdate()))}
+        >
           Open selected channel download
         </Button>
       )}

@@ -183,6 +183,25 @@ rm -rf "$root"
   },
 );
 
+test('preserves the newest rollback when the managed location is occupied', { skip: !bash }, () => {
+  const result = runBash(`
+root=$(mktemp -d)
+backup_root="$root/backups"
+backup_path="$backup_root/.rollback-123.app"
+stage_dir="$root/stage"
+mkdir -p "$backup_path" "$backup_root/.rollback-older.app" "$stage_dir"
+printf unrelated > "$backup_root/Imnota.app"
+is_imnota_bundle() { [[ -d "$1" ]]; }
+retain_latest_rollback_backup
+cleanup_stale_rollback_backups
+[[ -d "$backup_path" ]]
+[[ ! -e "$backup_root/.rollback-older.app" ]]
+[[ "$(cat "$backup_root/Imnota.app")" == unrelated ]]
+rm -rf "$root"
+`);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("a failed lock acquisition never removes another updater's lock", { skip: !bash }, () => {
   const result = runBash(`
 root=$(mktemp -d)

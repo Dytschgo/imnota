@@ -163,3 +163,13 @@ it('copies and runs the supplied Terminal command for an available upgrade', asy
   fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
   await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
 });
+
+it('uses the guarded download callback for a Terminal update from Settings', async () => {
+  const api = setup();
+  const onDownload = vi.fn(async () => {});
+  render(<UpdateControl onDownload={onDownload} />);
+  act(() => api.emit({ state: 'available', manualDownload: true, terminalCommand: 'update-command' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  await waitFor(() => expect(onDownload).toHaveBeenCalledOnce());
+  expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
+});

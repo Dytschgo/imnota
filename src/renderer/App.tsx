@@ -184,7 +184,10 @@ export default function App() {
           ? projects.find((project) => project.projectPath === validCheckpoint.projectPath)
           : undefined;
         if (validCheckpoint && savedProject && ['workspace', 'context'].includes(validCheckpoint.view)) {
-          adoptSnapshot(await window.imnota.loadProject(savedProject.projectPath), validCheckpoint.itemId ?? undefined);
+          adoptSnapshot(
+            await window.imnota.loadProject(savedProject.projectPath),
+            validCheckpoint.itemId ?? undefined,
+          );
           const restored = useAppStore.getState();
           if (
             validCheckpoint.collectionId &&
@@ -201,9 +204,12 @@ export default function App() {
               restored.set({ activeScreenshotId: validCheckpoint.itemId });
           }
           restored.set({ view: validCheckpoint.view, search: validCheckpoint.search });
-        } else if (validCheckpoint && ['projects', 'recent', 'favourites', 'settings'].includes(validCheckpoint.view)) {
+        } else if (
+          validCheckpoint &&
+          ['projects', 'recent', 'favourites', 'settings'].includes(validCheckpoint.view)
+        ) {
           useAppStore.getState().set({ view: validCheckpoint.view, search: validCheckpoint.search });
-        } else if (projects[0]) {
+        } else if (settings.openRecentOnLaunch && projects[0]) {
           adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
         }
         if (checkpoint) clearSessionCheckpoint();
@@ -765,6 +771,16 @@ export default function App() {
       savedAt: new Date().toISOString(),
     });
   }, []);
+  async function downloadUpdate() {
+    if (!(await flushAll())) return;
+    checkpointSession();
+    try {
+      await window.imnota.downloadUpdate();
+    } catch {
+      clearSessionCheckpoint();
+      setError('The update could not be downloaded.');
+    }
+  }
   async function restoreRecoveredDelete(undoToken: string, screenshotId: string) {
     const current = useAppStore.getState().snapshot;
     if (!current) return;
@@ -1021,6 +1037,7 @@ export default function App() {
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
             onReplayOnboarding={() => setShowOnboarding(true)}
+            onDownload={downloadUpdate}
             onInstall={async () => {
               checkpointSession();
               await installUpdate();
@@ -1147,11 +1164,7 @@ export default function App() {
       </AppShell>
       <FloatingUpdateControl
         status={updateStatus}
-        onDownload={async () => {
-          if (!(await flushAll())) return;
-          checkpointSession();
-          await window.imnota.downloadUpdate().catch(() => setError('The update could not be downloaded.'));
-        }}
+        onDownload={downloadUpdate}
         onRetry={() =>
           window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
         }

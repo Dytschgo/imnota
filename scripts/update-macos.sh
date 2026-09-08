@@ -238,6 +238,7 @@ retain_latest_rollback_backup() {
 cleanup_stale_rollback_backups() {
   local candidate
   while IFS= read -r -d '' candidate; do
+    [[ "$candidate" != "$backup_path" ]] || continue
     is_imnota_bundle "$candidate" || continue
     /bin/mv -- "$candidate" "$stage_dir/retired-${candidate##*/}" ||
       warn "Could not retire a stale Imnota rollback backup: $candidate"

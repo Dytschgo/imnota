@@ -71,9 +71,13 @@ export function FloatingUpdateControl({
         className="floating-update-button"
         label={label}
         onClick={() =>
-          void (
-            failed ? onRetry() : downloaded ? onInstall() : available || status.manualDownload ? onDownload() : undefined
-          )
+          void (failed
+            ? onRetry()
+            : downloaded
+              ? onInstall()
+              : available || status.manualDownload
+                ? onDownload()
+                : undefined)
         }
       >
         {failed ? (
