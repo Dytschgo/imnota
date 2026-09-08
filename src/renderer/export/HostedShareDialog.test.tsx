@@ -207,7 +207,9 @@ describe('HostedShareDialog', () => {
       ok: false,
       error: { code: 'network-failure', message: 'History refresh is offline.', retryable: true },
     });
-    await waitFor(() => expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false'));
+    await waitFor(() =>
+      expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false'),
+    );
     expect(screen.getByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
     expect(screen.queryByText('History refresh is offline.')).not.toBeInTheDocument();
   });
