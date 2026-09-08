@@ -107,6 +107,12 @@ function requireCsrf(request, response, session, config) {
 
 function throttleState(db, config, timestamp) {
   const row = db.prepare('SELECT * FROM owner_login_throttle WHERE id = 1').get();
+  if (row?.blocked_until > timestamp) {
+    return {
+      blocked: true,
+      retryAfterSeconds: Math.ceil((row.blocked_until - timestamp) / 1000),
+    };
+  }
   if (!row || row.window_started_at + config.ownerLoginThrottleWindowMs <= timestamp) {
     if (row)
       db.prepare(

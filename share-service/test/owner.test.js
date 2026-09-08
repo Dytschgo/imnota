@@ -231,12 +231,16 @@ test('persistent owner throttle is bounded and owner page contains login and das
   assert.match(page.text, /data-dashboard/);
   assert.match(page.text, /do not identify people/);
   const wrong = randomBytes(32).toString('base64url');
-  for (let attempt = 0; attempt < 2; attempt += 1)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt === 1) instance.advance(999);
     await instance.api
       .post('/api/owner/session')
       .set('Origin', origin)
       .send({ accessKey: wrong })
       .expect(401);
+  }
+  // Crossing the failure-count window must not shorten the later active block.
+  instance.advance(2);
   await instance.api
     .post('/api/owner/session')
     .set('Origin', origin)
