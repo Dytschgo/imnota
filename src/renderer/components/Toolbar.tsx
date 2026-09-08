@@ -296,6 +296,12 @@ export function Toolbar({
         <div
           className="annotation-more"
           ref={moreRef}
+          onKeyDown={(event) => {
+            if (event.key === 'Tab' && moreOpen && event.target !== moreTriggerRef.current) {
+              // Let the browser move focus first, including Shift+Tab back to the trigger.
+              window.requestAnimationFrame(() => closeMoreMenu());
+            }
+          }}
           onBlur={(event) => {
             if (!moreRef.current?.contains(event.relatedTarget as Node | null)) closeMoreMenu();
           }}

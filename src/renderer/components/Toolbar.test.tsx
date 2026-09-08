@@ -80,7 +80,6 @@ describe('annotation toolbar', () => {
     const { container } = render(<Toolbar {...props()} />);
     const toolbar = within(container);
     const trigger = toolbar.getByRole('button', { name: 'More annotation tools' });
-    const select = toolbar.getByRole('button', { name: 'Select / Move' });
     const undo = toolbar.getByRole('button', { name: 'Undo' });
 
     trigger.focus();
@@ -93,10 +92,12 @@ describe('annotation toolbar', () => {
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
-    fireEvent.keyDown(trigger, { key: 'Tab', shiftKey: true });
-    fireEvent.blur(trigger, { relatedTarget: select });
+    const firstItem = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    await waitFor(() => expect(firstItem).toHaveFocus());
+    fireEvent.keyDown(firstItem, { key: 'Tab', shiftKey: true });
+    trigger.focus();
     await waitFor(() => expect(toolbar.queryByRole('menu', { name: 'More annotation tools' })).toBeNull());
+    expect(trigger).toHaveFocus();
   });
 
   test('renders the optional ten-color quick palette and reports selection', () => {
