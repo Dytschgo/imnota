@@ -1020,12 +1020,12 @@ export default function App() {
         nativeMutationToken = null;
         if (identity !== navigationIdentity.current) return;
       }
+      await refreshProjects();
+      if (identity !== navigationIdentity.current) return;
       setDialog(null);
       setEditProject(null);
       setEditProjectPath(null);
       setEditProjectRevision(null);
-      await refreshProjects();
-      if (identity !== navigationIdentity.current) return;
       showToast('Project details saved');
     } catch (reason) {
       if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
