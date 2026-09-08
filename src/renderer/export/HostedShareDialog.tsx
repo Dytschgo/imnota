@@ -44,7 +44,15 @@ export function HostedShareDialog({
   const historyRequest = useRef(0);
   const refreshHistory = useCallback(async ({ reportError = true } = {}) => {
     const request = ++historyRequest.current;
-    const result = await window.imnota.listHostedShares();
+    let result: Awaited<ReturnType<typeof window.imnota.listHostedShares>>;
+    try {
+      result = await window.imnota.listHostedShares();
+    } catch {
+      if (mounted.current && request === historyRequest.current && reportError) {
+        setError('Could not refresh hosted share history. Try again.');
+      }
+      return false;
+    }
     if (!mounted.current || request !== historyRequest.current) return false;
     if (result.ok) {
       setHistory(result.value.records);
@@ -88,15 +96,18 @@ export function HostedShareDialog({
     setRecord(result.value);
     setHistory((items) => [result.value, ...items.filter((item) => item.id !== result.value.id)]);
     setError(undefined);
-    await refreshHistory({ reportError: false });
-    if (mounted.current) setBusy(false);
+    setBusy(false);
+    void refreshHistory({ reportError: false });
   };
   const retryRecovery = async () => {
     if (busy) return;
     setBusy(true);
     setError(undefined);
-    await refreshHistory();
-    if (mounted.current) setBusy(false);
+    try {
+      await refreshHistory();
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
   };
   const cancel = async () => {
     if (request) await window.imnota.cancelHostedShare({ requestId: request });
@@ -115,6 +126,7 @@ export function HostedShareDialog({
       return;
     }
     if (record?.id === result.value.id) setRecord(result.value);
+    historyRequest.current += 1;
     setHistory((items) => items.map((item) => (item.id === result.value.id ? result.value : item)));
   };
   const recordExpired = record ? isExpired(record) : false;
@@ -308,6 +320,7 @@ export function HostedShareDialog({
                   variant="ghost"
                   disabled={busy}
                   onClick={() => {
+                    historyRequest.current += 1;
                     setRecoveryErrors([]);
                     setError(undefined);
                   }}

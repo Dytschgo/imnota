@@ -187,19 +187,28 @@ describe('HostedShareDialog', () => {
   });
 
   it('keeps a successful upload ready when its follow-up history refresh fails', async () => {
+    let finishRefresh!: (value: Awaited<ReturnType<ImnotaBridge['listHostedShares']>>) => void;
+    const refresh = new Promise<Awaited<ReturnType<ImnotaBridge['listHostedShares']>>>(
+      (resolve) => (finishRefresh = resolve),
+    );
     const listHostedShares = vi
       .fn<ImnotaBridge['listHostedShares']>()
       .mockResolvedValueOnce({ ok: true, value: { records: [], recoveryErrors: [] } })
-      .mockResolvedValueOnce({
-        ok: false,
-        error: { code: 'network-failure', message: 'History refresh is offline.', retryable: true },
-      });
+      .mockImplementationOnce(() => refresh);
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledOnce());
 
     approveAndPublish();
     expect(await screen.findByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
+    await waitFor(() => expect(listHostedShares).toHaveBeenCalledTimes(2));
+    expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false');
+    finishRefresh({
+      ok: false,
+      error: { code: 'network-failure', message: 'History refresh is offline.', retryable: true },
+    });
+    await waitFor(() => expect(document.querySelector('.hosted-share')).toHaveAttribute('aria-busy', 'false'));
+    expect(screen.getByRole('heading', { name: 'Hosted prompt is ready' })).toBeInTheDocument();
     expect(screen.queryByText('History refresh is offline.')).not.toBeInTheDocument();
   });
 
@@ -245,9 +254,9 @@ describe('HostedShareDialog', () => {
   });
 
   it('keeps recovery warnings visible when retry fails and prevents a second retry while busy', async () => {
-    let finishRetry!: (value: Awaited<ReturnType<ImnotaBridge['listHostedShares']>>) => void;
+    let rejectRetry!: (reason?: unknown) => void;
     const retry = new Promise<Awaited<ReturnType<ImnotaBridge['listHostedShares']>>>(
-      (resolve) => (finishRetry = resolve),
+      (_resolve, reject) => (rejectRetry = reject),
     );
     const listHostedShares = vi
       .fn<ImnotaBridge['listHostedShares']>()
@@ -266,11 +275,8 @@ describe('HostedShareDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry recovery' }));
     expect(listHostedShares).toHaveBeenCalledTimes(2);
 
-    finishRetry({
-      ok: false,
-      error: { code: 'network-failure', message: 'Recovery service is offline.', retryable: true },
-    });
-    expect(await screen.findByText('Recovery service is offline.')).toBeInTheDocument();
+    rejectRetry(new Error('Bridge disconnected.'));
+    expect(await screen.findByText('Could not refresh hosted share history. Try again.')).toBeInTheDocument();
     expect(screen.getByText('A previous receipt timed out.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry recovery' })).toBeEnabled();
   });
