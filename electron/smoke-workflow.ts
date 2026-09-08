@@ -1115,7 +1115,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     const buttons = [...card.querySelectorAll('button')];
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
-      text: card.innerText?.replace(/\\s+/g, ' ').trim() ?? '',
+      text: card.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
       copyLabel: buttons.find((button) => /^Copy Bundle$/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
@@ -1128,6 +1128,7 @@ async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Pro
     if (!card) throw new Error('Prompt card ${cardIndex + 1} disappeared');
     const button = card.querySelector('button[data-testid^="copy-bundle-"]');
     if (!button || button.disabled) throw new Error('Prompt ${cardIndex + 1} action is unavailable');
+    button.scrollIntoView({ block: 'center', inline: 'nearest' });
     const bounds = button.getBoundingClientRect();
     return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
   })()`);
