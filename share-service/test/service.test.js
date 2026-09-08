@@ -191,6 +191,12 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.doesNotMatch(page.text, /href="javascript:/);
   assert.match(page.text, /Available until/);
   assertMetaCsp(page.text);
+  assert.match(page.text, /<script type="module" src="\/static\/share-copy\.js"><\/script>/);
+  assert.match(page.text, /data-copy-markdown/);
+  assert.match(page.text, /data-copy-png/);
+  assert.match(page.text, /data-copy-png-markdown/);
+  assert.match(page.text, /data-copy-status/);
+  assert.doesNotMatch(page.text, /<script[^>]*>[^<]*(?:alert|markdown)/i);
 
   const markdown = await instance.api.get(`/s/${publicToken}/markdown`).expect(200);
   assert.match(markdown.headers['content-type'], /^text\/markdown/);
@@ -209,6 +215,32 @@ test('creates, renders and downloads only controlled finalized artifacts', async
     .expect(200);
   assert.match(zip.headers['content-type'], /^application\/zip/);
   assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
+});
+
+test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const empty = await share(instance, { images: [], includeArchive: false });
+  const emptyToken = empty.body.url.split('/').at(-1);
+  const emptyPage = await instance.api.get(`/s/${emptyToken}`).expect(200);
+  assert.match(emptyPage.text, /data-copy-markdown/);
+  assert.doesNotMatch(emptyPage.text, /data-copy-png/);
+
+  const mixed = await share(instance, {
+    requestId: randomUUID(),
+    images: [
+      { filename: 'prompt-001.png', dataBase64: onePixelPng.toString('base64') },
+      { filename: 'prompt-002.png', dataBase64: onePixelPng.toString('base64') },
+    ],
+    includeArchive: false,
+  });
+  const mixedToken = mixed.body.url.split('/').at(-1);
+  const mixedPage = await instance.api.get(`/s/${mixedToken}`).expect(200);
+  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 2);
+  assert.equal((mixedPage.text.match(/data-copy-png-markdown>/g) ?? []).length, 2);
+  for (const filename of ['prompt-001.png', 'prompt-002.png']) {
+    assert.match(mixedPage.text, new RegExp(`data-asset-url="/s/${mixedToken}/assets/${filename}"`));
+  }
 });
 
 test('fully validates, bounds, and re-encodes PNGs before private storage', async (t) => {
