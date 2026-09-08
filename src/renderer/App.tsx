@@ -187,8 +187,17 @@ export default function App() {
             if (
               checkpoint.collectionId &&
               restored.snapshot?.project.collections.some((item) => item.id === checkpoint.collectionId)
-            )
+            ) {
               restored.setActiveCollection(checkpoint.collectionId);
+              if (
+                checkpoint.itemId &&
+                restored.snapshot &&
+                orderedCollectionItems(restored.snapshot.project, checkpoint.collectionId).some(
+                  (item) => item.id === checkpoint.itemId,
+                )
+              )
+                restored.set({ activeScreenshotId: checkpoint.itemId });
+            }
             restored.set({ search: checkpoint.search });
           } else if (checkpoint?.view === 'settings') {
             useAppStore.getState().set({ view: 'settings', search: checkpoint.search });

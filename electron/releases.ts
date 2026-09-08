@@ -31,7 +31,7 @@ const releaseSchema = z.object({
   tag_name: z.string().max(120),
   draft: z.boolean(),
   prerelease: z.boolean(),
-  body: z.string().max(200_000).optional(),
+  body: z.string().max(200_000).nullable().optional(),
   assets: z
     .array(
       z.object({

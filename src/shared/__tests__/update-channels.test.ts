@@ -68,6 +68,11 @@ it('carries release notes into update metadata', () => {
   );
   expect(candidate?.releaseNotes).toContain('Better updates');
 });
+
+it('accepts releases without a GitHub release body', () => {
+  const candidate = selectRelease({ ...release(), body: null }, 'stable', 'darwin');
+  expect(candidate?.releaseNotes).toBe('');
+});
 it('orders stable and nightly versions without lexical comparisons or automatic downgrades', () => {
   expect(compareReleaseVersions('0.10.0', '0.9.0')).toBe(1);
   expect(compareReleaseVersions('0.3.0', nightlyVersion)).toBe(1);
