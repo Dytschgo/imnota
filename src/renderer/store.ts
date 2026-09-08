@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { readCollectionHistory, rememberCollection, type RecentCollection } from './navigation-history';
 import { orderedCollectionItems } from '../shared/content-items';
 import type {
   ProjectData,
@@ -13,6 +14,8 @@ export type AppView = 'projects' | 'recent' | 'favourites' | 'workspace' | 'cont
 interface AppState {
   settings: WorkspaceSettings;
   projects: ProjectListItem[];
+  recentCollections: RecentCollection[];
+  recordCollectionOpen: () => void;
   snapshot: ProjectSnapshot | null;
   activeScreenshotId: string | null;
   activeCollectionId: string;
@@ -55,10 +58,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     sharingSenderName: '',
   },
   projects: [],
+  recentCollections: readCollectionHistory(),
+  recordCollectionOpen: () => {
+    const state = get();
+    const snapshot = state.snapshot;
+    if (
+      !snapshot?.project.collections.some(
+        (collection) => collection.id === state.activeCollectionId && !collection.archived,
+      )
+    )
+      return;
+    set({
+      recentCollections: rememberCollection(
+        state.recentCollections,
+        snapshot.projectPath,
+        state.activeCollectionId,
+      ),
+    });
+  },
   snapshot: null,
   activeScreenshotId: null,
   activeCollectionId: '001-collection',
-  navigationOpen: true,
+  navigationOpen: localValue('imnota:navigation') !== 'closed',
   view: 'projects',
   search: '',
   leftPanelOpen: localValue('imnota:left-panel') !== 'closed',
@@ -106,6 +127,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeCollectionId: collectionId,
       activeScreenshotId: orderedCollectionItems(snapshot.project, collectionId)[0]?.id ?? null,
     });
+    get().recordCollectionOpen();
   },
   updateProject: (project) =>
     set((state) => ({
@@ -123,6 +145,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 }));
 
 useAppStore.subscribe((state, previous) => {
+  if (state.navigationOpen !== previous.navigationOpen)
+    remember('imnota:navigation', state.navigationOpen ? 'open' : 'closed');
   if (state.leftPanelOpen !== previous.leftPanelOpen)
     remember('imnota:left-panel', state.leftPanelOpen ? 'open' : 'closed');
   if (state.rightPanelOpen !== previous.rightPanelOpen)

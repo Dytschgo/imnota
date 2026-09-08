@@ -39,7 +39,12 @@ function snapshot(): ProjectSnapshot {
 
 beforeEach(() => {
   localStorage.clear();
-  useAppStore.setState({ snapshot: null, activeCollectionId: '001-collection', activeScreenshotId: null });
+  useAppStore.setState({
+    snapshot: null,
+    activeCollectionId: '001-collection',
+    activeScreenshotId: null,
+    recentCollections: [],
+  });
 });
 
 it('remembers the last opened collection locally and selects its first sorted screenshot on reopen', () => {
@@ -65,6 +70,18 @@ it('keeps the selected screenshot when the current project snapshot is refreshed
   });
 
   expect(useAppStore.getState().activeScreenshotId).toBe('later');
+});
+
+it('records explicit collection navigation but does not reorder history on autosave refreshes', () => {
+  const value = snapshot();
+  useAppStore.getState().setProject(value);
+  useAppStore.getState().setActiveCollection('002-collection');
+  const history = useAppStore.getState().recentCollections;
+  expect(history[0]).toMatchObject({ projectPath: value.projectPath, collectionId: '002-collection' });
+  useAppStore.getState().setProject({ ...value, projectRevision: 'saved' });
+  expect(useAppStore.getState().recentCollections).toBe(history);
+  useAppStore.getState().setActiveCollection('missing');
+  expect(useAppStore.getState().recentCollections).toBe(history);
 });
 
 it('selects the restored item and its collection atomically after Undo elsewhere', () => {

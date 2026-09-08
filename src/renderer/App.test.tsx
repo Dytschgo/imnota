@@ -26,6 +26,7 @@ afterEach(() => {
     view: 'projects',
     search: '',
     rightPanelOpen: true,
+    recentCollections: [],
   });
 });
 
@@ -202,6 +203,55 @@ describe('feedback controls', () => {
       expect.objectContaining({ screenshot: expect.objectContaining({ description: 'Latest note' }) }),
     );
     expect(useAppStore.getState().snapshot).toBeNull();
+  });
+
+  it('opens a collection from the full Recent page and records only a successful visit', async () => {
+    const second = { ...snapshot.project.collections[0], id: 'second', name: 'Review two' };
+    const project = { ...snapshot.project, collections: [...snapshot.project.collections, second] };
+    const loadProject = vi.fn(async () => ({ ...snapshot, project }));
+    useAppStore.setState({
+      recentCollections: [
+        { projectPath: snapshot.projectPath, collectionId: second.id, openedAt: '2026-01-01' },
+      ],
+    });
+    renderApp({ listProjects: async () => [{ ...project, projectPath: snapshot.projectPath }], loadProject });
+    await screen.findByRole('textbox', { name: 'Search projects' });
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    await screen.findByRole('heading', { name: 'Recent collections' });
+    const row = document.querySelector<HTMLButtonElement>('.library .project-row')!;
+    expect(row).toHaveTextContent('Review two');
+    fireEvent.click(row);
+    await waitFor(() => expect(useAppStore.getState().activeCollectionId).toBe('second'));
+    expect(useAppStore.getState().recentCollections).toHaveLength(1);
+    expect(useAppStore.getState().recentCollections[0].openedAt).not.toBe('2026-01-01');
+  });
+
+  it('keeps the previous history when a recent collection cannot be opened', async () => {
+    const history = [
+      { projectPath: snapshot.projectPath, collectionId: '001-collection', openedAt: '2026-01-01' },
+    ];
+    useAppStore.setState({ recentCollections: history });
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject: async () => {
+        throw new Error('Project moved');
+      },
+    });
+    await screen.findByRole('textbox', { name: 'Search projects' });
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    await screen.findByRole('heading', { name: 'Recent collections' });
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.library .project-row')!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Project moved');
+    expect(useAppStore.getState().recentCollections).toEqual(history);
+  });
+
+  it('uses navigation shortcuts without intercepting typing in search', async () => {
+    renderApp();
+    const input = await screen.findByRole('textbox', { name: 'Search projects' });
+    fireEvent.keyDown(window, { key: '2', code: 'Digit2', ctrlKey: true });
+    await screen.findByRole('heading', { name: 'Recent collections' });
+    fireEvent.keyDown(input, { key: '3', code: 'Digit3', ctrlKey: true });
+    expect(useAppStore.getState().view).toBe('recent');
   });
 
   it('deletes the conflict copy selected by a preceding text flush, preserving the external original', async () => {

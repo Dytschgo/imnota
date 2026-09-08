@@ -35,6 +35,7 @@ import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
 import { usePromptBundleController } from './export/usePromptBundleController';
 import { SettingsView, useKeyboardShortcuts } from './settings';
 import { useAppStore, type AppView } from './store';
+import { resolveRecentCollections, relativeOpenedTime } from './navigation-history';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -171,8 +172,14 @@ export default function App() {
         const projects = await window.imnota.listProjects();
         if (!active) return;
         useAppStore.getState().set({ projects });
-        if (settings.openRecentOnLaunch && projects[0])
-          adoptSnapshot(await window.imnota.loadProject(projects[0].projectPath));
+        if (settings.openRecentOnLaunch && projects[0]) {
+          const recent = resolveRecentCollections(projects, useAppStore.getState().recentCollections)[0];
+          const snapshot = await window.imnota.loadProject(recent?.projectPath ?? projects[0].projectPath);
+          if (!active) return;
+          adoptSnapshot(snapshot);
+          if (recent) useAppStore.getState().setActiveCollection(recent.id);
+          else useAppStore.getState().recordCollectionOpen();
+        }
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : 'Imnota could not start.'))
       .finally(() => active && setBooting(false));
@@ -343,7 +350,7 @@ export default function App() {
   }
 
   const guardedSnapshot = useCallback(
-    async (action: () => Promise<ProjectSnapshot | null | undefined>, failure: string) => {
+    async (action: () => Promise<ProjectSnapshot | null | undefined>, failure: string, recordOpen = true) => {
       const identity = ++navigationIdentity.current;
       if (!(await flushAll())) {
         setError(`${failure} was cancelled so your unsaved work stays open.`);
@@ -361,6 +368,8 @@ export default function App() {
             setError(`${failure} could not safely adopt the latest project state.`);
             return false;
           }
+          if (identity !== navigationIdentity.current) return false;
+          if (recordOpen) useAppStore.getState().recordCollectionOpen();
           return true;
         }
         await persistence.cancelNativeMutation(nativeMutationToken);
@@ -438,6 +447,7 @@ export default function App() {
       setNewProject({ name: '', description: '' });
       await refreshProjects();
       adoptSnapshot(snapshot);
+      useAppStore.getState().recordCollectionOpen();
       showToast('Project created');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Project could not be created.');
@@ -602,20 +612,35 @@ export default function App() {
     }
   }
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
-    if (navigationIdentityAtStart !== undefined && navigationIdentityAtStart !== navigationIdentity.current)
-      return;
-    if (id !== store.activeCollectionId && (await flushAll())) {
-      if (navigationIdentityAtStart !== undefined && navigationIdentityAtStart !== navigationIdentity.current)
+    const identity = navigationIdentityAtStart ?? ++navigationIdentity.current;
+    if (identity !== navigationIdentity.current) return;
+    const before = useAppStore.getState();
+    if (id !== before.activeCollectionId && (await flushAll())) {
+      if (
+        identity !== navigationIdentity.current ||
+        before.snapshot?.projectPath !== useAppStore.getState().snapshot?.projectPath
+      )
         return;
       useAppStore.getState().setActiveCollection(id);
     }
   }
   async function openCollection(projectPath: string, collectionId: string) {
-    if (!(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the collection')))
+    if (
+      !(await guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the collection', false))
+    )
       return;
     const requestIdentity = navigationIdentity.current;
     const current = useAppStore.getState();
-    if (current.snapshot?.projectPath === projectPath) await selectCollection(collectionId, requestIdentity);
+    if (current.snapshot?.projectPath === projectPath) {
+      await selectCollection(collectionId, requestIdentity);
+      const selected = useAppStore.getState();
+      if (
+        requestIdentity === navigationIdentity.current &&
+        selected.snapshot?.projectPath === projectPath &&
+        selected.activeCollectionId === collectionId
+      )
+        selected.recordCollectionOpen();
+    }
   }
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
@@ -779,6 +804,9 @@ export default function App() {
     'project.open': () =>
       void guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project'),
     'project.search': () => void openProjectSearch(),
+    'navigation.projects': () => void navigate('projects'),
+    'navigation.recent': () => void navigate('recent'),
+    'navigation.favourites': () => void navigate('favourites'),
     'edit.save': () => void flushAll(),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
@@ -862,6 +890,11 @@ export default function App() {
     <>
       <AppShell
         searchShortcut={shortcutLabel('project.search')}
+        navigationShortcuts={{
+          projects: shortcutLabel('navigation.projects'),
+          recent: shortcutLabel('navigation.recent'),
+          favourites: shortcutLabel('navigation.favourites'),
+        }}
         onNavigate={navigate}
         onNewProject={() => setDialog('new-project')}
         onOpenProject={() =>
@@ -872,6 +905,9 @@ export default function App() {
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
+        onSelectProject={(projectPath) =>
+          guardedSnapshot(() => window.imnota.loadProject(projectPath), 'Opening the project').then(() => {})
+        }
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
@@ -1032,6 +1068,7 @@ export default function App() {
           />
         ) : !store.snapshot ? (
           <Library
+            onOpenCollection={openCollection}
             onNew={() => setDialog('new-project')}
             onOpen={() => guardedSnapshot(() => window.imnota.openProjectDialog(), 'Opening the project')}
             onSelect={(projectPath) =>
@@ -1253,17 +1290,22 @@ export function matchesProjectSearch(project: ProjectListItem, search: string) {
 }
 
 function Library({
+  onOpenCollection,
   onNew,
   onOpen,
   onSelect,
   searchInputRef,
 }: {
+  onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onNew(): void;
   onOpen(): void;
   onSelect(projectPath: string): void;
   searchInputRef: RefObject<HTMLInputElement>;
 }) {
-  const { projects, search, set, view, settings } = useAppStore();
+  const { projects, search, set, view, settings, recentCollections } = useAppStore();
+  const recent = resolveRecentCollections(projects, recentCollections).filter((entry) =>
+    `${entry.name} ${entry.projectName}`.toLowerCase().includes(search.trim().toLowerCase()),
+  );
   const filtered = projects.filter(
     (project) => (view !== 'favourites' || project.favourite) && matchesProjectSearch(project, search),
   );
@@ -1271,7 +1313,13 @@ function Library({
     <section className="library">
       <div className="library-heading">
         <div>
-          <h1>{view === 'favourites' ? 'Favourites' : view === 'recent' ? 'Recent projects' : 'Projects'}</h1>
+          <h1>
+            {view === 'favourites'
+              ? 'Favourite projects'
+              : view === 'recent'
+                ? 'Recent collections'
+                : 'Projects'}
+          </h1>
           <p>
             {projects.length} local project{projects.length === 1 ? '' : 's'} · {settings.workspacePath}
           </p>
@@ -1292,7 +1340,11 @@ function Library({
         <input
           ref={searchInputRef}
           aria-label="Search projects"
-          placeholder="Search projects and screenshot descriptions"
+          placeholder={
+            view === 'recent'
+              ? 'Search recent collections and projects'
+              : 'Search projects and screenshot descriptions'
+          }
           value={search}
           onChange={(event) => set({ search: event.target.value })}
         />
@@ -1302,7 +1354,42 @@ function Library({
           </button>
         )}
       </div>
-      {filtered.length ? (
+      {view === 'recent' ? (
+        recent.length ? (
+          <div className="project-list">
+            {recent.map((entry) => (
+              <button
+                className="project-row"
+                key={`${entry.projectPath}:${entry.id}`}
+                onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
+                title={`${entry.projectName} / ${entry.name}`}
+              >
+                <div className="project-symbol">
+                  <Layers3 size={18} aria-hidden="true" />
+                </div>
+                <div className="project-row-copy">
+                  <strong>{entry.name}</strong>
+                  <span>{entry.projectName}</span>
+                  <small>{relativeOpenedTime(entry.openedAt)}</small>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={<FolderOpen size={22} aria-hidden="true" />}
+            title={search ? 'No matching collections' : 'No recent collections yet'}
+            description={
+              search
+                ? 'Try another collection or project name.'
+                : 'Open a project or collection to find it here next time.'
+            }
+            action={
+              !search ? <Button onClick={() => set({ view: 'projects' })}>Browse projects</Button> : undefined
+            }
+          />
+        )
+      ) : filtered.length ? (
         <div className="project-list">
           {filtered.map((project) => (
             <button className="project-row" key={project.id} onClick={() => onSelect(project.projectPath)}>
@@ -1326,14 +1413,22 @@ function Library({
       ) : (
         <EmptyState
           icon={<FolderOpen size={22} aria-hidden="true" />}
-          title={search ? 'No matching projects' : 'Your project library is empty'}
+          title={
+            search
+              ? 'No matching projects'
+              : view === 'favourites'
+                ? 'No favourite projects yet'
+                : 'Your project library is empty'
+          }
           description={
             search
               ? 'Try another project name or description.'
-              : 'Create a local project, then add the screenshots that explain the work.'
+              : view === 'favourites'
+                ? 'Open a project and use the heart button to keep it here.'
+                : 'Create a local project, then add the screenshots that explain the work.'
           }
           action={
-            !search ? (
+            !search && view !== 'favourites' ? (
               <Button variant="primary" onClick={onNew}>
                 <Plus size={16} aria-hidden="true" />
                 Create first project
