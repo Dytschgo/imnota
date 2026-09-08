@@ -395,7 +395,14 @@ async function createBenchmarkProject(
   })()`);
   if (reopenedCount !== count)
     throw new Error(`${count}-image fixture reopened with ${reopenedCount} images.`);
-  return { projectPath, importMs, reopenMs: performance.now() - reopenStarted };
+  const reopenMs = performance.now() - reopenStarted;
+  // Fixtures created through IPC have never been visited in the renderer. Open the
+  // project explicitly so relaunch resumes this fixture through real visit history.
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row', text: name });
+  await driver.click({ selector: '.project-row', text: name });
+  await driver.waitFor({ selector: '.crumb-muted', text: name, exact: true });
+  return { projectPath, importMs, reopenMs };
 }
 
 async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
@@ -988,8 +995,21 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({
     selector: '[aria-label="Uploaded backdrops"] .imnota-backdrop-preset[aria-pressed="true"]:not(:disabled)',
   });
-  await driver.click({ selector: '.nav-submenu-item' });
+  await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
   await driver.waitFor({ selector: '.workspace' });
+  await driver.click({ selector: '[aria-label="Collapse quick access"]' });
+  const quickAccessHidden = await driver.evaluate<boolean>(
+    `getComputedStyle(document.querySelector('#quick-access-collections')).display === 'none'`,
+  );
+  if (!quickAccessHidden) throw new Error('Collapsed quick access remains visible.');
+  await driver.click({ selector: '[aria-label="Expand quick access"]' });
+  await driver.evaluate(`(() => {
+    const sidebar = document.querySelector('.side-nav');
+    const footer = sidebar.querySelector('.side-nav-footer').getBoundingClientRect();
+    if (footer.bottom > innerHeight || footer.height === 0) throw new Error('Sidebar footer is inaccessible.');
+    const active = sidebar.querySelector('#quick-access-collections [aria-current="location"]');
+    if (!active) throw new Error('Opened collection has no current-location marker.');
+  })()`);
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor(uploaded);
   await driver.click({ selector: '[data-testid="backdrop-preset-amber"]' });
@@ -1017,7 +1037,7 @@ async function exercisePreferencesAndChannel(
       `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
-    await driver.click({ selector: '.nav-submenu-item' });
+    await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
     await driver.waitFor({ selector: '.workspace' });
     await driver.resize(SMOKE_VIEWPORTS[0]);
     await waitForStableCanvas(driver);
