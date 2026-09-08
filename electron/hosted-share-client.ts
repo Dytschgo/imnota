@@ -28,6 +28,8 @@ type PendingShare = {
 };
 type JsonObject = Record<string, unknown>;
 
+export type HostedShareFetch = (target: string, init: RequestInit) => Promise<Response>;
+
 export interface HostedShareArtifacts {
   title: string;
   markdown: string;
@@ -100,6 +102,59 @@ function validShareUrl(value: unknown): value is string {
 
 function invalidResponse(message: string): NativeWorkflowError {
   return new NativeWorkflowError('network-failure', message, true);
+}
+
+function persistenceFailure(action: 'access' | 'save'): NativeWorkflowError {
+  return new NativeWorkflowError(
+    'io-failure',
+    action === 'save'
+      ? 'Could not save local hosted-share data. Existing local share information was preserved.'
+      : 'Could not access local hosted-share data.',
+    true,
+  );
+}
+
+function networkFailure(error: unknown): NativeWorkflowError {
+  const codes = new Set<string>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current && typeof current === 'object'; depth += 1) {
+    const candidate = current as { code?: unknown; message?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string' && candidate.code.length <= 100)
+      codes.add(candidate.code.toUpperCase());
+    if (typeof candidate.message === 'string') {
+      for (const code of candidate.message
+        .slice(0, 500)
+        .matchAll(
+          /\b(?:NET::)?ERR_[A-Z_]+|E(?:AI_AGAIN|CONN(?:ABORTED|REFUSED|RESET)|HOSTUNREACH|NETUNREACH|NOTFOUND|TIMEDOUT)\b/g,
+        ))
+        codes.add(code[0].replace(/^NET::/i, '').toUpperCase());
+    }
+    current = candidate.cause;
+  }
+  const hasCode = (...expected: string[]): boolean => expected.some((code) => codes.has(code));
+  const hasPrefix = (...expected: string[]): boolean =>
+    [...codes].some((code) => expected.some((prefix) => code.startsWith(prefix)));
+  const reason =
+    hasCode(
+      'CERT_HAS_EXPIRED',
+      'CERT_AUTHORITY_INVALID',
+      'CERT_COMMON_NAME_INVALID',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+    ) || hasPrefix('ERR_CERT_', 'ERR_SSL_')
+      ? 'A TLS certificate check prevented the secure connection.'
+      : hasCode('ERR_PROXY_CONNECTION_FAILED', 'ERR_TUNNEL_CONNECTION_FAILED', 'ERR_NO_SUPPORTED_PROXIES')
+        ? 'Your network proxy could not connect to the share service.'
+        : hasCode('ENOTFOUND', 'EAI_AGAIN', 'ERR_NAME_NOT_RESOLVED') || hasPrefix('ERR_DNS_')
+          ? 'The share service hostname could not be resolved.'
+          : hasCode('ERR_INTERNET_DISCONNECTED', 'ENETUNREACH', 'EHOSTUNREACH', 'ERR_NETWORK_CHANGED')
+            ? 'Your device appears to be offline.'
+            : hasCode('ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ERR_TIMED_OUT') ||
+                hasPrefix('ERR_CONNECTION_', 'ERR_SOCKET_')
+              ? 'The connection to the share service was interrupted.'
+              : 'Could not reach the share service.';
+  return new NativeWorkflowError('network-failure', `${reason} Your local exports remain available.`, true);
 }
 
 function validateReceipt(value: unknown): StoredShare {
@@ -241,6 +296,7 @@ export class HostedShareClient {
   constructor(
     private readonly userDataPath: string,
     private readonly openExternal: (url: string) => Promise<void>,
+    private readonly fetchTransport: HostedShareFetch = (target, init) => globalThis.fetch(target, init),
   ) {}
 
   async openPairing(): Promise<void> {
@@ -269,9 +325,18 @@ export class HostedShareClient {
         expiresInDays: input.expiresInDays,
       };
       const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-      await this.savePending(input, payloadFingerprint);
+      try {
+        await this.savePending(input, payloadFingerprint);
+      } catch (error) {
+        if (error instanceof NativeWorkflowError && error.code === 'io-failure')
+          throw new NativeWorkflowError(error.code, error.message, error.retryable, {
+            ...error.details,
+            requestMayHaveCommitted: false,
+          });
+        throw error;
+      }
       const target = `${originForTests()}/api/shares`;
-      const response = await fetch(target, {
+      const response = await this.fetchTransport(target, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${input.pairingToken}`,
@@ -323,11 +388,7 @@ export class HostedShareClient {
       if (controller.signal.aborted)
         throw new NativeWorkflowError('session-cancelled', 'Hosted share upload cancelled.', true);
       if (error instanceof NativeWorkflowError) throw error;
-      throw new NativeWorkflowError(
-        'network-failure',
-        'Could not reach the share service. Your local exports remain available.',
-        true,
-      );
+      throw networkFailure(error);
     } finally {
       clearTimeout(deadline);
       this.active.delete(input.requestId);
@@ -428,7 +489,7 @@ export class HostedShareClient {
       controller.abort();
     }, timeoutMs);
     try {
-      response = await fetch(target, { ...init, signal: controller.signal, redirect: 'error' });
+      response = await this.fetchTransport(target, { ...init, signal: controller.signal, redirect: 'error' });
       validateResponseDestination(response, target);
       return { response, body: await readJson(response) };
     } catch (error) {
@@ -438,11 +499,7 @@ export class HostedShareClient {
           throw withCommitState(error, false);
         throw error;
       }
-      throw new NativeWorkflowError(
-        'network-failure',
-        'Could not reach the share service. Your local exports remain available.',
-        true,
-      );
+      throw networkFailure(error);
     } finally {
       clearTimeout(deadline);
     }
@@ -582,14 +639,14 @@ export class HostedShareClient {
     const pendingFile = this.pendingFile();
     const raw = await fs.readFile(pendingFile, 'utf8').catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return '{}';
-      throw error;
+      throw persistenceFailure('access');
     });
     const fileModifiedAt = await fs
       .stat(pendingFile)
       .then((stat) => stat.mtimeMs)
       .catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return Date.now();
-        throw error;
+        throw persistenceFailure('access');
       });
     let value: unknown;
     try {
@@ -654,7 +711,7 @@ export class HostedShareClient {
   private async read(): Promise<StoredShare[]> {
     const raw = await fs.readFile(this.file(), 'utf8').catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return '[]';
-      throw error;
+      throw persistenceFailure('access');
     });
     let parsed: unknown;
     try {
@@ -700,14 +757,14 @@ export class HostedShareClient {
   }
 
   private async atomicWrite(target: string, content: string): Promise<void> {
-    await fs.mkdir(this.userDataPath, { recursive: true });
     const temp = `${target}.${randomUUID()}.tmp`;
     try {
+      await fs.mkdir(this.userDataPath, { recursive: true });
       await fs.writeFile(temp, content, { mode: 0o600 });
       await fs.rename(temp, target);
-    } catch (error) {
+    } catch {
       await fs.rm(temp, { force: true }).catch(() => undefined);
-      throw error;
+      throw persistenceFailure('save');
     }
   }
 }

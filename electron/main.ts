@@ -6,6 +6,7 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
+  net,
   shell,
   session,
 } from 'electron';
@@ -911,9 +912,19 @@ function registerIpc(): void {
     },
     new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
   );
-  hostedShareClient = new HostedShareClient(app.getPath('userData'), async (url) => {
-    await shell.openExternal(url);
-  });
+  hostedShareClient = new HostedShareClient(
+    app.getPath('userData'),
+    async (url) => {
+      await shell.openExternal(url);
+    },
+    (target, init) =>
+      net.fetch(target, {
+        ...init,
+        bypassCustomProtocolHandlers: true,
+        credentials: 'omit',
+        cache: 'no-store',
+      }),
+  );
   handle('settings:get', () => settings);
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
