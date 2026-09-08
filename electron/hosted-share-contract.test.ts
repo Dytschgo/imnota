@@ -73,7 +73,8 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
     const first = await client.create(
       {
         requestId: '123e4567-e89b-42d3-a456-426614174011',
-        pairingToken: await pair(),
+        pairingToken: '',
+        senderName: 'Dylan',
         sessionId: 'final-session',
         bundleNumbers: [1],
         includeArchive: false,
@@ -81,8 +82,15 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
       },
       {
         title: 'Real contract prompt',
-        markdown: '# Real contract',
+        markdown: '# Real contract\r\n\r\nUnicode: café\n',
         images: [{ filename: 'prompt-001.png', dataBase64: pngBase64 }],
+        bundles: [
+          {
+            bundleNumber: 1,
+            markdown: '# Real contract\r\n\r\nUnicode: café\n',
+            imageFilename: 'prompt-001.png',
+          },
+        ],
       },
     );
     expect(first).toMatchObject({
@@ -91,6 +99,14 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
       createdAt: expect.stringMatching(/Z$/),
       byteSize: expect.any(Number),
     });
+    const publicPath = new URL(first.url).pathname;
+    const bundleMarkdown = await realFetch(`${localOrigin}${publicPath}/bundles/1/markdown`);
+    expect(bundleMarkdown.status).toBe(200);
+    expect(bundleMarkdown.headers.get('content-type')).toMatch(/^text\/markdown/);
+    expect(await bundleMarkdown.text()).toBe('# Real contract\r\n\r\nUnicode: café\n');
+    expect(await realFetch(`${localOrigin}${publicPath}`).then((response) => response.text())).toContain(
+      'Dylan shared this prompt bundle with you',
+    );
 
     loseNextUploadResponse = true;
     await expect(

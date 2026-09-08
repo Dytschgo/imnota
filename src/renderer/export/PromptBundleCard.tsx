@@ -130,7 +130,7 @@ export function PromptBundleCard({
             {String(bundle.bundleNumber).padStart(2, '0')}
           </span>
         </button>
-        <div className="prompt-bundle-primary">
+        <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
           {bundle.delivery === 'clipboard' ? (
             <Button
               data-testid={`copy-bundle-${bundle.bundleNumber}`}
@@ -247,10 +247,6 @@ export function PromptBundleCard({
             {bundle.error}
           </p>
         )}
-        <details className="prompt-bundle-info">
-          <summary>About copying</summary>
-          <p>Copy Bundle uses the latest image and Markdown. Options copies one format.</p>
-        </details>
       </div>
     </article>
   );

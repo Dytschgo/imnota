@@ -84,6 +84,11 @@
   border-color: #53616b;
   color: #dce6df;
 }
+.shared-bundle .copy-split.is-copied .copy-toggle {
+  background: #333d43;
+  border-color: #53616b;
+  color: #dce6df;
+}
 .shared-bundle :is(button, a, summary, select):focus-visible {
   outline: 2px solid var(--share-green);
   outline-offset: 4px;

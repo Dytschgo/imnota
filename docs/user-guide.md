@@ -45,7 +45,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Open the sharing dialog from the active collection. Each card represents one generated prompt and shows its preview, prompt number, screenshot count, excluded count, estimated size and any readability warning.
+Open the sharing dialog from the active collection. Each card shows a preview and a **Bundle 1**, **Bundle 2**, etc. heading. Dimensions and counts are under **Bundle details**.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
@@ -64,17 +64,17 @@ Picture 3 was intentionally excluded from this prompt bundle.
 
 A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
 
-The combined Copy action writes Markdown and a PNG to the clipboard together. Operating systems and receiving editors negotiate clipboard formats differently, so a successful copy does not prove that the target accepted both. If only one arrives, use Copy Markdown only and Copy image only, or open the generated files/folder and attach the PNG manually.
+The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. Some receiving apps paste only one format; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
 
 ## Share a hosted link
 
-In the prompt sharing dialog, choose **Share online**. Review the exact generated PNG/Markdown files, choose 7, 14 or 30 days, and optionally include a downloadable ZIP. Confirm that anyone with the link may read the approved files.
+Choose **Share online**, check the bundle, and optionally enter your name. New links expire after **1 day** by default; 7, 14 and 30 days are also available. A downloadable ZIP is included by default. Confirm that anyone with the link can view and download the bundle.
 
-Choose **Open pairing page**, obtain a one-use code in the browser, and paste it into Imnota. The code expires after about 10 minutes. **Publish HTTPS link** uploads the approved artifacts and returns a link you can copy or open. Local copy and export remain available without pairing or internet access.
+Choose **Create link**. Imnota handles pairing and returns a link to copy or open. **Use a pairing code instead** retains the manual browser option when needed. Local copy and export remain available offline.
 
-On the shared page, use **Copy Markdown**, **Copy PNG**, or **Copy PNG + Markdown** beside an image. Combined copy contains that PNG and the share's full Markdown. If the receiving editor pastes only one format, use the separate buttons. Downloads remain available when the browser denies clipboard access or does not support it.
+The shared page shows your name when supplied, for example, “Dylan shared this prompt bundle with you.” Use **Copy Bundle** at the top or below an image, its dropdown for individual formats, and **Download ZIP** for the complete share. For a multi-bundle share, select the bundle at the top; each copy uses its matching Markdown and PNG. Older shares without bundle metadata still include the full share Markdown with each image, as explained in **Copying help**. Downloads remain available if clipboard access fails.
 
-Use **Revoke link** on the result or in local share history to stop access. Expired and revoked links cannot be reopened through the service. Revocation cannot remove files a recipient has already downloaded or copied. The app retains pending-upload information to recover a response interrupted by a network failure. **Retry recovery** checks those uploads again; **Dismiss** clears the visible warnings without deleting history or pending recovery information. Warnings refresh after a successful upload and may return if an unresolved upload still fails recovery.
+Use **Revoke link** on the result or in **Your shared links** to stop access. Revocation cannot remove copies someone already saved. **Retry recovery** checks uploads interrupted by a network failure. **Dismiss** remembers the specific warning across dialog reopening and app restarts without deleting history or recovery information. A different failure or a new failed upload can still show a warning.
 
 Editable drawing sources, original project folders, local paths and recovery journals are not uploaded. Inspect the generated content itself before sharing: annotations, screenshot pixels and Markdown can contain sensitive information even when project metadata is excluded. The hosting provider may retain access logs; see the [service privacy and operations notes](../share-service/docs/hostinger-deployment.md).
 

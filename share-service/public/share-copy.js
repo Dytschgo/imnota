@@ -222,6 +222,8 @@ export function boot(documentObject = globalThis.document) {
     button.addEventListener('click', async () => {
       if (copying) return;
       copying = true;
+      const picker = root.querySelector('[data-bundle-picker]');
+      if (picker) picker.disabled = true;
       button.closest('details')?.removeAttribute('open');
       for (const control of controls) control.disabled = true;
       setStatus('Copying…');
@@ -232,11 +234,13 @@ export function boot(documentObject = globalThis.document) {
         if (button.hasAttribute('data-copy-bundle')) {
           button.textContent = 'Copied';
           button.classList.add('is-copied');
+          button.closest('.copy-split')?.classList.add('is-copied');
         }
       } catch (error) {
         setStatus(messageFor(error, fallback), true);
       } finally {
         copying = false;
+        if (picker) picker.disabled = false;
         for (const control of controls) control.disabled = false;
       }
     });
@@ -288,6 +292,7 @@ export function boot(documentObject = globalThis.document) {
     const primary = toolbar.querySelector('[data-copy-bundle]');
     primary.textContent = 'Copy Bundle';
     primary.classList.remove('is-copied');
+    primary.closest('.copy-split')?.classList.remove('is-copied');
   };
   picker?.addEventListener('change', updateSelection);
   updateSelection();

@@ -15,7 +15,6 @@ import { openDatabase } from './database.js';
 import { directorySize } from './maintenance.js';
 import {
   deriveToken,
-  escapeHtml,
   isSafePngFilename,
   normalizePng,
   preflightPng,

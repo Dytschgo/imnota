@@ -216,6 +216,11 @@
   color: var(--ink-2);
   box-shadow: none;
 }
+.prompt-bundle-primary.is-copied .prompt-bundle-options > .btn {
+  background: var(--surface-3);
+  color: var(--ink-2);
+  border-left-color: var(--line);
+}
 
 .prompt-bundle-options {
   position: relative;
