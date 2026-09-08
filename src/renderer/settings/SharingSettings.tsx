@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  Check,
-  Copy,
-  ExternalLink,
-  Link2,
-  RefreshCw,
-  Trash2,
-} from 'lucide-react';
+import { AlertTriangle, Check, Copy, ExternalLink, Link2, RefreshCw, Trash2 } from 'lucide-react';
 import type { HostedShareRecord, HostedShareRecoveryWarning } from '../../shared/workflow-bridge';
 import { Button, Modal } from '../components/ui';
 import { useSharingSenderName } from './sharing-preferences';
@@ -65,9 +57,7 @@ export function SharingSettings() {
     }
     setRecords(result.value.records);
     setRecoveryWarnings(result.value.recoveryWarnings ?? []);
-    setLegacyRecoveryErrors(
-      result.value.recoveryWarnings === undefined ? result.value.recoveryErrors : [],
-    );
+    setLegacyRecoveryErrors(result.value.recoveryWarnings === undefined ? result.value.recoveryErrors : []);
   }, []);
 
   useEffect(() => {
@@ -145,9 +135,7 @@ export function SharingSettings() {
     }
     historyRequest.current += 1;
     setLoading(false);
-    setRecords((items) =>
-      items.map((item) => (item.id === result.value.id ? result.value : item)),
-    );
+    setRecords((items) => items.map((item) => (item.id === result.value.id ? result.value : item)));
     setRevokeTarget(undefined);
   };
 
@@ -278,11 +266,7 @@ export function SharingSettings() {
                   </div>
                   {available && (
                     <div className="sharing-row-actions">
-                      <Button
-                        variant="ghost"
-                        disabled={mutationBusy}
-                        onClick={() => void copyLink(record)}
-                      >
+                      <Button variant="ghost" disabled={mutationBusy} onClick={() => void copyLink(record)}>
                         {copiedId === record.id ? (
                           <Check size={14} aria-hidden="true" />
                         ) : (
@@ -293,11 +277,7 @@ export function SharingSettings() {
                       <a className="btn btn-ghost" href={record.url} target="_blank" rel="noreferrer">
                         <ExternalLink size={14} aria-hidden="true" /> Open
                       </a>
-                      <Button
-                        variant="ghost"
-                        disabled={mutationBusy}
-                        onClick={() => setRevokeTarget(record)}
-                      >
+                      <Button variant="ghost" disabled={mutationBusy} onClick={() => setRevokeTarget(record)}>
                         <Trash2 size={14} aria-hidden="true" /> Revoke
                       </Button>
                     </div>

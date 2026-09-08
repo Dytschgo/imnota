@@ -9,9 +9,9 @@ export function normalizeSharingSenderName(value: unknown): string {
   return typeof value === 'string' ? value.normalize('NFC').trim() : '';
 }
 
-export function validateSharingSenderName(value: string):
-  | { ok: true; value: string }
-  | { ok: false; error: string } {
+export function validateSharingSenderName(
+  value: string,
+): { ok: true; value: string } | { ok: false; error: string } {
   const parsed = sharingSenderNameSchema.safeParse(value);
   if (!parsed.success) {
     const tooLong = [...normalizeSharingSenderName(value)].length > 80;
@@ -26,12 +26,8 @@ export function validateSharingSenderName(value: string):
 }
 
 /** Serializes settings writes so a slower earlier response cannot replace a newer preference. */
-export function saveWorkspaceSettingsPatch(
-  patch: Partial<WorkspaceSettings>,
-): Promise<WorkspaceSettings> {
-  const operation = settingsWriteQueue
-    .catch(() => undefined)
-    .then(() => window.imnota.setSettings(patch));
+export function saveWorkspaceSettingsPatch(patch: Partial<WorkspaceSettings>): Promise<WorkspaceSettings> {
+  const operation = settingsWriteQueue.catch(() => undefined).then(() => window.imnota.setSettings(patch));
   settingsWriteQueue = operation.then(
     () => undefined,
     () => undefined,

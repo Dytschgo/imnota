@@ -52,6 +52,8 @@ export function HostedShareDialog({
   const mounted = useRef(true);
   const historyRequest = useRef(0);
   const uploading = useRef(false);
+  const uploadStarted = useRef(false);
+  const cancelRequested = useRef(false);
   const refreshHistory = useCallback(async ({ reportError = true } = {}) => {
     const request = ++historyRequest.current;
     let result: Awaited<ReturnType<typeof window.imnota.listHostedShares>>;
@@ -87,12 +89,19 @@ export function HostedShareDialog({
       return;
     }
     uploading.current = true;
+    uploadStarted.current = false;
+    cancelRequested.current = false;
+    setBusy(true);
+    setError(undefined);
     try {
       if (!(await saveSenderName()) || !mounted.current) return;
+      if (cancelRequested.current) {
+        setError('Link creation cancelled.');
+        return;
+      }
       const id = request ?? requestId();
       setRequest(id);
-      setBusy(true);
-      setError(undefined);
+      uploadStarted.current = true;
       const result = await window.imnota.createHostedShare({
         requestId: id,
         pairingToken: token.trim(),
@@ -118,6 +127,7 @@ export function HostedShareDialog({
       if (mounted.current) setError('Could not create the link. Try again.');
     } finally {
       uploading.current = false;
+      uploadStarted.current = false;
       if (mounted.current) setBusy(false);
     }
   };
@@ -155,7 +165,8 @@ export function HostedShareDialog({
     }
   };
   const cancel = async () => {
-    if (request) await window.imnota.cancelHostedShare({ requestId: request });
+    cancelRequested.current = true;
+    if (request && uploadStarted.current) await window.imnota.cancelHostedShare({ requestId: request });
   };
   const revoke = async () => {
     if (!revokeTarget) return;
