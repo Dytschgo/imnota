@@ -156,5 +156,6 @@ describe('main-owned prompt bundle grants', () => {
 
     await expect(workflow.cancel(earliestFinalizedSessionId)).rejects.toThrow(/not found|closed/);
     await expect(workflow.cancel(held.sessionId)).resolves.toEqual(heldResult);
-  });
+    // This exercises 129 real filesystem sessions, including Windows file operations.
+  }, 30_000);
 });
