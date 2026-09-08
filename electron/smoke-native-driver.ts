@@ -279,9 +279,15 @@ export class NativeUiDriver {
   }
 
   async doubleClick(point: SmokePoint): Promise<void> {
-    await this.clickPoint(point, 1);
-    await wait(80);
-    await this.clickPoint(point, 2);
+    // Queue the complete native gesture before yielding: runner scheduling between
+    // clicks can otherwise exceed Konva's 400ms pointer-double-click window.
+    const contents = this.window.webContents;
+    contents.sendInputEvent({ type: 'mouseMove', ...point });
+    for (const clickCount of [1, 2]) {
+      contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount });
+      contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount });
+    }
+    await wait(40);
   }
 
   async wheel(point: SmokePoint, deltaX: number, deltaY: number): Promise<void> {
