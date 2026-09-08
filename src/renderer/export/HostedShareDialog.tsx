@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Copy, ExternalLink, Info, Square, Trash2 } from '
 import type { HostedShareRecord, HostedShareRecoveryWarning } from '../../shared/workflow-bridge';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import { Button, Modal, TextInput } from '../components/ui';
+import { useSharingSenderName } from '../settings/sharing-preferences';
 import './hosted-share.css';
 
 function requestId() {
@@ -31,9 +32,15 @@ export function HostedShareDialog({
       : undefined;
   const [token, setToken] = useState('');
   const [approved, setApproved] = useState(false);
-  const [includeArchive, setIncludeArchive] = useState(true);
+  const [showPairing, setShowPairing] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(1);
-  const [senderName, setSenderName] = useState('');
+  const {
+    senderName,
+    setSenderName,
+    saveSenderName,
+    saving: savingName,
+    error: nameError,
+  } = useSharingSenderName();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [record, setRecord] = useState<HostedShareRecord>();
@@ -44,6 +51,7 @@ export function HostedShareDialog({
   const [revokeTarget, setRevokeTarget] = useState<HostedShareRecord>();
   const mounted = useRef(true);
   const historyRequest = useRef(0);
+  const uploading = useRef(false);
   const refreshHistory = useCallback(async ({ reportError = true } = {}) => {
     const request = ++historyRequest.current;
     let result: Awaited<ReturnType<typeof window.imnota.listHostedShares>>;
@@ -73,35 +81,45 @@ export function HostedShareDialog({
     };
   }, [refreshHistory]);
   const upload = async () => {
+    if (uploading.current || busy || !approved) return;
     if (quotaProblem) {
       setError(quotaProblem);
       return;
     }
-    const id = request ?? requestId();
-    setRequest(id);
-    setBusy(true);
-    setError(undefined);
-    const result = await window.imnota.createHostedShare({
-      requestId: id,
-      pairingToken: token.trim(),
-      sessionId: artifacts.sessionId,
-      bundleNumbers: artifacts.bundleNumbers,
-      includeArchive,
-      expiresInDays,
-      senderName: senderName.trim() || undefined,
-    });
-    if (!mounted.current) return;
-    if (!result.ok) {
+    uploading.current = true;
+    try {
+      if (!(await saveSenderName()) || !mounted.current) return;
+      const id = request ?? requestId();
+      setRequest(id);
+      setBusy(true);
+      setError(undefined);
+      const result = await window.imnota.createHostedShare({
+        requestId: id,
+        pairingToken: token.trim(),
+        sessionId: artifacts.sessionId,
+        bundleNumbers: artifacts.bundleNumbers,
+        includeArchive: true,
+        expiresInDays,
+        senderName: senderName.normalize('NFC').trim() || undefined,
+      });
+      if (!mounted.current) return;
+      if (!result.ok) {
+        setBusy(false);
+        setError(result.error.message);
+        if (result.error.details?.requestMayHaveCommitted === false) setRequest(undefined);
+        return;
+      }
+      setRecord(result.value);
+      setHistory((items) => [result.value, ...items.filter((item) => item.id !== result.value.id)]);
+      setError(undefined);
       setBusy(false);
-      setError(result.error.message);
-      if (result.error.details?.requestMayHaveCommitted === false) setRequest(undefined);
-      return;
+      void refreshHistory({ reportError: false });
+    } catch {
+      if (mounted.current) setError('Could not create the link. Try again.');
+    } finally {
+      uploading.current = false;
+      if (mounted.current) setBusy(false);
     }
-    setRecord(result.value);
-    setHistory((items) => [result.value, ...items.filter((item) => item.id !== result.value.id)]);
-    setError(undefined);
-    setBusy(false);
-    void refreshHistory({ reportError: false });
   };
   const retryRecovery = async () => {
     if (busy) return;
@@ -167,12 +185,11 @@ export function HostedShareDialog({
       <section className="hosted-share" aria-busy={busy}>
         {!record ? (
           <>
-            <h3 className="hosted-share-step">1. Check your bundle</h3>
             <div className="hosted-share-manifest">
               <strong>{artifacts.title}</strong>
               <span>
                 Markdown · {imageCount} PNG
-                {imageCount === 1 ? '' : 's'}
+                {imageCount === 1 ? '' : 's'} · ZIP included
               </span>
               <details className="hosted-share-file-details">
                 <summary>Included files</summary>
@@ -188,47 +205,59 @@ export function HostedShareDialog({
               label="Your name (optional)"
               value={senderName}
               maxLength={80}
-              disabled={busy}
+              disabled={busy || savingName}
               onChange={(event) => setSenderName(event.target.value)}
+              onBlur={() => void saveSenderName()}
               placeholder="e.g. Dylan"
             />
-            <h3 className="hosted-share-step">2. Choose who can open it</h3>
+            {nameError && (
+              <p className="hosted-share-error" role="alert">
+                {nameError}
+              </p>
+            )}
             {quotaProblem && (
               <p className="hosted-share-error" role="alert">
                 <AlertTriangle size={15} />
                 {quotaProblem}
               </p>
             )}
-            <label className="hosted-share-check">
-              <input
-                type="checkbox"
-                disabled={Boolean(quotaProblem)}
-                checked={approved}
-                onChange={(event) => setApproved(event.target.checked)}
-              />{' '}
-              Anyone with the link can view and download this bundle until it expires or I revoke it.
-            </label>
-            <div className="hosted-share-options">
-              <label>
-                <span>Expires after</span>
-                <select
-                  value={expiresInDays}
-                  onChange={(event) => setExpiresInDays(Number(event.target.value))}
-                >
-                  <option value={1}>1 day</option>
-                  <option value={7}>7 days</option>
-                  <option value={14}>14 days</option>
-                  <option value={30}>30 days</option>
-                </select>
-              </label>
-              <label className="hosted-share-check">
-                <input
-                  type="checkbox"
-                  checked={includeArchive}
-                  onChange={(event) => setIncludeArchive(event.target.checked)}
-                />{' '}
-                Include downloadable ZIP
-              </label>
+            <fieldset className="hosted-share-expiry" disabled={busy}>
+              <legend>Expires after</legend>
+              <div className="hosted-share-expiry-choices">
+                {[1, 7, 14, 30].map((days) => (
+                  <label key={days}>
+                    <input
+                      type="radio"
+                      name="share-expiry"
+                      value={days}
+                      checked={expiresInDays === days}
+                      onChange={() => setExpiresInDays(days)}
+                    />
+                    <span>
+                      {days} {days === 1 ? 'day' : 'days'}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="hosted-share-consent">
+              <p id="hosted-share-consent-description">
+                I understand that everyone with the link can open the bundle.
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={approved}
+                aria-describedby="hosted-share-consent-description"
+                className="hosted-share-consent-switch"
+                disabled={busy || Boolean(quotaProblem)}
+                onClick={() => setApproved((value) => !value)}
+              >
+                <span className="hosted-share-switch-track" aria-hidden="true">
+                  <span />
+                </span>
+                I understand
+              </button>
             </div>
             <details className="hosted-share-info">
               <summary>
@@ -239,34 +268,45 @@ export function HostedShareDialog({
                 records views and downloads; the hosting provider may keep access logs.
               </p>
             </details>
-            <details className="hosted-share-info">
-              <summary>Use a pairing code instead</summary>
-              <Button
-                variant="soft"
-                disabled={Boolean(quotaProblem)}
-                onClick={() =>
-                  void window.imnota
-                    .openHostedSharePairing()
-                    .then((result) => !result.ok && onError(result.error.message))
-                }
-              >
-                <ExternalLink size={14} /> Get a pairing code
-              </Button>
-              <TextInput
-                label="Pairing code"
-                disabled={Boolean(quotaProblem)}
-                autoComplete="off"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="Paste your code"
-              />
-            </details>
+            {showPairing && (
+              <div className="hosted-share-pairing-fallback" id="hosted-share-pairing-fallback">
+                <Button
+                  variant="soft"
+                  disabled={busy || Boolean(quotaProblem)}
+                  onClick={() =>
+                    void window.imnota
+                      .openHostedSharePairing()
+                      .then((result) => !result.ok && onError(result.error.message))
+                  }
+                >
+                  <ExternalLink size={14} /> Get a pairing code
+                </Button>
+                <TextInput
+                  label="Pairing code"
+                  disabled={busy || Boolean(quotaProblem)}
+                  autoComplete="off"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder="Paste your code"
+                />
+              </div>
+            )}
             {busy && (
               <p className="hosted-share-progress" role="status">
                 Creating your link…
               </p>
             )}
-            <footer className="hosted-share-actions">
+            <footer className="hosted-share-actions hosted-share-create-actions">
+              <Button
+                variant="ghost"
+                className="hosted-share-pairing-toggle"
+                disabled={busy || Boolean(quotaProblem)}
+                aria-expanded={showPairing}
+                aria-controls="hosted-share-pairing-fallback"
+                onClick={() => setShowPairing((value) => !value)}
+              >
+                Pairing code
+              </Button>
               <Button variant="ghost" disabled={busy} onClick={onClose}>
                 Back
               </Button>
@@ -390,14 +430,6 @@ export function HostedShareDialog({
             })}
           </details>
         )}
-        <a
-          className="hosted-share-owner-link"
-          href="https://app.imnota.xyz/owner"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Site owner dashboard <ExternalLink size={12} aria-hidden="true" />
-        </a>
         {revokeTarget && (
           <Modal
             title="Revoke this hosted link?"
