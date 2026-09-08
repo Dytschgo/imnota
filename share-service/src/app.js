@@ -104,13 +104,10 @@ function validateUpload(body, config) {
   if (typeof body.markdown !== 'string') {
     throw new ApiError(400, 'invalid_request', 'Markdown must be a string.');
   }
+  const senderName = validateSenderName(body.senderName);
   const requestId = typeof body.requestId === 'string' ? body.requestId.toLowerCase() : '';
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestId)) {
     throw new ApiError(400, 'invalid_request', 'requestId must be a UUID generated for this upload.');
-  }
-  const markdown = Buffer.from(body.markdown, 'utf8');
-  if (markdown.length > config.maxMarkdownBytes) {
-    throw new ApiError(413, 'payload_too_large', 'Markdown exceeds the size limit.');
   }
   if (!Array.isArray(body.images) || body.images.length > config.maxImages) {
     throw new ApiError(
@@ -119,8 +116,14 @@ function validateUpload(body, config) {
       `Images must be an array with at most ${config.maxImages} entries.`,
     );
   }
+  const bundles = validateBundles(body.bundles, body.images);
+  const markdown = Buffer.from(body.markdown, 'utf8');
+  const structuredMarkdownBytes = bundles.reduce((total, bundle) => total + bundle.markdownBytes, 0);
+  if (markdown.length + structuredMarkdownBytes > config.maxMarkdownBytes) {
+    throw new ApiError(413, 'payload_too_large', 'Markdown exceeds the size limit.');
+  }
   const filenames = new Set();
-  let uploadedBytes = markdown.length;
+  let resourceBytes = markdown.length + structuredMarkdownBytes;
   let totalImagePixels = 0;
   let totalInflatedPngBytes = 0;
   const pngLimits = {
@@ -149,8 +152,8 @@ function validateUpload(body, config) {
     if (uploadedData.length > config.maxImageBytes) {
       throw new ApiError(413, 'payload_too_large', `Image ${image.filename} exceeds the size limit.`);
     }
-    uploadedBytes += uploadedData.length;
-    if (uploadedBytes > config.maxBundleBytes) {
+    resourceBytes += uploadedData.length;
+    if (resourceBytes > config.maxBundleBytes) {
       throw new ApiError(413, 'payload_too_large', 'The decoded upload bundle exceeds the size limit.');
     }
     let inspected;
@@ -185,8 +188,9 @@ function validateUpload(body, config) {
     }
     return { filename, ...normalized };
   });
-  const decodedBytes = markdown.length + images.reduce((sum, image) => sum + image.data.length, 0);
-  if (decodedBytes > config.maxBundleBytes) {
+  const artifactBytes = markdown.length + images.reduce((sum, image) => sum + image.data.length, 0);
+  const normalizedResourceBytes = artifactBytes + structuredMarkdownBytes;
+  if (normalizedResourceBytes > config.maxBundleBytes) {
     throw new ApiError(413, 'payload_too_large', 'The normalized bundle exceeds the size limit.');
   }
   const expiresInDays = body.expiresInDays ?? config.defaultExpiryDays;
@@ -205,10 +209,70 @@ function validateUpload(body, config) {
     title,
     markdown,
     images,
-    decodedBytes,
+    bundles,
+    senderName,
+    hasStructuredMetadata: body.senderName !== undefined || body.bundles !== undefined,
+    artifactBytes,
     expiresInDays,
     includeArchive: body.includeArchive === true,
   };
+}
+
+function validateSenderName(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string')
+    throw new ApiError(400, 'invalid_request', 'senderName must be a printable name.');
+  const senderName = value.normalize('NFC').trim();
+  if (!senderName || [...senderName].length > 80 || /[\p{C}\u202A-\u202E\u2066-\u2069]/u.test(senderName)) {
+    throw new ApiError(400, 'invalid_request', 'senderName must contain 1 to 80 printable characters.');
+  }
+  return senderName;
+}
+
+function validateBundles(value, images) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20)
+    throw new ApiError(400, 'invalid_request', 'bundles must contain at most 20 entries.');
+  const imageFilenames = new Set();
+  for (const image of images ?? []) {
+    if (image && typeof image === 'object' && typeof image.filename === 'string')
+      imageFilenames.add(image.filename);
+  }
+  const mappedImages = new Set();
+  const numbers = new Set();
+  const bundles = value.map((bundle) => {
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle))
+      throw new ApiError(400, 'invalid_request', 'Each bundle must be an object.');
+    const bundleNumber = bundle.bundleNumber;
+    if (
+      !Number.isInteger(bundleNumber) ||
+      bundleNumber < 1 ||
+      bundleNumber > 999 ||
+      numbers.has(bundleNumber)
+    )
+      throw new ApiError(400, 'invalid_request', 'Bundle numbers must be unique integers from 1 to 999.');
+    numbers.add(bundleNumber);
+    if (typeof bundle.markdown !== 'string')
+      throw new ApiError(400, 'invalid_request', 'Each bundle needs Markdown text.');
+    if (bundle.imageFilename !== null && typeof bundle.imageFilename !== 'string')
+      throw new ApiError(400, 'invalid_request', 'Each bundle imageFilename must be a PNG filename or null.');
+    if (bundle.imageFilename !== null) {
+      if (!isSafePngFilename(bundle.imageFilename) || !imageFilenames.has(bundle.imageFilename))
+        throw new ApiError(400, 'invalid_request', 'Each bundle image must match an uploaded PNG.');
+      if (mappedImages.has(bundle.imageFilename))
+        throw new ApiError(400, 'invalid_request', 'Each uploaded PNG can belong to only one bundle.');
+      mappedImages.add(bundle.imageFilename);
+    }
+    return {
+      number: bundleNumber,
+      markdown: bundle.markdown,
+      markdownBytes: Buffer.byteLength(bundle.markdown, 'utf8'),
+      imageFilename: bundle.imageFilename,
+    };
+  });
+  if (mappedImages.size !== imageFilenames.size)
+    throw new ApiError(400, 'invalid_request', 'Each uploaded PNG must belong to one bundle.');
+  return bundles.sort((left, right) => left.number - right.number);
 }
 
 function uploadFingerprint(upload) {
@@ -217,7 +281,7 @@ function uploadFingerprint(upload) {
     const data = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
     hash.update(String(data.length)).update(':').update(data).update(';');
   };
-  append('imnota-share-upload-v1');
+  append(upload.hasStructuredMetadata ? 'imnota-share-upload-v2' : 'imnota-share-upload-v1');
   append(upload.requestId);
   append(upload.title);
   append(upload.markdown);
@@ -229,6 +293,14 @@ function uploadFingerprint(upload) {
   for (const image of sortedImages) {
     append(image.filename);
     append(image.data);
+  }
+  if (upload.hasStructuredMetadata) {
+    append(upload.senderName ?? '');
+    for (const bundle of upload.bundles) {
+      append(bundle.number);
+      append(bundle.markdown);
+      append(bundle.imageFilename ?? '');
+    }
   }
   return hash.digest('hex');
 }
@@ -478,7 +550,7 @@ export function createService(overrides = {}) {
           .json(shareReceipt(committedAfterStaging, bearer, config, committedAssets, true));
       }
 
-      const estimatedSize = upload.includeArchive ? upload.decodedBytes * 2 + 4096 : upload.decodedBytes;
+      const estimatedSize = upload.includeArchive ? upload.artifactBytes * 2 + 4096 : upload.artifactBytes;
       const filesystemUsage = await directorySize(config.uploadsDir);
       const id = randomUUID();
       const stagedAt = now();
@@ -530,7 +602,7 @@ export function createService(overrides = {}) {
       const managementToken = deriveToken(config.receiptSecret, bearer, upload.requestId, 'management');
       const stagingDirectory = path.join(config.uploadsDir, `.staging-${id}`);
       const shareDirectory = path.join(config.uploadsDir, id);
-      let byteSize = upload.decodedBytes;
+      let byteSize = upload.artifactBytes;
       try {
         await fsp.mkdir(stagingDirectory, { recursive: false, mode: 0o700 });
         await fsp.writeFile(path.join(stagingDirectory, 'prompt.md'), upload.markdown, {
@@ -575,7 +647,7 @@ export function createService(overrides = {}) {
             throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
           }
           db.prepare(
-            'INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, created_at, expires_at, recovery_until, byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, sender_name, created_at, expires_at, recovery_until, byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           ).run(
             id,
             tokenHash(publicToken),
@@ -584,6 +656,7 @@ export function createService(overrides = {}) {
             upload.requestId,
             payloadHash,
             upload.title,
+            upload.senderName ?? null,
             createdAt,
             expiresAt,
             recoveryUntil,
@@ -595,6 +668,11 @@ export function createService(overrides = {}) {
           );
           for (const image of upload.images)
             insertAsset.run(id, image.filename, image.data.length, image.width, image.height);
+          const insertBundle = db.prepare(
+            'INSERT INTO share_bundles (share_id, bundle_number, markdown, image_filename) VALUES (?, ?, ?, ?)',
+          );
+          for (const bundle of upload.bundles)
+            insertBundle.run(id, bundle.number, bundle.markdown, bundle.imageFilename);
           db.prepare('DELETE FROM staging_uploads WHERE id = ?').run(id);
           db.exec('COMMIT');
         } catch (error) {
@@ -628,6 +706,7 @@ export function createService(overrides = {}) {
               id,
               request_id: upload.requestId,
               title: upload.title,
+              sender_name: upload.senderName ?? null,
               created_at: createdAt,
               expires_at: expiresAt,
               byte_size: byteSize,
@@ -735,6 +814,25 @@ export function createService(overrides = {}) {
   );
 
   app.get(
+    '/s/:token/bundles/:number/markdown',
+    asyncRoute(async (request, response) => {
+      const record = publicRecord(request.params.token, db, now());
+      const numberText = request.params.number;
+      if (!record || !/^[1-9]\d{0,2}$/u.test(numberText))
+        return response.status(404).type('html').send(unavailablePage());
+      const bundle = db
+        .prepare('SELECT bundle_number, markdown FROM share_bundles WHERE share_id = ? AND bundle_number = ?')
+        .get(record.id, Number(numberText));
+      if (!bundle) return response.status(404).type('html').send(unavailablePage());
+      response.set({
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="bundle-${bundle.bundle_number}.md"`,
+      });
+      return response.send(bundle.markdown);
+    }),
+  );
+
+  app.get(
     '/s/:token/assets/:filename',
     asyncRoute(async (request, response) => {
       const record = publicRecord(request.params.token, db, now());
@@ -780,9 +878,23 @@ export function createService(overrides = {}) {
       const assets = db
         .prepare('SELECT filename, width, height FROM assets WHERE share_id = ? ORDER BY filename')
         .all(record.id);
+      const bundles = db
+        .prepare(
+          'SELECT bundle_number AS number, image_filename AS imageFilename FROM share_bundles WHERE share_id = ? ORDER BY bundle_number',
+        )
+        .all(record.id);
       return response
         .type('html')
-        .send(sharePage(record, renderMarkdown(markdown), assets, request.params.token, config.publicOrigin));
+        .send(
+          sharePage(
+            record,
+            renderMarkdown(markdown),
+            assets,
+            request.params.token,
+            config.publicOrigin,
+            bundles,
+          ),
+        );
     }),
   );
 

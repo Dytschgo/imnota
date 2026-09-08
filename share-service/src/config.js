@@ -45,7 +45,7 @@ export function loadConfig(overrides = {}) {
     receiptSecret,
     defaultExpiryDays: integer(
       overrides.defaultExpiryDays ?? process.env.IMNOTA_SHARE_DEFAULT_EXPIRY_DAYS,
-      30,
+      1,
     ),
     maxExpiryDays: integer(overrides.maxExpiryDays ?? process.env.IMNOTA_SHARE_MAX_EXPIRY_DAYS, 30),
     cleanupGraceMs: integer(

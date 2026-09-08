@@ -28,6 +28,7 @@ export function openDatabase(config) {
       request_id TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       title TEXT NOT NULL,
+      sender_name TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL,
       recovery_until INTEGER NOT NULL,
@@ -43,6 +44,13 @@ export function openDatabase(config) {
       height INTEGER NOT NULL,
       PRIMARY KEY (share_id, filename)
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS share_bundles (
+      share_id TEXT NOT NULL REFERENCES shares(id) ON DELETE CASCADE,
+      bundle_number INTEGER NOT NULL CHECK (bundle_number BETWEEN 1 AND 999),
+      markdown TEXT NOT NULL,
+      image_filename TEXT,
+      PRIMARY KEY (share_id, bundle_number)
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS staging_uploads (
       id TEXT PRIMARY KEY,
       upload_token_hash TEXT NOT NULL UNIQUE,
@@ -55,6 +63,9 @@ export function openDatabase(config) {
     CREATE INDEX IF NOT EXISTS shares_revoked_idx ON shares(revoked_at);
     CREATE INDEX IF NOT EXISTS pairings_expiry_idx ON pairings(expires_at);
   `);
+  const shareColumns = db.prepare('PRAGMA table_info(shares)').all();
+  if (!shareColumns.some((column) => column.name === 'sender_name'))
+    db.exec('ALTER TABLE shares ADD COLUMN sender_name TEXT');
   const fingerprint = createHash('sha256')
     .update(Buffer.from(config.receiptSecret, 'base64url'))
     .digest('hex');
