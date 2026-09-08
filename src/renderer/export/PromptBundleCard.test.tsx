@@ -2,9 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
+const initialShowPopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'showPopover');
+const initialHidePopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hidePopover');
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (initialShowPopover) Object.defineProperty(HTMLElement.prototype, 'showPopover', initialShowPopover);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>).showPopover;
+  if (initialHidePopover) Object.defineProperty(HTMLElement.prototype, 'hidePopover', initialHidePopover);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>).hidePopover;
 });
 
 it('disables preview while another prompt operation is running', () => {
@@ -158,18 +165,32 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
   } as DOMRect;
 }
 
-it('portals the menu into its dialog, keeps it in bounds, and closes it without closing the dialog', async () => {
-  let triggerTop = 350;
+it('uses a native top-layer popover inside the dialog and keeps it within the viewport', async () => {
+  let triggerTop = 132;
+  const order: string[] = [];
+  const showPopover = vi.fn(function (this: HTMLElement) {
+    order.push('show');
+    this.setAttribute('data-popover-open', 'true');
+  });
+  const hidePopover = vi.fn(function (this: HTMLElement) {
+    order.push('hide');
+    this.removeAttribute('data-popover-open');
+  });
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: showPopover });
+  Object.defineProperty(HTMLElement.prototype, 'hidePopover', { configurable: true, value: hidePopover });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.getAttribute('role') === 'dialog') return rect(50, 50, 540, 340);
-    if (this.getAttribute('aria-label') === 'Copy options') return rect(550, triggerTop, 36, 32);
-    if (this.getAttribute('role') === 'menu') return rect(0, 0, 160, 100);
+    if (this.getAttribute('role') === 'dialog') return rect(40, 20, 260, 140);
+    if (this.getAttribute('aria-label') === 'Copy options') return rect(260, triggerTop, 36, 32);
+    if (this.getAttribute('role') === 'menu') {
+      order.push('measure');
+      return rect(0, 0, 160, 100);
+    }
     return rect(0, 0, 0, 0);
   });
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 400 });
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 180 });
   render(
-    <section role="dialog">
+    <section role="dialog" style={{ backdropFilter: 'blur(18px)' }}>
       <PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />
     </section>,
   );
@@ -179,18 +200,24 @@ it('portals the menu into its dialog, keeps it in bounds, and closes it without 
   fireEvent.click(options);
   const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
   expect(dialog).toContainElement(menu);
-  await waitFor(() => expect(menu).toHaveStyle({ left: '426px', top: '244px' }));
+  expect(menu).toHaveAttribute('popover', 'manual');
+  await waitFor(() => expect(menu).toHaveStyle({ left: '136px', top: '26px' }));
   expect(menu).toHaveClass('prompt-bundle-options-menu');
+  expect(showPopover).toHaveBeenCalledOnce();
+  expect(order.indexOf('show')).toBeLessThan(order.indexOf('measure'));
 
-  triggerTop = 100;
+  triggerTop = 28;
   fireEvent.scroll(dialog);
-  await waitFor(() => expect(menu).toHaveStyle({ top: '138px' }));
+  await waitFor(() => expect(menu).toHaveStyle({ top: '20px' }));
 
   fireEvent.keyDown(menu, { key: 'Escape' });
   await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
   expect(document.activeElement).toBe(options);
+  expect(hidePopover).toHaveBeenCalledOnce();
 
   fireEvent.click(options);
   fireEvent.pointerDown(document.body);
   await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  expect(showPopover).toHaveBeenCalledTimes(2);
+  expect(hidePopover).toHaveBeenCalledTimes(2);
 });

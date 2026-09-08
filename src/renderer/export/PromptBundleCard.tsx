@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import './prompt-bundles.css';
@@ -88,13 +88,29 @@ export function PromptBundleCard({
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!optionsOpen) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    menu.setAttribute('popover', 'manual');
+    let nativePopoverOpen = false;
+    try {
+      if (typeof menu.showPopover === 'function') {
+        menu.showPopover();
+        nativePopoverOpen = true;
+      }
+    } catch {
+      // A browser without the Popover API keeps the fixed-position fallback visible.
+    }
     const positionMenu = () => {
       const trigger = optionsRef.current?.querySelector<HTMLElement>('button');
-      const menu = menuRef.current;
-      const dialogBounds = dialog?.getBoundingClientRect();
-      if (!trigger || !menu || !dialogBounds) return;
+      const dialogBounds = dialog?.getBoundingClientRect() ?? {
+        left: 0,
+        right: window.innerWidth,
+        top: 0,
+        bottom: window.innerHeight,
+      };
+      if (!trigger) return;
       const triggerBounds = trigger.getBoundingClientRect();
       const menuBounds = menu.getBoundingClientRect();
       const inset = 8;
@@ -131,16 +147,14 @@ export function PromptBundleCard({
       setOptionsOpen(false);
       optionsRef.current?.querySelector<HTMLElement>('button')?.focus();
     };
-    const frame = requestAnimationFrame(() => {
-      positionMenu();
-      menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
-    });
+    positionMenu();
+    menu.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
     document.addEventListener('pointerdown', closeOnOutsidePress);
     document.addEventListener('scroll', positionMenu, true);
     window.addEventListener('resize', positionMenu);
     dialog?.addEventListener('keydown', closeOnEscape, true);
     return () => {
-      cancelAnimationFrame(frame);
+      if (nativePopoverOpen) menu.hidePopover?.();
       document.removeEventListener('pointerdown', closeOnOutsidePress);
       document.removeEventListener('scroll', positionMenu, true);
       window.removeEventListener('resize', positionMenu);
@@ -151,6 +165,15 @@ export function PromptBundleCard({
   const runOption = (action?: (request: PromptBundleActionRequest) => void | Promise<void>) => {
     setOptionsOpen(false);
     void action?.(request);
+  };
+
+  const toggleOptions = () => {
+    if (optionsOpen) {
+      setOptionsOpen(false);
+      return;
+    }
+    setMenuPosition(undefined);
+    setOptionsOpen(true);
   };
 
   return (
@@ -212,7 +235,7 @@ export function PromptBundleCard({
               aria-expanded={optionsOpen}
               aria-controls={optionsOpen ? optionsMenuId : undefined}
               disabled={busy || disabled}
-              onClick={() => setOptionsOpen((open) => !open)}
+              onClick={toggleOptions}
             >
               <ChevronDown size={14} aria-hidden="true" />
             </Button>
