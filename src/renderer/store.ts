@@ -10,13 +10,7 @@ import type {
 } from '../shared/types';
 
 export type AppView =
-  | 'projects'
-  | 'recent'
-  | 'favourites'
-  | 'archived'
-  | 'workspace'
-  | 'context'
-  | 'settings';
+  'projects' | 'recent' | 'favourites' | 'archived' | 'workspace' | 'context' | 'settings';
 
 interface AppState {
   settings: WorkspaceSettings;

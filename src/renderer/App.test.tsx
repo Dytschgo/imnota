@@ -993,20 +993,14 @@ describe('feedback controls', () => {
     await screen.findByTestId('library-full-search');
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Editing & shortcuts' }));
-    expect(screen.getByRole('button', { name: 'Editing & shortcuts' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Shortcuts' }));
+    expect(screen.getByRole('button', { name: 'Shortcuts' })).toHaveAttribute('aria-current', 'page');
 
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     await screen.findByRole('heading', { name: 'Projects' });
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await screen.findByTestId('settings-view');
-    expect(screen.getByRole('button', { name: 'Editing & shortcuts' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    expect(screen.getByRole('button', { name: 'Shortcuts' })).toHaveAttribute('aria-current', 'page');
 
     fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
     await screen.findByRole('heading', { name: 'Projects' });

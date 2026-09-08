@@ -115,9 +115,9 @@ export async function exerciseUiFeedback(
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ text: 'Appearance', exact: true });
-  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="strong"])' });
+  await driver.click({ selector: 'label:has(input[name="glass-level"][value="strong"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-glass-requested="strong"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({
@@ -127,12 +127,12 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '.imnota-backdrop-theme-link input:not(:checked):not(:disabled)' });
   await driver.click({ text: 'No image', exact: true });
   await driver.waitFor({ selector: ':root[data-background="none"]' });
-  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"]:not(:disabled))' });
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-emerald"][aria-pressed="true"]:not(:disabled)',
   });
   if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-dark-backdrop.png'));
-  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-background="none"][data-theme="light"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({
