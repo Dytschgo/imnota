@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.classify.outputs.channel }}
+      sha: ${{ steps.classify.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,11 +24,37 @@ jobs:
           channel="$(node scripts/release-channel.mjs classify-tag "$GITHUB_REF_NAME")"
           test "$channel" = stable
           candidate="$(git rev-parse "$GITHUB_REF^{commit}")"
+          test "$candidate" = "$(git rev-parse HEAD)"
           git fetch --force origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$candidate" origin/main
+          node -e "const expected = 'v' + require('./package.json').version; if (process.env.GITHUB_REF_NAME !== expected) { console.error('Release tag ' + process.env.GITHUB_REF_NAME + ' does not match package version ' + expected); process.exit(1); }"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: classify
+    if: needs.classify.outputs.channel == 'stable'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.classify.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      # Includes the release-channel and asset-staging script tests.
+      - run: pnpm test
 
   package:
+    # Build alongside quality; publication requires both to pass.
     needs: classify
     if: needs.classify.outputs.channel == 'stable'
     strategy:
@@ -46,6 +73,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.classify.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
@@ -54,13 +83,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: node --test scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs
-      - name: Verify release version
-        run: node -e "const expected = 'v' + require('./package.json').version; if (process.env.GITHUB_REF_NAME !== expected) { console.error('Release tag ' + process.env.GITHUB_REF_NAME + ' does not match package version ' + expected); process.exit(1); }"
+      - name: Test platform-specific behavior
+        run: pnpm test:platform
       - name: Set expected stable package version
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'IMNOTA_EXPECT_VERSION=' + require('./package.json').version + String.fromCharCode(10))"
       - run: ${{ matrix.command }}
@@ -93,12 +117,14 @@ jobs:
             release/latest*.yml
 
   publish:
-    needs: package
+    needs: [classify, quality, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.classify.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -123,10 +149,12 @@ jobs:
           make_latest: false
 
   verify-public-mac-install:
-    needs: publish
+    needs: [classify, publish]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.classify.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
