@@ -24,7 +24,7 @@ export async function exerciseMixedContent(
   );
   await driver.click({ text: 'Preview', exact: true });
   await driver.waitFor({ selector: '.markdown-preview h1', text: 'System overview' });
-  await driver.click({ text: 'Prompt bundles', exact: true });
+  await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
   await driver.waitFor(
     {
       selector:
@@ -44,7 +44,8 @@ export async function exerciseMixedContent(
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.resize({ width: 1280, height: 800 });
-  await driver.click({ text: 'Add drawing', exact: true });
+  await driver.click({ text: 'Add item', exact: true });
+  await driver.click({ selector: '.add-item-popover [role="menuitem"]', text: 'Drawing' });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
   await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });
   const canvas = await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });
@@ -110,7 +111,7 @@ export async function exerciseMixedContent(
   const markdown = await fs.readFile(path.join(directory, 'text', text.markdownFilename), 'utf8');
   if (!markdown.includes('# System overview'))
     throw new Error('Text Markdown did not autosave before navigation.');
-  await driver.click({ text: 'Prompt bundles', exact: true });
+  await driver.click({ selector: '[data-testid="share-prompt-bundles"]' });
   await driver.waitFor(
     {
       selector:
