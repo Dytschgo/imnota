@@ -1115,7 +1115,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     const buttons = [...card.querySelectorAll('button')];
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
-      text: card.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      text: [...card.querySelectorAll('dt, dd')].map((entry) => entry.textContent?.trim() ?? '').join(' '),
       copyLabel: buttons.find((button) => /^Copy Bundle$/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
@@ -1333,13 +1333,13 @@ async function exercisePromptWorkflow(
   if (!cards.length) throw new Error('Share prompt bundles dialog contains no real bundle cards.');
   if (options.requireSplit && cards.length < 2)
     throw new Error('Mixed native-resolution fixture did not split into prompt bundles.');
-  await verifyPromptCopyOptions(driver, cards.length);
   if (options.artifactDirectory) {
     await driver.resize(SMOKE_VIEWPORTS[2]);
     options.artifacts.push(await driver.capture(options.artifactDirectory, '1920x1080-sharing.png'));
     await driver.resize(SMOKE_VIEWPORTS[3]);
     options.artifacts.push(await driver.capture(options.artifactDirectory, '3440x1440-sharing.png'));
   }
+  await verifyPromptCopyOptions(driver, cards.length);
   const copiedIndex = cards.findIndex((card) => card.copyLabel);
   if (copiedIndex < 0)
     throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
