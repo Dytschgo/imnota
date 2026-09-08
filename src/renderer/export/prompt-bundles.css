@@ -229,10 +229,8 @@
 }
 
 .prompt-bundle-options-menu {
-  position: absolute;
-  z-index: 2;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
+  z-index: 20;
   min-width: 156px;
   padding: 4px;
   border: 1px solid var(--line-strong);

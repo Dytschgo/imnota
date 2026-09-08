@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import './prompt-bundles.css';
 
@@ -77,28 +78,75 @@ export function PromptBundleCard({
   onLoadPreview,
 }: PromptBundleCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number }>();
   const optionsRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const optionsMenuId = useId().replace(/:/g, '');
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
   const request = requestFor(bundle);
-  const fallbacksReady = Boolean(bundle.artifactSessionId) && !busy && !disabled;
   const copied = bundle.state === 'copied';
+  const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
+  const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
 
   useEffect(() => {
     if (!optionsOpen) return;
+    const positionMenu = () => {
+      const trigger = optionsRef.current?.querySelector<HTMLElement>('button');
+      const menu = menuRef.current;
+      const dialogBounds = dialog?.getBoundingClientRect();
+      if (!trigger || !menu || !dialogBounds) return;
+      const triggerBounds = trigger.getBoundingClientRect();
+      const menuBounds = menu.getBoundingClientRect();
+      const inset = 8;
+      const bounds = {
+        left: Math.max(inset, dialogBounds.left),
+        right: Math.min(window.innerWidth - inset, dialogBounds.right),
+        top: Math.max(inset, dialogBounds.top),
+        bottom: Math.min(window.innerHeight - inset, dialogBounds.bottom),
+      };
+      const menuWidth = menuBounds.width || 156;
+      const menuHeight = menuBounds.height || 98;
+      const roomBelow = bounds.bottom - triggerBounds.bottom;
+      const top =
+        roomBelow >= menuHeight + 6
+          ? triggerBounds.bottom + 6
+          : Math.max(bounds.top, triggerBounds.top - menuHeight - 6);
+      const left = Math.min(
+        Math.max(bounds.left, triggerBounds.right - menuWidth),
+        Math.max(bounds.left, bounds.right - menuWidth),
+      );
+      setMenuPosition({ left: Math.round(left), top: Math.round(top) });
+    };
     const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!optionsRef.current?.contains(event.target as Node)) setOptionsOpen(false);
+      if (
+        !optionsRef.current?.contains(event.target as Node) &&
+        !menuRef.current?.contains(event.target as Node)
+      )
+        setOptionsOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOptionsOpen(false);
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOptionsOpen(false);
+      optionsRef.current?.querySelector<HTMLElement>('button')?.focus();
     };
+    const frame = requestAnimationFrame(() => {
+      positionMenu();
+      menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    });
     document.addEventListener('pointerdown', closeOnOutsidePress);
-    document.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('scroll', positionMenu, true);
+    window.addEventListener('resize', positionMenu);
+    dialog?.addEventListener('keydown', closeOnEscape, true);
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener('pointerdown', closeOnOutsidePress);
-      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('scroll', positionMenu, true);
+      window.removeEventListener('resize', positionMenu);
+      dialog?.removeEventListener('keydown', closeOnEscape, true);
     };
-  }, [optionsOpen]);
+  }, [dialog, optionsOpen]);
 
   const runOption = (action?: (request: PromptBundleActionRequest) => void | Promise<void>) => {
     setOptionsOpen(false);
@@ -168,39 +216,44 @@ export function PromptBundleCard({
             >
               <ChevronDown size={14} aria-hidden="true" />
             </Button>
-            {optionsOpen && (
-              <div
-                id={optionsMenuId}
-                className="prompt-bundle-options-menu"
-                role="menu"
-                aria-label={`Bundle ${bundle.bundleNumber} options`}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!onCopyMarkdown}
-                  onClick={() => runOption(onCopyMarkdown)}
+            {optionsOpen &&
+              menuPortal &&
+              createPortal(
+                <div
+                  ref={menuRef}
+                  id={optionsMenuId}
+                  className="prompt-bundle-options-menu"
+                  role="menu"
+                  aria-label={`Bundle ${bundle.bundleNumber} options`}
+                  style={menuPosition ? { left: menuPosition.left, top: menuPosition.top } : undefined}
                 >
-                  <FileText size={14} aria-hidden="true" /> Copy Markdown
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!onCopyImage || !bundle.pictureNumbers.length}
-                  onClick={() => runOption(onCopyImage)}
-                >
-                  <FileImage size={14} aria-hidden="true" /> Copy PNG
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!onOpenFiles || !fallbacksReady}
-                  onClick={() => runOption(onOpenFiles)}
-                >
-                  <FolderOpen size={14} aria-hidden="true" /> Open files
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!onCopyMarkdown}
+                    onClick={() => runOption(onCopyMarkdown)}
+                  >
+                    <FileText size={14} aria-hidden="true" /> Copy Markdown
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!onCopyImage || !bundle.pictureNumbers.length}
+                    onClick={() => runOption(onCopyImage)}
+                  >
+                    <FileImage size={14} aria-hidden="true" /> Copy PNG
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!onOpenFiles}
+                    onClick={() => runOption(onOpenFiles)}
+                  >
+                    <FolderOpen size={14} aria-hidden="true" /> Open files
+                  </button>
+                </div>,
+                menuPortal,
+              )}
           </div>
         </div>
       </div>

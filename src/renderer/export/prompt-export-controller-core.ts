@@ -1254,23 +1254,61 @@ export class PromptBundleControllerEngine {
     );
   }
 
-  openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    return this.nativeArtifactAction(selection, async (sessionId, bundleNumber) => {
-      if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
-        const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
-        if (!png.ok) return png;
+  private openBundleFiles(sessionId: string, bundleNumber: number): Promise<WorkflowResult<void>> {
+    const grant =
+      this.latestArtifact?.sessionId === sessionId ? this.latestArtifact.grants.get(bundleNumber) : undefined;
+    if (grant?.pngFilename) {
+      return this.bridge
+        .openPromptExportBundle({ sessionId, bundleNumber, target: 'png' })
+        .then((png) =>
+          png.ok ? this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' }) : png,
+        );
+    }
+    return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
+  }
+
+  async openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    const bundleNumber = selectionNumber(selection);
+    const artifact = this.latestArtifact;
+    const needsFreshExport =
+      bundleNumber === undefined ||
+      !artifact ||
+      !artifact.grants.has(bundleNumber) ||
+      (typeof selection !== 'number' && !selection.artifactSessionId);
+    if (needsFreshExport) {
+      const prepared = await this.fresh(bundleNumber, false);
+      if (!prepared.ok || !prepared.sessionId || prepared.bundleNumber === undefined) return prepared;
+      try {
+        const result = await this.openBundleFiles(prepared.sessionId, prepared.bundleNumber);
+        if (!result.ok) throw nativeFailure(result.error, true);
+        return prepared;
+      } catch (error) {
+        return this.resultError(error);
       }
-      return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
-    });
+    }
+    return this.nativeArtifactAction(selection, (sessionId, selectedBundleNumber) =>
+      this.openBundleFiles(sessionId, selectedBundleNumber),
+    );
   }
 
   async openFolder(): Promise<PromptBundleControllerActionResult> {
     const artifact = this.latestArtifact;
     const bundleNumber = artifact?.grants.keys().next().value as number | undefined;
-    if (!artifact || bundleNumber === undefined)
-      return this.resultError(
-        failure('invalid-bundle', 'Prepare a fresh export before opening its folder.', true),
-      );
+    if (!artifact || bundleNumber === undefined) {
+      const prepared = await this.fresh(undefined, false);
+      if (!prepared.ok || !prepared.sessionId || prepared.bundleNumber === undefined) return prepared;
+      try {
+        const result = await this.bridge.openPromptExportBundle({
+          sessionId: prepared.sessionId,
+          bundleNumber: prepared.bundleNumber,
+          target: 'folder',
+        });
+        if (!result.ok) throw nativeFailure(result.error, true);
+        return prepared;
+      } catch (error) {
+        return this.resultError(error);
+      }
+    }
     return this.nativeArtifactAction(bundleNumber, (sessionId, selectedBundleNumber) =>
       this.bridge.openPromptExportBundle({
         sessionId,

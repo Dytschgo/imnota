@@ -1,8 +1,11 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 it('disables preview while another prompt operation is running', () => {
   const onLoadPreview = vi.fn();
@@ -70,6 +73,28 @@ it('uses an honest file action for oversized prompts and disables fallbacks befo
   expect(screen.getByRole('button', { name: /options/i })).toBeEnabled();
 });
 
+it('offers Open files before an artifact exists so the controller can prepare it', () => {
+  const onOpenFiles = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model({ artifactSessionId: undefined })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onOpenFiles={onOpenFiles}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  const openFiles = screen.getByRole('menuitem', { name: 'Open files' });
+  expect(openFiles).toBeEnabled();
+  fireEvent.click(openFiles);
+  expect(onOpenFiles).toHaveBeenCalledWith({
+    planId: 'plan-current',
+    artifactSessionId: undefined,
+    bundleNumber: 2,
+  });
+});
+
 it('keeps individual formats in an accessible options menu', () => {
   const onCopyMarkdown = vi.fn();
   const onCopyImage = vi.fn();
@@ -117,4 +142,55 @@ it('shows a gray copied state while leaving Copy Bundle available again', () => 
   expect(button).toHaveClass('is-copied');
   fireEvent.click(button);
   expect(onCopyFresh).toHaveBeenCalledOnce();
+});
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+it('portals the menu into its dialog, keeps it in bounds, and closes it without closing the dialog', async () => {
+  let triggerTop = 350;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.getAttribute('role') === 'dialog') return rect(50, 50, 540, 340);
+    if (this.getAttribute('aria-label') === 'Copy options') return rect(550, triggerTop, 36, 32);
+    if (this.getAttribute('role') === 'menu') return rect(0, 0, 160, 100);
+    return rect(0, 0, 0, 0);
+  });
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 600 });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 400 });
+  render(
+    <section role="dialog">
+      <PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />
+    </section>,
+  );
+
+  const dialog = screen.getByRole('dialog');
+  const options = screen.getByRole('button', { name: /options/i });
+  fireEvent.click(options);
+  const menu = screen.getByRole('menu', { name: 'Bundle 2 options' });
+  expect(dialog).toContainElement(menu);
+  await waitFor(() => expect(menu).toHaveStyle({ left: '426px', top: '244px' }));
+  expect(menu).toHaveClass('prompt-bundle-options-menu');
+
+  triggerTop = 100;
+  fireEvent.scroll(dialog);
+  await waitFor(() => expect(menu).toHaveStyle({ top: '138px' }));
+
+  fireEvent.keyDown(menu, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  expect(document.activeElement).toBe(options);
+
+  fireEvent.click(options);
+  fireEvent.pointerDown(document.body);
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
 });
