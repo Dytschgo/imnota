@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 async function fixture(status: ProjectData['status'] = 'active') {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-search-'));
+  const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-search-')));
   temporaryDirectories.push(workspace);
   const projectPath = path.join(workspace, status === 'active' ? 'alpha' : 'archive');
   const collectionId = '001-feedback';
