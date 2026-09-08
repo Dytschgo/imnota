@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Toolbar, type ToolbarProps } from './Toolbar';
 
@@ -16,9 +16,56 @@ function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('annotation toolbar', () => {
+  test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {
+    vi.useFakeTimers();
+    const setTool = vi.fn();
+    render(<Toolbar {...props({ setTool })} />);
+    const tool = screen.getByRole('button', { name: 'Text' });
+    const hover = () => {
+      fireEvent.pointerEnter(tool);
+      act(() => vi.advanceTimersByTime(320));
+    };
+    hover();
+    expect(screen.getByRole('tooltip')).toHaveTextContent('add editable text');
+    fireEvent.pointerDown(tool);
+    fireEvent.focus(tool);
+    fireEvent.pointerUp(tool);
+    fireEvent.click(tool);
+    expect(setTool).toHaveBeenCalledWith('text');
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.pointerLeave(tool);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    hover();
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    fireEvent.pointerLeave(tool);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.pointerEnter(tool);
+    fireEvent.pointerLeave(tool);
+    act(() => vi.advanceTimersByTime(320));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  test('supports keyboard discovery and Escape without losing focus or changing tools', () => {
+    vi.useFakeTimers();
+    const setTool = vi.fn();
+    render(<Toolbar {...props({ setTool })} />);
+    const tool = screen.getByRole('button', { name: 'Arrow' });
+    act(() => tool.focus());
+    act(() => vi.advanceTimersByTime(320));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Point to a specific interface detail.');
+    fireEvent.keyDown(tool, { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(tool).toHaveFocus();
+    expect(setTool).not.toHaveBeenCalled();
+  });
+
   test('keeps the six primary tools directly available and advanced tools in More', () => {
     const setTool = vi.fn();
     const { container } = render(<Toolbar {...props({ setTool })} />);
