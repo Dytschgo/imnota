@@ -4,7 +4,9 @@ export type AppearanceMode = 'system' | 'light' | 'dark';
 export type AccentPreset = 'graphite' | 'indigo' | 'emerald' | 'amber';
 export type GlassLevel = 'off' | 'subtle' | 'balanced' | 'strong';
 
-export const BACKDROP_PRESETS = ['graphite', 'indigo', 'emerald', 'amber'] as const;
+export const CHARACTER_BACKDROP_PRESETS = ['graphite', 'indigo', 'emerald', 'amber'] as const;
+export const GENERIC_BACKDROP_PRESETS = ['mist-light', 'sand-light', 'slate-dark', 'dusk-dark'] as const;
+export const BACKDROP_PRESETS = [...CHARACTER_BACKDROP_PRESETS, ...GENERIC_BACKDROP_PRESETS] as const;
 export type BackdropPreset = (typeof BACKDROP_PRESETS)[number];
 export const BACKGROUND_IMAGE_MAX_BYTES = 5_500_000;
 // Base64 expands binary data by roughly a third. The additional allowance covers the data URL header.

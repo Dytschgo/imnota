@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
+import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import {
@@ -1014,7 +1015,7 @@ async function exercisePreferencesAndChannel(
   if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
-  for (const preset of ['graphite', 'indigo', 'emerald', 'amber']) {
+  for (const preset of BACKDROP_PRESETS) {
     await driver.click({ selector: `[data-testid="backdrop-preset-${preset}"]` });
     await driver.evaluate(`new Promise((resolve, reject) => {
       const started = Date.now();
@@ -1033,6 +1034,25 @@ async function exercisePreferencesAndChannel(
       };
       check();
     })`);
+    if (GENERIC_BACKDROP_PRESETS.some((generic) => generic === preset)) {
+      const theme = preset.endsWith('-light') ? 'light' : 'dark';
+      await driver.click({ selector: `label:has(input[name="appearance-mode"][value="${theme}"])` });
+      await driver.waitFor({ selector: `:root[data-theme="${theme}"]` });
+      await driver.waitFor({
+        selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
+      });
+      const glass = theme === 'light' ? 'off' : 'strong';
+      await driver.click({ selector: `label:has(input[name="glass-level"][value="${glass}"])` });
+      const expectedBackground = profile.performanceClass === 'constrained' ? 'none' : 'active';
+      await driver.waitFor({
+        selector: `:root[data-glass-requested="${glass}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
+      });
+      await driver.waitFor({
+        selector: `input[name="glass-level"][value="${glass}"]:checked:not(:disabled)`,
+      });
+      if (artifactDirectory)
+        artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
+    }
   }
   await driver.evaluate(`(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180;

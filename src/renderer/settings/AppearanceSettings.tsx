@@ -1,7 +1,8 @@
 import { Check, ImagePlus, Monitor, Moon, Sparkles, Sun, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
-  BACKDROP_PRESETS,
+  CHARACTER_BACKDROP_PRESETS,
+  GENERIC_BACKDROP_PRESETS,
   BACKGROUND_IMAGE_MAX_BYTES,
   BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH,
   BACKGROUND_IMAGE_MAX_DIMENSION,
@@ -53,6 +54,10 @@ const BACKDROP_LABELS: Record<BackdropPreset, string> = {
   indigo: 'Indigo',
   emerald: 'Emerald',
   amber: 'Amber',
+  'mist-light': 'Mist light',
+  'sand-light': 'Sand light',
+  'slate-dark': 'Slate dark',
+  'dusk-dark': 'Dusk dark',
 };
 
 async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
@@ -488,28 +493,36 @@ export function AppearanceSettings({
             </small>
           </span>
         </label>
-        <div className="imnota-backdrop-presets" role="group" aria-label="Bundled backdrops">
-          <span>Bundled backdrops{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
-          <div>
-            {BACKDROP_PRESETS.map((preset) => {
-              const selected = activeBackdrop.image === backdropPresetValue(preset);
-              return (
-                <button
-                  type="button"
-                  className={`imnota-backdrop-preset ${selected ? 'active' : ''}`}
-                  key={preset}
-                  data-testid={`backdrop-preset-${preset}`}
-                  aria-pressed={selected}
-                  disabled={controlsDisabled}
-                  onClick={() => void updateBackdrop(backdropPresetValue(preset))}
-                >
-                  <img src={backdropPresetUrl(preset)} alt="" />
-                  <span>{BACKDROP_LABELS[preset]}</span>
-                </button>
-              );
-            })}
+        {[
+          { label: 'Generic', presets: GENERIC_BACKDROP_PRESETS },
+          { label: 'Characters', presets: CHARACTER_BACKDROP_PRESETS },
+        ].map(({ label, presets }) => (
+          <div key={label} className="imnota-backdrop-presets" role="group" aria-label={`${label} backdrops`}>
+            <span>
+              {label}
+              {value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}
+            </span>
+            <div>
+              {presets.map((preset) => {
+                const selected = activeBackdrop.image === backdropPresetValue(preset);
+                return (
+                  <button
+                    type="button"
+                    className={`imnota-backdrop-preset ${selected ? 'active' : ''}`}
+                    key={preset}
+                    data-testid={`backdrop-preset-${preset}`}
+                    aria-pressed={selected}
+                    disabled={controlsDisabled}
+                    onClick={() => void updateBackdrop(backdropPresetValue(preset))}
+                  >
+                    <img src={backdropPresetUrl(preset)} alt="" loading="lazy" />
+                    <span>{BACKDROP_LABELS[preset]}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ))}
         <div className="imnota-backdrop-presets" role="group" aria-label="Uploaded backdrops">
           <span>Your images{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
           <div>

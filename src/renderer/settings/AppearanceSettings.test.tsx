@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_IMAGE_MAX_BYTES, DEFAULT_APPEARANCE } from '../../shared/preferences';
 import { AppearanceSettings } from './AppearanceSettings';
@@ -77,6 +77,26 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('keeps the selected character and offers generic artwork as explicit choices', async () => {
+    const onChange = vi.fn();
+    renderSettings(onChange, 'preset:emerald');
+    const characters = screen.getByRole('group', { name: 'Characters backdrops' });
+    const generic = screen.getByRole('group', { name: 'Generic backdrops' });
+    expect(within(characters).getAllByRole('button')).toHaveLength(4);
+    expect(within(characters).getByRole('button', { name: 'Emerald' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(generic).getAllByRole('button')).toHaveLength(4);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(within(generic).getByRole('button', { name: 'Mist light' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ backgroundImage: 'preset:mist-light' }),
+      ),
+    );
+  });
+
   it('initializes legacy shared values before allowing one theme to use No image', async () => {
     const onChange = vi.fn();
     const legacy = {
