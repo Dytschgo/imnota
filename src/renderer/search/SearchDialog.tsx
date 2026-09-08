@@ -45,6 +45,10 @@ const kindIcons: Record<ProjectSearchResult['kind'], ReactNode> = {
   drawing: <Pencil size={16} aria-hidden="true" />,
 };
 
+function normalizeSearchQuery(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 export function SearchDialog({
   open,
   scope = 'active',
@@ -79,7 +83,7 @@ export function SearchDialog({
 
   useEffect(() => {
     if (!open) return;
-    const normalizedQuery = query.trim();
+    const normalizedQuery = normalizeSearchQuery(query);
     if (!normalizedQuery) {
       requestSequence.current += 1;
       setResponse(null);
@@ -135,7 +139,12 @@ export function SearchDialog({
   };
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (!results.length || loading || response?.query !== query.trim() || response.scope !== currentScope)
+    if (
+      !results.length ||
+      loading ||
+      response?.query !== normalizeSearchQuery(query) ||
+      response.scope !== currentScope
+    )
       return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();

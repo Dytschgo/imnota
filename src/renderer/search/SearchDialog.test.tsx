@@ -82,6 +82,21 @@ describe('SearchDialog', () => {
     expect(screen.queryByText('Stale result')).not.toBeInTheDocument();
   });
 
+  it('opens a result with Enter when the typed query contains repeated whitespace', async () => {
+    const searchProjects = vi.fn(async ({ query }: { query: string }) => response(query));
+    setSearch(searchProjects);
+    const onOpenResult = vi.fn();
+    render(<SearchDialog open onClose={vi.fn()} onOpenResult={onOpenResult} />);
+    const input = screen.getByTestId('global-search-input');
+    fireEvent.change(input, { target: { value: 'button  copy' } });
+    await act(async () => vi.advanceTimersByTime(180));
+    expect(searchProjects).toHaveBeenCalledWith({ query: 'button copy', scope: 'active', limit: 50 });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onOpenResult).toHaveBeenCalledWith(
+      expect.objectContaining({ itemId: 'shot-one', annotationId: 'annotation-one' }),
+    );
+  });
+
   it('does not let an earlier open action close a reopened dialog', async () => {
     setSearch(async ({ query }) => response(query));
     let finishOpen!: () => void;
