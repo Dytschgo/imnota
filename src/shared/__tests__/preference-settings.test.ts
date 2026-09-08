@@ -5,6 +5,7 @@ import {
   resolvePreferenceSettings,
 } from '../preference-settings';
 import { shouldShowOnboarding } from '../preferences';
+import { appearanceBackdrop } from '../preferences';
 
 describe('profile-aware preference settings', () => {
   it('identifies a new profile before defaults are written', () => {
@@ -101,6 +102,7 @@ describe('profile-aware preference settings', () => {
       backgroundImage: 'preset:indigo',
       backgroundOpacity: 0.55,
       useSameBackdropForBoth: true,
+      themeBackdropsInitialized: false,
       lightBackgroundImage: '',
       darkBackgroundImage: '',
     });
@@ -124,5 +126,33 @@ describe('profile-aware preference settings', () => {
     );
     expect(result.settings.appearance.lightBackgroundImage).toBe('preset:emerald');
     expect(result.settings.appearance.darkBackgroundImage).toBe('');
+  });
+
+  it('keeps an explicit per-theme No image after returning through shared mode', () => {
+    const base = resolvePreferenceSettings(undefined, false).settings;
+    const separate = mergePreferenceSettings(base, {
+      appearance: {
+        backgroundImage: 'preset:indigo',
+        backgroundOpacity: 0.55,
+        useSameBackdropForBoth: false,
+        themeBackdropsInitialized: true,
+        lightBackgroundImage: 'preset:indigo',
+        darkBackgroundImage: 'preset:indigo',
+        lightBackgroundOpacity: 0.55,
+        darkBackgroundOpacity: 0.55,
+      },
+    });
+    const lightOff = mergePreferenceSettings(separate, { appearance: { lightBackgroundImage: '' } });
+    expect(appearanceBackdrop(lightOff.appearance, 'light').image).toBe('');
+    expect(appearanceBackdrop(lightOff.appearance, 'dark').image).toBe('preset:indigo');
+
+    const shared = mergePreferenceSettings(lightOff, {
+      appearance: { useSameBackdropForBoth: true, backgroundImage: '' },
+    });
+    const restoredSeparate = mergePreferenceSettings(shared, {
+      appearance: { useSameBackdropForBoth: false },
+    });
+    expect(appearanceBackdrop(restoredSeparate.appearance, 'light').image).toBe('');
+    expect(appearanceBackdrop(restoredSeparate.appearance, 'dark').image).toBe('preset:indigo');
   });
 });

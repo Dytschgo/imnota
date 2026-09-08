@@ -77,6 +77,49 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('initializes legacy shared values before allowing one theme to use No image', async () => {
+    const onChange = vi.fn();
+    const legacy = {
+      ...DEFAULT_APPEARANCE,
+      glassLevel: 'balanced' as const,
+      backgroundImage: 'preset:indigo',
+      backgroundOpacity: 0.55,
+    };
+    const { rerender } = render(<AppearanceSettings value={legacy} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /same image and opacity/i }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          useSameBackdropForBoth: false,
+          themeBackdropsInitialized: true,
+          lightBackgroundImage: 'preset:indigo',
+          darkBackgroundImage: 'preset:indigo',
+        }),
+      ),
+    );
+
+    rerender(
+      <AppearanceSettings
+        value={{
+          ...legacy,
+          useSameBackdropForBoth: false,
+          themeBackdropsInitialized: true,
+          lightBackgroundImage: 'preset:indigo',
+          darkBackgroundImage: 'preset:indigo',
+          lightBackgroundOpacity: 0.55,
+          darkBackgroundOpacity: 0.55,
+        }}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'No image' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ darkBackgroundImage: '', lightBackgroundImage: 'preset:indigo' }),
+      ),
+    );
+  });
+
   it('keeps separate backdrop choices and opacity scoped to the effective theme', async () => {
     const onChange = vi.fn();
     const separate = {

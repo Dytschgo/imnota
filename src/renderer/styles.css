@@ -110,12 +110,20 @@ button:disabled {
 :root[data-background='active']:not([data-glass-level='off'])
   :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
   /* Uploaded images can have any luminance. Keep application chrome readable. */
-  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(var(--imnota-glass-blur)) saturate(var(--imnota-glass-saturation));
 }
 :root[data-theme='light'][data-background='active']:not([data-glass-level='off'])
   :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
   background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+:root[data-background='active']:not([data-glass-level='off']) :is(.library, .settings-view) {
+  /* These are the main reading surfaces; a wallpaper must never sit directly behind their text. */
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+:root[data-theme='light'][data-background='active']:not([data-glass-level='off'])
+  :is(.library, .settings-view) {
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
 }
 :root[data-desktop-glass='active'],
 :root[data-desktop-glass='active'] body,

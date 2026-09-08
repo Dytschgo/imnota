@@ -467,14 +467,14 @@ export function AppearanceSettings({
               } else {
                 void update({
                   useSameBackdropForBoth: false,
-                  ...(activeTheme === 'dark'
-                    ? {
-                        darkBackgroundImage: activeBackdrop.image,
-                        darkBackgroundOpacity: activeBackdrop.opacity,
-                      }
+                  ...(value.themeBackdropsInitialized
+                    ? {}
                     : {
+                        themeBackdropsInitialized: true,
                         lightBackgroundImage: activeBackdrop.image,
+                        darkBackgroundImage: activeBackdrop.image,
                         lightBackgroundOpacity: activeBackdrop.opacity,
+                        darkBackgroundOpacity: activeBackdrop.opacity,
                       }),
                 });
               }

@@ -35,6 +35,7 @@ export const preferenceSettingsSchema = z
           .default(''),
         backgroundOpacity: z.number().min(0).max(1).default(0.42),
         useSameBackdropForBoth: z.boolean().default(true),
+        themeBackdropsInitialized: z.boolean().default(false),
         lightBackgroundImage: z
           .string()
           .max(BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH)

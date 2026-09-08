@@ -42,6 +42,8 @@ export interface AppearancePreferences {
    * changing existing saved preferences.
    */
   useSameBackdropForBoth: boolean;
+  /** Marks that empty theme fields are intentional, rather than absent legacy data. */
+  themeBackdropsInitialized: boolean;
   lightBackgroundImage: string;
   darkBackgroundImage: string;
   lightBackgroundOpacity: number;
@@ -85,6 +87,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   backgroundImage: '',
   backgroundOpacity: 0.42,
   useSameBackdropForBoth: true,
+  themeBackdropsInitialized: false,
   lightBackgroundImage: '',
   darkBackgroundImage: '',
   lightBackgroundOpacity: 0.42,
@@ -101,14 +104,8 @@ export function appearanceBackdrop(
   if (appearance.useSameBackdropForBoth)
     return { image: appearance.backgroundImage, opacity: appearance.backgroundOpacity };
   return theme === 'dark'
-    ? {
-        image: appearance.darkBackgroundImage || appearance.backgroundImage,
-        opacity: appearance.darkBackgroundOpacity,
-      }
-    : {
-        image: appearance.lightBackgroundImage || appearance.backgroundImage,
-        opacity: appearance.lightBackgroundOpacity,
-      };
+    ? { image: appearance.darkBackgroundImage, opacity: appearance.darkBackgroundOpacity }
+    : { image: appearance.lightBackgroundImage, opacity: appearance.lightBackgroundOpacity };
 }
 
 export const DEFAULT_ONBOARDING: OnboardingPreferences = {
