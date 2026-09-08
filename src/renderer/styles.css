@@ -2281,6 +2281,91 @@ kbd {
   font-size: 12px;
   animation: toast-in 180ms ease-out;
 }
+
+.floating-update {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.floating-update-button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.floating-update-available .floating-update-button,
+.floating-update-downloaded .floating-update-button {
+  border-color: var(--imnota-accent);
+  color: var(--imnota-accent-hover);
+}
+.floating-update-error .floating-update-button {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.floating-update-percent,
+.floating-update-progress {
+  color: var(--ink-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.floating-update-popover {
+  position: absolute;
+  right: 0;
+  bottom: 52px;
+  display: none;
+  width: min(360px, calc(100vw - 40px));
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-2);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+.floating-update:hover .floating-update-popover,
+.floating-update:focus-within .floating-update-popover {
+  display: block;
+}
+.floating-update-popover > strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+.floating-update-popover p {
+  margin: 6px 0 10px;
+  line-height: 1.45;
+}
+.floating-update-notes {
+  max-height: 220px;
+  overflow: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.floating-update-notes strong {
+  color: var(--ink);
+}
+.floating-update-notes pre {
+  max-height: 150px;
+  margin: 6px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.45;
+}
+.floating-update-popover a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--imnota-accent-hover);
+}
 .toast svg {
   color: var(--success);
 }

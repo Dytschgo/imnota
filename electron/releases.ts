@@ -31,6 +31,7 @@ const releaseSchema = z.object({
   tag_name: z.string().max(120),
   draft: z.boolean(),
   prerelease: z.boolean(),
+  body: z.string().max(200_000).nullable().optional(),
   assets: z
     .array(
       z.object({
@@ -48,6 +49,7 @@ export interface ReleaseCandidate {
   assetUrls: string[];
   checksumUrl?: string;
   sourceChannel?: UpdateChannel;
+  releaseNotes?: string;
 }
 export function selectRelease(
   value: unknown,
@@ -104,6 +106,7 @@ export function selectRelease(
     assetUrls,
     checksumUrl: hasAsset((name) => name === 'SHA256SUMS.txt') ? `${feedUrl}SHA256SUMS.txt` : undefined,
     sourceChannel: channel,
+    releaseNotes: release.body ?? '',
   };
 }
 

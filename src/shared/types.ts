@@ -139,6 +139,8 @@ export interface UpdateStatus {
   installing?: boolean;
   channel?: UpdateChannel;
   releaseUrl?: string;
+  releaseNotes?: string;
+  sourceChannel?: UpdateChannel;
   manualDownload?: boolean;
   currentVersion?: string;
   state: UpdateState;

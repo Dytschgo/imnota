@@ -20,6 +20,7 @@ export interface SettingsViewProps {
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
   onReplayOnboarding?(): void;
+  onDownload?: () => Promise<void>;
   onInstall?: () => Promise<void>;
   onWorkspaceChanged?(): void | Promise<void>;
 }
@@ -38,6 +39,7 @@ export function SettingsView({
   onAppearanceChange,
   onShortcutChange = async () => undefined,
   onReplayOnboarding = () => undefined,
+  onDownload,
   onInstall,
   onWorkspaceChanged,
 }: SettingsViewProps) {
@@ -102,7 +104,7 @@ export function SettingsView({
           />
         </div>
         <div hidden={group !== 'Updates & about'}>
-          <UpdateControl onInstall={onInstall} />
+          <UpdateControl onInstall={onInstall} onDownload={onDownload} />
           <OnboardingSettings
             value={preferences.onboarding}
             onReplay={onReplayOnboarding}
