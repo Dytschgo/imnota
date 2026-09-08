@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe('AppShell navigation', () => {
-  it('places Back and Forward before the location toolbar and keeps Forward disabled initially', () => {
+  it('places Back before the location toolbar and hides Forward until history exists', () => {
     const onBack = vi.fn();
     render(
       <AppShell
@@ -68,10 +68,9 @@ describe('AppShell navigation', () => {
     );
 
     const back = screen.getByRole('button', { name: 'Back' });
-    const forward = screen.getByRole('button', { name: 'Forward' });
     const locationToolbar = document.querySelector('.crumbs')!;
     expect(back.compareDocumentPosition(locationToolbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(forward).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Forward' })).not.toBeInTheDocument();
     fireEvent.click(back);
     expect(onBack).toHaveBeenCalledOnce();
     expect(screen.getByTestId('search-trigger')).toHaveTextContent('Search');

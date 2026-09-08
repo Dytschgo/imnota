@@ -10,6 +10,7 @@ export type AppDialog = 'new-project' | 'edit-project' | 'shortcuts' | 'about' |
 export interface NewProjectDraft {
   name: string;
   description: string;
+  icon?: ProjectEditDraft['icon'];
 }
 
 export interface ProjectEditDraft extends NewProjectDraft {
@@ -88,6 +89,15 @@ export function AppDialogs({
             value={newProject.description}
             onChange={(event) => onNewProjectChange({ ...newProject, description: event.target.value })}
           />
+          <fieldset className="project-icon-picker">
+            <legend>Project icon</legend>
+            <div>{Object.entries(projectIcons).map(([key, Icon]) => (
+              <button key={key} type="button" aria-label={`Use ${key} icon`} aria-pressed={(newProject.icon ?? 'layers') === key}
+                onClick={() => onNewProjectChange({ ...newProject, icon: key as ProjectEditDraft['icon'] })}>
+                <Icon size={16} aria-hidden="true" />
+              </button>
+            ))}</div>
+          </fieldset>
           <div className="modal-actions">
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel

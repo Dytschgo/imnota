@@ -223,19 +223,19 @@ describe('feedback controls', () => {
     expect(localStorage.getItem('imnota:last-session')).toBeNull();
   });
 
-  it('saves current notes before opening and focusing project search', async () => {
+  it('saves current notes before opening global search', async () => {
     const { save, note } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Latest note' } });
     fireEvent.click(screen.getByTestId('search-trigger'));
-    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    const search = await screen.findByTestId('global-search-input');
     await waitFor(() => expect(search).toHaveFocus());
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({ screenshot: expect.objectContaining({ description: 'Latest note' }) }),
     );
-    expect(useAppStore.getState().snapshot).toBeNull();
+    expect(useAppStore.getState().snapshot).not.toBeNull();
   });
 
-  it('returns to the saved workspace location with Back after opening Search', async () => {
+  it('keeps the workspace location while global search is open', async () => {
     const loadProject = vi.fn(async () => snapshot);
     renderApp({
       listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
@@ -245,17 +245,12 @@ describe('feedback controls', () => {
     act(() => useAppStore.getState().setProject(snapshot));
 
     fireEvent.click(screen.getByTestId('search-trigger'));
-    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    const search = await screen.findByTestId('global-search-input');
     fireEvent.change(search, { target: { value: 'restored query' } });
-    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath));
     expect(useAppStore.getState().view).toBe('workspace');
-    expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath);
-    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
-    await waitFor(() => expect(useAppStore.getState().view).toBe('projects'));
-    expect(screen.getByRole('textbox', { name: 'Search projects' })).toHaveValue('restored query');
+    expect(loadProject).not.toHaveBeenCalled();
   });
 
   it('opens a collection from the full Recent page and records only a successful visit', async () => {
@@ -527,7 +522,7 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
     expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
     expect(note).toHaveValue('Unsaved note');
-    expect(screen.queryByRole('textbox', { name: 'Search projects' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('global-search-input')).not.toBeInTheDocument();
   });
 
   it('keeps context C visible when delayed context B finishes saving first', async () => {
@@ -769,11 +764,10 @@ describe('feedback controls', () => {
     expect(beforeUnload.defaultPrevented).toBe(false);
   });
 
-  it('keeps the editor available when project refresh fails', async () => {
+  it('keeps the editor available when global search opens', async () => {
     const { note, editingSnapshot } = await renderEditingProject();
-    vi.mocked(window.imnota.listProjects).mockRejectedValueOnce(new Error('Refresh unavailable'));
     fireEvent.click(screen.getByTestId('search-trigger'));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh unavailable');
+    await screen.findByTestId('global-search-dialog');
     expect(useAppStore.getState().snapshot).toBe(editingSnapshot);
     expect(note).toHaveValue('Original note');
   });
@@ -993,12 +987,12 @@ describe('feedback controls', () => {
     );
   });
 
-  it('focuses the existing library search without clearing its query', async () => {
+  it('opens global search without changing the library filter', async () => {
     renderApp();
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     fireEvent.change(search, { target: { value: '  design  ' } });
     fireEvent.click(screen.getByTestId('search-trigger'));
-    await waitFor(() => expect(search).toHaveFocus());
+    await screen.findByTestId('global-search-input');
     expect(search).toHaveValue('  design  ');
   });
 
@@ -1009,19 +1003,19 @@ describe('feedback controls', () => {
     await screen.findByTestId('settings-view');
     useAppStore.getState().set({ search: 'stale query' });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
-    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    const search = await screen.findByTestId('global-search-input');
     await waitFor(() => expect(search).toHaveFocus());
     expect(search).toHaveValue('');
   });
 
-  it('focuses search from Recent without changing the active library filter', async () => {
+  it('opens global search from Recent without changing the active library filter', async () => {
     renderApp();
     await screen.findByRole('button', { name: 'Recent' });
     fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
     const search = await screen.findByRole('textbox', { name: 'Search projects' });
     fireEvent.change(search, { target: { value: 'recent filter' } });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
-    await waitFor(() => expect(search).toHaveFocus());
+    await screen.findByTestId('global-search-input');
     expect(useAppStore.getState().view).toBe('recent');
     expect(search).toHaveValue('recent filter');
   });

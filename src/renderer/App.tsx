@@ -916,10 +916,6 @@ export default function App() {
       setDialogBusy(false);
     }
   }
-  type ProjectManagementBridge = {
-    updateProjectMetadata(input: { projectPath: string; expectedRevision: string; patch: ProjectEditDraft }): Promise<ProjectSnapshot>;
-    setProjectArchived(input: { projectPath: string; expectedRevision: string; archived: boolean }): Promise<ProjectSnapshot>;
-  };
   async function beginProjectEdit(projectPath: string) {
     if (!(await flushAll())) return;
     const snapshot = await window.imnota.loadProject(projectPath);
@@ -933,7 +929,7 @@ export default function App() {
     if (!editProject || !editProjectPath || !editProjectRevision) return;
     setDialogBusy(true);
     try {
-      const result = await (window.imnota as typeof window.imnota & ProjectManagementBridge).updateProjectMetadata({
+      const result = await window.imnota.updateProjectMetadata({
         projectPath: editProjectPath,
         expectedRevision: editProjectRevision,
         patch: editProject,
@@ -950,7 +946,7 @@ export default function App() {
       const loaded = expectedRevision ? null : await window.imnota.loadProject(projectPath);
       const revision = expectedRevision ?? loaded?.projectRevision;
       if (!revision) throw new Error('Project revision is unavailable.');
-      const result = await (window.imnota as typeof window.imnota & ProjectManagementBridge).setProjectArchived({ projectPath, expectedRevision: revision, archived });
+      const result = await window.imnota.setProjectArchived({ projectPath, expectedRevision: revision, archived });
       if (useAppStore.getState().snapshot?.projectPath === projectPath) useAppStore.getState().setProject(null);
       await refreshProjects();
       showToast(archived ? 'Project archived' : 'Project restored');

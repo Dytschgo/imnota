@@ -94,9 +94,11 @@ export function AppShell({
             <IconButton label="Back" disabled={!canGoBack} onClick={() => void onBack?.()}>
               <ArrowLeft size={16} aria-hidden="true" />
             </IconButton>
-            <IconButton label="Forward" disabled={!canGoForward} onClick={() => void onForward?.()}>
-              <ArrowRight size={16} aria-hidden="true" />
-            </IconButton>
+            {canGoForward && (
+              <IconButton label="Forward" onClick={() => void onForward?.()}>
+                <ArrowRight size={16} aria-hidden="true" />
+              </IconButton>
+            )}
           </div>
           <div className="crumbs">
             {!store.navigationOpen && (
