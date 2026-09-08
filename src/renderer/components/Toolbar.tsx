@@ -177,7 +177,14 @@ function ToolTooltip({
       ref={anchor}
       className="annotation-tooltip-anchor"
       onPointerEnter={show}
-      onPointerLeave={hide}
+      onPointerLeave={() => {
+        pointerFocus.current = false;
+        hide();
+      }}
+      onPointerCancel={() => {
+        pointerFocus.current = false;
+        hide();
+      }}
       onPointerDown={() => {
         pointerFocus.current = true;
         hide();

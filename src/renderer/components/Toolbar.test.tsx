@@ -52,6 +52,23 @@ describe('annotation toolbar', () => {
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
+  test.each(['outside release', 'pointer cancellation'])('restores keyboard tooltips after %s', (ending) => {
+    vi.useFakeTimers();
+    render(<Toolbar {...props()} />);
+    const tool = screen.getByRole('button', { name: 'Arrow' });
+    fireEvent.pointerDown(tool);
+    if (ending === 'outside release') {
+      fireEvent.pointerLeave(tool);
+      fireEvent.pointerUp(document.body);
+    } else {
+      fireEvent.pointerCancel(tool);
+    }
+    act(() => tool.focus());
+    act(() => vi.advanceTimersByTime(320));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Point to a specific interface detail.');
+    expect(tool).toHaveFocus();
+  });
+
   test('supports keyboard discovery and Escape without losing focus or changing tools', () => {
     vi.useFakeTimers();
     const setTool = vi.fn();
