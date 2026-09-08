@@ -640,17 +640,77 @@ async function exerciseNativeCanvas(
     },
   );
   await selectTool(driver, 'Arrow');
+  const imageRight = geometry.image.x + geometry.image.width;
+  const imageBottom = geometry.image.y + geometry.image.height;
+  const rightMargin = geometry.stage.x + geometry.stage.width - imageRight;
+  const bottomMargin = geometry.stage.y + geometry.stage.height - imageBottom;
+  const arrowTarget =
+    rightMargin >= 16
+      ? {
+          x: Math.round(imageRight + Math.min(24, rightMargin / 2)),
+          y: Math.round(geometry.image.y + geometry.image.height * 0.8),
+        }
+      : bottomMargin >= 16
+        ? {
+            x: Math.round(geometry.image.x + geometry.image.width * 0.9),
+            y: Math.round(imageBottom + Math.min(24, bottomMargin / 2)),
+          }
+        : null;
+  if (!arrowTarget)
+    throw new Error(
+      `Cropped image has no canvas margin for an outside-bound arrow: ${JSON.stringify(geometry)}.`,
+    );
   await driver.drag(
     {
       x: Math.round(geometry.image.x + geometry.image.width * 0.9),
       y: Math.round(geometry.image.y + geometry.image.height * 0.8),
     },
-    {
-      x: Math.round(geometry.image.x + geometry.image.width + 80),
-      y: Math.round(geometry.image.y + geometry.image.height + 50),
-    },
+    arrowTarget,
   );
   await delay(900);
+}
+
+async function assertNativeCanvasAnnotationsPersisted(
+  driver: NativeUiDriver,
+  projectPath: string,
+): Promise<void> {
+  await driver.evaluate(`(async () => {
+    const started = Date.now();
+    let diagnostic = 'annotations unavailable';
+    while (Date.now() - started < 10000) {
+      const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+      const screenshot = snapshot.project.screenshots[0];
+      const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot });
+      const annotations = content.annotations;
+      const crops = annotations.filter((annotation) => annotation.kind === 'crop');
+      const crop = crops[crops.length - 1];
+      const blur = annotations.find((annotation) => annotation.kind === 'blur');
+      const text = annotations.find(
+        (annotation) => annotation.kind === 'text' && annotation.text === 'Trusted pointer note'
+      );
+      const arrow = annotations.find((annotation) => annotation.kind === 'arrow');
+      const points = arrow?.points;
+      const endpoint = arrow && Array.isArray(points) && points.length >= 4
+        ? { x: arrow.x + points[points.length - 2], y: arrow.y + points[points.length - 1] }
+        : null;
+      const outsideCrop = Boolean(
+        crop && endpoint &&
+        (endpoint.x < crop.x || endpoint.x > crop.x + crop.width ||
+          endpoint.y < crop.y || endpoint.y > crop.y + crop.height)
+      );
+      if (crop && blur && text && arrow && endpoint && outsideCrop) return true;
+      diagnostic = JSON.stringify({
+        kinds: annotations.map((annotation) => annotation.kind),
+        crop,
+        arrow,
+        endpoint,
+        outsideCrop,
+        trustedText: text?.text ?? null
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Native canvas annotations did not persist before fixture replacement: ' + diagnostic);
+  })()`);
 }
 
 async function installDeterministicExportAnnotations(
@@ -1632,6 +1692,7 @@ export async function runSmokeWorkflow(
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
+  await assertNativeCanvasAnnotationsPersisted(driver, projectPath);
   assertions.push(
     'trusted pan, crop, redaction, outside-bound arrow creation, double-click, Enter and Escape',
   );
