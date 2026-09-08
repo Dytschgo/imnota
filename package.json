@@ -26,7 +26,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run && node --test scripts/dev-electron.test.mjs scripts/smoke-process.node.test.mjs scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs scripts/update-macos.test.mjs scripts/visual-regression.test.mjs",
+    "test": "vitest run && corepack pnpm test:scripts",
     "test:visual": "node scripts/visual-regression.mjs",
     "test:share-contract": "vitest run --config vitest.share.config.ts",
     "test:watch": "vitest",
@@ -35,7 +35,9 @@
     "package:linux": "corepack pnpm build && electron-builder --linux --publish never",
     "package:win": "corepack pnpm build && electron-builder --win --publish never",
     "package:mac": "corepack pnpm build && electron-builder --mac --universal --publish never",
-    "package:all": "corepack pnpm build && electron-builder --linux --win --mac --publish never"
+    "package:all": "corepack pnpm build && electron-builder --linux --win --mac --publish never",
+    "test:scripts": "node --test scripts/dev-electron.test.mjs scripts/smoke-process.node.test.mjs scripts/release-readiness.test.mjs scripts/release-channel.test.mjs scripts/stage-release-assets.test.mjs scripts/update-macos.test.mjs scripts/visual-regression.test.mjs",
+    "test:platform": "vitest run --config vitest.platform.config.ts && corepack pnpm test:scripts"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
