@@ -189,6 +189,27 @@ describe('HostedShareClient request boundary', () => {
     });
   });
 
+  it('accepts multiline Unicode structured Markdown with automatic pairing', async () => {
+    const transport = vi.fn<HostedShareFetch>(async (target) =>
+      target.endsWith('/api/pairing')
+        ? json({ uploadToken: 'z'.repeat(43), expiresAt: '2099-01-01T00:00:00.000Z' }, 201)
+        : json(receipt(), 201),
+    );
+    const { root } = await fixture();
+    const markdown = '# Grüezi\r\n\r\n\t– multilingual prompt\n\n```txt\n😀\n```';
+    await new HostedShareClient(root, async () => undefined, transport).create(
+      { ...upload(), pairingToken: '' },
+      {
+        ...artifacts(),
+        markdown,
+        bundles: [{ bundleNumber: 1, markdown, imageFilename: 'prompt-001.png' }],
+      },
+    );
+    expect(JSON.parse(String((transport.mock.calls[1]?.[1] as RequestInit).body)).bundles[0].markdown).toBe(
+      markdown,
+    );
+  });
+
   it('uses the injected transport for upload, receipt recovery, and revocation', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-transport-'));
     roots.push(root);

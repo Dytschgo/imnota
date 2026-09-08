@@ -83,6 +83,19 @@ function safeText(value: unknown, maximum: number, allowEmpty = false): value is
   );
 }
 
+function safeMarkdown(value: unknown, maximumBytes: number): value is string {
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > maximumBytes)
+    return false;
+  return Array.from(value).every((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return (
+      codePoint !== 0 &&
+      (codePoint > 31 || character === '\t' || character === '\n' || character === '\r') &&
+      (codePoint < 127 || codePoint > 159)
+    );
+  });
+}
+
 function validTimestamp(value: unknown): value is string {
   if (typeof value !== 'string' || !ISO_TIMESTAMP.test(value)) return false;
   const timestamp = Date.parse(value);
@@ -527,7 +540,7 @@ export class HostedShareClient {
           bundle.bundleNumber < 1 ||
           bundle.bundleNumber > 999 ||
           bundleNumbers.has(bundle.bundleNumber) ||
-          !safeText(bundle.markdown, MAX_MARKDOWN_BYTES) ||
+          !safeMarkdown(bundle.markdown, MAX_MARKDOWN_BYTES) ||
           (bundle.imageFilename !== null && !SAFE_PNG.test(bundle.imageFilename))
         )
           throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
