@@ -293,7 +293,13 @@ export function Toolbar({
             onClick={() => setTool(definition.id)}
           />
         ))}
-        <div className="annotation-more" ref={moreRef}>
+        <div
+          className="annotation-more"
+          ref={moreRef}
+          onBlur={(event) => {
+            if (!moreRef.current?.contains(event.relatedTarget as Node | null)) closeMoreMenu();
+          }}
+        >
           <span className="annotation-tooltip-anchor">
             <IconButton
               ref={moreTriggerRef}

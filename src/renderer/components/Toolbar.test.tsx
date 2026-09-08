@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, test, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Toolbar, type ToolbarProps } from './Toolbar';
 
 function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
@@ -15,6 +15,8 @@ function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
     ...overrides,
   };
 }
+
+afterEach(cleanup);
 
 describe('annotation toolbar', () => {
   test('keeps the six primary tools directly available and advanced tools in More', () => {
@@ -72,6 +74,29 @@ describe('annotation toolbar', () => {
     expect(setTool).toHaveBeenCalledWith('eraser');
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('closes More when Tab or Shift+Tab moves focus outside the popup', async () => {
+    const { container } = render(<Toolbar {...props()} />);
+    const toolbar = within(container);
+    const trigger = toolbar.getByRole('button', { name: 'More annotation tools' });
+    const select = toolbar.getByRole('button', { name: 'Select / Move' });
+    const undo = toolbar.getByRole('button', { name: 'Undo' });
+
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    await waitFor(() => expect(redaction).toHaveFocus());
+    fireEvent.keyDown(redaction, { key: 'Tab' });
+    fireEvent.blur(redaction, { relatedTarget: undo });
+    await waitFor(() => expect(toolbar.queryByRole('menu', { name: 'More annotation tools' })).toBeNull());
+
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    fireEvent.keyDown(trigger, { key: 'Tab', shiftKey: true });
+    fireEvent.blur(trigger, { relatedTarget: select });
+    await waitFor(() => expect(toolbar.queryByRole('menu', { name: 'More annotation tools' })).toBeNull());
   });
 
   test('renders the optional ten-color quick palette and reports selection', () => {
