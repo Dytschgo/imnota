@@ -130,7 +130,11 @@ export function AppShell({
                 {saveState && (
                   <span className={`save-state ${saveState}`} data-testid="save-state" role="status">
                     <span className="save-dot" aria-hidden="true" />
-                    {saveState === 'saving' ? 'Saving�' : saveState === 'error' ? 'Save failed' : 'Saved'}
+                    {saveState === 'saving'
+                      ? 'Saving\u2026'
+                      : saveState === 'error'
+                        ? 'Save failed'
+                        : 'Saved'}
                   </span>
                 )}
                 {saveState === 'error' && onRetrySave && (
