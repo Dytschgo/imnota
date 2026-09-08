@@ -10,11 +10,8 @@ describe('SettingsView category navigation', () => {
   it('starts on Appearance and keeps its own category when uncontrolled', () => {
     render(<SettingsView />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
-    fireEvent.click(screen.getByRole('button', { name: 'Workspace & privacy' }));
-    expect(screen.getByRole('button', { name: 'Workspace & privacy' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
+    expect(screen.getByRole('button', { name: 'Workspace' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('uses the controlled category restored by navigation and reports category selections', () => {

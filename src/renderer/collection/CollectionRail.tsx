@@ -61,6 +61,8 @@ export function CollectionControls({
   const pickerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
+  const collectionItems = project ? orderedCollectionItems(project, current?.id ?? '') : [];
+  const includedItemCount = collectionItems.filter((item) => item.includeInExport).length;
   const selectedIndex = Math.max(
     0,
     collections.findIndex((collection) => collection.id === current?.id),
@@ -154,6 +156,12 @@ export function CollectionControls({
     <div className="round-controls">
       <div className="collection-control-heading">
         <span className="field-label">Collection</span>
+        <span
+          className="collection-count"
+          aria-label={`${includedItemCount} included items out of ${collectionItems.length}`}
+        >
+          {includedItemCount}/{collectionItems.length} included
+        </span>
         <IconButton
           data-testid="new-collection"
           className="new-collection-button"
@@ -183,7 +191,7 @@ export function CollectionControls({
               event.key === 'End'
             ) {
               event.preventDefault();
-              openPicker(selectedIndex);
+              openPicker(event.key === 'Home' || event.key === 'ArrowDown' ? 0 : collections.length - 1);
             } else if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
               if (pickerOpen) closePicker();
@@ -217,6 +225,9 @@ export function CollectionControls({
             className="collection-picker-menu"
             role="listbox"
             aria-label="Collections"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) closePicker();
+            }}
           >
             {collections.map((collection, index) => (
               <button
@@ -263,11 +274,11 @@ export function CollectionControls({
         )}
       </div>
       <details className="collection-context">
-        <summary>Overall context{current.overallContext.trim() ? ' · Added' : ''}</summary>
+        <summary>Bundle context{current.overallContext.trim() ? ' · Added' : ''}</summary>
         <TextArea
           aria-label="Overall context"
           rows={4}
-          placeholder="Context shared by every item in this collection"
+          placeholder="What should the agent understand about this collection?"
           value={current.overallContext}
           onChange={(event) => updateOverallContext(event.target.value)}
           onBlur={() => {
@@ -336,9 +347,65 @@ export function CollectionRail({
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addMenuFocusedIndex, setAddMenuFocusedIndex] = useState(0);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const addMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const addMenuId = useId().replace(/:/g, '');
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
+  const addItemOptions = [
+    {
+      id: 'screenshot',
+      label: 'Screenshot',
+      description: 'Import an image into this collection',
+      icon: Upload,
+      run: onImport,
+    },
+    ...(onAddContent
+      ? [
+          {
+            id: 'drawing',
+            label: 'Drawing',
+            description: 'Sketch a visual explanation',
+            icon: Pencil,
+            run: () => void onAddContent('drawing'),
+          },
+          {
+            id: 'text',
+            label: 'Text block',
+            description: 'Add Markdown to the prompt sequence',
+            icon: FileText,
+            run: () => void onAddContent('text'),
+          },
+        ]
+      : []),
+  ];
+
+  const closeAddMenu = (restoreFocus = false) => {
+    setAddMenuOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => addMenuTriggerRef.current?.focus());
+  };
+
+  const openAddMenu = (focusedIndex = 0) => {
+    setAddMenuFocusedIndex(Math.min(Math.max(focusedIndex, 0), addItemOptions.length - 1));
+    setAddMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const closeMenu = (event: PointerEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) closeAddMenu();
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    const frame = window.requestAnimationFrame(() => addMenuItemRefs.current[addMenuFocusedIndex]?.focus());
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [addMenuFocusedIndex, addMenuOpen]);
 
   async function reorderScreenshot(targetIndex: number, sourceIndex = dragIndex) {
     if (sourceIndex === null || sourceIndex === targetIndex || !project) return;
@@ -417,7 +484,12 @@ export function CollectionRail({
       data-testid="collection-rail"
     >
       <div className="rail-heading">
-        {store.leftPanelOpen && <strong>{project?.name}</strong>}
+        {store.leftPanelOpen && (
+          <div>
+            <span className="eyebrow">Evidence collection</span>
+            <strong>{project?.name}</strong>
+          </div>
+        )}
         <IconButton
           label={store.leftPanelOpen ? 'Collapse collections panel' : 'Expand collections panel'}
           onClick={() => store.set({ leftPanelOpen: !store.leftPanelOpen })}
@@ -492,6 +564,21 @@ export function CollectionRail({
                           ? 'Drawing'
                           : 'Markdown'}
                     </small>
+                    <span
+                      className={`item-inclusion ${item.includeInExport ? 'included' : 'excluded'}`}
+                      aria-label={
+                        item.includeInExport
+                          ? 'Included in the next prompt bundle'
+                          : 'Excluded from the next prompt bundle'
+                      }
+                      title={
+                        item.includeInExport
+                          ? 'Included in the next prompt bundle'
+                          : 'Excluded from the next prompt bundle'
+                      }
+                    >
+                      {item.includeInExport ? 'Included' : 'Excluded'}
+                    </span>
                   </span>
                 </button>
                 <IconButton
@@ -514,30 +601,91 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
-            {onAddContent && (
-              <>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('drawing')}
+            <div className="add-item-menu" ref={addMenuRef}>
+              <Button
+                ref={addMenuTriggerRef}
+                data-testid="add-item-trigger"
+                variant="primary"
+                disabled={collection?.archived}
+                aria-expanded={addMenuOpen}
+                aria-haspopup="menu"
+                aria-controls={addMenuId}
+                onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'Home') {
+                    event.preventDefault();
+                    openAddMenu(0);
+                  } else if (event.key === 'ArrowUp' || event.key === 'End') {
+                    event.preventDefault();
+                    openAddMenu(addItemOptions.length - 1);
+                  } else if (event.key === 'Escape' && addMenuOpen) {
+                    event.preventDefault();
+                    closeAddMenu(true);
+                  }
+                }}
+              >
+                <Plus size={15} aria-hidden="true" />
+                Add item
+                <ChevronDown size={14} aria-hidden="true" />
+              </Button>
+              {addMenuOpen && (
+                <div
+                  className="add-item-popover"
+                  id={addMenuId}
+                  role="menu"
+                  aria-label="Add item"
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) closeAddMenu();
+                  }}
                 >
-                  <Pencil size={15} aria-hidden="true" />
-                  Add drawing
-                </Button>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('text')}
-                >
-                  <FileText size={15} aria-hidden="true" />
-                  Add text
-                </Button>
-              </>
-            )}
-            <Button variant="soft" disabled={collection?.archived} onClick={onImport}>
-              <Upload size={15} aria-hidden="true" />
-              Add screenshots
-            </Button>
+                  {addItemOptions.map((option, index) => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.id}
+                        ref={(element) => {
+                          addMenuItemRefs.current[index] = element;
+                        }}
+                        type="button"
+                        role="menuitem"
+                        tabIndex={index === addMenuFocusedIndex ? 0 : -1}
+                        data-testid={`add-item-${option.id}`}
+                        onClick={() => {
+                          option.run();
+                          closeAddMenu();
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex((current) => (current + 1) % addItemOptions.length);
+                          } else if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(
+                              (current) => (current - 1 + addItemOptions.length) % addItemOptions.length,
+                            );
+                          } else if (event.key === 'Home') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(0);
+                          } else if (event.key === 'End') {
+                            event.preventDefault();
+                            setAddMenuFocusedIndex(addItemOptions.length - 1);
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault();
+                            closeAddMenu(true);
+                          }
+                        }}
+                      >
+                        <Icon size={15} aria-hidden="true" />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <Button variant="ghost" disabled={collection?.archived} onClick={() => void onPaste()}>
               <Clipboard size={15} aria-hidden="true" />
               Paste from clipboard

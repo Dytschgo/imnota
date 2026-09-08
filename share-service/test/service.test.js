@@ -151,6 +151,12 @@ function v1Fingerprint(upload, expiresInDays = 1) {
 test('health and pairing pages use restrictive security headers', async (t) => {
   const instance = await fixture();
   t.after(() => instance.destroy());
+  const home = await instance.api.get('/').expect(200);
+  assertMetaCsp(home.text);
+  assert.match(home.text, /href="\/new"/);
+  assert.match(home.text, /Keep the source local/);
+  assert.match(home.headers['x-robots-tag'], /noindex/);
+  assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM pairings').get().count, 0);
   const health = await instance.api.get('/health').expect(200);
   assert.deepEqual(health.body, {
     status: 'ok',

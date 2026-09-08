@@ -152,7 +152,7 @@ test('owner sessions enforce idle and absolute expiry and key rotation invalidat
   assert.equal(reopened.db.prepare('SELECT COUNT(*) AS count FROM owner_sessions').get().count, 0);
 });
 
-test('owner list exposes only bounded metadata and honest aggregate request counts', async (t) => {
+test('owner readouts expose only bounded metadata and honest aggregate request counts', async (t) => {
   const instance = await fixture();
   t.after(() => instance.destroy());
   const created = await createShare(instance);
@@ -184,7 +184,12 @@ test('owner list exposes only bounded metadata and honest aggregate request coun
     created.body.byteSize + Buffer.byteLength('# Prompt\n\nDetails'),
   );
   assert.equal(listing.body.shares[0].storedBytes, listing.body.totals.storedBytes);
+  assert.equal(listing.body.shares[0].title, 'Private dashboard row');
+  assert.equal(listing.body.shares[0].artifactCount, 3);
   const serialized = JSON.stringify(listing.body);
+  assert.equal(listing.body.shares[0].reference, `share-${created.body.id.slice(-6)}`);
+  assert.equal('title' in listing.body.shares[0], true);
+  assert.equal(serialized.includes('Private dashboard row'), true);
   assert.equal(serialized.includes(publicToken), false);
   assert.equal(serialized.includes(created.body.managementToken), false);
   for (const privateName of [
@@ -196,6 +201,54 @@ test('owner list exposes only bounded metadata and honest aggregate request coun
     'uploadsDir',
   ])
     assert.equal(serialized.includes(privateName), false);
+});
+
+test('owner artifact counts include the mandatory Markdown artifact', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const paired = await instance.api.post('/api/pairing').set('Origin', origin).send({}).expect(201);
+  await instance.api
+    .post('/api/shares')
+    .set('Authorization', `Bearer ${paired.body.uploadToken}`)
+    .send({ requestId: randomUUID(), title: 'Text-only share', markdown: 'Only Markdown', images: [] })
+    .expect(201);
+  const cookie = await login(instance);
+  const listing = await instance.api.get('/api/owner/shares').set('Cookie', cookie).expect(200);
+  assert.equal(listing.body.shares[0].artifactCount, 1);
+});
+
+test('owner overview and pairing readouts require a session and minimize returned data', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const paired = await instance.api.post('/api/pairing').set('Origin', origin).send({}).expect(201);
+  const created = await createShare(instance, 'Owner-only title must not be returned');
+  await instance.api.get('/api/owner/overview').expect(401);
+  await instance.api.get('/api/owner/pairings').expect(401);
+  const cookie = await login(instance);
+  const overview = await instance.api.get('/api/owner/overview').set('Cookie', cookie).expect(200);
+  const pairings = await instance.api.get('/api/owner/pairings').set('Cookie', cookie).expect(200);
+  assert.deepEqual(Object.keys(overview.body).sort(), [
+    'checkedAt',
+    'pairing',
+    'retention',
+    'service',
+    'shares',
+    'storage',
+  ]);
+  assert.equal(overview.body.shares.active, 1);
+  assert.equal(overview.body.pairing.waiting, 1);
+  assert.match(pairings.body.pairings[0].reference, /^pair-[0-9a-f]{6}$/);
+  assert.equal('id' in pairings.body.pairings[0], false);
+  const serialized = JSON.stringify({ overview: overview.body, pairings: pairings.body });
+  for (const forbidden of [
+    created.body.url,
+    created.body.managementToken,
+    paired.body.uploadToken,
+    'Owner-only title must not be returned',
+    'uploadsDir',
+    'token_hash',
+  ])
+    assert.equal(serialized.includes(forbidden), false);
 });
 
 test('owner revocation requires the session, exact origin, and derived CSRF token', async (t) => {
@@ -229,7 +282,9 @@ test('persistent owner throttle is bounded and owner page contains login and das
   const page = await instance.api.get('/owner').expect(200);
   assert.match(page.text, /data-login/);
   assert.match(page.text, /data-dashboard/);
-  assert.match(page.text, /do not identify people/);
+  assert.match(page.text, /data-detail-dialog/);
+  assert.match(page.text, /Connecting to the private owner console/);
+  assert.match(page.text, /Request totals count successful service requests/);
   const wrong = randomBytes(32).toString('base64url');
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (attempt === 1) instance.advance(999);

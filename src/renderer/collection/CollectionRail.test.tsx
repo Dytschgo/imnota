@@ -256,8 +256,77 @@ describe('CollectionRail', () => {
     expect(
       useAppStore.getState().snapshot?.project.contentItems?.find((item) => item.id === 'text')?.position,
     ).toBe(0);
-    expect(screen.getByRole('button', { name: 'Add drawing' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add text' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(screen.getByRole('menu', { name: 'Add item' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: /Drawing/ })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: /Text block/ })).toBeVisible();
+  });
+
+  it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {
+    const onImport = vi.fn();
+    const onAddContent = vi.fn();
+    render(<CollectionRail {...props({ onImport, onAddContent })} />);
+
+    const trigger = screen.getByRole('button', { name: 'Add item' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const screenshot = await screen.findByTestId('add-item-screenshot');
+    await waitFor(() => expect(screenshot).toHaveFocus());
+
+    fireEvent.keyDown(screenshot, { key: 'End' });
+    const text = screen.getByTestId('add-item-text');
+    await waitFor(() => expect(text).toHaveFocus());
+    fireEvent.keyDown(text, { key: 'Home' });
+    await waitFor(() => expect(screenshot).toHaveFocus());
+    fireEvent.keyDown(screenshot, { key: 'ArrowUp' });
+    await waitFor(() => expect(text).toHaveFocus());
+    fireEvent.keyDown(text, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    await waitFor(() => expect(screen.getByTestId('add-item-text')).toHaveFocus());
+    fireEvent.click(screen.getByTestId('add-item-drawing'));
+    expect(onAddContent).toHaveBeenCalledWith('drawing');
+    expect(onImport).not.toHaveBeenCalled();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it.each([false, true])(
+    'closes both popovers after focus leaves with Tab (reverse=%s)',
+    async (shiftKey) => {
+      render(<CollectionRail {...props()} />);
+      const destination = screen.getByRole('button', { name: /Paste from clipboard/i });
+      for (const [trigger, role] of [
+        [screen.getByRole('button', { name: 'Collection' }), 'listbox'],
+        [screen.getByRole('button', { name: 'Add item' }), 'menu'],
+      ] as const) {
+        fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+        const popup = await screen.findByRole(role);
+        await waitFor(() => expect(popup.contains(document.activeElement)).toBe(true));
+        fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey });
+        // jsdom does not perform browser Tab traversal: model the resulting focus move.
+        act(() => destination.focus());
+        expect(screen.queryByRole(role)).not.toBeInTheDocument();
+        expect(trigger).toHaveAttribute('aria-expanded', 'false');
+        expect(destination).toHaveFocus();
+      }
+    },
+  );
+
+  it('opens collection keyboard endpoints at the requested option', async () => {
+    render(<CollectionRail {...props()} />);
+    const trigger = screen.getByRole('button', { name: 'Collection' });
+    for (const [key, name] of [
+      ['End', 'Collection B'],
+      ['Home', 'Collection A'],
+      ['ArrowUp', 'Collection B'],
+    ] as const) {
+      fireEvent.keyDown(trigger, { key });
+      await waitFor(() => expect(screen.getByRole('option', { name })).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      await waitFor(() => expect(trigger).toHaveFocus());
+    }
   });
 
   it('excludes a text block without altering screenshots', async () => {
@@ -317,7 +386,7 @@ describe('CollectionRail', () => {
     });
     expect(onSnapshot).toHaveBeenNthCalledWith(1, expect.any(Object), 'alpha');
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
-    expect(screen.getByRole('button', { name: /add screenshots/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore' }));

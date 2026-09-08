@@ -14,10 +14,10 @@ import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 
 export const SETTINGS_CATEGORIES = [
   'Appearance',
-  'Editing & shortcuts',
-  'Workspace & privacy',
+  'Shortcuts',
+  'Workspace',
   'Sharing',
-  'Updates & help',
+  'Updates & about',
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
@@ -75,8 +75,12 @@ export function SettingsView({
   return (
     <section className="settings-view" data-testid="settings-view">
       <div className="settings-heading">
+        <span className="eyebrow">Local workspace</span>
         <h1>Settings</h1>
-        <p>Preferences stay on this device. Project files remain in your local workspace.</p>
+        <p>
+          Control the app, workspace, shortcuts, and sharing defaults without moving project files out of your
+          local workspace.
+        </p>
       </div>
       <nav className="settings-navigation" aria-label="Settings categories">
         {SETTINGS_CATEGORIES.map((name) => (
@@ -109,14 +113,14 @@ export function SettingsView({
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Editing & shortcuts'}>
+        <div hidden={group !== 'Shortcuts'}>
           <ShortcutSettings
             value={preferences.shortcuts}
             onChange={onShortcutChange}
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Updates & help'}>
+        <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} onDownload={onDownload} />
           <OnboardingSettings
             value={preferences.onboarding}
@@ -124,7 +128,7 @@ export function SettingsView({
             disabled={savingPreferences}
           />
         </div>
-        <div hidden={group !== 'Editing & shortcuts'}>
+        <div hidden={group !== 'Shortcuts'}>
           <section className="settings-section" aria-labelledby="behaviour-title">
             <h2 id="behaviour-title">Behaviour</h2>
             <label className="field">
@@ -164,7 +168,7 @@ export function SettingsView({
             </label>
           </section>
         </div>
-        <div hidden={group !== 'Workspace & privacy'}>
+        <div hidden={group !== 'Workspace'}>
           <section className="settings-section" aria-labelledby="workspace-settings-title">
             <h2 id="workspace-settings-title">Workspace</h2>
             <div className="workspace-path">

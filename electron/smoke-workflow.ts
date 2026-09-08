@@ -1076,7 +1076,7 @@ async function exercisePreferencesAndChannel(
   await driver.click({ text: 'No image', exact: true });
   await driver.waitFor({ selector: ':root[data-desktop-glass="off"][data-background="none"]' });
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
-  await driver.click({ text: 'Updates & help', exact: true });
+  await driver.click({ text: 'Updates & about', exact: true });
   const chooseNightly = async () => {
     await driver.waitFor(channelSelect);
     // Standard DOM option selection avoids OS-owned popup menus outside webContents.

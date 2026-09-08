@@ -392,7 +392,7 @@ function markdownRenderer() {
 }
 
 function unavailablePage() {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Share unavailable · Imnota</title><link rel="stylesheet" href="/static/share.css"></head><body><main><p class="eyebrow">Imnota shared prompt</p><h1>Share unavailable</h1><p>This link does not exist, has expired, or was revoked.</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">${metaCspTag}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Share unavailable · Imnota</title><link rel="icon" href="/static/imnota-logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/share.css"></head><body><header class="service-header"><a class="brand" href="/"><img class="brand-mark" src="/static/imnota-logo.svg" width="32" height="32" alt="" />imnota<span class="brand-context">/ sharing</span></a></header><main><p class="eyebrow">Imnota shared prompt</p><h1>Share unavailable</h1><p>This link does not exist, has expired, or was revoked.</p><p>Ask the sender for a fresh link, or check that you copied the complete address.</p><a class="button secondary" href="/">About Imnota sharing</a></main></body></html>`;
 }
 
 export function createService(overrides = {}) {
@@ -455,6 +455,11 @@ export function createService(overrides = {}) {
       });
     }),
   );
+
+  app.get('/', publicLimiter, (_request, response) => {
+    response.set('X-Robots-Tag', 'noindex, nofollow');
+    response.sendFile(path.join(staticDir, 'index.html'));
+  });
 
   app.get('/new', publicLimiter, (_request, response) => {
     response.set('X-Robots-Tag', 'noindex, nofollow');

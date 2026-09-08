@@ -253,17 +253,30 @@ export function Workspace(props: WorkspaceProps) {
             annotationColor={props.annotationColor}
           />
         ) : (
-          <EmptyState
-            icon={<ImagePlus size={22} aria-hidden="true" />}
-            title="Start your collection"
-            description="Add a drawing, write some text, or drop a screenshot here."
-            action={
-              <Button variant="primary" onClick={props.onImport}>
-                <Upload size={16} aria-hidden="true" />
-                Add screenshot
-              </Button>
-            }
-          />
+          <div className="workspace-empty-state">
+            <EmptyState
+              icon={<ImagePlus size={22} aria-hidden="true" />}
+              title="Start with the evidence"
+              description="Import a screenshot, then add the context that makes the next prompt useful."
+              action={
+                <Button variant="primary" onClick={props.onImport}>
+                  <Upload size={16} aria-hidden="true" />
+                  Add screenshot
+                </Button>
+              }
+            />
+            <ol className="workspace-empty-steps" aria-label="Collection workflow">
+              <li>
+                <span>1</span> Add evidence
+              </li>
+              <li>
+                <span>2</span> Mark what matters
+              </li>
+              <li>
+                <span>3</span> Copy a prompt bundle
+              </li>
+            </ol>
+          </div>
         )}
       </div>
       {store.rightPanelOpen && (

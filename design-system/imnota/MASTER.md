@@ -64,6 +64,9 @@ The shell is a desktop workspace with side navigation, a collection rail, the ca
 - Use consistent 4, 8, 12, 16, 24 and 32 px spacing steps.
 - Keep rails compact and scroll long screenshot lists inside their region.
 - Make the active collection, active screenshot and active annotation tool unambiguous.
+- Treat the collection rail as the bundle outline: show item type plus an explicit included/excluded label, and reserve the cyan relationship line for the selected evidence.
+- Keep one persistent workspace handoff action (`Copy prompt bundle`) in the top bar. Other export and sharing choices remain discoverable but secondary.
+- Group the canvas tools by task (`Annotate`, `Transform`, `View`) and keep irreversible removal actions visually separate.
 - Muted/excluded screenshot rows remain readable and selectable.
 - Dialog actions should place the most common current-collection prompt copies first and fallbacks nearby.
 
@@ -74,6 +77,8 @@ Buttons use indigo for the primary action, semantic colors for status/destructiv
 Inputs and text areas use `--input`, a subtle border and an indigo focus ring. Focus is always visible for keyboard navigation. Disabled controls remain identifiable and use `not-allowed` cursor behavior.
 
 Cards and rows communicate selection with surface and border changes, not scale effects. Use badges sparingly for archived, conflict, priority and Note references. Error states name the affected screenshot or operation and offer a next action.
+
+Inspectors use a stable information order: **Context**, selected **Annotation**, **Export**, then a collapsed **Danger zone**. Export inclusion must always be expressed in words as well as colour. Collection-level context should explain its bundle role and prompt for the agent-facing context, not expose an unlabeled generic notes field.
 
 Annotation colors and application-theme colors are related but distinct. The live canvas follows semantic annotation defaults and user palette overrides. Prompt PNG export always renders on white and may adapt annotation colors for contrast without changing persisted intent.
 
