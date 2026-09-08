@@ -1007,7 +1007,7 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().view).toBe('projects');
   });
 
-  it('skips a missing project while walking back to the next valid history location', async () => {
+  it('restores a history project from disk when it is absent from the cached project list', async () => {
     let listed = [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' as const }];
     const listProjects = vi.fn(async () => listed);
     const loadProject = vi.fn(async () => ({ ...snapshot, projectRevision: 'project-1' }));
@@ -1024,10 +1024,10 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await screen.findByTestId('settings-view');
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    await screen.findByRole('heading', { name: 'Projects' });
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath));
 
-    expect(useAppStore.getState().snapshot).toBeNull();
-    expect(loadProject).toHaveBeenCalledOnce();
+    expect(useAppStore.getState().view).toBe('workspace');
+    expect(loadProject).toHaveBeenCalledTimes(2);
   });
 
   it.each([

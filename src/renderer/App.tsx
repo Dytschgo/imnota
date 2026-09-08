@@ -503,14 +503,6 @@ export default function App() {
       while (moved.location) {
         const target = moved.location;
         if (target.projectPath && ['workspace', 'context'].includes(target.view)) {
-          const project = useAppStore
-            .getState()
-            .projects.find((candidate) => candidate.projectPath === target.projectPath);
-          if (!project || project.status === 'archived') {
-            candidateStack = moved.stack;
-            moved = moveNavigationLocation(candidateStack, direction);
-            continue;
-          }
           const nativeMutationToken = persistence.beginNativeMutation();
           let adopted = false;
           let snapshot: ProjectSnapshot;
