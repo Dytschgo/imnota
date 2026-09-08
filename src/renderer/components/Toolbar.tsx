@@ -254,11 +254,16 @@ export function Toolbar({
   const [moreFocusedIndex, setMoreFocusedIndex] = useState(0);
   const moreRef = useRef<HTMLDivElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const moreTabCloseFrame = useRef<number | undefined>(undefined);
   const moreMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const moreMenuId = useId().replace(/:/g, '');
   const moreActive = MORE_TOOLS.some((definition) => definition.id === tool);
 
   const closeMoreMenu = (restoreFocus = false) => {
+    if (moreTabCloseFrame.current !== undefined) {
+      window.cancelAnimationFrame(moreTabCloseFrame.current);
+      moreTabCloseFrame.current = undefined;
+    }
     setMoreOpen(false);
     if (restoreFocus) window.requestAnimationFrame(() => moreTriggerRef.current?.focus());
   };
@@ -299,7 +304,7 @@ export function Toolbar({
           onKeyDown={(event) => {
             if (event.key === 'Tab' && moreOpen && event.target !== moreTriggerRef.current) {
               // Let the browser move focus first, including Shift+Tab back to the trigger.
-              window.requestAnimationFrame(() => closeMoreMenu());
+              moreTabCloseFrame.current = window.requestAnimationFrame(() => closeMoreMenu());
             }
           }}
           onBlur={(event) => {
