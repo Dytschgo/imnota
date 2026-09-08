@@ -1067,7 +1067,7 @@ describe('feedback controls', () => {
 
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('heading', { name: 'Privacy' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Workspace & privacy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
     expect(screen.getByRole('heading', { name: 'Privacy' })).toBeVisible();
     expect(screen.queryByRole('radio', { name: 'Dark' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
@@ -1076,7 +1076,7 @@ describe('feedback controls', () => {
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ theme: 'dark' }));
 
     setSettings.mockRejectedValueOnce(new Error('unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: 'Editing & shortcuts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Interface scale' }), { target: { value: '1.1' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('This preference could not be saved');
   });

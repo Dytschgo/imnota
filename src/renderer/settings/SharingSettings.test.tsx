@@ -69,7 +69,7 @@ describe('SharingSettings', () => {
     const native = bridge();
     render(<SettingsView />);
     expect(native.listHostedShares).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Workspace & privacy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
     expect(native.listHostedShares).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Sharing' }));
     expect(await screen.findByTestId('sharing-settings')).toBeInTheDocument();

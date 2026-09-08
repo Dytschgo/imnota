@@ -9,26 +9,95 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex,nofollow" />
     <title>Pair Imnota sharing</title>
+    <link rel="icon" href="/static/imnota-logo.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/share.css" />
     <script src="/static/new.js" defer></script>
   </head>
   <body>
-    <main class="pairing">
-      <p class="eyebrow">Imnota sharing</p>
-      <h1>Pair this browser</h1>
-      <p>
-        Create a one-time upload code, then paste it into Imnota. The code expires after 10 minutes and
-        authorizes one finalized prompt upload.
-      </p>
-      <p>No project folder, recovery data, annotation source, or settings are requested by this service.</p>
-      <button id="create-code" class="button" type="button">Create upload code</button>
-      <section id="result" hidden aria-live="polite">
-        <label for="upload-code">One-time upload code</label>
-        <textarea id="upload-code" rows="2" readonly></textarea>
-        <button id="copy-code" class="button secondary" type="button">Copy code</button>
-        <p id="expiry"></p>
-      </section>
-      <p id="error" class="error" role="alert"></p>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="service-header">
+      <a class="brand" href="/" aria-label="Imnota sharing home"
+        ><img class="brand-mark" src="/static/imnota-logo.svg" width="32" height="32" alt="" />imnota<span
+          class="brand-context"
+          >/ sharing</span
+        ></a
+      ><a class="quiet-link" href="https://imnota.xyz/">About Imnota ↗</a>
+    </header>
+    <main id="main" class="pairing">
+      <header class="pairing-heading">
+        <p class="eyebrow">Connect your handoff</p>
+        <h1>Pair this browser</h1>
+        <p class="lede">One code. One upload. Your finished bundle, ready to share.</p>
+      </header>
+      <div class="pairing-layout">
+        <ol class="pairing-steps" aria-label="Pairing instructions">
+          <li id="step-create" aria-current="step">
+            <span class="step-number" aria-hidden="true">01</span>
+            <div>
+              <h2>Create an upload code</h2>
+              <p>It is single-use and expires after 10 minutes.</p>
+            </div>
+          </li>
+          <li id="step-paste">
+            <span class="step-number" aria-hidden="true">02</span>
+            <div>
+              <h2>Paste it into Imnota</h2>
+              <p>Return to the sharing dialog in the desktop app and paste your code.</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-number" aria-hidden="true">03</span>
+            <div>
+              <h2>Upload and get your link</h2>
+              <p>Finish in Imnota. The app shows upload progress, your share link, and its expiry.</p>
+            </div>
+          </li>
+        </ol>
+        <section class="pairing-panel" aria-labelledby="code-heading">
+          <div class="panel-heading">
+            <h2 id="code-heading">Your connection</h2>
+            <span class="connection-state" id="connection-state">Not paired</span>
+          </div>
+          <p id="code-intro">
+            Create a code when you are ready to upload from Imnota. Keep it private: it authorizes one
+            finalized prompt upload.
+          </p>
+          <button id="create-code" class="button" type="button">Create upload code</button>
+          <section id="result" hidden aria-label="Upload code">
+            <label for="upload-code">One-time upload code</label>
+            <textarea
+              id="upload-code"
+              rows="3"
+              readonly
+              spellcheck="false"
+              aria-describedby="expiry code-help"
+            ></textarea>
+            <div class="code-actions">
+              <button id="copy-code" class="button" type="button">Copy code</button
+              ><span id="expiry" role="timer" aria-live="off"></span>
+            </div>
+            <p id="code-help">Paste this into Imnota to continue. This page does not monitor the upload.</p>
+          </section>
+          <p id="pairing-status" class="pairing-status" role="status" aria-live="polite"></p>
+          <p id="error" class="error" role="alert"></p>
+          <noscript
+            ><p>
+              JavaScript is needed to create a one-time code. You can still copy and export bundles locally in
+              Imnota.
+            </p></noscript
+          >
+        </section>
+      </div>
+      <aside class="privacy-strip">
+        <strong>Only your finished bundle leaves Imnota.</strong>
+        <p>
+          No project folder, recovery data, annotation source, or settings are requested by this service.
+          Local copy and export remain available without pairing.
+        </p>
+      </aside>
     </main>
+    <footer class="service-footer">
+      <a class="quiet-link" href="/">Back to sharing</a><span>No account needed to receive a bundle</span>
+    </footer>
   </body>
 </html>

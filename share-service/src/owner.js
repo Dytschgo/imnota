@@ -3,14 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
+import { directorySize } from './maintenance.js';
+import { ownerPage } from './owner-page.js';
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(sourceDir, '../public');
 const sessionCookie = '__Host-imnota_owner';
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/u;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const ownerMetaCsp =
-  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'";
+const expiringWindowMs = 24 * 60 * 60 * 1000;
 
 function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -175,15 +176,21 @@ function decodeCursor(value) {
 
 function statusClause(status) {
   if (status === 'active') return 's.revoked_at IS NULL AND s.expires_at > ?';
+  if (status === 'expiring') return 's.revoked_at IS NULL AND s.expires_at > ? AND s.expires_at <= ?';
   if (status === 'expired') return 's.revoked_at IS NULL AND s.expires_at <= ?';
   if (status === 'revoked') return 's.revoked_at IS NOT NULL';
   return '1 = 1';
+}
+
+function shareReference(id) {
+  return `share-${id.slice(-6)}`;
 }
 
 function serializeShare(row, timestamp) {
   const status = row.revoked_at !== null ? 'revoked' : row.expires_at <= timestamp ? 'expired' : 'active';
   return {
     id: row.id,
+    reference: shareReference(row.id),
     title: row.title,
     createdAt: new Date(row.created_at).toISOString(),
     expiresAt: new Date(row.expires_at).toISOString(),
@@ -192,6 +199,8 @@ function serializeShare(row, timestamp) {
     metadataBytes: row.metadata_byte_size,
     storedBytes: row.byte_size + row.metadata_byte_size,
     hasArchive: row.has_archive === 1,
+    artifactCount: row.asset_count + (row.has_archive === 1 ? 1 : 0) + 1,
+    expiresSoon: status === 'active' && row.expires_at <= timestamp + expiringWindowMs,
     status,
     usage: {
       pageViews: row.page_views,
@@ -201,10 +210,6 @@ function serializeShare(row, timestamp) {
       lastAccessedAt: row.last_accessed_at === null ? null : new Date(row.last_accessed_at).toISOString(),
     },
   };
-}
-
-function ownerPage() {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${ownerMetaCsp}"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Owner · Imnota</title><link rel="stylesheet" href="/static/owner.css"><script type="module" src="/static/owner.js"></script></head><body><main class="owner-shell"><header><p class="eyebrow">Imnota private service</p><h1>Shared links</h1><p class="lede">Request totals from this service. They do not identify people.</p></header><section class="panel" data-login hidden><h2>Owner access</h2><form data-login-form><label for="access-key">Access key</label><input id="access-key" name="accessKey" type="password" autocomplete="current-password" required><button type="submit">Sign in</button></form><p class="message" role="alert" data-login-error></p></section><section data-dashboard hidden><div class="toolbar"><label for="status-filter">Show</label><select id="status-filter" data-status-filter><option value="all">All links</option><option value="active">Active</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><button class="quiet" type="button" data-refresh>Refresh</button><button class="quiet" type="button" data-logout>Sign out</button></div><div class="totals" data-totals aria-live="polite"></div><p class="message" role="alert" data-dashboard-error></p><div class="share-list" data-share-list></div><button class="load-more" type="button" data-load-more hidden>Load more</button></section></main></body></html>`;
 }
 
 export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) {
@@ -311,7 +316,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     if (disabled) return error(response, 404, 'not_found', 'Endpoint not found.');
     if (!sessionFor(request, response, { db, config, now })) return undefined;
     const status = typeof request.query.status === 'string' ? request.query.status : 'all';
-    if (!['all', 'active', 'expired', 'revoked'].includes(status))
+    if (!['all', 'active', 'expiring', 'expired', 'revoked'].includes(status))
       return error(response, 400, 'invalid_request', 'The status filter is invalid.');
     const limitText = typeof request.query.limit === 'string' ? request.query.limit : '50';
     if (!/^\d{1,3}$/u.test(limitText))
@@ -325,6 +330,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     const where = [statusClause(status)];
     const parameters = [];
     if (status === 'active' || status === 'expired') parameters.push(timestamp);
+    if (status === 'expiring') parameters.push(timestamp, timestamp + expiringWindowMs);
     if (cursor) {
       where.push('(s.created_at < ? OR (s.created_at = ? AND s.id < ?))');
       parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
@@ -333,6 +339,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
     const rows = db
       .prepare(
         `SELECT s.id, s.title, s.created_at, s.expires_at, s.revoked_at, s.byte_size, s.metadata_byte_size, s.has_archive,
+          (SELECT COUNT(*) FROM assets a WHERE a.share_id = s.id) AS asset_count,
           COALESCE(u.page_views, 0) AS page_views,
           COALESCE(u.markdown_requests, 0) AS markdown_requests,
           COALESCE(u.asset_requests, 0) AS asset_requests,
@@ -378,6 +385,103 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
         },
       },
       nextCursor: hasMore ? encodeCursor(page.at(-1)) : null,
+    });
+  });
+
+  app.get('/api/owner/overview', async (request, response, next) => {
+    if (disabled) return error(response, 404, 'not_found', 'Endpoint not found.');
+    if (!sessionFor(request, response, { db, config, now })) return undefined;
+    try {
+      const timestamp = now();
+      const shareTotals = db
+        .prepare(
+          `SELECT
+            COUNT(*) AS shares,
+            COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at > ? THEN 1 ELSE 0 END), 0) AS active,
+            COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at > ? AND expires_at <= ? THEN 1 ELSE 0 END), 0) AS expiring,
+            COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at <= ? THEN 1 ELSE 0 END), 0) AS expired,
+            COALESCE(SUM(CASE WHEN revoked_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS revoked,
+            COALESCE(SUM(CASE WHEN (expires_at <= ? AND expires_at <= ?) OR (revoked_at IS NOT NULL AND revoked_at <= ?) THEN 1 ELSE 0 END), 0) AS cleanup_eligible,
+            COALESCE(SUM(byte_size), 0) AS byte_size,
+            COALESCE(SUM(metadata_byte_size), 0) AS metadata_bytes
+          FROM shares`,
+        )
+        .get(
+          timestamp,
+          timestamp,
+          timestamp + expiringWindowMs,
+          timestamp,
+          timestamp,
+          timestamp - config.cleanupGraceMs,
+          timestamp - config.cleanupGraceMs,
+        );
+      const pairingTotals = db
+        .prepare(
+          `SELECT
+            COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN used_at IS NULL AND expires_at > ? THEN 1 ELSE 0 END), 0) AS waiting,
+            COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS consumed,
+            COALESCE(SUM(CASE WHEN used_at IS NULL AND expires_at <= ? THEN 1 ELSE 0 END), 0) AS expired,
+            COALESCE(SUM(CASE WHEN expires_at <= ? THEN 1 ELSE 0 END), 0) AS cleanup_eligible
+          FROM pairings`,
+        )
+        .get(timestamp, timestamp, timestamp - config.cleanupGraceMs);
+      const reserved = db
+        .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
+        .get().bytes;
+      const filesystemBytes = await directorySize(config.uploadsDir);
+      return response.json({
+        checkedAt: new Date(timestamp).toISOString(),
+        service: { database: 'available' },
+        shares: {
+          total: shareTotals.shares,
+          active: shareTotals.active,
+          expiring: shareTotals.expiring,
+          expired: shareTotals.expired,
+          revoked: shareTotals.revoked,
+          cleanupEligible: shareTotals.cleanup_eligible,
+        },
+        pairing: {
+          total: pairingTotals.total,
+          waiting: pairingTotals.waiting,
+          consumed: pairingTotals.consumed,
+          expired: pairingTotals.expired,
+          cleanupEligible: pairingTotals.cleanup_eligible,
+        },
+        storage: {
+          recordedBytes: shareTotals.byte_size,
+          metadataBytes: shareTotals.metadata_bytes,
+          reservedBytes: reserved,
+          filesystemBytes,
+          capacityBytes: config.maxStorageBytes,
+        },
+        retention: {
+          cleanupGraceMs: config.cleanupGraceMs,
+          cleanupIntervalMs: config.cleanupIntervalMs,
+        },
+      });
+    } catch (failure) {
+      return next(failure);
+    }
+  });
+
+  app.get('/api/owner/pairings', (request, response) => {
+    if (disabled) return error(response, 404, 'not_found', 'Endpoint not found.');
+    if (!sessionFor(request, response, { db, config, now })) return undefined;
+    const timestamp = now();
+    const rows = db
+      .prepare(
+        'SELECT id, created_at, expires_at, used_at FROM pairings ORDER BY created_at DESC, id DESC LIMIT 100',
+      )
+      .all();
+    return response.json({
+      pairings: rows.map((row) => ({
+        reference: `pair-${row.id.slice(-6)}`,
+        createdAt: new Date(row.created_at).toISOString(),
+        expiresAt: new Date(row.expires_at).toISOString(),
+        usedAt: row.used_at === null ? null : new Date(row.used_at).toISOString(),
+        status: row.used_at !== null ? 'consumed' : row.expires_at <= timestamp ? 'expired' : 'waiting',
+      })),
     });
   });
 

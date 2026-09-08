@@ -237,6 +237,7 @@ export function boot(documentObject = globalThis.document) {
           button.closest('.copy-split')?.classList.add('is-copied');
         }
       } catch (error) {
+        root.querySelector('.markdown-preview')?.setAttribute('open', '');
         setStatus(messageFor(error, fallback), true);
       } finally {
         copying = false;
@@ -257,7 +258,7 @@ export function boot(documentObject = globalThis.document) {
         copyMarkdown,
         () => writeShareClipboard({ markdownPath: paths().markdownPath }),
         'Markdown copied.',
-        'Try Download ZIP instead.',
+        'Use Download Markdown in the expanded prompt below.',
       );
     const copyPng = scope.querySelector('[data-copy-png]');
     if (copyPng) {
@@ -265,7 +266,7 @@ export function boot(documentObject = globalThis.document) {
         copyPng,
         () => writeShareClipboard({ pngPath: paths().pngPath }),
         'PNG copied.',
-        'Try Download ZIP instead.',
+        'Use Download PNG beside the image instead.',
       );
     }
     const copyBundle = scope.querySelector('[data-copy-bundle]');
@@ -274,7 +275,7 @@ export function boot(documentObject = globalThis.document) {
         copyBundle,
         () => writeShareClipboard(paths()),
         'Bundle copied.',
-        'Try the separate copy options or Download ZIP.',
+        'Use Download Markdown below, and Download PNG beside any image.',
       );
     }
   }
