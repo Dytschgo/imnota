@@ -94,10 +94,7 @@ it('serializes a channel change behind a pending sender-name save and preserves 
       updateChannel: 'nightly',
     }),
   );
-  expect(setSettings.mock.calls).toEqual([
-    [{ sharingSenderName: 'Dylan' }],
-    [{ updateChannel: 'nightly' }],
-  ]);
+  expect(setSettings.mock.calls).toEqual([[{ sharingSenderName: 'Dylan' }], [{ updateChannel: 'nightly' }]]);
 });
 
 it('disables channel changes while checking, downloading or awaiting installation', async () => {
