@@ -34,6 +34,7 @@ export function openDatabase(config) {
       recovery_until INTEGER NOT NULL,
       revoked_at INTEGER,
       byte_size INTEGER NOT NULL,
+      metadata_byte_size INTEGER NOT NULL DEFAULT 0 CHECK (metadata_byte_size >= 0),
       has_archive INTEGER NOT NULL CHECK (has_archive IN (0, 1))
     ) STRICT;
     CREATE TABLE IF NOT EXISTS assets (
@@ -66,6 +67,10 @@ export function openDatabase(config) {
   const shareColumns = db.prepare('PRAGMA table_info(shares)').all();
   if (!shareColumns.some((column) => column.name === 'sender_name'))
     db.exec('ALTER TABLE shares ADD COLUMN sender_name TEXT');
+  if (!shareColumns.some((column) => column.name === 'metadata_byte_size'))
+    db.exec(
+      'ALTER TABLE shares ADD COLUMN metadata_byte_size INTEGER NOT NULL DEFAULT 0 CHECK (metadata_byte_size >= 0)',
+    );
   const fingerprint = createHash('sha256')
     .update(Buffer.from(config.receiptSecret, 'base64url'))
     .digest('hex');

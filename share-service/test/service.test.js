@@ -152,7 +152,13 @@ test('health and pairing pages use restrictive security headers', async (t) => {
   const instance = await fixture();
   t.after(() => instance.destroy());
   const health = await instance.api.get('/health').expect(200);
-  assert.deepEqual(health.body, { status: 'ok', storageBytes: 0, recordedBytes: 0, reservedBytes: 0 });
+  assert.deepEqual(health.body, {
+    status: 'ok',
+    storageBytes: 0,
+    recordedBytes: 0,
+    metadataBytes: 0,
+    reservedBytes: 0,
+  });
   assert.equal(health.headers['x-powered-by'], undefined);
   assert.match(health.headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.match(health.headers['content-security-policy'], /connect-src 'self'/);
@@ -387,6 +393,37 @@ test('keeps legacy fingerprints unchanged and binds structured metadata to idemp
     .send({ ...structured, bundles: [{ ...structured.bundles[0], markdown: 'Changed bundle source' }] })
     .expect(409)
     .expect(({ body }) => assert.equal(body.error.code, 'idempotency_conflict'));
+});
+
+test('charges persisted bundle metadata to quota and releases it with expired shares', async (t) => {
+  const instance = await fixture({ maxStorageBytes: 150, cleanupGraceMs: 1 });
+  t.after(() => instance.destroy());
+  const structuredText = 'm'.repeat(90);
+  const upload = {
+    markdown: '',
+    images: [],
+    includeArchive: false,
+    bundles: [{ bundleNumber: 1, markdown: structuredText, imageFilename: null }],
+  };
+  const first = await share(instance, upload);
+  assert.equal(first.status, 201, first.text);
+  const health = await instance.api.get('/health').expect(200);
+  assert.equal(health.body.recordedBytes, 0);
+  assert.equal(health.body.storageBytes, 0);
+  assert.equal(health.body.metadataBytes, Buffer.byteLength(structuredText));
+
+  const second = await share(instance, upload);
+  assert.equal(second.status, 507, second.text);
+  assert.equal(second.body.error.code, 'quota_exceeded');
+
+  const cleanup = await cleanupExpired({
+    db: instance.db,
+    config: instance.config,
+    now: Date.UTC(2026, 8, 9, 12) + 2,
+  });
+  assert.equal(cleanup.deletedShares, 1);
+  const afterCleanup = await instance.api.get('/health').expect(200);
+  assert.equal(afterCleanup.body.metadataBytes, 0);
 });
 
 test('rejects unsafe sender metadata, unmapped images, and oversized combined Markdown', async (t) => {

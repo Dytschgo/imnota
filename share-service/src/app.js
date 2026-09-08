@@ -213,6 +213,7 @@ function validateUpload(body, config) {
     senderName,
     hasStructuredMetadata: body.senderName !== undefined || body.bundles !== undefined,
     artifactBytes,
+    metadataByteSize: structuredMarkdownBytes + Buffer.byteLength(senderName ?? '', 'utf8'),
     expiresInDays,
     includeArchive: body.includeArchive === true,
   };
@@ -436,11 +437,20 @@ export function createService(overrides = {}) {
     asyncRoute(async (_request, response) => {
       db.prepare('SELECT 1').get();
       const recorded = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+      const metadataBytes = db
+        .prepare('SELECT COALESCE(SUM(metadata_byte_size), 0) AS bytes FROM shares')
+        .get().bytes;
       const reserved = db
         .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
         .get().bytes;
       const storageBytes = await directorySize(config.uploadsDir);
-      response.json({ status: 'ok', storageBytes, recordedBytes: recorded, reservedBytes: reserved });
+      response.json({
+        status: 'ok',
+        storageBytes,
+        recordedBytes: recorded,
+        metadataBytes,
+        reservedBytes: reserved,
+      });
     }),
   );
 
@@ -550,17 +560,27 @@ export function createService(overrides = {}) {
           .json(shareReceipt(committedAfterStaging, bearer, config, committedAssets, true));
       }
 
-      const estimatedSize = upload.includeArchive ? upload.artifactBytes * 2 + 4096 : upload.artifactBytes;
+      const estimatedArtifactSize = upload.includeArchive
+        ? upload.artifactBytes * 2 + 4096
+        : upload.artifactBytes;
+      const estimatedSize = estimatedArtifactSize + upload.metadataByteSize;
       const filesystemUsage = await directorySize(config.uploadsDir);
       const id = randomUUID();
       const stagedAt = now();
       db.exec('BEGIN IMMEDIATE');
       try {
-        const usage = db.prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares').get().bytes;
+        const usage = db
+          .prepare(
+            'SELECT COALESCE(SUM(byte_size), 0) AS artifact_bytes, COALESCE(SUM(metadata_byte_size), 0) AS metadata_bytes FROM shares',
+          )
+          .get();
         const reserved = db
           .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
           .get().bytes;
-        if (Math.max(filesystemUsage, usage) + reserved + estimatedSize > config.maxStorageBytes) {
+        if (
+          Math.max(filesystemUsage, usage.artifact_bytes) + usage.metadata_bytes + reserved + estimatedSize >
+          config.maxStorageBytes
+        ) {
           throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
         }
         db.prepare(
@@ -624,13 +644,18 @@ export function createService(overrides = {}) {
         db.exec('BEGIN IMMEDIATE');
         try {
           const committedUsage = db
-            .prepare('SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM shares')
-            .get().bytes;
+            .prepare(
+              'SELECT COALESCE(SUM(byte_size), 0) AS artifact_bytes, COALESCE(SUM(metadata_byte_size), 0) AS metadata_bytes FROM shares',
+            )
+            .get();
           const otherReservations = db
             .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads WHERE id != ?')
             .get(id).bytes;
           if (
-            Math.max(finalFilesystemUsage, committedUsage + byteSize) + otherReservations >
+            Math.max(finalFilesystemUsage, committedUsage.artifact_bytes + byteSize) +
+              committedUsage.metadata_bytes +
+              upload.metadataByteSize +
+              otherReservations >
             config.maxStorageBytes
           ) {
             throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
@@ -647,7 +672,7 @@ export function createService(overrides = {}) {
             throw new ApiError(401, 'pairing_expired', 'The upload token expired.');
           }
           db.prepare(
-            'INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, sender_name, created_at, expires_at, recovery_until, byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO shares (id, public_token_hash, management_token_hash, upload_token_hash, request_id, payload_hash, title, sender_name, created_at, expires_at, recovery_until, byte_size, metadata_byte_size, has_archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           ).run(
             id,
             tokenHash(publicToken),
@@ -661,6 +686,7 @@ export function createService(overrides = {}) {
             expiresAt,
             recoveryUntil,
             byteSize,
+            upload.metadataByteSize,
             upload.includeArchive ? 1 : 0,
           );
           const insertAsset = db.prepare(
