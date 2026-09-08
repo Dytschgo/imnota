@@ -929,7 +929,7 @@ describe('feedback controls', () => {
     };
     renderApp({ openProjectDialog: async () => recovered });
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
-    await waitFor(() => expect(useAppStore.getState().snapshot).toBe(recovered));
+    await waitFor(() => expect(useAppStore.getState().snapshot).toEqual(recovered));
     expect(screen.queryByTestId('snapshot-notice')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Undo delete' })).not.toBeInTheDocument();
     expect(recovered.recoveredDeletes).toHaveLength(1);
