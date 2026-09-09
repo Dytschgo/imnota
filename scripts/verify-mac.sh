@@ -10,5 +10,6 @@ test -f "$archive"
 destination="$(mktemp -d)"
 ditto -x -k "$archive" "$destination"
 codesign --verify --deep --strict "$destination/Imnota.app"
+test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$destination/Imnota.app/Contents/Info.plist")" = "13.0.0"
 lipo "$destination/Imnota.app/Contents/MacOS/Imnota" -verify_arch arm64 x86_64
 node scripts/smoke.mjs "$destination/Imnota.app/Contents/MacOS/Imnota"

@@ -35,6 +35,8 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 
 Development and packaging targets are Windows, macOS and Linux. Unsigned artifacts are suitable for local testing. Production signing and notarisation are intentionally optional.
 
+Builds using Electron 44 require **macOS 13 or later**. Stable [v0.2.6](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6) retains the previous Electron runtime for Macs that cannot run the new nightly. Check the release's OS requirement before updating from an older build, whose bundled updater may not check compatibility before installation.
+
 ## Installation
 
 Install Imnota with one command. On macOS or Linux:

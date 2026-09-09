@@ -2,6 +2,24 @@ import { nativeImage } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 
+async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
+  // Reopening clears the previous query/results in an effect. That changes the
+  // centered dialog's position, so input presence alone is not click readiness.
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const check = () => {
+      const input = document.querySelector('[data-testid="global-search-input"]');
+      const dialog = document.querySelector('[data-testid="global-search-dialog"]');
+      if (input instanceof HTMLInputElement && input.value === '' &&
+          dialog?.getAttribute('aria-busy') === 'false' &&
+          !dialog.querySelector('[data-testid="global-search-result"]')) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Search did not reset its previous query and results.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+}
+
 /** Verify search targets and project lifecycle through the real preload and native UI. */
 export async function exerciseUiFeedback(
   driver: NativeUiDriver,
@@ -30,6 +48,7 @@ export async function exerciseUiFeedback(
     return {projectPath,projectId:snapshot.project.id,itemId:item.id};
   })()`);
   await driver.click({ selector: '[data-testid="search-trigger"]' });
+  await waitForEmptySearch(driver);
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzmarkdownprobe');
   await driver.waitFor({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
   if (artifactDirectory) {
@@ -53,6 +72,7 @@ export async function exerciseUiFeedback(
   })`);
 
   await driver.click({ selector: '[data-testid="search-trigger"]' });
+  await waitForEmptySearch(driver);
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzannotationprobe');
   await driver.click({
     selector: '[data-testid="global-search-result"][data-annotation-id="feedback-search-note"]',
