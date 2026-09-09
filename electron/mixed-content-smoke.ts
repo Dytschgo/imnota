@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { clipboard, dialog, nativeImage } from 'electron';
+import { dialog, nativeImage } from 'electron';
+import { nativeClipboard } from './native-clipboard.js';
 import JSZip from 'jszip';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
@@ -44,7 +45,10 @@ export async function exerciseMixedContent(
     },
     { timeoutMs: 30_000 },
   );
-  if (!clipboard.readText().includes('# System overview') || !clipboard.readImage().isEmpty())
+  if (
+    !(await nativeClipboard.readText()).includes('# System overview') ||
+    !(await nativeClipboard.readImage()).isEmpty()
+  )
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.resize({ width: 1280, height: 800 });
@@ -229,11 +233,11 @@ export async function exerciseMixedContent(
     },
     { timeoutMs: 30_000 },
   );
-  const mixedMarkdown = clipboard.readText();
+  const mixedMarkdown = await nativeClipboard.readText();
   if (
     !mixedMarkdown.includes('# System overview') ||
     !mixedMarkdown.includes('Drawing 1') ||
-    clipboard.readImage().isEmpty()
+    (await nativeClipboard.readImage()).isEmpty()
   )
     throw new Error('Mixed prompt copy must combine the written explanation and rendered drawing.');
   if (mixedMarkdown.indexOf('# System overview') > mixedMarkdown.indexOf('Drawing 1'))
@@ -286,7 +290,8 @@ export async function exerciseMixedContent(
   }
   // The bridge copy operation for Markdown has no image dependency.
   await driver.evaluate(`window.imnota.copyText(${JSON.stringify(markdown)})`);
-  if (clipboard.readText() !== markdown) throw new Error('Text-only clipboard content changed.');
+  if ((await nativeClipboard.readText()) !== markdown)
+    throw new Error('Text-only clipboard content changed.');
   driver.setWindow(await host.reopenWindow());
   await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
   if (artifactDirectory) {

@@ -1,16 +1,6 @@
-import {
-  app,
-  BrowserWindow,
-  clipboard,
-  dialog,
-  ipcMain,
-  nativeImage,
-  nativeTheme,
-  net,
-  shell,
-  session,
-} from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, shell, session } from 'electron';
 import os from 'node:os';
+import { nativeClipboard } from './native-clipboard.js';
 import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -659,10 +649,10 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
   };
 }
 
-function copyTextToClipboard(text: string): void {
+async function copyTextToClipboard(text: string): Promise<void> {
   if (typeof text !== 'string' || text.length > 2_000_000)
     throw new Error('Context is too large to copy. Export the Markdown file instead.');
-  clipboard.writeText(text);
+  await nativeClipboard.writeText(text);
 }
 
 function clipboardImage(imageDataUrl: string) {
@@ -683,14 +673,14 @@ function validateDecodedPromptPng(
     throw new Error('Prompt PNG could not be fully decoded at its reserved dimensions.');
 }
 
-function copyImageToClipboard(imageDataUrl: string): void {
-  clipboard.writeImage(clipboardImage(imageDataUrl));
+async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
+  await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
-function copyContextToClipboard(markdown: string, imageDataUrl: string): void {
+async function copyContextToClipboard(markdown: string, imageDataUrl: string): Promise<void> {
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
-  clipboard.write({ text: markdown, html, image });
+  await nativeClipboard.writeContext(markdown, html, image);
 }
 
 function registerIpc(): void {
@@ -1544,7 +1534,7 @@ function registerIpc(): void {
   });
   handle('screenshots:paste', async (_event, projectPath: string, collectionId?: string) => {
     const safePath = await assertProjectPath(projectPath);
-    const image = clipboard.readImage();
+    const image = await nativeClipboard.readImage();
     if (image.isEmpty())
       throw new Error('The clipboard does not contain an image. Copy a screenshot and try again.');
     const filename = `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
@@ -1812,13 +1802,13 @@ function registerIpc(): void {
     if (error) throw new Error(error);
   });
   handle('system:copy-text', async (_event, text: string) => {
-    copyTextToClipboard(text);
+    await copyTextToClipboard(text);
   });
   handle('system:copy-image', async (_event, dataUrl: string) => {
-    copyImageToClipboard(dataUrl);
+    await copyImageToClipboard(dataUrl);
   });
   handle('system:copy-context', async (_event, input) => {
-    copyContextToClipboard(input.markdown, input.imageDataUrl);
+    await copyContextToClipboard(input.markdown, input.imageDataUrl);
   });
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
