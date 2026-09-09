@@ -7,6 +7,8 @@ import { SideNav } from './SideNav';
 export interface AppShellProps {
   children: ReactNode;
   searchShortcut: string;
+  saveState?: 'saved' | 'saving' | 'error';
+  onRetrySave?(): void;
   onNavigate(view: AppView): void | Promise<void>;
   onNewProject(): void;
   onOpenProject(): void | Promise<void>;
@@ -27,6 +29,8 @@ export interface AppShellProps {
 export function AppShell({
   children,
   searchShortcut,
+  saveState,
+  onRetrySave,
   onNavigate,
   onNewProject,
   onOpenProject,
@@ -59,16 +63,6 @@ export function AppShell({
   const activeCollection = store.snapshot?.project.collections.find(
     (collection) => collection.id === store.activeCollectionId,
   );
-  const activeItemCount = activeCollection
-    ? [
-        ...store.snapshot!.project.screenshots.filter(
-          (screenshot) => screenshot.collectionId === activeCollection.id,
-        ),
-        ...(store.snapshot!.project.contentItems ?? []).filter(
-          (item) => item.collectionId === activeCollection.id,
-        ),
-      ].length
-    : 0;
   return (
     <div
       ref={shellRef}
@@ -100,6 +94,15 @@ export function AppShell({
       />
       <main className="main-shell">
         <header className="topbar">
+          {!store.navigationOpen && (
+            <IconButton
+              className="navigation-restore"
+              label="Show navigation"
+              onClick={() => store.set({ navigationOpen: true })}
+            >
+              <PanelLeft size={16} aria-hidden="true" />
+            </IconButton>
+          )}
           <div className="topbar-navigation" aria-label="Navigation history">
             <IconButton label="Back" disabled={!canGoBack} onClick={() => void onBack?.()}>
               <ArrowLeft size={16} aria-hidden="true" />
@@ -111,15 +114,6 @@ export function AppShell({
             )}
           </div>
           <div className="crumbs">
-            {!store.navigationOpen && (
-              <IconButton
-                className="navigation-restore"
-                label="Show navigation"
-                onClick={() => store.set({ navigationOpen: true })}
-              >
-                <PanelLeft size={16} aria-hidden="true" />
-              </IconButton>
-            )}
             <span className="crumb-muted">
               {store.view === 'settings'
                 ? 'Settings'
@@ -132,8 +126,22 @@ export function AppShell({
                 <span className="crumb-separator">/</span>
                 <span className="crumb-current" title={activeCollection?.name}>
                   {activeCollection?.name ?? 'Collection'}
-                  <small>{activeItemCount} items</small>
                 </span>
+                {saveState && (
+                  <span className={`save-state ${saveState}`} data-testid="save-state" role="status">
+                    <span className="save-dot" aria-hidden="true" />
+                    {saveState === 'saving'
+                      ? 'Saving\u2026'
+                      : saveState === 'error'
+                        ? 'Save failed'
+                        : 'Saved'}
+                  </span>
+                )}
+                {saveState === 'error' && onRetrySave && (
+                  <Button variant="ghost" onClick={onRetrySave}>
+                    Retry save
+                  </Button>
+                )}
               </>
             )}
           </div>

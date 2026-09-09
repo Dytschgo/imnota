@@ -36,23 +36,16 @@
 }
 
 .annotation-tooltip {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 9px);
-  left: 50%;
-  width: 210px;
+  position: fixed;
+  z-index: 1000;
+  width: min(210px, calc(100vw - 16px));
   padding: 9px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   color: var(--ink);
   background: var(--surface-2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -3px);
-  transition:
-    opacity 120ms ease,
-    transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .annotation-tooltip strong,
@@ -76,23 +69,6 @@
   position: absolute;
   top: 8px;
   right: 8px;
-}
-
-.annotation-tooltip-anchor:hover > .annotation-tooltip,
-.annotation-tooltip-anchor:focus-within > .annotation-tooltip {
-  opacity: 1;
-  transform: translate(-50%, 0);
-  transition-delay: 320ms;
-}
-
-.annotation-primary-tools > .annotation-tooltip-anchor:first-child > .annotation-tooltip {
-  left: 0;
-  transform: translateY(-3px);
-}
-
-.annotation-primary-tools > .annotation-tooltip-anchor:first-child:hover > .annotation-tooltip,
-.annotation-primary-tools > .annotation-tooltip-anchor:first-child:focus-within > .annotation-tooltip {
-  transform: translateY(0);
 }
 
 .annotation-more {
