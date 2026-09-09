@@ -36,11 +36,18 @@ Keep prior releases available. If a migration fails acceptance, fix or revert it
 - Tailwind: merged in #63 (`b4769de`), superseding #8. Version 4.3.3 uses its dedicated PostCSS plugin and explicit source paths. Existing reset colors remain intact. All platform/native/strict visual checks passed. CI exposed an asynchronous search-test assumption; waiting for the unchanged selected-scope assertion resolved it without changing application behavior.
 - Electron clipboard preparation: merged in #64 (`45de8b1`) on Electron 39. All callers await clipboard completion; atomic context writes and failure propagation are covered. All platform/native/visual checks passed.
 - Electron macOS preparation: merged in #65 (`3d3bcd4`). Install/update helpers reject incompatible or unreadable minimum OS versions before replacement. Numeric-version and preservation tests, all platform checks and the real Mac archive/update test passed, including a fresh run after integrating #64.
-- Electron runtime: migration in progress to 44.2.0. The adapter uses MIME-based ClipboardItems; CI explicitly installs the binary; packaging declares and verifies macOS 13.0.0. Local lint/type checks, 623 application tests, 45 script tests, build and 18 unpackaged Windows native assertion groups passed. All 14 same-host visual comparisons passed unchanged tolerances. A packaged search-input timing failure requires waiting for query/results reset before native clicking; the rebuilt package and exact-head platform CI remain acceptance gates.
-- Final cumulative nightly: pending acceptance of the runtime PR. Stable 0.2.6 remains Latest.
+- Electron runtime: merged in #66 (`970584a`), superseding #4. The adapter uses MIME-based ClipboardItems; CI explicitly installs the binary; packaging declares and verifies macOS 13.0.0. Local lint/type checks, 623 application tests, 45 script tests, build and 18 native assertion groups in both unpackaged and packaged Windows apps passed. All platform CI and strict visual comparisons passed without changing baselines or tolerances. Native verification waits for search query/results reset before clicking.
+- Final cumulative nightly: [0.2.7-nightly.20260909.34358152858](https://github.com/Dytschgo/imnota/releases/tag/v0.2.7-nightly.20260909.34358152858), published from `970584a91594dd8e5510b31a845b356d67a9f25a`. [Nightly workflow](https://github.com/Dytschgo/imnota/actions/runs/34358152858) passed every platform/publication gate. All 13 public assets were downloaded; 12 SHA-256 entries and all three update manifests passed verification. Stable 0.2.6 remains Latest with unchanged asset identities and digests.
+
+## Testing this nightly
+
+Focus on screenshot annotations/cropping, drawing selection/export, text/image/bundle copy and paste, reopening search, and light/dark appearance with backdrops. macOS 13 or later is required. Older installed update helpers cannot gain the new OS compatibility check retroactively; use stable 0.2.6 on Macs that cannot run this nightly.
 
 ## References
 
 - [React Hooks ESLint plugin](https://react.dev/reference/eslint-plugin-react-hooks)
 - [Vitest 4 migration guide](https://v4.vitest.dev/guide/migration)
 - [Zod 4 migration guide](https://zod.dev/v4/changelog)
+- [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)
+- [Tailwind 4 upgrade guide](https://tailwindcss.com/docs/upgrade-guide)
+- [Electron breaking changes](https://www.electronjs.org/docs/latest/breaking-changes)
