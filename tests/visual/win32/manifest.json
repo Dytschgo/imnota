@@ -18,8 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "098802bdf61b47558e026915700312b455aae370",
+  "sourceRevision": "8d28b7c0a4397d2960f28c83e598a8b1f05b60e5",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291427211",
-  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed header save status, inspector collapse control, navigation ordering and resulting toolbar reflow in eight changed captures and their difference images. Other captures retained within existing tolerance from run 34259747270."
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34294812300",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed all ten changed captures and their difference images for cumulative PRs 44-48. Expected changes are Annotate label removal, shifted tools, the two-column collection heading, and resulting 1440px toolbar reflow and canvas recentering. Settings and onboarding captures retained within the existing tolerance."
 }
