@@ -2,12 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   mergePreferenceSettings,
   preferenceSettingsEnvelope,
+  preferenceSettingsUpdateSchema,
   resolvePreferenceSettings,
 } from '../preference-settings';
 import { shouldShowOnboarding } from '../preferences';
 import { BACKDROP_PRESETS, backdropPresetValue, appearanceBackdrop } from '../preferences';
 
 describe('profile-aware preference settings', () => {
+  it.each([{}, { accent: 'amber' }, { lightBackgroundImage: '' }])(
+    'keeps appearance updates sparse without inserting stored-profile defaults: %j',
+    (appearance) => {
+      expect(preferenceSettingsUpdateSchema.parse({ appearance })).toEqual({ appearance });
+    },
+  );
+
   it.each(BACKDROP_PRESETS)(
     'preserves %s through saving and restarting shared and separate theme preferences',
     (preset) => {
