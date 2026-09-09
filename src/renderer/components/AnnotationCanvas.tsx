@@ -54,6 +54,7 @@ import { zoomAt } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
 import type { ToolChoice } from './Toolbar';
 import './annotation-canvas.css';
+import './canvas-surface.css';
 
 type ThemePreference = CanvasTheme | 'system';
 
@@ -1052,7 +1053,7 @@ export function AnnotationCanvas({
 
   return (
     <div
-      className="canvas-wrap annotation-canvas"
+      className="canvas-wrap annotation-canvas canvas-workspace-surface"
       style={{ cursor: spaceHeld || pan.current ? 'grabbing' : tool === 'select' ? 'default' : 'crosshair' }}
       ref={wrapRef}
       data-image-x={viewport.x}

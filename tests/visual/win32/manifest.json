@@ -18,9 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "49d8be0f6739920491d13d1a9d6b081630565bff",
+  "sourceRevision": "098802bdf61b47558e026915700312b455aae370",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291439096",
-  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; individually reviewed settings copy and restored transparent backdrop captures and diff images",
-  "sourceCommit": "49d8be0f6739920491d13d1a9d6b081630565bff"
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34291427211",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; individually reviewed header save status, inspector collapse control, navigation ordering and resulting toolbar reflow in eight changed captures and their difference images. Other captures retained within existing tolerance from run 34259747270."
 }

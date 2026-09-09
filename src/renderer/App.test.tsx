@@ -360,7 +360,7 @@ describe('feedback controls', () => {
     act(() => useAppStore.getState().setProject(persisted));
     const editor = await screen.findByRole('textbox', { name: 'Markdown' });
     fireEvent.change(editor, { target: { value: 'Local edit' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete text block:/ }));
     expect(await screen.findByRole('dialog', { name: 'Delete this item?' })).toBeInTheDocument();
     act(() => useAppStore.getState().set({ activeScreenshotId: text.id }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
@@ -380,13 +380,13 @@ describe('feedback controls', () => {
     }));
     await renderEditingProject({ deleteScreenshot });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Delete screenshot:/ }));
     expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(deleteScreenshot).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
     await waitFor(() =>
       expect(deleteScreenshot).toHaveBeenCalledWith({
@@ -406,7 +406,7 @@ describe('feedback controls', () => {
     }));
     await renderEditingProject({ deleteScreenshot });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Delete screenshot:/ }));
     await waitFor(() => expect(deleteScreenshot).toHaveBeenCalled());
     expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
     useAppStore.setState((state) => ({
@@ -435,7 +435,7 @@ describe('feedback controls', () => {
       })),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(screen.getByTestId('item-delete-shot'));
     await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
     act(() => useAppStore.getState().set({ activeScreenshotId: 'second-shot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
@@ -448,6 +448,111 @@ describe('feedback controls', () => {
     );
   });
 
+  it('keeps a clicked row bound when another selection was already waiting for its save', async () => {
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    const { save, note } = await renderEditingProject({ deleteScreenshot });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: {
+          ...state.snapshot!,
+          project: {
+            ...state.snapshot!.project,
+            screenshots: [
+              ...state.snapshot!.project.screenshots,
+              { ...state.snapshot!.project.screenshots[0], id: 'second-shot', title: 'Second screen' },
+            ],
+          },
+        },
+      })),
+    );
+    let finishSave!: () => void;
+    save.mockImplementation(
+      (input) =>
+        new Promise((resolve) => {
+          finishSave = () =>
+            resolve({
+              project: {
+                ...useAppStore.getState().snapshot!.project,
+                screenshots: useAppStore
+                  .getState()
+                  .snapshot!.project.screenshots.map((shot) =>
+                    shot.id === input.screenshot.id ? input.screenshot : shot,
+                  ),
+              },
+              savedScreenshotId: input.screenshot.id,
+              conflictCreated: false,
+              contentRevision: 'b'.repeat(64),
+              projectRevision: 'project-content-2',
+            });
+        }),
+    );
+    fireEvent.change(note, { target: { value: 'Pending edit' } });
+    fireEvent.click(screen.getByTestId('screenshot-second-shot'));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('item-delete-shot'));
+    await act(async () => finishSave());
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    expect(useAppStore.getState().activeScreenshotId).toBe('shot');
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('deletes an unselected row without changing the active screenshot', async () => {
+    let persisted: ProjectSnapshot;
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async ({ screenshotId }) => {
+      const current = useAppStore.getState().snapshot!;
+      persisted = {
+        ...current,
+        project: {
+          ...current.project,
+          screenshots: current.project.screenshots.filter((shot) => shot.id !== screenshotId),
+        },
+      };
+      return { snapshot: persisted, undoToken: 'undo' };
+    });
+    await renderEditingProject({
+      deleteScreenshot,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'updated' },
+      }),
+    });
+    act(() =>
+      useAppStore.setState((state) => ({
+        snapshot: {
+          ...state.snapshot!,
+          project: {
+            ...state.snapshot!.project,
+            screenshots: [
+              ...state.snapshot!.project.screenshots,
+              { ...state.snapshot!.project.screenshots[0], id: 'second-shot', title: 'Second screen' },
+            ],
+          },
+        },
+      })),
+    );
+    fireEvent.click(screen.getByTestId('item-delete-second-shot'));
+    await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
+    expect(useAppStore.getState().activeScreenshotId).toBe('shot');
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'second-shot',
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('item-delete-second-shot')).not.toBeInTheDocument());
+    expect(useAppStore.getState().activeScreenshotId).toBe('shot');
+  });
+
   it('aborts a confirmed deletion when the project changed while the modal was open', async () => {
     const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
       snapshot,
@@ -455,7 +560,7 @@ describe('feedback controls', () => {
     }));
     await renderEditingProject({ deleteScreenshot });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete screenshot' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
     await screen.findByRole('dialog', { name: 'Delete this screenshot?' });
     act(() =>
       useAppStore.setState((state) => ({
@@ -472,7 +577,7 @@ describe('feedback controls', () => {
 
   it('opens the inspector as a focusable narrow-window drawer and dismisses it with Escape', async () => {
     await renderEditingProject({}, true);
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
 
     const trigger = screen.getByRole('button', { name: 'Expand inspector' });
     fireEvent.click(trigger);
@@ -489,13 +594,17 @@ describe('feedback controls', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Close inspector' })).not.toBeInTheDocument(),
     );
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Expand inspector' })).toHaveFocus();
   });
 
   it('keeps the desktop inspector modeless', async () => {
     await renderEditingProject();
     expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Collapse inspector' }).closest('.inspector-heading'),
+    ).not.toBeNull();
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Saved');
+    expect(screen.getByTestId('save-state').closest('.topbar')).not.toBeNull();
     expect(screen.getByRole('textbox', { name: 'Title' })).toBeInTheDocument();
   });
 
@@ -511,7 +620,7 @@ describe('feedback controls', () => {
     expect(trigger).toHaveFocus();
     act(() => changeViewport(true));
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Expand inspector' })).toHaveFocus();
   });
 
   it('keeps the project and notes open when saving before search fails', async () => {
@@ -522,6 +631,8 @@ describe('feedback controls', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/cancelled|Workspace unavailable/i);
     expect(useAppStore.getState().snapshot?.project.id).toBe(editingSnapshot.project.id);
     expect(useAppStore.getState().activeScreenshot()?.description).toBe('Unsaved note');
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Save failed');
+    expect(screen.getByTestId('save-state').closest('.topbar')).not.toBeNull();
     expect(note).toHaveValue('Unsaved note');
     expect(screen.queryByTestId('global-search-input')).not.toBeInTheDocument();
   });
@@ -791,7 +902,7 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot).toBeNull();
   });
 
-  it('surfaces nonfatal snapshot warnings and recovered delete grants', async () => {
+  it('keeps nonfatal warnings without the stale delete-undo banner', async () => {
     const recovered = {
       ...snapshot,
       projectRevision: 'project-recovered',
@@ -805,13 +916,24 @@ describe('feedback controls', () => {
     expect(await screen.findByTestId('snapshot-notice')).toHaveTextContent(
       'A screenshot transaction was recovered',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Undo delete' }));
-    await waitFor(() =>
-      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
-        projectPath: snapshot.projectPath,
-        undoToken: 'undo-token',
-      }),
-    );
+    expect(screen.queryByRole('button', { name: 'Undo delete' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/previously deleted/)).not.toBeInTheDocument();
+    expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+  });
+
+  it('does not create a notice from persisted delete grants alone when reopening a project', async () => {
+    const recovered = {
+      ...snapshot,
+      recoveredDeletes: [{ undoToken: 'screenshot-token', screenshotId: 'shot' }],
+      recoveredContentDeletes: [{ undoToken: 'content-token', itemId: 'text' }],
+    };
+    renderApp({ openProjectDialog: async () => recovered });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot).toEqual(recovered));
+    expect(screen.queryByTestId('snapshot-notice')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo delete' })).not.toBeInTheDocument();
+    expect(recovered.recoveredDeletes).toHaveLength(1);
+    expect(recovered.recoveredContentDeletes).toHaveLength(1);
   });
 
   it('keeps Description Undo separate from canvas annotation history', async () => {
