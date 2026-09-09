@@ -18,6 +18,7 @@ import type {
 } from '@excalidraw/excalidraw/types';
 import '@excalidraw/excalidraw/index.css';
 import './content-editors.css';
+import '../components/canvas-surface.css';
 import { DrawingSourceError, isAllowedDrawingElement, parseDrawingSource } from './drawing-render';
 
 type DrawingTool =
@@ -49,7 +50,7 @@ function initialDataFromSource(source: string): ExcalidrawInitialDataState {
   const drawing = parseDrawingSource(source);
   return {
     ...drawing,
-    appState: { ...drawing.appState, viewBackgroundColor: '#ffffff' },
+    appState: { ...drawing.appState, viewBackgroundColor: 'transparent' },
   } as ExcalidrawInitialDataState;
 }
 
@@ -66,7 +67,12 @@ export function DrawingEditor({
   // intentionally read once, so a parent autosave never reloads an active canvas.
   const [loaded] = useState(() => {
     try {
-      return { initialData: initialDataFromSource(source), error: null };
+      const background = parseDrawingSource(source).appState.viewBackgroundColor;
+      return {
+        initialData: initialDataFromSource(source),
+        sourceBackground: typeof background === 'string' ? background : '#ffffff',
+        error: null,
+      };
     } catch (error) {
       const message =
         error instanceof DrawingSourceError ? error.message : 'This drawing could not be loaded.';
@@ -74,6 +80,7 @@ export function DrawingEditor({
     }
   });
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
   const sourceRef = useRef(source);
   const sceneVersionRef = useRef<number | null>(null);
   const interactionRef = useRef(false);
@@ -134,7 +141,8 @@ export function DrawingEditor({
       <div className="drawing-editor-tools" aria-label="Drawing tools">
         {tools.map((button) => {
           const Icon = button.icon;
-          const selected = activeTool.tool === button.tool && activeTool.rounded === button.rounded;
+          const selected =
+            activeTool.tool === button.tool && Boolean(activeTool.rounded) === Boolean(button.rounded);
           return (
             <button
               key={button.label}
@@ -143,6 +151,7 @@ export function DrawingEditor({
               title={button.label}
               aria-label={button.label}
               aria-pressed={selected}
+              disabled={!engineReady}
               data-testid={`drawing-tool-${button.label.toLowerCase().replaceAll(' ', '-')}`}
               onClick={() => selectTool(button)}
             >
@@ -155,7 +164,7 @@ export function DrawingEditor({
         </span>
       </div>
       <div
-        className="drawing-editor-canvas"
+        className="drawing-editor-canvas canvas-workspace-surface"
         data-testid="drawing-editor-canvas"
         onKeyDownCapture={() => {
           interactionRef.current = true;
@@ -180,6 +189,7 @@ export function DrawingEditor({
           }}
           excalidrawAPI={(api) => {
             apiRef.current = api;
+            setEngineReady(true);
           }}
           onPointerDown={() => {
             interactionRef.current = true;
@@ -207,7 +217,14 @@ export function DrawingEditor({
             if (elements.some((element) => !isAllowedDrawingElement(element))) return;
             sceneVersionRef.current = sceneVersion;
 
-            const nextSource = serializeAsJSON(elements, appState, {}, 'local');
+            // The transparent editor reveals the shared workspace outside Excalidraw's
+            // dark color filter. Never persist this display-only background.
+            const nextSource = serializeAsJSON(
+              elements,
+              { ...appState, viewBackgroundColor: loaded.sourceBackground },
+              {},
+              'local',
+            );
             if (nextSource === sourceRef.current) return;
             sourceRef.current = nextSource;
             onChange(nextSource);
