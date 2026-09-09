@@ -212,7 +212,7 @@ Completion means every feedback-map entry has a corresponding verified result. A
 
 Implementation used separate worktrees from main at `6215c64`, preserving the original dirty feature checkout. PR 3 is stacked on PR 1, PR 4 on PR 3, and PR 8 on PR 7. Other PRs target main independently. A local integration branch `review/ui-feedback-20260909` combines all eight for verification without an umbrella PR.
 
-- Final combined application suite: 591 tests in 80 files passed. Script suite: 42 passed, with the packaged macOS test skipped on Windows.
+- Initial combined application suite: 591 tests in 80 files passed. Script suite: 42 passed, with the packaged macOS test skipped on Windows.
 - Combined lint, typecheck and production build passed. The final small settings-label correction also passed 36 focused appearance/preference tests, lint and typecheck.
 - Windows Electron native walkthrough: 18 assertion groups passed with compiled production assets, including drawing/text editing, viewport/theme transitions, export checks and all eight backdrop presets. This is unpackaged Windows evidence; macOS/Linux native and distributable verification remain CI/release checks.
 - Dialog fixture: 24 rendered states at 1280x800, 800x600 and 640x480, including tall forms and tall/wide previews at fit, width and actual scale.
@@ -235,3 +235,22 @@ Representative captures below show the combined candidate and the isolated previ
 ![Light theme with the generated Mist background visible through app surfaces](docs/ui-feedback/light-backdrop.png)
 
 ![Full-space tall bundle preview fitted without cropping](docs/ui-feedback/full-preview.png)
+
+### Integration review corrections
+
+Grok's September 9 review was resolved before final integration:
+
+- Overlapping PNGs were treated as provisional during source integration. Cumulative packaged Windows captures and their differences were individually reviewed; the 14-image matrix and strict tolerances were preserved. Each manifest records its exact source revision and runner evidence.
+- Light and dark image glass now cover the same outer editor, library and settings surfaces. Settings navigation is transparent within its glass parent, avoiding a second tint. Dialogs intentionally retain a stronger generic surface over the dimmed overlay for readability.
+- The tooltip fix applies to custom annotation descriptions. Native titles on View controls, drawing tools and item actions remain intentional; accessible names are preserved.
+- Unused header/collection CSS and narrating comments were removed. The collection heading uses two tracks for its two controls.
+
+The initial UI integration rehearsal at `40d6e4c` passed the Windows native walkthrough with 18 assertion groups. After the drawing corrections below, cumulative candidate `44c3661` matches integration source `373bf15` exactly across application code, assets, dependencies, scripts and workflows. Independent review accepted source reconciliation and real-app settings, sharing and compact-inspector captures. Glass-specific fixtures also checked representative rename/share modal contents; these fixtures are not a claim of full hosted-service workflow verification.
+
+The authorized merge and nightly procedure is recorded in [Nightly-UI-Merge-Plan.md](Nightly-UI-Merge-Plan.md). The dependency migration PRs and the later hosted-sharing draft #52 are outside this release scope.
+
+A subsequent macOS native run failed the broad connector assertion despite an earlier pass with identical application source. Investigation found an early drawing-tool click could arrive before the engine API existed, and unrounded tools could lose their pressed indicator. PR #49 disables controls until readiness, normalizes the selection state and adds a delayed-engine regression test. The native walkthrough now waits for saved rectangle counts, verifies initial endpoint bindings, and confirms actual movement with the same connector attached. The corrected Windows walkthrough passed all 18 assertion groups. These findings explain concrete defects; the original failed run lacked scene evidence to prove its precise cause. Final cross-platform runs retain all checks.
+
+The stronger checkpoints subsequently identified a Windows run where only the first rectangle existed, with geometry derived from the initial full-window canvas. The native driver now waits until the canvas matches its embedded host, rereads geometry before each gesture and rejects a geometry change explicitly. It does not replay gestures. The layout-aware local Windows walkthrough passed all 18 assertion groups. Cumulative candidate `44c3661` passed 592 application tests in 80 files, 42 script tests and the sharing contract check in CI; the macOS-only script check is exercised by its platform pipeline.
+
+Final portal verification used the actual CollectionRail rename modal and PromptSharingDialog/PromptBundleCard, opened from their AppShell/Workspace controls, at 1280x800 in unpackaged Windows Electron. All four light/dark active-background states were centered, unclipped and readable; closing each restored its opener focus. The fixture used synthetic snapshots and bundles with no saving, preview generation or upload. This verifies actual component presentation and focus, not a live hosted-service transaction.
