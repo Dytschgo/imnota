@@ -51,7 +51,29 @@ export async function exerciseMixedContent(
   await driver.click({ text: 'Add item', exact: true });
   await driver.click({ selector: '.add-item-popover [role="menuitem"]', text: 'Drawing' });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
-  const canvas = await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });
+  await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });
+  type CanvasBounds = { x: number; y: number; width: number; height: number };
+  const waitForCanvasBounds = () =>
+    driver.evaluate<CanvasBounds>(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    const bounds = (element) => {
+      if (!element) return null;
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const check = () => {
+      const canvas = bounds(document.querySelector('.drawing-editor .excalidraw__canvas.interactive'));
+      const host = bounds(document.querySelector('.drawing-editor-canvas'));
+      if (canvas && host && host.width > 0 && host.height > 0 &&
+          ['x', 'y', 'width', 'height'].every(key => Math.abs(canvas[key] - host[key]) <= 1))
+        return resolve(canvas);
+      if (Date.now() >= deadline)
+        return reject(new Error('Drawing canvas did not match its host: ' + JSON.stringify({ canvas, host })));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+  const initialCanvas = await waitForCanvasBounds();
   const createdDrawing = (await host.readProject(projectPath)).contentItems?.find(
     (item) => item.kind === 'drawing',
   );
@@ -93,18 +115,28 @@ export async function exerciseMixedContent(
     await driver.waitFor({ selector: `[data-testid="drawing-tool-${tool}"][aria-pressed="true"]` });
   };
   await selectDrawingTool('rectangle');
-  const point = (x: number, y: number) => ({
-    x: Math.round(canvas.x + canvas.width * x),
-    y: Math.round(canvas.y + canvas.height * y),
-  });
-  await driver.drag(point(0.1, 0.25), point(0.35, 0.4));
+  const dragOnCanvas = async (from: [number, number], to: [number, number]) => {
+    const canvas = await waitForCanvasBounds();
+    if (
+      (Object.keys(initialCanvas) as Array<keyof CanvasBounds>).some(
+        (key) => Math.abs(canvas[key] - initialCanvas[key]) > 1,
+      )
+    )
+      throw new Error(`Drawing canvas moved between gestures: ${JSON.stringify({ initialCanvas, canvas })}`);
+    const point = ([x, y]: [number, number]) => ({
+      x: Math.round(canvas.x + canvas.width * x),
+      y: Math.round(canvas.y + canvas.height * y),
+    });
+    await driver.drag(point(from), point(to));
+  };
+  await dragOnCanvas([0.1, 0.25], [0.35, 0.4]);
   const firstScene = await waitForScene(
     'the first rectangle',
     (elements) => elements.filter((element) => element.type === 'rectangle').length === 1,
   );
   const firstRectangle = firstScene.find((element) => element.type === 'rectangle')!;
   await selectDrawingTool('rectangle');
-  await driver.drag(point(0.6, 0.25), point(0.85, 0.4));
+  await dragOnCanvas([0.6, 0.25], [0.85, 0.4]);
   const secondScene = await waitForScene(
     'both rectangles',
     (elements) => elements.filter((element) => element.type === 'rectangle').length === 2,
@@ -113,7 +145,7 @@ export async function exerciseMixedContent(
     (element) => element.type === 'rectangle' && element.id !== firstRectangle.id,
   )!;
   await selectDrawingTool('arrow');
-  await driver.drag(point(0.35, 0.325), point(0.6, 0.325));
+  await dragOnCanvas([0.35, 0.325], [0.6, 0.325]);
   const hasBindings = (element: SceneElement) =>
     element.type === 'arrow' &&
     element.startBinding?.elementId === firstRectangle.id &&
@@ -123,7 +155,7 @@ export async function exerciseMixedContent(
   );
   const connectorId = connectedScene.find(hasBindings)!.id;
   await selectDrawingTool('select');
-  await driver.drag(point(0.1, 0.325), point(0.1, 0.525));
+  await dragOnCanvas([0.1, 0.325], [0.1, 0.525]);
   await waitForScene(
     'the moved rectangle with the same connector bindings',
     (elements) =>
