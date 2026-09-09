@@ -1467,14 +1467,6 @@ button.icon-button.new-collection-button svg {
   margin: 0 4px;
   background: var(--line);
 }
-.canvas-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  padding-left: 9px;
-  border-left: 1px solid var(--line);
-}
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -1619,9 +1611,6 @@ button.icon-button.new-collection-button svg {
 .inspector-drawer-layer,
 .inspector-drawer {
   display: contents;
-}
-.inspector-drawer-close {
-  display: none;
 }
 .inspector-heading {
   min-height: 72px;
@@ -2507,14 +2496,6 @@ kbd {
     min-width: 0;
     border-left: 1px solid var(--line-strong);
   }
-  .inspector-drawer-close {
-    position: absolute;
-    z-index: 1;
-    top: 13px;
-    right: 12px;
-    display: grid;
-    background: var(--surface-2);
-  }
   .context-builder {
     grid-template-columns: 300px minmax(0, 1fr);
     padding: 22px;
@@ -2823,10 +2804,6 @@ kbd {
 @media (max-width: 1200px) {
   .toolbar-group-label {
     display: none;
-  }
-  .canvas-actions {
-    border-left: 0;
-    padding-left: 0;
   }
 }
 
