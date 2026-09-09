@@ -18,8 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "feca310cd15784d1370d387ca57653eedc70dc08",
+  "sourceRevision": "264ce84140addb89b4170c110973924d7c8b3b9b",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34294851020",
-  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; reviewed all ten changed captures and difference images for cumulative toolbar reflow, collection button alignment and restored backdrop transparency. Four other captures retained within existing strict tolerance."
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34294865338",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale; all ten changed captures and difference images are byte-identical to the individually reviewed cumulative PR50 pairs from run 34294851020: toolbar reflow, collection button alignment and restored backdrop transparency. Four other captures retained within existing strict tolerance."
 }

@@ -5,9 +5,33 @@ import {
   resolvePreferenceSettings,
 } from '../preference-settings';
 import { shouldShowOnboarding } from '../preferences';
-import { appearanceBackdrop } from '../preferences';
+import { BACKDROP_PRESETS, backdropPresetValue, appearanceBackdrop } from '../preferences';
 
 describe('profile-aware preference settings', () => {
+  it.each(BACKDROP_PRESETS)(
+    'preserves %s through saving and restarting shared and separate theme preferences',
+    (preset) => {
+      const initial = resolvePreferenceSettings(undefined, false);
+      const image = backdropPresetValue(preset);
+      for (const useSameBackdropForBoth of [true, false]) {
+        const settings = mergePreferenceSettings(initial.settings, {
+          appearance: {
+            backgroundImage: image,
+            lightBackgroundImage: image,
+            darkBackgroundImage: image,
+            useSameBackdropForBoth,
+          },
+        });
+        const restarted = resolvePreferenceSettings(
+          preferenceSettingsEnvelope({}, settings, initial.profile),
+          true,
+        );
+        expect(appearanceBackdrop(restarted.settings.appearance, 'light').image).toBe(image);
+        expect(appearanceBackdrop(restarted.settings.appearance, 'dark').image).toBe(image);
+      }
+    },
+  );
+
   it('identifies a new profile before defaults are written', () => {
     const result = resolvePreferenceSettings(undefined, false);
     expect(result.profile).toEqual({

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_IMAGE_MAX_BYTES, DEFAULT_APPEARANCE } from '../../shared/preferences';
 import { AppearanceSettings } from './AppearanceSettings';
@@ -77,6 +77,69 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
+  it('shows image controls when the current theme image overrides stored desktop glass', () => {
+    const value = {
+      ...DEFAULT_APPEARANCE,
+      mode: 'system' as const,
+      desktopGlass: true,
+      useSameBackdropForBoth: false,
+      themeBackdropsInitialized: true,
+      lightBackgroundImage: 'preset:mist-light',
+      darkBackgroundImage: '',
+    };
+    const effective = {
+      theme: 'light' as const,
+      accent: 'indigo' as const,
+      requestedGlassLevel: 'strong' as const,
+      glassLevel: 'strong' as const,
+      glassFallbackReason: 'none' as const,
+      desktopGlassStatus: 'off' as const,
+    };
+    const { rerender } = render(
+      <AppearanceSettings value={value} effectiveAppearance={effective} onChange={vi.fn()} />,
+    );
+    expect(screen.getByRole('slider', { name: /Background opacity/ })).toBeEnabled();
+    expect(screen.queryByText(/Solid fallback is active/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    rerender(
+      <AppearanceSettings
+        value={value}
+        effectiveAppearance={{ ...effective, theme: 'dark', desktopGlassStatus: 'active' }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('slider', { name: /Glass tint/ })).toBeEnabled();
+    expect(screen.getByText(/Desktop glass \(Beta\) is active/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('keeps the selected character and offers generic artwork as explicit choices', async () => {
+    const onChange = vi.fn();
+    renderSettings(onChange, 'preset:emerald');
+    const characters = screen.getByRole('group', { name: 'Characters backdrops' });
+    const generic = screen.getByRole('group', { name: 'Generic backdrops' });
+    expect(within(characters).getAllByRole('button')).toHaveLength(4);
+    expect(within(characters).getByRole('button', { name: 'Emerald' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(generic).getAllByRole('button')).toHaveLength(4);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(within(generic).getByRole('button', { name: 'Mist light' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ backgroundImage: 'preset:mist-light' }),
+      ),
+    );
+  });
+
   it('initializes legacy shared values before allowing one theme to use No image', async () => {
     const onChange = vi.fn();
     const legacy = {
