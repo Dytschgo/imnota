@@ -1,3 +1,4 @@
+import { versionStaticHead } from './static-assets.js';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,7 +243,7 @@ export function installOwnerRoutes({ app, db, config, now = () => Date.now() }) 
 
   app.get('/owner', (_request, response) => {
     if (disabled) return response.status(404).type('text').send('Not found.');
-    return response.type('html').send(ownerPage());
+    return response.type('html').send(versionStaticHead(ownerPage()));
   });
 
   app.post('/api/owner/session', loginLimiter, (request, response, next) => {
