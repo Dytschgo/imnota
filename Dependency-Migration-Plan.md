@@ -29,8 +29,9 @@ Keep prior releases available. If a migration fails acceptance, fix or revert it
 
 ## Progress
 
-- Hooks plugin: implementation in progress; existing Hooks lint policy preserved explicitly.
-- Remaining migrations and final nightly: pending.
+- Hooks plugin: merged in #59 (`7de6bf5`), superseding #7. Lint/type checks, 609 application tests, script tests, all platform CI and native/visual checks passed. Existing Hooks lint policy preserved explicitly.
+- Vitest: upgrading to 4.1.11. The existing configuration and mocks remain compatible; full discovery retains all 82 application test files. Full local suite passes without changing test assertions.
+- Zod, React-Konva, Tailwind, Electron and final nightly: pending.
 
 ## References
 
