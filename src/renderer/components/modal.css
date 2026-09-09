@@ -35,11 +35,14 @@
 }
 
 .modal-viewport .modal-actions {
-  position: sticky;
-  bottom: 0;
   flex-wrap: wrap;
   padding-block: 12px;
-  background: var(--surface-2);
+  background: transparent;
+}
+
+/* Action-only confirmations need the same horizontal inset as forms. */
+.modal-viewport .modal > .modal-actions {
+  padding-inline: 22px;
 }
 
 .modal-viewport .modal-form {

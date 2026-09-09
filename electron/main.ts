@@ -1649,21 +1649,7 @@ function registerIpc(): void {
   );
   handle('content:delete', async (_event, input) => {
     const projectPath = await assertProjectPath(input.projectPath);
-    if (settings.confirmBeforeDeletion && process.env.IMNOTA_SMOKE !== '1') {
-      const project = await readProject(projectPath);
-      const item = (project.contentItems ?? []).find((entry) => entry.id === input.itemId);
-      if (!item) throw new Error('Content item does not belong to this project.');
-      const label = item.kind === 'drawing' ? item.title : item.preview || 'Text block';
-      const answer = await dialog.showMessageBox(mainWindow!, {
-        type: 'warning',
-        buttons: ['Cancel', 'Move to trash'],
-        defaultId: 0,
-        cancelId: 0,
-        message: `Delete ${item.kind === 'drawing' ? 'this drawing' : 'this text block'}?`,
-        detail: `${label} and its local content files will be moved to the system trash.`,
-      });
-      if (answer.response !== 1) throw new Error('Content deletion cancelled.');
-    }
+    // The renderer owns confirmation; persistence still validates the item and trash transaction.
     return contentPersistence.delete({ ...input, projectPath });
   });
   handle('content:undo-delete', async (_event, input) =>

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { clipboard, nativeImage } from 'electron';
+import { clipboard, dialog, nativeImage } from 'electron';
 import JSZip from 'jszip';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
@@ -253,15 +253,37 @@ export async function exerciseMixedContent(
   )
     throw new Error('Package export omitted local Markdown, editable drawing source, or its PNG.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
-  await driver.evaluate(`(async () => {
-    const input = {projectPath:${JSON.stringify(projectPath)},itemId:${JSON.stringify(drawing.id)}};
-    const copy = await window.imnota.duplicateContentItem(input);
-    if (copy.project.contentItems.length !== 3) throw new Error('Drawing duplication failed');
-    const result = await window.imnota.deleteContentItem(input);
-    const restored = await window.imnota.undoDeleteContentItem({projectPath:input.projectPath,undoToken:result.undoToken});
-    if (!restored.project.contentItems.some(item=>item.id===input.itemId)) throw new Error('Drawing Undo failed');
-    return true;
-  })()`);
+  // Exercise the production confirmation path without the smoke bypass. A repeated
+  // native warning must fail immediately rather than hang CI behind a system dialog.
+  const previousSmoke = process.env.IMNOTA_SMOKE;
+  const previousDialog = dialog.showMessageBox;
+  const previousSettings = await host.readSettings();
+  try {
+    await driver.evaluate('window.imnota.setSettings({confirmBeforeDeletion:true})');
+    delete process.env.IMNOTA_SMOKE;
+    dialog.showMessageBox = (() => {
+      throw new Error('Content deletion requested a duplicate native confirmation.');
+    }) as typeof dialog.showMessageBox;
+    await driver.evaluate(`(async () => {
+      const projectPath = ${JSON.stringify(projectPath)};
+      const copy = await window.imnota.duplicateContentItem({projectPath,itemId:${JSON.stringify(drawing.id)}});
+      if (copy.project.contentItems.length !== 3) throw new Error('Drawing duplication failed');
+      for (const itemId of ${JSON.stringify([text.id, drawing.id])}) {
+        const result = await window.imnota.deleteContentItem({projectPath,itemId});
+        if (result.snapshot.project.contentItems.some(item=>item.id===itemId)) throw new Error('Content deletion failed');
+        const restored = await window.imnota.undoDeleteContentItem({projectPath,undoToken:result.undoToken});
+        if (!restored.project.contentItems.some(item=>item.id===itemId)) throw new Error('Content Undo failed');
+      }
+      return true;
+    })()`);
+  } finally {
+    dialog.showMessageBox = previousDialog;
+    if (previousSmoke === undefined) delete process.env.IMNOTA_SMOKE;
+    else process.env.IMNOTA_SMOKE = previousSmoke;
+    await driver.evaluate(
+      `window.imnota.setSettings({confirmBeforeDeletion:${JSON.stringify(previousSettings.confirmBeforeDeletion)}})`,
+    );
+  }
   // The bridge copy operation for Markdown has no image dependency.
   await driver.evaluate(`window.imnota.copyText(${JSON.stringify(markdown)})`);
   if (clipboard.readText() !== markdown) throw new Error('Text-only clipboard content changed.');
