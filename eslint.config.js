@@ -44,6 +44,11 @@ export default tseslint.config(
   {
     files: ['**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks },
-    rules: { ...reactHooks.configs.recommended.rules, '@typescript-eslint/no-explicit-any': 'off' },
+    rules: {
+      // Preserve the existing Hooks policy; adopting React Compiler diagnostics is separate work.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
   },
 );
