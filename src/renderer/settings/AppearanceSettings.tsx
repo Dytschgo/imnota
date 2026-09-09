@@ -307,8 +307,8 @@ export function AppearanceSettings({
           <div>
             <h3 id="background-settings-title">Backdrop</h3>
             <p>
-              Choose a bundled image or upload one from this device. Balanced or Strong glass lets it show
-              through.
+              Choose a bundled image or upload one from this device. Light mode automatically reveals the
+              image through glass surfaces.
             </p>
           </div>
           <div className="imnota-background-actions">
