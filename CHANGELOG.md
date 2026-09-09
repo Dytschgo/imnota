@@ -8,7 +8,7 @@
 - Centered dialogs, expanded bundle previews, simplified visibility controls, and added recoverable item deletion from the collection list. Removed stale recovery banners and duplicate deletion prompts.
 - Improved light-mode contrast, restored backdrop transparency, added generic light and dark backgrounds alongside the existing character options, and matched drawing and screenshot canvas surfaces.
 - Improved edit preservation, interrupted-export recovery, update visibility, and macOS rollback cleanup.
-- This release keeps the existing project format and dependencies; the major dependency migrations are not included. macOS downloads remain ad-hoc signed, not Apple-notarised.
+- This release keeps the existing project format; the major dependency migrations are not included. macOS downloads remain ad-hoc signed, not Apple-notarised.
 
 ## 0.2.5
 
