@@ -1,3 +1,4 @@
+import { versionStaticHead } from './static-assets.js';
 import { sharePage } from './share-page.js';
 import archiver from 'archiver';
 import express from 'express';
@@ -26,6 +27,12 @@ import {
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(sourceDir, '../public');
+const entryPages = Object.fromEntries(
+  ['index.html', 'new.html'].map((name) => [
+    name,
+    versionStaticHead(fs.readFileSync(path.join(staticDir, name), 'utf8')),
+  ]),
+);
 const metaCsp =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'";
 const metaCspTag = `<meta http-equiv="Content-Security-Policy" content="${metaCsp}">`;
@@ -458,12 +465,18 @@ export function createService(overrides = {}) {
 
   app.get('/', publicLimiter, (_request, response) => {
     response.set('X-Robots-Tag', 'noindex, nofollow');
-    response.sendFile(path.join(staticDir, 'index.html'));
+    response
+      .set('Cache-Control', 'public, max-age=0, must-revalidate')
+      .type('html')
+      .send(entryPages['index.html']);
   });
 
   app.get('/new', publicLimiter, (_request, response) => {
     response.set('X-Robots-Tag', 'noindex, nofollow');
-    response.sendFile(path.join(staticDir, 'new.html'));
+    response
+      .set('Cache-Control', 'public, max-age=0, must-revalidate')
+      .type('html')
+      .send(entryPages['new.html']);
   });
 
   app.post('/api/pairing', pairingLimiter, pairingJsonParser, (request, response, next) => {
@@ -834,7 +847,7 @@ export function createService(overrides = {}) {
     '/s/:token/markdown',
     asyncRoute(async (request, response) => {
       const record = publicRecord(request.params.token, db, now());
-      if (!record) return response.status(404).type('html').send(unavailablePage());
+      if (!record) return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       response.set({
         'Content-Type': 'text/markdown; charset=utf-8',
         'Content-Disposition': 'attachment; filename="prompt.md"',
@@ -852,11 +865,11 @@ export function createService(overrides = {}) {
       const record = publicRecord(request.params.token, db, now());
       const numberText = request.params.number;
       if (!record || !/^[1-9]\d{0,2}$/u.test(numberText))
-        return response.status(404).type('html').send(unavailablePage());
+        return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       const bundle = db
         .prepare('SELECT bundle_number, markdown FROM share_bundles WHERE share_id = ? AND bundle_number = ?')
         .get(record.id, Number(numberText));
-      if (!bundle) return response.status(404).type('html').send(unavailablePage());
+      if (!bundle) return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       response.set({
         'Content-Type': 'text/markdown; charset=utf-8',
         'Content-Disposition': `attachment; filename="bundle-${bundle.bundle_number}.md"`,
@@ -870,11 +883,11 @@ export function createService(overrides = {}) {
     asyncRoute(async (request, response) => {
       const record = publicRecord(request.params.token, db, now());
       if (!record || !isSafePngFilename(request.params.filename))
-        return response.status(404).type('html').send(unavailablePage());
+        return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       const asset = db
         .prepare('SELECT filename FROM assets WHERE share_id = ? AND filename = ?')
         .get(record.id, request.params.filename);
-      if (!asset) return response.status(404).type('html').send(unavailablePage());
+      if (!asset) return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       response.set({
         'Content-Type': 'image/png',
         'Content-Disposition': `inline; filename="${asset.filename}"`,
@@ -890,7 +903,8 @@ export function createService(overrides = {}) {
     '/s/:token/archive.zip',
     asyncRoute(async (request, response) => {
       const record = publicRecord(request.params.token, db, now());
-      if (!record || !record.has_archive) return response.status(404).type('html').send(unavailablePage());
+      if (!record || !record.has_archive)
+        return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       response.set({
         'Content-Type': 'application/zip',
         'Content-Disposition': 'attachment; filename="imnota-prompt.zip"',
@@ -906,7 +920,7 @@ export function createService(overrides = {}) {
     '/s/:token',
     asyncRoute(async (request, response) => {
       const record = publicRecord(request.params.token, db, now());
-      if (!record) return response.status(404).type('html').send(unavailablePage());
+      if (!record) return response.status(404).type('html').send(versionStaticHead(unavailablePage()));
       const markdown = await fsp.readFile(path.join(config.uploadsDir, record.id, 'prompt.md'), 'utf8');
       const assets = db
         .prepare('SELECT filename, width, height FROM assets WHERE share_id = ? ORDER BY filename')
@@ -919,13 +933,15 @@ export function createService(overrides = {}) {
       return response
         .type('html')
         .send(
-          sharePage(
-            record,
-            renderMarkdown(markdown),
-            assets,
-            request.params.token,
-            config.publicOrigin,
-            bundles,
+          versionStaticHead(
+            sharePage(
+              record,
+              renderMarkdown(markdown),
+              assets,
+              request.params.token,
+              config.publicOrigin,
+              bundles,
+            ),
           ),
         );
     }),

@@ -225,7 +225,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.doesNotMatch(page.text, /href="javascript:/);
   assert.match(page.text, /Available until/);
   assertMetaCsp(page.text);
-  assert.match(page.text, /<script type="module" src="\/static\/share-copy\.js"><\/script>/);
+  assert.match(page.text, /<script type="module" src="\/static\/share-copy\.js\?v=[a-f0-9]{64}"><\/script>/);
   assert.match(page.text, /data-copy-markdown/);
   assert.match(page.text, /data-copy-png/);
   assert.match(page.text, /data-copy-bundle/);
@@ -969,4 +969,36 @@ test('enforces service quota, request limits and endpoint rate limits with stabl
     .expect(({ body }) => {
       assert.equal(body.error.code, 'rate_limited');
     });
+});
+
+test('every service HTML entry uses byte-versioned assets while private pages remain no-store', async (t) => {
+  const instance = await fixture({
+    ownerAccessKeyHash: createHash('sha256').update('test-owner').digest('hex'),
+  });
+  t.after(() => instance.destroy());
+  const receipt = await share(instance);
+  assert.equal(receipt.status, 201);
+  const publicPath = new URL(receipt.body.url).pathname;
+  const entries = [
+    ['/', 200, ['share.css']],
+    ['/new', 200, ['share.css', 'new.js']],
+    ['/owner', 200, ['owner.css', 'owner.js']],
+    [publicPath, 200, ['share.css', 'share-copy.js']],
+    [`/s/${randomToken()}`, 404, ['share.css']],
+  ];
+  for (const [route, status, names] of entries) {
+    const page = await instance.api.get(route).expect(status);
+    assertMetaCsp(page.text);
+    assert.match(page.headers['cache-control'], route === '/' || route === '/new' ? /max-age=0/ : /no-store/);
+    const head = page.text.split('</head>')[0];
+    for (const name of names) {
+      const bytes = fs.readFileSync(new URL(`../public/${name}`, import.meta.url));
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      const url = `/static/${name}?v=${hash}`;
+      assert.ok(head.includes(`"${url}"`), `${route} references current ${name}`);
+      assert.ok(!head.includes(`"/static/${name}"`));
+      const asset = await instance.api.get(url).expect(200);
+      assert.equal(asset.text, bytes.toString('utf8'));
+    }
+  }
 });
