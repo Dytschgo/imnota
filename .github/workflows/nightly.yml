@@ -57,6 +57,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
       - run: npm ci --prefix share-service
       - run: npm test --prefix share-service
       - run: npm audit --prefix share-service --omit=dev --audit-level=high
@@ -98,6 +99,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
       - run: pnpm build
       - run: ${{ matrix.command }}
         env:

@@ -985,6 +985,7 @@ function registerIpc(): void {
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose Imnota workspace',
+      defaultPath: settings.workspacePath || app.getPath('documents'),
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;
@@ -1338,6 +1339,7 @@ function registerIpc(): void {
   handle('projects:open-dialog', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Open Imnota project',
+      defaultPath: settings.workspacePath || app.getPath('documents'),
       properties: ['openDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;

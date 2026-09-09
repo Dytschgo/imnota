@@ -47,6 +47,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
@@ -83,6 +84,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
       - name: Test platform-specific behavior
         run: pnpm test:platform
       - name: Set expected stable package version
@@ -163,6 +165,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
       - name: Download and install the published Mac release
         run: bash scripts/install.sh
         env:

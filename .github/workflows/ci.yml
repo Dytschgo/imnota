@@ -83,6 +83,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec install-electron
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm format:check
       - run: pnpm lint
         if: env.RUN_APPLICATION == 'true'
@@ -141,6 +143,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_APPLICATION == 'true'
+      - run: pnpm exec install-electron
         if: env.RUN_APPLICATION == 'true'
       - run: ${{ matrix.command }}
         if: env.RUN_APPLICATION == 'true'
