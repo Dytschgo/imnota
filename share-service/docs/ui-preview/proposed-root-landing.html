@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Imnota Sharing - private prompt-bundle links</title>
+<link rel="icon" href="assets/logo.svg">
+<link rel="stylesheet" href="share.css">
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="index.html"><img src="assets/logo.svg" width="28" height="28" alt="Imnota logo"><span>Imnota Sharing <small>app.imnota.xyz</small></span></a>
+<nav><span class="status-dot">Local-first - explicit share only</span><a class="navlink" href="https://imnota.xyz/">imnota.xyz</a><a class="navlink" href="https://github.com/Dytschgo/imnota">GitHub</a></nav>
+</div></header>
+<main>
+<p class="eyebrow">Private share service</p>
+<h1>Share one finished bundle.<br>Nothing else leaves your machine.</h1>
+<p class="lede">Imnota stays local-first. When you need a second pair of eyes, publish <b>only</b> the generated Markdown + prompt PNGs to a secret read-only link. No account, no project folder, no annotation source.</p>
+<div class="hero-grid">
+<div>
+<div class="cta-row"><a class="button" href="new.html">Pair browser</a><a class="button secondary" href="#how">How sharing works</a></div>
+<div class="privacy-note">The desktop app never auto-uploads. Sharing is always a separate button with a privacy confirm. Links are unguessable, expire (30 days default), and can be revoked instantly.</div>
+</div>
+<div class="preview-frame"><img src="assets/share-preview.png" alt="Share viewer mock"><div class="preview-cap">/s/&lt;token&gt; - Markdown reading view + PNG previews + ZIP</div></div>
+</div>
+<h2 id="how">How it works</h2>
+<div class="card-grid">
+<div class="card"><div class="step">1</div><h3>Pair this browser</h3><p>Open <code>/new</code>, create a one-time code. It expires in 10 minutes and works for exactly one upload.</p></div>
+<div class="card"><div class="step">2</div><h3>Publish from Imnota</h3><p>Paste the code in the desktop app. It sends <code>prompt.md</code> + included PNGs only. ZIP is built on the server.</p></div>
+<div class="card"><div class="step">3</div><h3>Send the link</h3><p>Share <code>/s/&lt;token&gt;</code>. Anyone with the link can read. No login. Revoke anytime.</p></div>
+</div>
+<div class="split">
+<div class="card"><h3>Shared</h3><ul class="tight"><li>Generated Markdown</li><li>Included prompt PNGs</li><li>Optional server-built ZIP</li></ul></div>
+<div class="card"><h3>Never shared</h3><ul class="tight"><li>Project folder, source screenshots</li><li>Annotation / drawing JSON, recovery files</li><li>Settings, paths, secrets</li></ul></div>
+</div>
+<p style="margin-top:26px"><img src="assets/annotation-marks.svg" alt="annotation motif" width="240" height="72"></p>
+<h2>Pairing preview</h2>
+<div class="preview-frame"><img src="assets/pairing-art.png" alt="pairing illustration"><div class="preview-cap">Desktop bundle -&gt; one-time code -&gt; this browser. Same IDs, same API, new skin.</div></div>
+<div class="cta-row"><a class="button" href="new.html">Go to pairing</a><a class="button secondary" href="share.html">See share viewer</a></div>
+</main>
+<footer class="site"><div class="topbar-inner"><span>Read-only shares hosted at app.imnota.xyz - <a href="https://imnota.xyz/">back to imnota.xyz</a></span><span style="margin-left:auto">/health is for monitoring, not people.</span></div></footer>
+</body>
+</html>

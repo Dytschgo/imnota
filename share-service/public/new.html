@@ -1,34 +1,38 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'"
-    />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex,nofollow" />
-    <title>Pair Imnota sharing</title>
-    <link rel="stylesheet" href="/static/share.css" />
-    <script src="/static/new.js" defer></script>
-  </head>
-  <body>
-    <main class="pairing">
-      <p class="eyebrow">Imnota sharing</p>
-      <h1>Pair this browser</h1>
-      <p>
-        Create a one-time upload code, then paste it into Imnota. The code expires after 10 minutes and
-        authorizes one finalized prompt upload.
-      </p>
-      <p>No project folder, recovery data, annotation source, or settings are requested by this service.</p>
-      <button id="create-code" class="button" type="button">Create upload code</button>
-      <section id="result" hidden aria-live="polite">
-        <label for="upload-code">One-time upload code</label>
-        <textarea id="upload-code" rows="2" readonly></textarea>
-        <button id="copy-code" class="button secondary" type="button">Copy code</button>
-        <p id="expiry"></p>
-      </section>
-      <p id="error" class="error" role="alert"></p>
-    </main>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Pair Imnota sharing</title>
+<link rel="icon" href="/static/assets/logo.svg">
+<link rel="stylesheet" href="/static/share.css">
+<script src="/static/new.js" defer></script>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="/"><img src="/static/assets/logo.svg" width="28" height="28" alt="Imnota logo"><span>Imnota Sharing <small>app.imnota.xyz</small></span></a>
+<nav><a class="navlink" href="https://imnota.xyz/">imnota.xyz</a><a class="navlink" href="https://github.com/Dytschgo/imnota">GitHub</a></nav>
+</div></header>
+<main class="pairing">
+<p class="eyebrow">Browser pairing</p>
+<h1>Pair this browser</h1>
+<p class="lede">Three steps: <b>1.</b> create a one-time code here, <b>2.</b> paste it into Imnota desktop, <b>3.</b> Imnota uploads one finished bundle. The code expires after 10 minutes and authorizes exactly one upload.</p>
+<div class="steps-bar" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
+<div class="preview-frame" style="margin:16px 0"><img src="/static/assets/pairing-art.png" alt="Pairing illustration"><div class="preview-cap">Desktop bundle to one-time code to this browser.</div></div>
+<div class="pair-card">
+<button id="create-code" class="button" type="button">Create upload code</button>
+<section id="result" hidden aria-live="polite">
+<label for="upload-code">One-time upload code</label>
+<textarea id="upload-code" rows="2" readonly></textarea>
+<div class="cta-row"><button id="copy-code" class="button secondary" type="button">Copy code</button></div>
+<p id="expiry" class="expiry"></p>
+</section>
+<p id="error" class="error" role="alert"></p>
+</div>
+<div class="privacy-note" style="margin-top:14px">No project folder, recovery data, annotation source, or settings are requested by this service.</div>
+</main>
+<footer class="site"><div class="topbar-inner"><span>Read-only shares hosted at app.imnota.xyz</span></div></footer>
+</body>
 </html>
