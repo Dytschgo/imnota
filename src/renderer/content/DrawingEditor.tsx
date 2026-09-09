@@ -80,6 +80,7 @@ export function DrawingEditor({
     }
   });
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
   const sourceRef = useRef(source);
   const sceneVersionRef = useRef<number | null>(null);
   const interactionRef = useRef(false);
@@ -149,6 +150,7 @@ export function DrawingEditor({
               title={button.label}
               aria-label={button.label}
               aria-pressed={selected}
+              disabled={!engineReady}
               data-testid={`drawing-tool-${button.label.toLowerCase().replaceAll(' ', '-')}`}
               onClick={() => selectTool(button)}
             >
@@ -186,6 +188,7 @@ export function DrawingEditor({
           }}
           excalidrawAPI={(api) => {
             apiRef.current = api;
+            setEngineReady(true);
           }}
           onPointerDown={() => {
             interactionRef.current = true;
