@@ -13,7 +13,7 @@ let target: string;
 const failure = (code: string) => Object.assign(new Error(code), { code });
 
 beforeEach(async () => {
-  directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-atomic-test-'));
+  directory = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'imnota-atomic-test-'));
   target = path.join(directory, 'drawing.json');
   await fs.writeFile(target, 'baseline');
 });
