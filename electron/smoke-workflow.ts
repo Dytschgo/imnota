@@ -1,4 +1,5 @@
-import { app, clipboard, nativeImage, type BrowserWindow } from 'electron';
+import { app, nativeImage, type BrowserWindow } from 'electron';
+import { nativeClipboard } from './native-clipboard.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -1495,9 +1496,9 @@ async function exercisePromptWorkflow(
     await verifyPromptSet(projectPath, latestSet, cards.length);
   }
   if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
-  const text = clipboard.readText();
-  const html = clipboard.readHTML();
-  const image = clipboard.readImage();
+  const text = await nativeClipboard.readText();
+  const html = await nativeClipboard.readHTML();
+  const image = await nativeClipboard.readImage();
   if (!text.includes('Picture ') || !html || image.isEmpty())
     throw new Error('Prompt copy did not place Markdown, HTML, and PNG on the native clipboard.');
   if (
@@ -1521,7 +1522,10 @@ async function exercisePromptWorkflow(
     `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'context' })`,
     ['session-not-found'],
   );
-  if (clipboard.readText() !== text || !clipboard.readImage().toPNG().equals(clipboardPng))
+  if (
+    (await nativeClipboard.readText()) !== text ||
+    !(await nativeClipboard.readImage()).toPNG().equals(clipboardPng)
+  )
     throw new Error('Rejected prompt copy changed the native clipboard.');
   return {
     bundleCount: cards.length,

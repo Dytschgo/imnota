@@ -1,4 +1,5 @@
-import { clipboard, nativeImage } from 'electron';
+import { nativeImage } from 'electron';
+import { nativeClipboard } from './native-clipboard.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 
 /** Verify search targets and project lifecycle through the real preload and native UI. */
@@ -8,7 +9,7 @@ export async function exerciseUiFeedback(
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
   const image = nativeImage.createFromBitmap(Buffer.alloc(64 * 64 * 4, 180), { width: 64, height: 64 });
-  clipboard.writeImage(image);
+  await nativeClipboard.writeImage(image);
   const fixture = await driver.evaluate<{
     projectPath: string;
     projectId: string;
