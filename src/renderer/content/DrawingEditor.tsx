@@ -141,7 +141,8 @@ export function DrawingEditor({
       <div className="drawing-editor-tools" aria-label="Drawing tools">
         {tools.map((button) => {
           const Icon = button.icon;
-          const selected = activeTool.tool === button.tool && activeTool.rounded === button.rounded;
+          const selected =
+            activeTool.tool === button.tool && Boolean(activeTool.rounded) === Boolean(button.rounded);
           return (
             <button
               key={button.label}

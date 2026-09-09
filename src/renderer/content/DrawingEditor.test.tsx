@@ -78,4 +78,28 @@ test('drawing tools wait for the engine and the first enabled click reaches it',
   expect(rectangle).toBeEnabled();
   fireEvent.click(rectangle);
   expect(api.setActiveTool).toHaveBeenCalledExactlyOnceWith({ type: 'rectangle' });
+  act(() =>
+    engine.props?.onChange?.(
+      [],
+      { activeTool: { type: 'rectangle' }, currentItemRoundness: 'sharp' } as Parameters<
+        NonNullable<ExcalidrawProps['onChange']>
+      >[1],
+      {},
+    ),
+  );
+  expect(rectangle).toHaveAttribute('aria-pressed', 'true');
+  const rounded = screen.getByRole('button', { name: 'Rounded rectangle' });
+  expect(rounded).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(rounded);
+  act(() =>
+    engine.props?.onChange?.(
+      [],
+      { activeTool: { type: 'rectangle' }, currentItemRoundness: 'round' } as Parameters<
+        NonNullable<ExcalidrawProps['onChange']>
+      >[1],
+      {},
+    ),
+  );
+  expect(rounded).toHaveAttribute('aria-pressed', 'true');
+  expect(rectangle).toHaveAttribute('aria-pressed', 'false');
 });
