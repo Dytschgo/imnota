@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="/static/share.css" />
     <script src="/static/new.js" defer></script>
   </head>
-  <body>
+  <body class="pairing-page">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="service-header">
       <a class="brand" href="/" aria-label="Imnota sharing home"
@@ -30,29 +30,39 @@
         <p class="lede">One code. One upload. Your finished bundle, ready to share.</p>
       </header>
       <div class="pairing-layout">
-        <ol class="pairing-steps" aria-label="Pairing instructions">
-          <li id="step-create" aria-current="step">
-            <span class="step-number" aria-hidden="true">01</span>
-            <div>
-              <h2>Create an upload code</h2>
-              <p>It is single-use and expires after 10 minutes.</p>
-            </div>
-          </li>
-          <li id="step-paste">
-            <span class="step-number" aria-hidden="true">02</span>
-            <div>
-              <h2>Paste it into Imnota</h2>
-              <p>Return to the sharing dialog in the desktop app and paste your code.</p>
-            </div>
-          </li>
-          <li>
-            <span class="step-number" aria-hidden="true">03</span>
-            <div>
-              <h2>Upload and get your link</h2>
-              <p>Finish in Imnota. The app shows upload progress, your share link, and its expiry.</p>
-            </div>
-          </li>
-        </ol>
+        <div class="pairing-guide">
+          <ol class="pairing-steps" aria-label="Pairing instructions">
+            <li id="step-create" aria-current="step">
+              <span class="step-number" aria-hidden="true">01</span>
+              <div>
+                <h2>Create an upload code</h2>
+                <p>It is single-use and expires after 10 minutes.</p>
+              </div>
+            </li>
+            <li id="step-paste">
+              <span class="step-number" aria-hidden="true">02</span>
+              <div>
+                <h2>Paste it into Imnota</h2>
+                <p>Return to the sharing dialog in the desktop app and paste your code.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">03</span>
+              <div>
+                <h2>Upload and get your link</h2>
+                <p>Finish in Imnota. The app shows upload progress, your share link, and its expiry.</p>
+              </div>
+            </li>
+          </ol>
+          <img
+            class="pairing-art"
+            src="/static/assets/pairing-art.png"
+            width="800"
+            height="600"
+            alt=""
+            aria-hidden="true"
+          />
+        </div>
         <section class="pairing-panel" aria-labelledby="code-heading">
           <div class="panel-heading">
             <h2 id="code-heading">Your connection</h2>
