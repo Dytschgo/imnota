@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cssBackgroundImage, useAppearance } from '../app/useAppearance';
+import { accentTokens, cssBackgroundImage, useAppearance } from '../app/useAppearance';
 import { DEFAULT_APPEARANCE, type GlassLevel } from './preferences';
 
 afterEach(() => {
@@ -143,5 +143,33 @@ describe('useAppearance', () => {
     act(() => listeners.forEach((listener) => listener()));
     expect(root.style.getPropertyValue('--imnota-background-image')).toContain('amber.png');
     expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0.7');
+  });
+
+  it('injects darker light-mode accent hover, stronger soft, and onAccent', () => {
+    const root = document.createElement('div');
+    const { rerender } = renderHook(
+      ({ mode, accent }: { mode: 'light' | 'dark'; accent: 'indigo' | 'graphite' }) =>
+        useAppearance({ ...DEFAULT_APPEARANCE, mode, accent }, { root }),
+      { initialProps: { mode: 'dark' as 'light' | 'dark', accent: 'indigo' as 'indigo' | 'graphite' } },
+    );
+
+    const darkIndigo = accentTokens('indigo', 'dark');
+    expect(root.style.getPropertyValue('--imnota-accent')).toBe(darkIndigo.base);
+    expect(root.style.getPropertyValue('--imnota-accent-hover')).toBe('#8b7cf6');
+    expect(root.style.getPropertyValue('--imnota-accent-soft')).toBe(darkIndigo.soft);
+    expect(root.style.getPropertyValue('--imnota-on-accent')).toBe('#ffffff');
+
+    rerender({ mode: 'light', accent: 'indigo' });
+    const lightIndigo = accentTokens('indigo', 'light');
+    expect(root.style.getPropertyValue('--imnota-accent-hover')).toBe('#4e3ee6');
+    expect(root.style.getPropertyValue('--imnota-accent-soft')).toBe('rgba(78, 62, 230, 0.2)');
+    expect(root.style.getPropertyValue('--imnota-accent-soft')).toBe(lightIndigo.soft);
+    expect(root.style.getPropertyValue('--imnota-on-accent')).toBe('#ffffff');
+
+    rerender({ mode: 'light', accent: 'graphite' });
+    const lightGraphite = accentTokens('graphite', 'light');
+    expect(root.style.getPropertyValue('--imnota-accent')).toBe('#4b5565');
+    expect(root.style.getPropertyValue('--imnota-accent-hover')).toBe(lightGraphite.hover);
+    expect(root.style.getPropertyValue('--imnota-on-accent')).toBe('#ffffff');
   });
 });

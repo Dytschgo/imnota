@@ -33,39 +33,75 @@ export interface UseAppearanceOptions {
   root?: HTMLElement | null;
 }
 
-const ACCENTS: Record<
-  AccentPreset,
-  { base: string; hover: string; softDark: string; softLight: string; onAccent: string }
-> = {
+export interface AccentTokens {
+  base: string;
+  hover: string;
+  soft: string;
+  onAccent: string;
+}
+
+const ACCENTS: Record<AccentPreset, Record<ResolvedTheme, AccentTokens>> = {
   graphite: {
-    base: '#7d8798',
-    hover: '#a5adba',
-    softDark: 'rgba(148, 159, 177, 0.16)',
-    softLight: 'rgba(76, 87, 104, 0.12)',
-    onAccent: '#0b0d12',
+    dark: {
+      base: '#7d8798',
+      hover: '#a5adba',
+      soft: 'rgba(148, 159, 177, 0.16)',
+      onAccent: '#0b0d12',
+    },
+    light: {
+      base: '#4b5565',
+      hover: '#384150',
+      soft: 'rgba(75, 85, 101, 0.2)',
+      onAccent: '#ffffff',
+    },
   },
   indigo: {
-    base: '#6857f5',
-    hover: '#8b7cf6',
-    softDark: 'rgba(104, 87, 245, 0.18)',
-    softLight: 'rgba(86, 69, 222, 0.12)',
-    onAccent: '#ffffff',
+    dark: {
+      base: '#6857f5',
+      hover: '#8b7cf6',
+      soft: 'rgba(104, 87, 245, 0.18)',
+      onAccent: '#ffffff',
+    },
+    light: {
+      base: '#6857f5',
+      hover: '#4e3ee6',
+      soft: 'rgba(78, 62, 230, 0.2)',
+      onAccent: '#ffffff',
+    },
   },
   emerald: {
-    base: '#159668',
-    hover: '#35b989',
-    softDark: 'rgba(21, 150, 104, 0.18)',
-    softLight: 'rgba(13, 128, 87, 0.12)',
-    onAccent: '#ffffff',
+    dark: {
+      base: '#159668',
+      hover: '#35b989',
+      soft: 'rgba(21, 150, 104, 0.18)',
+      onAccent: '#ffffff',
+    },
+    light: {
+      base: '#0e7450',
+      hover: '#0b5e41',
+      soft: 'rgba(14, 116, 80, 0.2)',
+      onAccent: '#ffffff',
+    },
   },
   amber: {
-    base: '#c77c11',
-    hover: '#e5a33b',
-    softDark: 'rgba(199, 124, 17, 0.18)',
-    softLight: 'rgba(170, 98, 5, 0.13)',
-    onAccent: '#17130b',
+    dark: {
+      base: '#c77c11',
+      hover: '#e5a33b',
+      soft: 'rgba(199, 124, 17, 0.18)',
+      onAccent: '#17130b',
+    },
+    light: {
+      base: '#8f5407',
+      hover: '#6f4005',
+      soft: 'rgba(143, 84, 7, 0.2)',
+      onAccent: '#ffffff',
+    },
   },
 };
+
+export function accentTokens(preset: AccentPreset, theme: ResolvedTheme): AccentTokens {
+  return ACCENTS[preset][theme];
+}
 
 const GLASS: Record<GlassLevel, { alpha: string; blur: string; saturation: string }> = {
   off: { alpha: '1', blur: '0px', saturation: '100%' },
@@ -221,7 +257,7 @@ export function useAppearance(
   useEffect(() => {
     const root = options.root ?? (typeof document === 'undefined' ? null : document.documentElement);
     if (!root) return;
-    const accent = ACCENTS[effective.accent];
+    const accent = accentTokens(effective.accent, effective.theme);
     const glass = GLASS[effective.glassLevel];
     root.dataset.theme = effective.theme;
     root.dataset.accent = effective.accent;
@@ -231,10 +267,7 @@ export function useAppearance(
     root.style.colorScheme = effective.theme;
     root.style.setProperty('--imnota-accent', accent.base);
     root.style.setProperty('--imnota-accent-hover', accent.hover);
-    root.style.setProperty(
-      '--imnota-accent-soft',
-      effective.theme === 'dark' ? accent.softDark : accent.softLight,
-    );
+    root.style.setProperty('--imnota-accent-soft', accent.soft);
     root.style.setProperty('--imnota-on-accent', accent.onAccent);
     root.style.setProperty('--imnota-glass-alpha', glass.alpha);
     root.style.setProperty('--imnota-glass-opacity', `${Number(glass.alpha) * 100}%`);

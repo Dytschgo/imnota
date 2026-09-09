@@ -25,9 +25,9 @@
 }
 
 .annotation-toolbar .icon-button.is-active {
-  color: #fff;
-  background: var(--indigo, #6857f5);
-  box-shadow: 0 3px 10px rgba(45, 36, 156, 0.28);
+  color: var(--imnota-on-accent);
+  background: var(--imnota-accent);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--imnota-accent) 28%, transparent);
 }
 
 .annotation-tooltip-anchor {
@@ -125,13 +125,13 @@
 }
 
 .annotation-more-menu button:focus-visible {
-  outline: 2px solid var(--indigo-light, #8e83ff);
+  outline: 2px solid var(--imnota-accent-hover);
   outline-offset: -2px;
 }
 
 .annotation-more-menu button.is-active {
-  color: var(--indigo-light, #8e83ff);
-  background: rgba(104, 87, 245, 0.12);
+  color: var(--imnota-accent-hover);
+  background: var(--imnota-accent-soft);
 }
 
 .annotation-menu-section + .annotation-menu-section {
@@ -202,7 +202,7 @@
 }
 
 .annotation-palette button:focus-visible {
-  outline: 2px solid var(--indigo-light, #8e83ff);
+  outline: 2px solid var(--imnota-accent-hover);
   outline-offset: 2px;
 }
 

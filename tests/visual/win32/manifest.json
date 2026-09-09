@@ -18,8 +18,8 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-09",
   "platform": "win32",
-  "sourceRevision": "b126f79a36c1ceeaf87996677c77cc454ed29ba6",
+  "sourceRevision": "64c65e137cd68a0c17f4b5b74a921b7351580ac6",
   "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34324314193",
-  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all eleven changed captures and difference images individually reviewed. Adaptive toolbar expands inline tools with available width, retains narrow view actions, and recenters the 1280px canvas after toolbar reflow. Settings heading loses its eyebrow and corresponding vertical space. Three onboarding captures retained within existing strict tolerance."
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34327235444",
+  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all seven changed captures and their difference images individually reviewed. Four light workspaces and three light onboarding scenes adopt stronger graphite ink, surfaces, borders, and the light scrim. Existing adaptive toolbar layout is preserved. Seven dark/settings/backdrop captures retained within the unchanged strict tolerance. Native verification passed."
 }
