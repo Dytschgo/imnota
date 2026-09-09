@@ -30,7 +30,7 @@ export function SharingSettings() {
   const mounted = useRef(true);
   const historyRequest = useRef(0);
   const revokeRequest = useRef(0);
-  const copiedTimer = useRef<number>();
+  const copiedTimer = useRef<number | undefined>(undefined);
   const mutationBusy = Boolean(busyWarning) || revoking;
   const mutationBusyRef = useRef(mutationBusy);
   mutationBusyRef.current = mutationBusy;

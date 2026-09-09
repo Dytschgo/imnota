@@ -53,7 +53,7 @@ export function useSharingSenderName(): SharingSenderNameState {
   const dirty = useRef(false);
   const mounted = useRef(true);
   const generation = useRef(0);
-  const pending = useRef<{ value: string; promise: Promise<boolean> }>();
+  const pending = useRef<{ value: string; promise: Promise<boolean> } | undefined>(undefined);
 
   useEffect(() => {
     mounted.current = true;

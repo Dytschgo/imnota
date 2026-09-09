@@ -145,7 +145,7 @@ function ToolTooltip({
   disabled?: boolean;
 }) {
   const anchor = useRef<HTMLSpanElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pointerFocus = useRef(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const hide = () => {
