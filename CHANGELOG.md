@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6
+
+- Added optional hosted prompt sharing, browser copy actions, device pairing, and private owner management. Sharing pages now use versioned assets so cached files cannot break updated pages.
+- Improved search, project management, collection history, favourites, and sharing settings.
+- Reworked navigation and editor headers, made annotation tools adapt to available space, and fixed tooltips that stayed open after selection.
+- Centered dialogs, expanded bundle previews, simplified visibility controls, and added recoverable item deletion from the collection list. Removed stale recovery banners and duplicate deletion prompts.
+- Improved light-mode contrast, restored backdrop transparency, added generic light and dark backgrounds alongside the existing character options, and matched drawing and screenshot canvas surfaces.
+- Improved edit preservation, interrupted-export recovery, update visibility, and macOS rollback cleanup.
+- This release keeps the existing project format; the major dependency migrations are not included. macOS downloads remain ad-hoc signed, not Apple-notarised.
+
 ## 0.2.5
 
 - Added standalone drawings with essential Excalidraw tools and connectors that stay attached to shapes. Drawings save editable JSON and a cropped PNG with a white background and padding in the collection's work tree.
