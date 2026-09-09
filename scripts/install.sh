@@ -37,6 +37,20 @@ case "$(uname -s)" in
     ditto -x -k "$archive_path" "$temporary_directory"
     test -x "$temporary_directory/Imnota.app/Contents/MacOS/Imnota"
     codesign --verify --deep --strict "$temporary_directory/Imnota.app"
+    minimum_macos="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$temporary_directory/Imnota.app/Contents/Info.plist")"
+    current_macos="$(/usr/bin/sw_vers -productVersion)"
+    if ! /usr/bin/awk -v current="$current_macos" -v minimum="$minimum_macos" 'BEGIN {
+      if (current !~ /^[0-9]+\.[0-9]+(\.[0-9]+)?$/ || minimum !~ /^[0-9]+\.[0-9]+(\.[0-9]+)?$/) exit 1;
+      split(current, actual, "."); split(minimum, required, ".");
+      for (i = 1; i <= 3; i++) {
+        if (actual[i] + 0 > required[i] + 0) exit 0;
+        if (actual[i] + 0 < required[i] + 0) exit 1;
+      }
+      exit 0;
+    }'; then
+      echo "This release requires macOS $minimum_macos or later; this Mac reports $current_macos. No installed app was changed." >&2
+      exit 1
+    fi
     if [ -e "$HOME/Applications/Imnota.app" ]; then
       backup_path="$HOME/Applications/Imnota-backup-$(date +%Y%m%d-%H%M%S).app"
       mv "$HOME/Applications/Imnota.app" "$backup_path"

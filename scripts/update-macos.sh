@@ -181,6 +181,33 @@ plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$2" "$1"
 }
 
+macos_version() {
+  /usr/bin/sw_vers -productVersion
+}
+
+version_at_least() {
+  local current=$1 minimum=$2 index
+  [[ "$current" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ && "$minimum" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+  local current_parts minimum_parts
+  IFS=. read -r -a current_parts <<< "$current"
+  IFS=. read -r -a minimum_parts <<< "$minimum"
+  for index in 0 1 2; do
+    local actual=$((10#${current_parts[$index]:-0})) required=$((10#${minimum_parts[$index]:-0}))
+    (( actual > required )) && return 0
+    (( actual < required )) && return 1
+  done
+  return 0
+}
+
+require_compatible_macos() {
+  local minimum current
+  minimum="$(plist_value "$1/Contents/Info.plist" LSMinimumSystemVersion)" ||
+    die "The downloaded app's minimum macOS version could not be read."
+  current="$(macos_version)" || die "The current macOS version could not be read."
+  version_at_least "$current" "$minimum" ||
+    die "This release requires macOS $minimum or later; this Mac reports $current. The installed app was not changed."
+}
+
 stat_identity() {
   /usr/bin/stat -f '%d:%i' "$1"
 }
@@ -384,6 +411,7 @@ validate_extracted_bundle() {
   validate_bundle_symlinks "$new_app" "$stage_dir/symlinks.bin"
   verify_signature "$new_app" || die "The downloaded app failed code-signature verification."
   verify_universal_binary "$new_app/Contents/MacOS/$APP_NAME" || die "The downloaded app is not a universal Intel and Apple silicon build."
+  require_compatible_macos "$new_app"
 }
 
 assert_original_app_unchanged() {
