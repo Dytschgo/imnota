@@ -1000,6 +1000,7 @@ async function exercisePreferencesAndChannel(
     performanceClass: string;
     platform: string;
     appearanceMode: string;
+    allowPerformanceFallback: boolean;
   }>(`(async () => {
     ${bridgePrelude()}
     const nativeProfile = unwrap(await workflow.getNativePerformanceProfile());
@@ -1007,7 +1008,8 @@ async function exercisePreferencesAndChannel(
     return {
       performanceClass: nativeProfile.performanceClass,
       platform: nativeProfile.platform,
-      appearanceMode: preferences.settings.appearance.mode
+      appearanceMode: preferences.settings.appearance.mode,
+      allowPerformanceFallback: preferences.settings.appearance.allowPerformanceFallback
     };
   })()`);
   if (!['constrained', 'standard'].includes(profile.performanceClass) || !profile.appearanceMode)
@@ -1044,9 +1046,18 @@ async function exercisePreferencesAndChannel(
       });
       const glass = theme === 'light' ? 'off' : 'strong';
       await driver.click({ selector: `label:has(input[name="glass-level"][value="${glass}"])` });
-      const expectedBackground = profile.performanceClass === 'constrained' ? 'none' : 'active';
+      const reducedTransparency = await driver.evaluate<boolean>(
+        `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
+      );
+      const expectedFallback = reducedTransparency
+        ? 'reduced-transparency'
+        : profile.allowPerformanceFallback && profile.performanceClass === 'constrained'
+          ? 'performance'
+          : 'none';
+      const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
+      const expectedGlass = expectedFallback === 'none' ? 'strong' : 'off';
       await driver.waitFor({
-        selector: `:root[data-glass-requested="${glass}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
+        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
       });
       await driver.waitFor({
         selector: `input[name="glass-level"][value="${glass}"]:checked:not(:disabled)`,
