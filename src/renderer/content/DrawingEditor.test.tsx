@@ -60,3 +60,46 @@ test('theme changes stay display-only and edits retain source background and sha
   emit(edited);
   expect(onChange).toHaveBeenCalledTimes(1);
 });
+
+test('drawing tools wait for the engine and the first enabled click reaches it', () => {
+  render(
+    <DrawingEditor source={JSON.stringify({ elements: [], appState: {} })} theme="dark" onChange={vi.fn()} />,
+  );
+  const rectangle = screen.getByRole('button', { name: 'Rectangle' });
+  expect(rectangle).toBeDisabled();
+  const api = { updateScene: vi.fn(), setActiveTool: vi.fn() };
+  fireEvent.click(rectangle);
+  expect(api.setActiveTool).not.toHaveBeenCalled();
+  act(() => {
+    const receiveApi = engine.props?.excalidrawAPI;
+    if (typeof receiveApi !== 'function') throw new Error('Missing drawing engine callback');
+    receiveApi(api as unknown as Parameters<typeof receiveApi>[0]);
+  });
+  expect(rectangle).toBeEnabled();
+  fireEvent.click(rectangle);
+  expect(api.setActiveTool).toHaveBeenCalledExactlyOnceWith({ type: 'rectangle' });
+  act(() =>
+    engine.props?.onChange?.(
+      [],
+      { activeTool: { type: 'rectangle' }, currentItemRoundness: 'sharp' } as Parameters<
+        NonNullable<ExcalidrawProps['onChange']>
+      >[1],
+      {},
+    ),
+  );
+  expect(rectangle).toHaveAttribute('aria-pressed', 'true');
+  const rounded = screen.getByRole('button', { name: 'Rounded rectangle' });
+  expect(rounded).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(rounded);
+  act(() =>
+    engine.props?.onChange?.(
+      [],
+      { activeTool: { type: 'rectangle' }, currentItemRoundness: 'round' } as Parameters<
+        NonNullable<ExcalidrawProps['onChange']>
+      >[1],
+      {},
+    ),
+  );
+  expect(rounded).toHaveAttribute('aria-pressed', 'true');
+  expect(rectangle).toHaveAttribute('aria-pressed', 'false');
+});

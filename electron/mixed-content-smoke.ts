@@ -51,19 +51,85 @@ export async function exerciseMixedContent(
   await driver.click({ text: 'Add item', exact: true });
   await driver.click({ selector: '.add-item-popover [role="menuitem"]', text: 'Drawing' });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
-  await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });
   const canvas = await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });
+  const createdDrawing = (await host.readProject(projectPath)).contentItems?.find(
+    (item) => item.kind === 'drawing',
+  );
+  if (!createdDrawing || createdDrawing.kind !== 'drawing') throw new Error('Drawing item was not created.');
+  const drawingSourcePath = path.join(
+    projectPath,
+    'collections',
+    createdDrawing.collectionId,
+    'drawings',
+    createdDrawing.sourceFilename,
+  );
+  type SceneElement = {
+    id: string;
+    type: string;
+    x: number;
+    y: number;
+    isDeleted?: boolean;
+    startBinding?: { elementId: string } | null;
+    endBinding?: { elementId: string } | null;
+  };
+  const waitForScene = async (
+    description: string,
+    predicate: (elements: SceneElement[]) => boolean,
+  ): Promise<SceneElement[]> => {
+    const deadline = Date.now() + 15_000;
+    let elements: SceneElement[] = [];
+    do {
+      const scene = JSON.parse(await fs.readFile(drawingSourcePath, 'utf8')) as {
+        elements: SceneElement[];
+      };
+      elements = scene.elements.filter((element) => !element.isDeleted);
+      if (predicate(elements)) return elements;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } while (Date.now() < deadline);
+    throw new Error(`Drawing did not persist ${description}. Last scene: ${JSON.stringify(elements)}`);
+  };
+  const selectDrawingTool = async (tool: string) => {
+    await driver.click({ selector: `[data-testid="drawing-tool-${tool}"]` });
+    await driver.waitFor({ selector: `[data-testid="drawing-tool-${tool}"][aria-pressed="true"]` });
+  };
+  await selectDrawingTool('rectangle');
   const point = (x: number, y: number) => ({
     x: Math.round(canvas.x + canvas.width * x),
     y: Math.round(canvas.y + canvas.height * y),
   });
   await driver.drag(point(0.1, 0.25), point(0.35, 0.4));
-  await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });
+  const firstScene = await waitForScene(
+    'the first rectangle',
+    (elements) => elements.filter((element) => element.type === 'rectangle').length === 1,
+  );
+  const firstRectangle = firstScene.find((element) => element.type === 'rectangle')!;
+  await selectDrawingTool('rectangle');
   await driver.drag(point(0.6, 0.25), point(0.85, 0.4));
-  await driver.click({ selector: '[data-testid="drawing-tool-arrow"]' });
+  const secondScene = await waitForScene(
+    'both rectangles',
+    (elements) => elements.filter((element) => element.type === 'rectangle').length === 2,
+  );
+  const secondRectangle = secondScene.find(
+    (element) => element.type === 'rectangle' && element.id !== firstRectangle.id,
+  )!;
+  await selectDrawingTool('arrow');
   await driver.drag(point(0.35, 0.325), point(0.6, 0.325));
-  await driver.click({ selector: '[data-testid="drawing-tool-select"]' });
+  const hasBindings = (element: SceneElement) =>
+    element.type === 'arrow' &&
+    element.startBinding?.elementId === firstRectangle.id &&
+    element.endBinding?.elementId === secondRectangle.id;
+  const connectedScene = await waitForScene('the connector bound to both rectangles', (elements) =>
+    elements.some(hasBindings),
+  );
+  const connectorId = connectedScene.find(hasBindings)!.id;
+  await selectDrawingTool('select');
   await driver.drag(point(0.1, 0.325), point(0.1, 0.525));
+  await waitForScene(
+    'the moved rectangle with the same connector bindings',
+    (elements) =>
+      elements.some((element) => element.id === firstRectangle.id && element.y > firstRectangle.y + 10) &&
+      elements.some((element) => element.id === connectorId && hasBindings(element)),
+  );
   if (artifactDirectory) {
     await driver.resize({ width: 1440, height: 900 });
     captures.push(await driver.capture(artifactDirectory, 'mixed-content-drawing.png'));
