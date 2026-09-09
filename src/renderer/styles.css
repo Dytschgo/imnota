@@ -99,6 +99,7 @@ button:disabled {
   color: var(--ink);
 }
 
+/* Dialogs keep this stronger surface over their dimmed overlay for readability. */
 :root[data-glass-level]:not([data-glass-level='off']) .sidebar,
 :root[data-glass-level]:not([data-glass-level='off']) .topbar,
 :root[data-glass-level]:not([data-glass-level='off']) .shot-rail,
@@ -113,15 +114,19 @@ button:disabled {
 /* The wallpaper already has its own opacity. Avoid blurring it into a flat colour
    or dimming it twice behind chrome; the screenshot canvas stays opaque. */
 :root[data-background='active']:not([data-glass-level='off'])
-  :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  /* Restore the pre-#33 dark treatment: one wallpaper, without a second tint or blur. */
+  :is(.sidebar, .topbar, .shot-rail, .inspector, .library, .settings-view) {
   background: color-mix(in srgb, var(--surface) 18%, transparent);
   backdrop-filter: none;
 }
 :root[data-theme='light'][data-background='active']:not([data-glass-level='off'])
-  :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation, .library, .settings-view) {
+  :is(.sidebar, .topbar, .shot-rail, .inspector, .library, .settings-view) {
   background: color-mix(in srgb, var(--surface) 55%, transparent);
   backdrop-filter: blur(var(--imnota-glass-blur));
+}
+/* Navigation inherits the settings surface; a second glass layer obscures the image. */
+:root[data-background='active']:not([data-glass-level='off']) .settings-navigation {
+  background: transparent;
+  backdrop-filter: none;
 }
 :root[data-desktop-glass='active'],
 :root[data-desktop-glass='active'] body,
