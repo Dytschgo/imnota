@@ -9,6 +9,7 @@ import {
 import './prompt-bundles.css';
 
 export interface PromptSharingDialogProps {
+  hidden?: boolean;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
   error?: { message: string };
@@ -46,6 +47,7 @@ function progressLabel(progress: PromptBundleProgress): string {
 
 export function PromptSharingDialog({
   bundles,
+  hidden = false,
   progress,
   error,
   cleanupPending = false,
@@ -73,6 +75,7 @@ export function PromptSharingDialog({
         : undefined;
   return (
     <Modal
+      hidden={hidden}
       title="Share bundles"
       description="Copy the latest bundle, or choose a single format."
       onClose={onClose}
