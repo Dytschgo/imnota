@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.7
+
+- Updated React and React Konva, Tailwind CSS, Zod, Vitest, the React Hooks lint plugin, and Electron. Existing projects keep their current format.
+- Adapted text, HTML and image copying to Electron 44 while preserving combined clipboard writes and error reporting.
+- Preserved backdrop preferences when changing individual appearance settings.
+- macOS now requires version 13 or later. New install and update helpers check OS compatibility before replacing the app; older installed helpers cannot gain this check retroactively.
+- macOS downloads remain ad-hoc signed, not Apple-notarised.
+
 ## 0.2.6
 
 - Retry briefly when Windows temporarily locks a save destination, preserving the committed file if the lock persists.
