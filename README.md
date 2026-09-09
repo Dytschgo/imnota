@@ -77,7 +77,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-Stable [v0.2.5](https://github.com/Dytschgo/imnota/releases/tag/v0.2.5) includes mixed content. The [September 8 nightly](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806) adds hosted sharing and workflow fixes, with Windows, macOS and Linux package checks and verified public downloads. See the [implementation plan](implementation%20plan.md) for current status and remaining manual QA.
+Stable [v0.2.6](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6) remains the default download. The [September 9 nightly](https://github.com/Dytschgo/imnota/releases/tag/v0.2.7-nightly.20260909.34358152858) contains the dependency migrations, including React 19, Tailwind 4 and Electron 44. Windows, macOS and Linux package checks passed, and all public assets and update manifests were verified. See the [migration record](Dependency-Migration-Plan.md) for PRs, verification and suggested testing, and the [implementation plan](implementation%20plan.md) for broader status and remaining manual QA.
 
 Quality checks:
 
