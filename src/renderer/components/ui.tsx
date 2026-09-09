@@ -8,6 +8,8 @@ import {
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
+import { createPortal } from 'react-dom';
+import './modal.css';
 import { LoaderCircle } from 'lucide-react';
 
 export const Button = forwardRef<
@@ -74,12 +76,16 @@ export function Modal({
   children,
   onClose,
   closeTestId,
+  variant = 'default',
+  hidden = false,
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   onClose: () => void;
   closeTestId?: string;
+  variant?: 'default' | 'preview';
+  hidden?: boolean;
 }) {
   const titleId = `${useId().replace(/:/g, '')}-title`;
   const descriptionId = `${useId().replace(/:/g, '')}-description`;
@@ -123,12 +129,13 @@ export function Modal({
     dialog?.addEventListener('keydown', keydown);
     return () => {
       dialog?.removeEventListener('keydown', keydown);
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
     };
   }, []);
-  return (
+  return createPortal(
     <div
-      className="modal-backdrop"
+      hidden={hidden}
+      className={`modal-backdrop modal-viewport modal-viewport-${variant}`}
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -137,7 +144,7 @@ export function Modal({
       <section
         ref={dialogRef}
         tabIndex={-1}
-        className="modal"
+        className={`modal modal-${variant}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -154,7 +161,8 @@ export function Modal({
         </div>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
