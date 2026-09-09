@@ -1183,12 +1183,6 @@ button.icon-button.new-collection-button svg {
   margin: 0 0 6px;
 }
 
-.recovered-delete {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .annotation-color-fieldset {
   min-width: 0;
   margin: 12px 0;
