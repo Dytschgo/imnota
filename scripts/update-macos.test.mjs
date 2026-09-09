@@ -259,6 +259,66 @@ test('helper has no privileged or quarantine-bypass commands', () => {
   assert.match(source, /--max-time 1800/);
 });
 
+test('compares macOS versions numerically and rejects unreadable versions', { skip: !bash }, () => {
+  for (const [current, minimum, accepted] of [
+    ['12.7.6', '13.0', false],
+    ['13.0', '13.0.0', true],
+    ['13.0.1', '13.0', true],
+    ['13.1', '13.2', false],
+    ['13.10', '13.9', true],
+    ['14.0', '13.6.9', true],
+    ['', '13.0', false],
+    ['14.0', 'unknown', false],
+  ]) {
+    const result = runBash('version_at_least "$2" "$3"', [current, minimum]);
+    assert.equal(result.status === 0, accepted, `${current} >= ${minimum}: ${result.stderr}`);
+  }
+});
+
+test(
+  'rejects an incompatible downloaded bundle before asking the installed app to quit or replacing it',
+  { skip: !bash },
+  () => {
+    const result = runBash(`
+root=$(mktemp -d)
+app_path="$root/Imnota.app"
+stage_dir="$root/staging"
+mkdir -p "$app_path" "$stage_dir/extracted/Imnota.app/Contents"
+printf old > "$app_path/version"
+trap 'test "$(cat "$app_path/version")" = old && printf preserved; rm -rf "$root"' EXIT
+plist_value() {
+  case "$2" in
+    CFBundleIdentifier) printf com.dytschgo.imnota ;;
+    CFBundleShortVersionString) printf 1.2.3 ;;
+    LSMinimumSystemVersion) printf 13.0 ;;
+    *) return 1 ;;
+  esac
+}
+macos_version() { printf 12.7.6; }
+validate_bundle_symlinks() { :; }
+verify_signature() { :; }
+verify_universal_binary() { :; }
+validate_extracted_bundle "$stage_dir/extracted" 1.2.3
+printf 'should-not-quit-or-replace'
+`);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /requires macOS 13\.0 or later/);
+    assert.equal(result.stdout, 'preserved');
+  },
+);
+
+test('accepts a compatible macOS bundle and refuses a missing minimum version', { skip: !bash }, () => {
+  const accepted = runBash(
+    'plist_value() { printf 13.0; }; macos_version() { printf 14.1; }; require_compatible_macos fixture',
+  );
+  assert.equal(accepted.status, 0, accepted.stderr);
+  const missing = runBash(
+    'plist_value() { return 1; }; macos_version() { printf 14.1; }; require_compatible_macos fixture',
+  );
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /minimum macOS version could not be read/);
+});
+
 test(
   'installs and retains a hidden rollback copy from the real packaged macOS zip',
   { skip: process.platform !== 'darwin' || !bash || !fs.existsSync(packagedMacZip) },
