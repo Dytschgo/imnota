@@ -480,8 +480,8 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
   const recovery = z
     .object({
       project: z.unknown(),
-      annotations: z.record(z.array(annotationSchema)),
-      notes: z.record(notesSchema).optional(),
+      annotations: z.record(z.string(), z.array(annotationSchema)),
+      notes: z.record(z.string(), notesSchema).optional(),
     })
     .parse(JSON.parse(recoverySource.toString('utf8')));
   const recoveryProject = parseProjectFile(recovery.project);
@@ -750,7 +750,7 @@ function registerIpc(): void {
     .strict();
   const projectRevision = z.string().regex(/^[a-f0-9]{64}$/);
   const projectIcon = z.enum(PROJECT_ICON_KEYS);
-  const contracts: Record<string, z.ZodTypeAny> = {
+  const contracts: Record<string, z.ZodType<unknown[]>> = {
     'settings:get': z.tuple([]),
     'settings:choose-workspace': z.tuple([]),
     'settings:set': z.tuple([settingsPatchSchema]),
@@ -870,7 +870,7 @@ function registerIpc(): void {
       z.object({
         projectPath: pathInput,
         project: projectSchema,
-        annotations: z.record(z.array(annotationSchema)),
+        annotations: z.record(z.string(), z.array(annotationSchema)),
       }),
     ]),
     'update:download': z.tuple([]),

@@ -30,8 +30,9 @@ Keep prior releases available. If a migration fails acceptance, fix or revert it
 ## Progress
 
 - Hooks plugin: merged in #59 (`7de6bf5`), superseding #7. Lint/type checks, 609 application tests, script tests, all platform CI and native/visual checks passed. Existing Hooks lint policy preserved explicitly.
-- Vitest: upgrading to 4.1.11. The existing configuration and mocks remain compatible; full discovery retains all 82 application test files. Full local suite passes without changing test assertions.
-- Zod, React-Konva, Tailwind, Electron and final nightly: pending.
+- Vitest: merged in #60 (`d983079`), superseding #41. All local checks and platform CI passed. Independent v3/v4 discovery comparison retained exactly the same 82 application and 41 platform test files; assertions and configuration are unchanged.
+- Zod: migration in progress. Records explicitly declare string keys and IPC contracts declare array output. Remove defaults only from sparse appearance-update schemas so changing one setting cannot reset omitted backdrop preferences; stored-profile defaults remain intact.
+- React-Konva, Tailwind, Electron and final nightly: pending. Electron needs a separate clipboard compatibility preparation PR before its runtime switch; Electron 44 requires macOS 13 or later.
 
 ## References
 

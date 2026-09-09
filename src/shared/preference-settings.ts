@@ -11,7 +11,7 @@ import { SHORTCUT_ACTIONS } from './shortcuts.js';
 
 const shortcutValueSchema = z.string().max(100).nullable();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
-const shortcutBindingsSchema = z.record(shortcutValueSchema).superRefine((bindings, context) => {
+const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
     if (!shortcutActionIds.has(actionId))
       context.addIssue({
@@ -60,7 +60,24 @@ export const preferenceSettingsSchema = z
 
 export const preferenceSettingsUpdateSchema = z
   .object({
-    appearance: preferenceSettingsSchema.shape.appearance.partial().strict().optional(),
+    // Zod 4 applies inner defaults even inside optional fields. Patches must contain only supplied keys.
+    appearance: preferenceSettingsSchema.shape.appearance
+      .extend({
+        backgroundImage: preferenceSettingsSchema.shape.appearance.shape.backgroundImage.unwrap(),
+        backgroundOpacity: preferenceSettingsSchema.shape.appearance.shape.backgroundOpacity.unwrap(),
+        useSameBackdropForBoth:
+          preferenceSettingsSchema.shape.appearance.shape.useSameBackdropForBoth.unwrap(),
+        themeBackdropsInitialized:
+          preferenceSettingsSchema.shape.appearance.shape.themeBackdropsInitialized.unwrap(),
+        lightBackgroundImage: preferenceSettingsSchema.shape.appearance.shape.lightBackgroundImage.unwrap(),
+        darkBackgroundImage: preferenceSettingsSchema.shape.appearance.shape.darkBackgroundImage.unwrap(),
+        lightBackgroundOpacity:
+          preferenceSettingsSchema.shape.appearance.shape.lightBackgroundOpacity.unwrap(),
+        darkBackgroundOpacity: preferenceSettingsSchema.shape.appearance.shape.darkBackgroundOpacity.unwrap(),
+      })
+      .partial()
+      .strict()
+      .optional(),
     shortcuts: z.object({ bindings: shortcutBindingsSchema.optional() }).strict().optional(),
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
   })
