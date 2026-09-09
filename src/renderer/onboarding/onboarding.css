@@ -5,6 +5,10 @@
   display: grid;
   place-items: center;
   padding: 28px;
+  background: rgba(3, 5, 9, 0.74);
+}
+
+:root[data-theme='light'] .imnota-onboarding-backdrop {
   background: var(--scrim);
 }
 
