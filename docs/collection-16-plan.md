@@ -4,8 +4,10 @@ Status: implemented for PR review on `fix/collection-16`, based on `main` at `68
 
 Priority: Medium for all six reports.
 
-Export set: ImnotaDev - Collection 16 - 260909-091117  
-Bundle reference: ImnotaDev - Collection 16 - 260909-091117 - 01  
+Export set: ImnotaDev - Collection 16 - 260909-091117
+
+Bundle reference: ImnotaDev - Collection 16 - 260909-091117 - 01
+
 Bundle: 1 of 1
 
 ## Scope and source alignment
