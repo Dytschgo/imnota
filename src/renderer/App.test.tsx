@@ -1579,14 +1579,18 @@ describe('feedback controls', () => {
     renderApp();
     fireEvent.click(await screen.findByTestId('library-full-search'));
     await screen.findByTestId('global-search-input');
-    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true'),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     await screen.findByRole('heading', { name: 'Archived projects' });
     fireEvent.click(screen.getByTestId('library-full-search'));
     await screen.findByTestId('global-search-input');
-    expect(screen.getByRole('button', { name: 'Archive' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Archive' })).toHaveAttribute('aria-pressed', 'true'),
+    );
   });
 
   it('opens search from Settings with Ctrl+F and clears a stale query', async () => {
