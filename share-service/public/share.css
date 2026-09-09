@@ -854,3 +854,58 @@ select {
     padding: 17px;
   }
 }
+
+.pairing-heading {
+  background: url('/static/assets/annotation-marks.svg') no-repeat right center / 180px auto;
+  padding-right: 200px;
+}
+.pairing-guide {
+  min-width: 0;
+}
+.pairing-art {
+  display: block;
+  width: min(100%, 400px);
+  height: auto;
+  margin: 12px auto 0;
+  border: 1px solid var(--share-line);
+  border-radius: 10px;
+}
+.pairing-steps .step-number {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--share-line);
+  border-radius: 50%;
+}
+.pairing-steps [aria-current='step'] .step-number {
+  background: #6857f5;
+  border-color: #6857f5;
+  color: #fff;
+}
+.pairing-page .button:not(.secondary),
+.shared-bundle .button:not(.secondary):not(.is-copied) {
+  background: #6857f5;
+  border-color: #6857f5;
+  color: #fff;
+}
+.shared-bundle .copy-split.is-copied .copy-toggle {
+  background: #333d43;
+  border-color: #53616b;
+  color: #dce6df;
+}
+.shared-bundle :is(article, figure) {
+  border-radius: 10px;
+}
+@media (max-width: 820px) {
+  .pairing-art {
+    display: none;
+  }
+}
+@media (max-width: 520px) {
+  .pairing-heading {
+    background: none;
+    padding-right: 0;
+  }
+}
