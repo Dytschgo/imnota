@@ -1287,6 +1287,14 @@ export default function App() {
   return (
     <>
       <AppShell
+        saveState={
+          persistence.saveState === 'error' || contentPersistence.saveState === 'error'
+            ? 'error'
+            : persistence.saveState === 'saving' || contentPersistence.saveState === 'saving'
+              ? 'saving'
+              : 'saved'
+        }
+        onRetrySave={contentPersistence.saveState === 'error' ? contentPersistence.retry : undefined}
         searchShortcut={shortcutLabel('project.search')}
         navigationShortcuts={{
           projects: shortcutLabel('navigation.projects'),

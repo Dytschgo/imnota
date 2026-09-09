@@ -619,7 +619,21 @@ button.icon-button.new-collection-button svg {
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 97%, var(--bg));
 }
+.topbar-navigation {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.topbar-navigation .icon-button,
+.topbar > .navigation-restore,
+.crumbs > .save-state {
+  flex: none;
+  white-space: nowrap;
+}
 .crumbs {
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -638,6 +652,7 @@ button.icon-button.new-collection-button svg {
   font-weight: 400;
 }
 .topbar-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1220,6 +1235,10 @@ button.icon-button.new-collection-button svg {
 .shot-rail.collapsed .rail-heading {
   padding: 12px 6px;
 }
+.inspector-restore {
+  flex: none;
+  margin-left: auto;
+}
 .rail-heading,
 .inspector-heading {
   display: flex;
@@ -1448,14 +1467,6 @@ button.icon-button.new-collection-button svg {
   margin: 0 4px;
   background: var(--line);
 }
-.canvas-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  padding-left: 9px;
-  border-left: 1px solid var(--line);
-}
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -1601,12 +1612,12 @@ button.icon-button.new-collection-button svg {
 .inspector-drawer {
   display: contents;
 }
-.inspector-drawer-close {
-  display: none;
-}
 .inspector-heading {
   min-height: 72px;
   padding: 15px 16px 13px;
+}
+.inspector-heading > .icon-button {
+  flex: none;
 }
 .inspector-heading > div {
   display: flex;
@@ -2485,14 +2496,6 @@ kbd {
     min-width: 0;
     border-left: 1px solid var(--line-strong);
   }
-  .inspector-drawer-close {
-    position: absolute;
-    z-index: 1;
-    top: 13px;
-    right: 12px;
-    display: grid;
-    background: var(--surface-2);
-  }
   .context-builder {
     grid-template-columns: 300px minmax(0, 1fr);
     padding: 22px;
@@ -2612,9 +2615,7 @@ kbd {
 
 .crumb-current {
   min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
+  display: block;
   overflow: hidden;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -2883,9 +2884,5 @@ kbd {
 @media (max-width: 1200px) {
   .toolbar-group-label {
     display: none;
-  }
-  .canvas-actions {
-    border-left: 0;
-    padding-left: 0;
   }
 }

@@ -1,5 +1,5 @@
 import { Copy, ImagePlus, PanelRight, Trash2, Upload } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
 import type {
@@ -80,7 +80,6 @@ export function Workspace(props: WorkspaceProps) {
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
-  const saveState = item ? (props.contentSaveState ?? 'saved') : props.saveState;
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
@@ -90,8 +89,9 @@ export function Workspace(props: WorkspaceProps) {
     const target =
       previous?.isConnected && !previous.hasAttribute('data-drawer-autofocus')
         ? previous
-        : (inspectorTriggerRef.current ??
-          document.querySelector<HTMLButtonElement>('[data-testid="inspector-toggle"]'));
+        : inspectorTriggerRef.current?.isConnected
+          ? inspectorTriggerRef.current
+          : document.querySelector<HTMLButtonElement>('[data-testid="inspector-toggle"]');
     target?.focus();
   }, []);
   const dismissInspector = useCallback(() => {
@@ -144,6 +144,21 @@ export function Workspace(props: WorkspaceProps) {
       restoreInspectorFocus();
     };
   }, [dismissInspector, narrowViewport, restoreInspectorFocus, store.rightPanelOpen]);
+  const previousInspectorOpen = useRef(store.rightPanelOpen);
+  useLayoutEffect(() => {
+    if (previousInspectorOpen.current && !store.rightPanelOpen) restoreInspectorFocus();
+    previousInspectorOpen.current = store.rightPanelOpen;
+  }, [store.rightPanelOpen, restoreInspectorFocus]);
+  const inspectorCollapse = (
+    <IconButton
+      data-drawer-autofocus
+      data-testid="inspector-toggle"
+      label={narrowViewport ? 'Close inspector' : 'Collapse inspector'}
+      onClick={dismissInspector}
+    >
+      <PanelRight size={17} aria-hidden="true" />
+    </IconButton>
+  );
   return (
     <section
       className="workspace"
@@ -188,27 +203,19 @@ export function Workspace(props: WorkspaceProps) {
               shortcutLabels={props.shortcutLabels}
             />
           )}
-          <div className="canvas-actions">
-            <span className={`save-state ${saveState}`} data-testid="save-state" role="status">
-              <span className="save-dot" />
-              {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}
-            </span>
-            {item && saveState === 'error' && (
-              <Button variant="ghost" onClick={props.onContentRetry}>
-                Retry save
-              </Button>
-            )}
+          {!store.rightPanelOpen && (
             <IconButton
+              className="inspector-restore"
               data-testid="inspector-toggle"
-              label={store.rightPanelOpen ? 'Collapse inspector' : 'Expand inspector'}
+              label="Expand inspector"
               onClick={(event) => {
                 inspectorTriggerRef.current = event.currentTarget;
-                store.set({ rightPanelOpen: !store.rightPanelOpen });
+                store.set({ rightPanelOpen: true });
               }}
             >
               <PanelRight size={17} aria-hidden="true" />
             </IconButton>
-          </div>
+          )}
         </div>
         {item ? (
           props.contentLoading || !props.content || props.content.item.id !== item.id ? (
@@ -294,16 +301,12 @@ export function Workspace(props: WorkspaceProps) {
             aria-label={narrowViewport ? 'Inspector' : undefined}
             tabIndex={narrowViewport ? -1 : undefined}
           >
-            <IconButton
-              data-drawer-autofocus
-              className="inspector-drawer-close"
-              label="Close inspector"
-              onClick={dismissInspector}
-            >
-              ×
-            </IconButton>
             {item ? (
               <aside className="inspector content-inspector" aria-label="Content details">
+                <div className="inspector-heading">
+                  <h2>{item.kind === 'drawing' ? 'Drawing context' : 'Text context'}</h2>
+                  {inspectorCollapse}
+                </div>
                 {item.kind === 'drawing' ? (
                   <label className="field">
                     <span className="field-label">Drawing title</span>
@@ -333,6 +336,7 @@ export function Workspace(props: WorkspaceProps) {
               </aside>
             ) : (
               <ScreenshotInspector
+                headerAction={inspectorCollapse}
                 shot={shot}
                 selectedAnnotation={selectedAnnotation}
                 onUpdateShot={props.onUpdateShot}

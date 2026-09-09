@@ -1,9 +1,11 @@
+import type { ReactNode } from 'react';
 import { Copy, PanelRight, Trash2, Undo2 } from 'lucide-react';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { Button, EmptyState, TextArea, TextInput } from '../components/ui';
 
 export interface ScreenshotInspectorProps {
+  headerAction?: ReactNode;
   shot: ScreenshotRecord | null;
   selectedAnnotation: Annotation | null;
   onUpdateShot(patch: Partial<ScreenshotRecord>): void;
@@ -17,6 +19,7 @@ export interface ScreenshotInspectorProps {
 }
 
 export function ScreenshotInspector({
+  headerAction,
   shot,
   selectedAnnotation,
   onUpdateShot,
@@ -31,6 +34,10 @@ export function ScreenshotInspector({
   if (!shot)
     return (
       <aside className="inspector" aria-label="Inspector" data-testid="inspector-panel">
+        <div className="inspector-heading">
+          <h2>Inspector</h2>
+          {headerAction}
+        </div>
         <EmptyState
           icon={<PanelRight size={20} aria-hidden="true" />}
           title="Inspector"
@@ -46,6 +53,7 @@ export function ScreenshotInspector({
           <span className="eyebrow">SCREENSHOT {String(shot.position + 1).padStart(2, '0')}</span>
           <h2>Screenshot context</h2>
         </div>
+        {headerAction}
       </div>
       <div className="inspector-scroll">
         <section className="inspector-section context-section" aria-labelledby="context-heading">
