@@ -50,10 +50,12 @@ describe('light theme tokens', () => {
   });
 
   it('meets WCAG AA contrast on solid light surfaces', () => {
+    expect(light['--imnota-accent-hover']).toBe(indigoHover);
     const backgrounds = [light['--surface'], light['--bg']];
     for (const background of backgrounds) {
       expect(contrastRatio(light['--ink-2'], background)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(light['--ink-3'], background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(light['--ink-4'], background)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(light['--danger'], background)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(indigoHover, background)).toBeGreaterThanOrEqual(4.5);
     }
