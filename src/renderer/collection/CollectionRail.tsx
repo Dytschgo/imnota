@@ -8,6 +8,8 @@ import {
   FileImage,
   FileText,
   PanelLeft,
+  MoreHorizontal,
+  Trash2,
   Pencil,
   Plus,
   Upload,
@@ -30,6 +32,8 @@ export interface CollectionRailProps {
   onMessage(message: string): void;
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
+  onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
+  onDeleteProject?(): void;
 }
 
 export function CollectionControls({
@@ -61,8 +65,6 @@ export function CollectionControls({
   const pickerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
-  const collectionItems = project ? orderedCollectionItems(project, current?.id ?? '') : [];
-  const includedItemCount = collectionItems.filter((item) => item.includeInExport).length;
   const selectedIndex = Math.max(
     0,
     collections.findIndex((collection) => collection.id === current?.id),
@@ -156,12 +158,6 @@ export function CollectionControls({
     <div className="round-controls">
       <div className="collection-control-heading">
         <span className="field-label">Collection</span>
-        <span
-          className="collection-count"
-          aria-label={`${includedItemCount} included items out of ${collectionItems.length}`}
-        >
-          {includedItemCount}/{collectionItems.length} included
-        </span>
         <IconButton
           data-testid="new-collection"
           className="new-collection-button"
@@ -344,6 +340,8 @@ export function CollectionRail({
   onMessage,
   onSnapshot,
   onAddContent,
+  onDeleteItem,
+  onDeleteProject,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -486,9 +484,27 @@ export function CollectionRail({
       <div className="rail-heading">
         {store.leftPanelOpen && (
           <div>
-            <span className="eyebrow">Evidence collection</span>
             <strong>{project?.name}</strong>
           </div>
+        )}
+        {store.leftPanelOpen && onDeleteProject && (
+          <details className="project-actions">
+            <summary aria-label="Project actions" title="Project actions">
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </summary>
+            <Button
+              variant="ghost"
+              onClick={(event) => {
+                const menu = event.currentTarget.closest('details');
+                menu?.removeAttribute('open');
+                menu?.querySelector('summary')?.focus();
+                onDeleteProject();
+              }}
+            >
+              <Trash2 size={15} aria-hidden="true" />
+              Delete project
+            </Button>
+          </details>
         )}
         <IconButton
           label={store.leftPanelOpen ? 'Collapse collections panel' : 'Expand collections panel'}
@@ -564,39 +580,49 @@ export function CollectionRail({
                           ? 'Drawing'
                           : 'Markdown'}
                     </small>
-                    <span
-                      className={`item-inclusion ${item.includeInExport ? 'included' : 'excluded'}`}
-                      aria-label={
-                        item.includeInExport
-                          ? 'Included in the next prompt bundle'
-                          : 'Excluded from the next prompt bundle'
-                      }
-                      title={
-                        item.includeInExport
-                          ? 'Included in the next prompt bundle'
-                          : 'Excluded from the next prompt bundle'
-                      }
-                    >
-                      {item.includeInExport ? 'Included' : 'Excluded'}
-                    </span>
                   </span>
                 </button>
-                <IconButton
-                  data-testid={`screenshot-export-toggle-${item.id}`}
-                  className="shot-visibility"
-                  label={
-                    item.includeInExport
-                      ? `Exclude ${item.kind === 'text' ? item.preview || 'text block' : item.title} from prompt`
-                      : `Include ${item.kind === 'text' ? item.preview || 'text block' : item.title} in prompt`
-                  }
-                  onClick={() => void toggleVisibility(item)}
-                >
-                  {item.includeInExport ? (
-                    <Eye size={16} aria-hidden="true" />
-                  ) : (
-                    <EyeOff size={16} aria-hidden="true" />
+                <div className="shot-item-actions">
+                  <IconButton
+                    data-testid={`screenshot-export-toggle-${item.id}`}
+                    className="shot-visibility"
+                    label={
+                      item.includeInExport
+                        ? `Exclude ${item.kind === 'text' ? item.preview || 'text block' : item.title} from prompt`
+                        : `Include ${item.kind === 'text' ? item.preview || 'text block' : item.title} in prompt`
+                    }
+                    aria-pressed={item.includeInExport}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void toggleVisibility(item);
+                    }}
+                  >
+                    {item.includeInExport ? (
+                      <Eye size={16} aria-hidden="true" />
+                    ) : (
+                      <EyeOff size={16} aria-hidden="true" />
+                    )}
+                  </IconButton>
+                  {onDeleteItem && (
+                    <IconButton
+                      className="shot-delete"
+                      data-testid={`item-delete-${item.id}`}
+                      label={`Delete ${item.kind === 'text' ? 'text block' : item.kind}: ${item.kind === 'text' ? item.preview || 'Text block' : item.title}`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onDragStart={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onDeleteItem(item.id, item.kind);
+                      }}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                    </IconButton>
                   )}
-                </IconButton>
+                </div>
               </div>
             ))}
           </div>

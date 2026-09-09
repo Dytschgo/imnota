@@ -960,10 +960,10 @@ async function captureWorkspaceMatrix(
     driver.browserWindow.setMinimumSize(800, 680);
     try {
       await driver.resize({ width: 900, height: 800 });
-      await driver.waitFor({ selector: '.inspector-drawer-close' });
+      await driver.waitFor({ selector: 'button[aria-label="Close inspector"]' });
       const drawerVisible = await driver.evaluate<boolean>(`(() => {
         const drawer = document.querySelector('.inspector-drawer').getBoundingClientRect();
-        const close = document.querySelector('.inspector-drawer-close').getBoundingClientRect();
+        const close = document.querySelector('button[aria-label="Close inspector"]').getBoundingClientRect();
         return drawer.width >= 256 && drawer.right <= innerWidth && close.width > 0;
       })()`);
       if (!drawerVisible) throw new Error('Narrow inspector did not render as an accessible drawer.');

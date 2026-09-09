@@ -55,14 +55,10 @@ export { SettingsView } from './settings/SettingsView';
 interface SnapshotNotice {
   projectPath: string;
   warnings: string[];
-  recoveredDeletes: Array<{ undoToken: string; screenshotId: string }>;
-  recoveredContentDeletes: Array<{ undoToken: string; itemId: string }>;
 }
 
 interface SnapshotExtras {
   warnings?: string[];
-  recoveredDeletes?: Array<{ undoToken: string; screenshotId: string }>;
-  recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
 type PendingDeletion = {
@@ -121,24 +117,7 @@ export default function App() {
     setSnapshotNotice((current) => {
       const sameProject = current?.projectPath === snapshot.projectPath;
       const warnings = [...new Set([...(sameProject ? current.warnings : []), ...(extras.warnings ?? [])])];
-      const recoveredByToken = new Map(
-        [...(sameProject ? current.recoveredDeletes : []), ...(extras.recoveredDeletes ?? [])].map((item) => [
-          item.undoToken,
-          item,
-        ]),
-      );
-      const recoveredDeletes = [...recoveredByToken.values()];
-      const recoveredContentDeletes = [
-        ...new Map(
-          [
-            ...(sameProject ? current.recoveredContentDeletes : []),
-            ...(extras.recoveredContentDeletes ?? []),
-          ].map((entry) => [entry.undoToken, entry]),
-        ).values(),
-      ];
-      return warnings.length || recoveredDeletes.length || recoveredContentDeletes.length
-        ? { projectPath: snapshot.projectPath, warnings, recoveredDeletes, recoveredContentDeletes }
-        : null;
+      return warnings.length ? { projectPath: snapshot.projectPath, warnings } : null;
     });
     setError('');
   }, []);
@@ -757,12 +736,19 @@ export default function App() {
       );
     }
   }
-  async function requestContentDeletion() {
+  async function requestContentDeletion(requestedId?: string) {
+    const identity = ++navigationIdentity.current;
+    const before = useAppStore.getState();
     if (!(await flushAll())) return;
     const current = useAppStore.getState();
-    const item = current.snapshot?.project.contentItems?.find(
-      (entry) => entry.id === current.activeScreenshotId,
-    );
+    if (
+      identity !== navigationIdentity.current ||
+      current.snapshot?.projectPath !== before.snapshot?.projectPath
+    )
+      return;
+    const targetId =
+      !requestedId || requestedId === before.activeScreenshotId ? current.activeScreenshotId : requestedId;
+    const item = current.snapshot?.project.contentItems?.find((entry) => entry.id === targetId);
     if (!current.snapshot || !item) return;
     const pending = {
       kind: 'content' as const,
@@ -782,16 +768,6 @@ export default function App() {
     try {
       const snapshot = await window.imnota.undoDeleteContentItem({ projectPath, undoToken });
       if (!(await persistence.acceptMutationSnapshot(snapshot, itemId, token))) return;
-      setSnapshotNotice((notice) =>
-        notice
-          ? {
-              ...notice,
-              recoveredContentDeletes: notice.recoveredContentDeletes.filter(
-                (entry) => entry.undoToken !== undoToken,
-              ),
-            }
-          : null,
-      );
     } catch (reason) {
       await persistence.cancelNativeMutation(token);
       setError(reason instanceof Error ? reason.message : 'The item could not be restored.');
@@ -875,10 +851,19 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be duplicated.');
     }
   }
-  async function requestScreenshotDeletion() {
+  async function requestScreenshotDeletion(requestedId?: string) {
+    const identity = ++navigationIdentity.current;
+    const before = useAppStore.getState();
     if (!(await flushAll())) return;
     const current = useAppStore.getState();
-    const shot = current.activeScreenshot();
+    if (
+      identity !== navigationIdentity.current ||
+      current.snapshot?.projectPath !== before.snapshot?.projectPath
+    )
+      return;
+    const targetId =
+      !requestedId || requestedId === before.activeScreenshotId ? current.activeScreenshotId : requestedId;
+    const shot = current.snapshot?.project.screenshots.find((entry) => entry.id === targetId);
     if (!current.snapshot || !shot) return;
     const pending = {
       kind: 'screenshot' as const,
@@ -1114,28 +1099,6 @@ export default function App() {
       setError('The update could not be downloaded.');
     }
   }
-  async function restoreRecoveredDelete(undoToken: string, screenshotId: string) {
-    const current = useAppStore.getState().snapshot;
-    if (!current) return;
-    const nativeMutationToken = await beginCurrentProjectMutation();
-    if (nativeMutationToken === null) return;
-    try {
-      const restored = await window.imnota.undoDeleteScreenshot({
-        projectPath: current.projectPath,
-        undoToken,
-      });
-      if (!(await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken))) return;
-      setSnapshotNotice((notice) => {
-        if (!notice) return null;
-        const recoveredDeletes = notice.recoveredDeletes.filter((item) => item.undoToken !== undoToken);
-        return notice.warnings.length || recoveredDeletes.length ? { ...notice, recoveredDeletes } : null;
-      });
-      showToast('Recovered screenshot restored');
-    } catch (reason) {
-      await persistence.cancelNativeMutation(nativeMutationToken);
-      setError(reason instanceof Error ? reason.message : 'The recovered screenshot could not be restored.');
-    }
-  }
   async function toggleFavourite() {
     if (!store.snapshot) return;
     queueProjectSave({
@@ -1287,6 +1250,14 @@ export default function App() {
   return (
     <>
       <AppShell
+        saveState={
+          persistence.saveState === 'error' || contentPersistence.saveState === 'error'
+            ? 'error'
+            : persistence.saveState === 'saving' || contentPersistence.saveState === 'saving'
+              ? 'saving'
+              : 'saved'
+        }
+        onRetrySave={contentPersistence.saveState === 'error' ? contentPersistence.retry : undefined}
         searchShortcut={shortcutLabel('project.search')}
         navigationShortcuts={{
           projects: shortcutLabel('navigation.projects'),
@@ -1339,30 +1310,6 @@ export default function App() {
             <div>
               {snapshotNotice.warnings.map((message) => (
                 <p key={message}>{message}</p>
-              ))}
-              {snapshotNotice.recoveredDeletes.map((recovered) => (
-                <div className="recovered-delete" key={recovered.undoToken}>
-                  <span>A previously deleted screenshot can still be restored.</span>
-                  <Button
-                    variant="soft"
-                    onClick={() => void restoreRecoveredDelete(recovered.undoToken, recovered.screenshotId)}
-                  >
-                    Undo delete
-                  </Button>
-                </div>
-              ))}
-              {snapshotNotice.recoveredContentDeletes.map((recovered) => (
-                <div className="recovered-delete" key={recovered.undoToken}>
-                  <span>A previously deleted drawing or text block can still be restored.</span>
-                  <Button
-                    variant="soft"
-                    onClick={() =>
-                      void undoContent(snapshotNotice.projectPath, recovered.undoToken, recovered.itemId)
-                    }
-                  >
-                    Undo delete
-                  </Button>
-                </div>
               ))}
             </div>
             <IconButton label="Dismiss project notices" onClick={() => setSnapshotNotice(null)}>
@@ -1438,7 +1385,6 @@ export default function App() {
             onContentRetry={contentPersistence.retry}
             onAddContent={addContent}
             onDuplicateContent={() => mutateContent('duplicate')}
-            onDeleteContent={requestContentDeletion}
             onDrawingTitle={(title) => {
               const current = useAppStore.getState().snapshot?.project;
               if (!current) return;
@@ -1520,7 +1466,9 @@ export default function App() {
             onDescriptionChange={changeDescription}
             onUndoDescription={undoDescription}
             onDuplicate={duplicateScreenshot}
-            onDeleteScreenshot={requestScreenshotDeletion}
+            onDeleteItem={(id, kind) =>
+              kind === 'screenshot' ? requestScreenshotDeletion(id) : requestContentDeletion(id)
+            }
             onDeleteProject={() => setDialog('delete-project')}
           />
         )}

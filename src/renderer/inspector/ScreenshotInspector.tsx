@@ -1,9 +1,11 @@
-import { Copy, PanelRight, Trash2, Undo2 } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Copy, PanelRight, Undo2 } from 'lucide-react';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { Button, EmptyState, TextArea, TextInput } from '../components/ui';
 
 export interface ScreenshotInspectorProps {
+  headerAction?: ReactNode;
   shot: ScreenshotRecord | null;
   selectedAnnotation: Annotation | null;
   onUpdateShot(patch: Partial<ScreenshotRecord>): void;
@@ -12,11 +14,10 @@ export interface ScreenshotInspectorProps {
   canUndoDescription: boolean;
   onChangeAnnotation(patch: Partial<Annotation>): void;
   onDuplicate(): void | Promise<void>;
-  onDeleteScreenshot(): void | Promise<void>;
-  onDeleteProject(): void;
 }
 
 export function ScreenshotInspector({
+  headerAction,
   shot,
   selectedAnnotation,
   onUpdateShot,
@@ -25,12 +26,14 @@ export function ScreenshotInspector({
   canUndoDescription,
   onChangeAnnotation,
   onDuplicate,
-  onDeleteScreenshot,
-  onDeleteProject,
 }: ScreenshotInspectorProps) {
   if (!shot)
     return (
       <aside className="inspector" aria-label="Inspector" data-testid="inspector-panel">
+        <div className="inspector-heading">
+          <h2>Inspector</h2>
+          {headerAction}
+        </div>
         <EmptyState
           icon={<PanelRight size={20} aria-hidden="true" />}
           title="Inspector"
@@ -46,6 +49,7 @@ export function ScreenshotInspector({
           <span className="eyebrow">SCREENSHOT {String(shot.position + 1).padStart(2, '0')}</span>
           <h2>Screenshot context</h2>
         </div>
+        {headerAction}
       </div>
       <div className="inspector-scroll">
         <section className="inspector-section context-section" aria-labelledby="context-heading">
@@ -274,44 +278,11 @@ export function ScreenshotInspector({
           <span className="section-label" id="export-heading">
             Export
           </span>
-          <label className="export-state check-row">
-            <input
-              type="checkbox"
-              checked={shot.includeInExport}
-              onChange={(event) => onUpdateShot({ includeInExport: event.target.checked })}
-            />
-            <span>
-              <strong>
-                {shot.includeInExport ? 'Included in prompt bundle' : 'Excluded from prompt bundle'}
-              </strong>
-              <small>
-                {shot.includeInExport
-                  ? 'Its description and visual evidence will be part of the next bundle.'
-                  : 'Keep editing it locally; it will not be copied into the next bundle.'}
-              </small>
-            </span>
-          </label>
           <Button variant="ghost" onClick={() => void onDuplicate()}>
             <Copy size={15} aria-hidden="true" />
             Duplicate screenshot
           </Button>
         </section>
-        <details className="danger-zone">
-          <summary>
-            <span>Danger zone</span>
-            <small>Delete item or project</small>
-          </summary>
-          <div className="danger-zone-actions">
-            <Button variant="danger" onClick={() => void onDeleteScreenshot()}>
-              <Trash2 size={15} aria-hidden="true" />
-              Delete screenshot
-            </Button>
-            <Button variant="danger" onClick={onDeleteProject}>
-              <Trash2 size={15} aria-hidden="true" />
-              Delete project
-            </Button>
-          </div>
-        </details>
       </div>
     </aside>
   );
