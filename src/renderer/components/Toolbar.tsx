@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronDown,
   Circle,
@@ -122,6 +123,100 @@ const TRANSFORM_TOOLS = MORE_TOOLS.filter((tool) => ['blur', 'pixelate', 'crop']
 const DRAWING_TOOLS = MORE_TOOLS.filter((tool) => !['blur', 'pixelate', 'crop', 'eraser'].includes(tool.id));
 const DANGER_TOOLS = MORE_TOOLS.filter((tool) => tool.id === 'eraser');
 
+function ToolTooltip({
+  children,
+  id,
+  content,
+  disabled = false,
+}: {
+  children: ReactNode;
+  id?: string;
+  content: ReactNode;
+  disabled?: boolean;
+}) {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const pointerFocus = useRef(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const hide = () => {
+    clearTimeout(timer.current);
+    setPosition(null);
+  };
+  const show = () => {
+    clearTimeout(timer.current);
+    if (disabled) return;
+    timer.current = setTimeout(() => {
+      const rect = anchor.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition({
+        left: Math.max(8, Math.min(rect.left + rect.width / 2 - 105, window.innerWidth - 218)),
+        top: Math.max(8, Math.min(rect.bottom + 9, window.innerHeight - 110)),
+      });
+    }, 320);
+  };
+  useEffect(() => {
+    const dismiss = () => {
+      clearTimeout(timer.current);
+      setPosition(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss();
+    };
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    document.addEventListener('keydown', escape);
+    return () => {
+      clearTimeout(timer.current);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+      document.removeEventListener('keydown', escape);
+    };
+  }, []);
+  return (
+    <span
+      ref={anchor}
+      className="annotation-tooltip-anchor"
+      onPointerEnter={show}
+      onPointerLeave={() => {
+        pointerFocus.current = false;
+        hide();
+      }}
+      onPointerCancel={() => {
+        pointerFocus.current = false;
+        hide();
+      }}
+      onPointerDown={() => {
+        pointerFocus.current = true;
+        hide();
+      }}
+      onPointerUp={() => {
+        pointerFocus.current = false;
+      }}
+      onFocus={(event) => {
+        if (
+          !pointerFocus.current &&
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !(event.relatedTarget instanceof Element && event.relatedTarget.closest('[role=menu]')) &&
+          event.target.matches(':focus-visible')
+        )
+          show();
+      }}
+      onBlur={hide}
+      onClick={hide}
+    >
+      {children}
+      {position &&
+        !disabled &&
+        createPortal(
+          <span className="annotation-tooltip" id={id} role="tooltip" style={position}>
+            {content}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
 function ToolButton({
   definition,
   active,
@@ -134,10 +229,20 @@ function ToolButton({
   const tooltipId = `${useId().replace(/:/g, '')}-tooltip`;
   const Icon = definition.icon;
   return (
-    <span className="annotation-tooltip-anchor">
+    <ToolTooltip
+      id={tooltipId}
+      content={
+        <>
+          <strong>{definition.label}</strong>
+          <span>{definition.description}</span>
+          {definition.shortcut && <kbd>{definition.shortcut}</kbd>}
+        </>
+      }
+    >
       <IconButton
         data-testid={`tool-${definition.id}`}
         label={`${definition.label}${definition.shortcut ? ` (${definition.shortcut})` : ''}`}
+        title={undefined}
         aria-describedby={tooltipId}
         className={active ? 'is-active' : ''}
         aria-pressed={active}
@@ -145,12 +250,7 @@ function ToolButton({
       >
         <Icon size={18} />
       </IconButton>
-      <span className="annotation-tooltip" id={tooltipId} role="tooltip">
-        <strong>{definition.label}</strong>
-        <span>{definition.description}</span>
-        {definition.shortcut && <kbd>{definition.shortcut}</kbd>}
-      </span>
-    </span>
+    </ToolTooltip>
   );
 }
 
@@ -288,8 +388,7 @@ export function Toolbar({
 
   return (
     <div className="toolbar annotation-toolbar" role="toolbar" aria-label="Annotation tools">
-      <div className="tool-group annotation-primary-tools" aria-label="Annotate">
-        <span className="toolbar-group-label">Annotate</span>
+      <div className="tool-group annotation-primary-tools" role="group" aria-label="Annotate">
         {PRIMARY_TOOLS.map((definition) => (
           <ToolButton
             key={definition.id}
@@ -311,11 +410,20 @@ export function Toolbar({
             if (!moreRef.current?.contains(event.relatedTarget as Node | null)) closeMoreMenu();
           }}
         >
-          <span className="annotation-tooltip-anchor">
+          <ToolTooltip
+            disabled={moreOpen}
+            content={
+              <>
+                <strong>More tools</strong>
+                <span>Redaction, pixelation, crop, drawing, and additional shapes.</span>
+              </>
+            }
+          >
             <IconButton
               ref={moreTriggerRef}
               data-testid="more-annotation-tools"
               label="More annotation tools"
+              title={undefined}
               className={moreActive ? 'is-active' : ''}
               aria-expanded={moreOpen}
               aria-haspopup="menu"
@@ -339,13 +447,7 @@ export function Toolbar({
                 <ChevronDown size={13} />
               </span>
             </IconButton>
-            {!moreOpen && (
-              <span className="annotation-tooltip" role="tooltip">
-                <strong>More tools</strong>
-                <span>Redaction, pixelation, crop, drawing, and additional shapes.</span>
-              </span>
-            )}
-          </span>
+          </ToolTooltip>
           {moreOpen && (
             <div
               className="annotation-more-menu"

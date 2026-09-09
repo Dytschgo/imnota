@@ -1,5 +1,5 @@
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
-import { Modal } from '../components/ui';
+import { PromptBundlePreview } from './PromptBundlePreview';
 import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptBundleCard';
 import { PromptSharingDialog } from './PromptSharingDialog';
 import { HostedShareDialog } from './HostedShareDialog';
@@ -52,30 +52,29 @@ export function PromptBundleDialogHost({
   if (!controller.isOpen) return null;
   return (
     <>
-      {!controller.preview && !hostedArtifacts && (
-        <PromptSharingDialog
-          bundles={controller.cards}
-          progress={controller.progress}
-          error={controller.error}
-          cleanupPending={controller.cleanupPending}
-          noContentMessage={controller.noContentMessage}
-          onClose={controller.close}
-          onCopyFresh={(selection) => run(controller.copyFresh(selection))}
-          onPrepareFreshFiles={(selection) => run(controller.prepareFreshFiles(selection))}
-          onCopyMarkdown={(selection) => run(controller.copyMarkdown(selection))}
-          onCopyImage={(selection) => run(controller.copyImage(selection))}
-          onOpenFiles={(selection) => run(controller.openFiles(selection))}
-          onOpenExportFolder={() => run(controller.openFolder())}
-          onCancel={() => run(controller.cancel())}
-          onRetryCleanup={() => run(controller.retryCleanup())}
-          onShareHosted={async () => {
-            const result = await controller.prepareHostedShare();
-            if (result.ok) setHostedArtifacts(result.value);
-            else onError(result.error.message);
-          }}
-          onLoadPreview={(selection) => run(controller.loadPreview(selection))}
-        />
-      )}
+      <PromptSharingDialog
+        hidden={Boolean(controller.preview || hostedArtifacts)}
+        bundles={controller.cards}
+        progress={controller.progress}
+        error={controller.error}
+        cleanupPending={controller.cleanupPending}
+        noContentMessage={controller.noContentMessage}
+        onClose={controller.close}
+        onCopyFresh={(selection) => run(controller.copyFresh(selection))}
+        onPrepareFreshFiles={(selection) => run(controller.prepareFreshFiles(selection))}
+        onCopyMarkdown={(selection) => run(controller.copyMarkdown(selection))}
+        onCopyImage={(selection) => run(controller.copyImage(selection))}
+        onOpenFiles={(selection) => run(controller.openFiles(selection))}
+        onOpenExportFolder={() => run(controller.openFolder())}
+        onCancel={() => run(controller.cancel())}
+        onRetryCleanup={() => run(controller.retryCleanup())}
+        onShareHosted={async () => {
+          const result = await controller.prepareHostedShare();
+          if (result.ok) setHostedArtifacts(result.value);
+          else onError(result.error.message);
+        }}
+        onLoadPreview={(selection) => run(controller.loadPreview(selection))}
+      />
       {hostedArtifacts && (
         <HostedShareDialog
           artifacts={hostedArtifacts}
@@ -84,19 +83,11 @@ export function PromptBundleDialogHost({
         />
       )}
       {controller.preview && (
-        <Modal
-          title={`Bundle ${controller.preview.bundleNumber} preview`}
-          description={`${controller.preview.width} × ${controller.preview.height}px`}
+        <PromptBundlePreview
+          key={controller.preview.dataUrl}
+          preview={controller.preview}
           onClose={controller.clearPreview}
-          closeTestId="prompt-preview-close"
-        >
-          <div className="prompt-large-preview" data-testid="prompt-large-preview">
-            <img
-              src={controller.preview.dataUrl}
-              alt={`Full-resolution Bundle ${controller.preview.bundleNumber}`}
-            />
-          </div>
-        </Modal>
+        />
       )}
     </>
   );

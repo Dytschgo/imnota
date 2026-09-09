@@ -124,6 +124,18 @@ afterEach(() => {
 });
 
 describe('CollectionRail', () => {
+  it('routes row trash to that item without selecting it and keeps the eye as inclusion state', () => {
+    const onDeleteItem = vi.fn();
+    const onSelectScreenshot = vi.fn();
+    render(<CollectionRail {...props({ onDeleteItem, onSelectScreenshot })} />);
+    fireEvent.click(screen.getByTestId('item-delete-beta'));
+    expect(onDeleteItem).toHaveBeenCalledWith('beta', 'screenshot');
+    expect(onSelectScreenshot).not.toHaveBeenCalled();
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByText('Evidence collection')).not.toBeInTheDocument();
+    expect(screen.queryByText('Excluded')).not.toBeInTheDocument();
+  });
+
   it('admits one collection operation while its preflight save is pending', async () => {
     let finishFlush!: (saved: boolean) => void;
     const onFlush = vi.fn(

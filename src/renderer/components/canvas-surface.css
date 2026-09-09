@@ -1,0 +1,10 @@
+.canvas-workspace-surface {
+  background-color: #0b0d12;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+:root[data-theme='light'] .canvas-workspace-surface {
+  background-color: #e9ebef;
+  background-image: radial-gradient(rgba(20, 24, 32, 0.08) 1px, transparent 1px);
+}

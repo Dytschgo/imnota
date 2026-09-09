@@ -1,8 +1,29 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Button, Modal } from './ui';
 
+afterEach(cleanup);
+
 describe('UI primitives', () => {
+  it('places dialogs outside clipped glass panels and dismisses only the backdrop', () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <aside style={{ overflow: 'hidden', filter: 'blur(0)' }}>
+        <Modal title="Rename collection" onClose={onClose}>
+          <input data-autofocus aria-label="Collection name" />
+          <button>Rename collection</button>
+        </Modal>
+      </aside>,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Rename collection' });
+    expect(container).not.toContainElement(dialog);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    fireEvent.mouseDown(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
   it('traps modal focus, closes on Escape and restores the previous focus', () => {
     const trigger = document.createElement('button');
     document.body.append(trigger);

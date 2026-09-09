@@ -99,6 +99,7 @@ button:disabled {
   color: var(--ink);
 }
 
+/* Dialogs keep this stronger surface over their dimmed overlay for readability. */
 :root[data-glass-level]:not([data-glass-level='off']) .sidebar,
 :root[data-glass-level]:not([data-glass-level='off']) .topbar,
 :root[data-glass-level]:not([data-glass-level='off']) .shot-rail,
@@ -113,15 +114,19 @@ button:disabled {
 /* The wallpaper already has its own opacity. Avoid blurring it into a flat colour
    or dimming it twice behind chrome; the screenshot canvas stays opaque. */
 :root[data-background='active']:not([data-glass-level='off'])
-  :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  /* Restore the pre-#33 dark treatment: one wallpaper, without a second tint or blur. */
+  :is(.sidebar, .topbar, .shot-rail, .inspector, .library, .settings-view) {
   background: color-mix(in srgb, var(--surface) 18%, transparent);
   backdrop-filter: none;
 }
 :root[data-theme='light'][data-background='active']:not([data-glass-level='off'])
-  :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation, .library, .settings-view) {
+  :is(.sidebar, .topbar, .shot-rail, .inspector, .library, .settings-view) {
   background: color-mix(in srgb, var(--surface) 55%, transparent);
   backdrop-filter: blur(var(--imnota-glass-blur));
+}
+/* Navigation inherits the settings surface; a second glass layer obscures the image. */
+:root[data-background='active']:not([data-glass-level='off']) .settings-navigation {
+  background: transparent;
+  backdrop-filter: none;
 }
 :root[data-desktop-glass='active'],
 :root[data-desktop-glass='active'] body,
@@ -279,7 +284,7 @@ button:disabled {
 }
 .collection-control-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-height: 20px;
@@ -607,7 +612,21 @@ button.icon-button.new-collection-button svg {
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 97%, var(--bg));
 }
+.topbar-navigation {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.topbar-navigation .icon-button,
+.topbar > .navigation-restore,
+.crumbs > .save-state {
+  flex: none;
+  white-space: nowrap;
+}
 .crumbs {
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -626,6 +645,7 @@ button.icon-button.new-collection-button svg {
   font-weight: 400;
 }
 .topbar-actions {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1156,12 +1176,6 @@ button.icon-button.new-collection-button svg {
   margin: 0 0 6px;
 }
 
-.recovered-delete {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .annotation-color-fieldset {
   min-width: 0;
   margin: 12px 0;
@@ -1207,6 +1221,10 @@ button.icon-button.new-collection-button svg {
 }
 .shot-rail.collapsed .rail-heading {
   padding: 12px 6px;
+}
+.inspector-restore {
+  flex: none;
+  margin-left: auto;
 }
 .rail-heading,
 .inspector-heading {
@@ -1436,14 +1454,6 @@ button.icon-button.new-collection-button svg {
   margin: 0 4px;
   background: var(--line);
 }
-.canvas-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  padding-left: 9px;
-  border-left: 1px solid var(--line);
-}
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -1488,9 +1498,6 @@ button.icon-button.new-collection-button svg {
   justify-content: center;
   overflow: hidden;
   padding: 0;
-  background: #0b0d12;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 16px 16px;
 }
 .crop-actions {
   position: absolute;
@@ -1518,10 +1525,6 @@ button.icon-button.new-collection-button svg {
 .crop-actions button:last-child {
   background: var(--imnota-accent);
   color: var(--imnota-on-accent);
-}
-:root[data-theme='light'] .canvas-wrap {
-  background-color: #e9ebef;
-  background-image: radial-gradient(rgba(20, 24, 32, 0.08) 1px, transparent 1px);
 }
 .canvas-meta {
   position: absolute;
@@ -1589,12 +1592,12 @@ button.icon-button.new-collection-button svg {
 .inspector-drawer {
   display: contents;
 }
-.inspector-drawer-close {
-  display: none;
-}
 .inspector-heading {
   min-height: 72px;
   padding: 15px 16px 13px;
+}
+.inspector-heading > .icon-button {
+  flex: none;
 }
 .inspector-heading > div {
   display: flex;
@@ -2473,14 +2476,6 @@ kbd {
     min-width: 0;
     border-left: 1px solid var(--line-strong);
   }
-  .inspector-drawer-close {
-    position: absolute;
-    z-index: 1;
-    top: 13px;
-    right: 12px;
-    display: grid;
-    background: var(--surface-2);
-  }
   .context-builder {
     grid-template-columns: 300px minmax(0, 1fr);
     padding: 22px;
@@ -2600,9 +2595,7 @@ kbd {
 
 .crumb-current {
   min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
+  display: block;
   overflow: hidden;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -2618,14 +2611,6 @@ kbd {
 .topbar-actions .btn-primary {
   min-height: 34px;
   padding-inline: 13px;
-}
-
-.collection-count {
-  color: var(--text-cyan);
-  font-size: 11px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .collection-context > summary {
@@ -2787,80 +2772,8 @@ kbd {
   margin-top: 18px;
 }
 
-.export-state {
-  align-items: flex-start;
-  margin: 0 0 12px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--success) 24%, var(--line));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--success) 6%, transparent);
-}
-
-.export-state:has(input:not(:checked)) {
-  border-color: var(--line);
-  background: var(--input);
-}
-
-.export-state span,
-.export-state small {
-  display: block;
-}
-
-.export-state strong {
-  color: var(--ink);
-  font-size: 12px;
-}
-
-.export-state small {
-  margin-top: 3px;
-  color: var(--ink-3);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .export-section > .btn {
   width: 100%;
-  justify-content: flex-start;
-}
-
-.danger-zone {
-  margin-top: 18px;
-  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--line));
-  border-radius: 8px;
-}
-
-.danger-zone > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px;
-  cursor: pointer;
-  color: var(--danger);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.danger-zone > summary > span {
-  flex: none;
-  white-space: nowrap;
-}
-
-.danger-zone > summary small {
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 500;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.danger-zone-actions {
-  display: grid;
-  gap: 7px;
-  padding: 0 10px 10px;
-}
-
-.danger-zone-actions .btn {
   justify-content: flex-start;
 }
 
@@ -2872,8 +2785,48 @@ kbd {
   .toolbar-group-label {
     display: none;
   }
-  .canvas-actions {
-    border-left: 0;
-    padding-left: 0;
-  }
+}
+
+.shot-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.shot-item-actions .icon-button {
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+}
+.shot-delete {
+  color: var(--ink-3);
+}
+.shot-delete:hover {
+  color: var(--danger);
+}
+.project-actions {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+}
+.project-actions > summary {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 5px;
+}
+.project-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.project-actions > .btn {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
 }
