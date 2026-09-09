@@ -757,12 +757,19 @@ export default function App() {
       );
     }
   }
-  async function requestContentDeletion() {
+  async function requestContentDeletion(requestedId?: string) {
+    const identity = ++navigationIdentity.current;
+    const before = useAppStore.getState();
     if (!(await flushAll())) return;
     const current = useAppStore.getState();
-    const item = current.snapshot?.project.contentItems?.find(
-      (entry) => entry.id === current.activeScreenshotId,
-    );
+    if (
+      identity !== navigationIdentity.current ||
+      current.snapshot?.projectPath !== before.snapshot?.projectPath
+    )
+      return;
+    const targetId =
+      !requestedId || requestedId === before.activeScreenshotId ? current.activeScreenshotId : requestedId;
+    const item = current.snapshot?.project.contentItems?.find((entry) => entry.id === targetId);
     if (!current.snapshot || !item) return;
     const pending = {
       kind: 'content' as const,
@@ -875,10 +882,19 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be duplicated.');
     }
   }
-  async function requestScreenshotDeletion() {
+  async function requestScreenshotDeletion(requestedId?: string) {
+    const identity = ++navigationIdentity.current;
+    const before = useAppStore.getState();
     if (!(await flushAll())) return;
     const current = useAppStore.getState();
-    const shot = current.activeScreenshot();
+    if (
+      identity !== navigationIdentity.current ||
+      current.snapshot?.projectPath !== before.snapshot?.projectPath
+    )
+      return;
+    const targetId =
+      !requestedId || requestedId === before.activeScreenshotId ? current.activeScreenshotId : requestedId;
+    const shot = current.snapshot?.project.screenshots.find((entry) => entry.id === targetId);
     if (!current.snapshot || !shot) return;
     const pending = {
       kind: 'screenshot' as const,
@@ -1446,7 +1462,6 @@ export default function App() {
             onContentRetry={contentPersistence.retry}
             onAddContent={addContent}
             onDuplicateContent={() => mutateContent('duplicate')}
-            onDeleteContent={requestContentDeletion}
             onDrawingTitle={(title) => {
               const current = useAppStore.getState().snapshot?.project;
               if (!current) return;
@@ -1528,7 +1543,9 @@ export default function App() {
             onDescriptionChange={changeDescription}
             onUndoDescription={undoDescription}
             onDuplicate={duplicateScreenshot}
-            onDeleteScreenshot={requestScreenshotDeletion}
+            onDeleteItem={(id, kind) =>
+              kind === 'screenshot' ? requestScreenshotDeletion(id) : requestContentDeletion(id)
+            }
             onDeleteProject={() => setDialog('delete-project')}
           />
         )}
