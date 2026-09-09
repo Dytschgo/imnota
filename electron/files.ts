@@ -46,7 +46,24 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
   const temporary = `${filePath}.tmp-${randomUUID()}`;
   try {
     await fs.writeFile(temporary, content, { flag: 'wx' });
-    await fs.rename(temporary, filePath);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.rename(temporary, filePath);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (
+          process.platform !== 'win32' ||
+          !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') ||
+          attempt >= 5
+        )
+          throw error;
+        // Windows readers can briefly deny replacement. Keep the old file intact.
+        await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
+        await assertNoLinks(filePath);
+        await assertNoLinks(temporary);
+      }
+    }
   } finally {
     await fs.unlink(temporary).catch(() => undefined);
   }

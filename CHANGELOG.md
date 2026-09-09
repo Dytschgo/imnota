@@ -2,6 +2,7 @@
 
 ## 0.2.6
 
+- Retry briefly when Windows temporarily locks a save destination, preserving the committed file if the lock persists.
 - Added optional hosted prompt sharing, browser copy actions, device pairing, and private owner management. Sharing pages now use versioned assets so cached files cannot break updated pages.
 - Improved search, project management, collection history, favourites, and sharing settings.
 - Reworked navigation and editor headers, made annotation tools adapt to available space, and fixed tooltips that stayed open after selection.
