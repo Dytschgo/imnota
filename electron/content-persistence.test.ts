@@ -49,6 +49,20 @@ async function fixture() {
 }
 
 describe('native mixed content persistence', () => {
+  it('rejects deletion of an unknown item without changing project metadata or content', async () => {
+    const { projectPath, service } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const before = await fs.readFile(path.join(projectPath, 'project.json'));
+    const item = created.project.contentItems![0];
+    const files = Object.values(contentItemRelativePaths(item)).map((relative) =>
+      path.join(projectPath, relative),
+    );
+    const bytes = await Promise.all(files.map((file) => fs.readFile(file)));
+    await expect(service.delete({ projectPath, itemId: 'does-not-belong' })).rejects.toThrow(/not found/i);
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(before);
+    expect(await Promise.all(files.map((file) => fs.readFile(file)))).toEqual(bytes);
+  });
+
   it('does not reuse an older migration backup even when it belongs to the same project', async () => {
     const { projectPath, service } = await fixture();
     const target = path.join(projectPath, 'project.json');
