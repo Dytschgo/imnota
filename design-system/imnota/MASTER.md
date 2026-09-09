@@ -4,7 +4,7 @@ This document describes the application's existing visual foundation. `src/rende
 
 ## Visual direction
 
-Imnota is a focused desktop workbench: quiet dark or light surfaces, indigo interaction color, compact controls and enough contrast to keep screenshots and annotations dominant. It should feel like a native developer tool, not a marketing site or a themed code editor.
+Imnota is a focused desktop workbench: quiet dark or light surfaces, indigo interaction color, compact controls and enough contrast to keep screenshots and annotations dominant. Dark is the designed base. Light is a cool graphite workbench with paper panels, not a shallow invert. It should feel like a native developer tool, not a marketing site or a themed code editor.
 
 - Variance: restrained. Use hierarchy, spacing and state rather than decorative novelty.
 - Motion: subtle and functional. Prefer 120–200 ms state transitions; respect reduced motion.
@@ -34,25 +34,32 @@ Body copy defaults to 14 px. Labels and dense metadata may be smaller when contr
 
 Dark is the current explicit base theme. Light uses the same semantic hierarchy. The application may follow the operating-system preference by default.
 
-| Role                    | Dark      | Light     | Token            |
-| ----------------------- | --------- | --------- | ---------------- |
-| App background          | `#0b0d12` | `#f5f6f8` | `--bg`           |
-| Primary surface         | `#12151c` | `#ffffff` | `--surface`      |
-| Secondary surface       | `#191d27` | `#f0f1f4` | `--surface-2`    |
-| Raised/selected surface | `#202532` | `#e8eaf0` | `--surface-3`    |
-| Input surface           | `#0f1218` | `#f9fafb` | `--input`        |
-| Primary text            | `#f4f5f7` | `#17191f` | `--ink`          |
-| Secondary text          | `#b3bac8` | `#656b78` | `--ink-2`        |
-| Muted text              | `#7d8595` | `#7d8491` | `--ink-3`        |
-| Faint text              | `#545d6e` | `#a8afbb` | `--ink-4`        |
-| Action/focus            | `#6857f5` | `#6857f5` | `--indigo`       |
-| Strong focus            | `#8b7cf6` | `#8b7cf6` | `--indigo-light` |
-| Informational accent    | `#3ec6e0` | `#3ec6e0` | `--cyan`         |
-| Success                 | `#22c55e` | `#22c55e` | `--success`      |
-| Warning                 | `#f59e0b` | `#f59e0b` | `--warning`      |
-| Destructive             | `#ef4444` | `#ef4444` | `--danger`       |
+| Role                    | Dark                  | Light                    | Token            |
+| ----------------------- | --------------------- | ------------------------ | ---------------- |
+| App background          | `#0b0d12`             | `#eceef2`                | `--bg`           |
+| Primary surface         | `#12151c`             | `#ffffff`                | `--surface`      |
+| Secondary surface       | `#191d27`             | `#e7e9ef`                | `--surface-2`    |
+| Raised/selected surface | `#202532`             | `#d8dce6`                | `--surface-3`    |
+| Input surface           | `#0f1218`             | `#f2f3f7`                | `--input`        |
+| Canvas                  | `#0b0d12`             | `#e4e6ec`                | `--canvas`       |
+| Canvas dots             | white 3.5%            | ink 8%                   | `--canvas-dot`   |
+| Primary text            | `#f4f5f7`             | `#12141a`                | `--ink`          |
+| Secondary text          | `#b3bac8`             | `#3d4452`                | `--ink-2`        |
+| Muted text              | `#7d8595`             | `#545b6a`                | `--ink-3`        |
+| Faint text              | `#545d6e`             | `#5c6472`                | `--ink-4`        |
+| Action/focus            | `#6857f5`             | `#6857f5`                | `--indigo`       |
+| Strong focus            | `#8b7cf6`             | `#4e3ee6`                | `--indigo-light` |
+| Informational accent    | `#3ec6e0`             | `#3ec6e0`                | `--cyan`         |
+| Informational text      | `#67e8f9`             | `#0369a1`                | `--text-cyan`    |
+| Success                 | `#22c55e`             | `#22c55e`                | `--success`      |
+| Success text            | `#4ade80`             | `#15803d`                | `--text-success` |
+| Warning                 | `#f59e0b`             | `#9a5706`                | `--warning`      |
+| Destructive             | `#ef4444`             | `#b42318`                | `--danger`       |
+| Modal scrim             | `rgba(3, 5, 9, 0.65)` | `rgba(18, 20, 26, 0.45)` | `--scrim`        |
 
-Borders use low-opacity ink through `--line` and `--line-strong`. Shadows are broad and quiet (`--shadow`) and should be reserved for menus, dialogs and meaningful elevation.
+Borders use low-opacity ink through `--line` and `--line-strong`. Shadows are broad and quiet (`--shadow`) and should be reserved for menus, dialogs and meaningful elevation. Muted chrome (`--ink-2`, `--ink-3`, `--ink-4`) must meet WCAG AA against `--surface` and `--bg`.
+
+Live accent injection uses `--imnota-accent`, `--imnota-accent-hover`, `--imnota-accent-soft`, and `--imnota-on-accent`. `--indigo` / `--indigo-light` remain compatibility aliases. Dark hover is a lighter tint; light hover is a darker shade so primary buttons and active icons stay at least 4.5:1. Primary button text uses `--imnota-on-accent`, never hardcoded white.
 
 Curated Graphite, Indigo, Emerald, Amber and Glass presets extend these semantic roles; they do not replace component-level colors ad hoc. Glass is cosmetic, has a solid fallback and must reduce or disable transparency for low-performance systems and reduced-transparency preferences.
 

@@ -20,6 +20,8 @@
   --surface-2: #191d27;
   --surface-3: #202532;
   --input: #0f1218;
+  --canvas: #0b0d12;
+  --canvas-dot: rgba(255, 255, 255, 0.035);
   --ink: #f4f5f7;
   --ink-2: #b3bac8;
   --ink-3: #7d8595;
@@ -31,12 +33,14 @@
   --imnota-accent: #6857f5;
   --imnota-accent-hover: #8b7cf6;
   --imnota-accent-soft: rgba(104, 87, 245, 0.18);
+  --imnota-on-accent: #ffffff;
   --cyan: #3ec6e0;
   --success: #22c55e;
   --text-cyan: #67e8f9;
   --text-success: #4ade80;
   --warning: #f59e0b;
   --danger: #ef4444;
+  --scrim: rgba(3, 5, 9, 0.65);
   --shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
   --imnota-glass-alpha: 1;
   --imnota-glass-blur: 0px;
@@ -46,22 +50,31 @@
 }
 
 :root[data-theme='light'] {
-  color: #17191f;
-  background: #f5f6f8;
-  --bg: #f5f6f8;
+  color: #12141a;
+  background: #eceef2;
+  --bg: #eceef2;
   --surface: #ffffff;
-  --surface-2: #f0f1f4;
-  --surface-3: #e8eaf0;
-  --input: #f9fafb;
-  --ink: #17191f;
-  --ink-2: #656b78;
-  --ink-3: #7d8491;
-  --ink-4: #a8afbb;
+  --surface-2: #e7e9ef;
+  --surface-3: #d8dce6;
+  --input: #f2f3f7;
+  --canvas: #e4e6ec;
+  --canvas-dot: rgba(18, 20, 26, 0.08);
+  --ink: #12141a;
+  --ink-2: #3d4452;
+  --ink-3: #545b6a;
+  --ink-4: #5c6472;
   --text-cyan: #0369a1;
   --text-success: #15803d;
-  --line: rgba(20, 24, 32, 0.1);
-  --line-strong: rgba(20, 24, 32, 0.18);
-  --shadow: 0 16px 40px rgba(20, 24, 32, 0.12);
+  --line: rgba(18, 20, 26, 0.15);
+  --line-strong: rgba(18, 20, 26, 0.24);
+  --indigo-light: #4e3ee6;
+  --imnota-accent-hover: #4e3ee6;
+  --imnota-accent-soft: rgba(78, 62, 230, 0.2);
+  --imnota-on-accent: #ffffff;
+  --warning: #9a5706;
+  --danger: #b42318;
+  --scrim: rgba(18, 20, 26, 0.45);
+  --shadow: 0 16px 40px rgba(18, 20, 26, 0.12);
 }
 
 * {
@@ -770,7 +783,7 @@ button.icon-button.new-collection-button svg {
 }
 .btn-primary {
   background: var(--imnota-accent);
-  color: white;
+  color: var(--imnota-on-accent);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--imnota-accent) 22%, transparent);
 }
 .btn-primary:hover {
@@ -1970,7 +1983,7 @@ button.icon-button.new-collection-button svg {
 .theme-options label.active {
   background: var(--surface-3);
   color: var(--ink);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
 }
 .theme-options input {
   position: absolute;
@@ -2105,7 +2118,7 @@ button.icon-button.new-collection-button svg {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(3, 5, 9, 0.65);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
 }
 .modal {

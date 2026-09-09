@@ -32,7 +32,7 @@ import type {
 } from '../src/shared/types.js';
 import type { ProjectIconKey } from '../src/shared/project-icons.js';
 import { PROJECT_ICON_KEYS } from '../src/shared/project-icons.js';
-import type { PreferenceSettingsResult } from '../src/shared/preferences.js';
+import type { AppearanceMode, PreferenceSettingsResult } from '../src/shared/preferences.js';
 import {
   mergePreferenceSettings,
   preferenceSettingsEnvelope,
@@ -132,6 +132,14 @@ let settings: WorkspaceSettings = {
   sharingSenderName: '',
 };
 let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
+
+function resolvedWindowBackground(
+  mode: AppearanceMode,
+  systemDark = nativeTheme.shouldUseDarkColors,
+): string {
+  const theme = mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
+  return theme === 'light' ? '#eceef2' : '#0b0d12';
+}
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
   await writeAtomically(filePath, content);
@@ -1049,11 +1057,11 @@ function registerIpc(): void {
     try {
       if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
       if (material === 'acrylic') target.setBackgroundMaterial(active ? 'acrylic' : 'none');
-      target.setBackgroundColor(active ? '#00000000' : appearance.mode === 'light' ? '#f5f6f8' : '#0b0d12');
+      target.setBackgroundColor(active ? '#00000000' : resolvedWindowBackground(appearance.mode));
       if (material === 'vibrancy') target.invalidateShadow();
       return { active };
     } catch {
-      target.setBackgroundColor('#0b0d12');
+      target.setBackgroundColor(resolvedWindowBackground(appearance.mode));
       return { active: false };
     }
   });
@@ -1906,7 +1914,7 @@ async function createWindow(): Promise<BrowserWindow> {
     height: 920,
     minWidth: 1080,
     minHeight: 680,
-    backgroundColor: '#0b0d12',
+    backgroundColor: resolvedWindowBackground(preferenceSettingsResult.settings.appearance.mode),
     // macOS must create an alpha-capable compositor before runtime vibrancy is
     // enabled. Changing only the background colour of an opaque window can
     // retain old frames while scrolling. Solid mode still paints opaque CSS.
