@@ -220,16 +220,8 @@
   letter-spacing: -0.02em;
 }
 
-@media (max-width: 1200px) {
-  .annotation-view-tools .icon-button:nth-of-type(3),
-  .annotation-view-tools .icon-button:nth-of-type(4) {
-    display: none;
-  }
-}
-
-@container canvas-column (max-width: 560px) {
-  .annotation-view-tools .icon-button:nth-of-type(3),
-  .annotation-view-tools .icon-button:nth-of-type(4) {
-    display: none;
-  }
+/* Keep view actions reachable when the toolbar wraps in a narrow canvas. */
+.annotation-view-tools.tool-group {
+  flex-wrap: wrap;
+  max-width: 100%;
 }

@@ -19,6 +19,8 @@ function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('annotation toolbar', () => {
@@ -162,6 +164,76 @@ describe('annotation toolbar', () => {
     trigger.focus();
     await waitFor(() => expect(toolbar.queryByRole('menu', { name: 'More annotation tools' })).toBeNull());
     expect(trigger).toHaveFocus();
+  });
+
+  test('fills available container space and keeps overflow navigation and focus correct on resize', async () => {
+    let width = 600;
+    let resize = () => {};
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const size = this.classList.contains('annotation-toolbar')
+        ? width
+        : this.classList.contains('annotation-view-tools')
+          ? 260
+          : this.classList.contains('annotation-palette')
+            ? 82
+            : this.getAttribute('aria-label') === 'More annotation tools'
+              ? 58
+              : this.tagName === 'BUTTON'
+                ? 29
+                : 0;
+      return { width: size, height: 29, top: 0, left: 0, right: size, bottom: 29, x: 0, y: 0, toJSON() {} };
+    });
+    const setTool = vi.fn();
+    const initialProps = props({ setTool, tool: 'crop' });
+    const { rerender } = render(<Toolbar {...initialProps} />);
+    expect(screen.getByRole('button', { name: 'Crop' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Freehand' })).toBeNull();
+    const trigger = screen.getByRole('button', { name: 'More annotation tools' });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const freehand = screen.getByRole('menuitemradio', { name: /^Freehand/ });
+    await waitFor(() => expect(freehand).toHaveFocus());
+    expect(screen.queryByRole('menuitemradio', { name: /^Crop/ })).toBeNull();
+    fireEvent.keyDown(freehand, { key: 'End' });
+    const remove = screen.getByRole('menuitemradio', { name: /Delete annotation/ });
+    await waitFor(() => expect(remove).toHaveFocus());
+    fireEvent.keyDown(remove, { key: 'ArrowDown' });
+    await waitFor(() => expect(freehand).toHaveFocus());
+    act(() => {
+      width = 1000;
+      resize();
+    });
+    expect(screen.queryByRole('button', { name: 'More annotation tools' })).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Delete annotation' })).toBeInTheDocument();
+    act(() => {
+      width = 400;
+      resize();
+    });
+    expect(screen.getByRole('button', { name: 'More annotation tools' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'More annotation tools' })).toHaveClass('is-active');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'More annotation tools' }), { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: /^Arrow/ })).toHaveFocus());
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Crop/ }));
+    expect(setTool).toHaveBeenCalledWith('crop');
+    act(() => {
+      width = 600;
+      resize();
+    });
+    expect(screen.getByRole('button', { name: 'Crop' })).toBeInTheDocument();
+    rerender(<Toolbar {...initialProps} onColorSelect={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Crop' })).toBeNull();
+    expect(screen.getByRole('group', { name: 'Quick annotation colors' })).toBeInTheDocument();
   });
 
   test('renders the optional ten-color quick palette and reports selection', () => {

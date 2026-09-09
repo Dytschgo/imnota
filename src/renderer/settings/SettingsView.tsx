@@ -75,7 +75,6 @@ export function SettingsView({
   return (
     <section className="settings-view" data-testid="settings-view">
       <div className="settings-heading">
-        <span className="eyebrow">Local workspace</span>
         <h1>Settings</h1>
         <p>
           Control the app, workspace, shortcuts, and sharing defaults without moving project files out of your

@@ -303,6 +303,77 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().view).toBe('recent');
   });
 
+  it.each(['text', 'drawing'] as const)('cancels then confirms %s deletion once in the app', async (kind) => {
+    const text = {
+      id: 'text',
+      kind: 'text' as const,
+      collectionId: '001-collection',
+      position: 0,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      markdownFilename: 'text.md',
+    };
+    const drawing = {
+      id: 'drawing',
+      kind: 'drawing' as const,
+      collectionId: '001-collection',
+      position: 1,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      title: 'Diagram',
+      sourceFilename: 'drawing.excalidraw',
+      imageFilename: 'drawing.png',
+      originalWidth: 100,
+      originalHeight: 100,
+    };
+    let persisted: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, schemaVersion: 4, contentItems: [text, drawing] },
+    };
+    const deleteContentItem = vi.fn<ImnotaBridge['deleteContentItem']>(async ({ itemId }) => {
+      persisted = {
+        ...persisted,
+        project: {
+          ...persisted.project,
+          contentItems: persisted.project.contentItems!.filter((item) => item.id !== itemId),
+        },
+      };
+      return { snapshot: persisted, undoToken: 'undo' };
+    });
+    renderApp({
+      loadContentItem: async () => ({ item: text, markdown: 'Original', contentRevision: 'revision' }),
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'updated' },
+      }),
+      deleteContentItem,
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => {
+      useAppStore.getState().setProject(persisted);
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+    });
+    await screen.findByRole('textbox', { name: 'Markdown' });
+    const label = kind === 'text' ? /^Delete text block:/ : /^Delete drawing:/;
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await screen.findByRole('dialog', { name: 'Delete this item?' });
+    expect(deleteContentItem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(screen.queryByRole('dialog', { name: 'Delete this item?' })).toBeNull();
+    expect(deleteContentItem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteContentItem).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        itemId: kind,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete this item?' })).toBeNull());
+  });
+
   it('deletes the conflict copy selected by a preceding text flush, preserving the external original', async () => {
     const text = {
       id: 'text',
