@@ -53,7 +53,7 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
   const getSavedContextRef = useRef(options.getSavedContext);
   const disposalGeneration = useRef(0);
   getSavedContextRef.current = options.getSavedContext;
-  const engineRef = useRef<PromptBundleControllerEngine>();
+  const engineRef = useRef<PromptBundleControllerEngine | undefined>(undefined);
   if (!engineRef.current) {
     engineRef.current = new PromptBundleControllerEngine({
       getSavedContext: () => getSavedContextRef.current(),
