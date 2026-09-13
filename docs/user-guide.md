@@ -6,7 +6,7 @@ Imnota turns screenshots, Markdown text blocks and drawings in one collection in
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.
 
-- A new project begins with an empty collection.
+- A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
 - Creating a newer collection archives the previous one. Archived collections remain available in the chooser and can be restored.
 - Renaming a collection changes its visible name, not its internal identity or folder references.
@@ -17,6 +17,10 @@ Overall context is optional and applies to the active collection. Prompt 1 conta
 Use the plus button beside **Projects** to create a project from the sidebar. Choose a predefined icon in the new-project dialog. **Edit project** on a project row changes its name, description and icon without renaming its folder.
 
 **Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Open **Archived projects** to search archived projects or restore one to the active library.
+
+### Start from a template
+
+The new-project dialog also has five optional templates: Bug report, UI review, Feature request, Design-to-code brief and Architecture handoff. Blank project is selected by default. A template creates ordered Markdown blocks that you can edit, reorder, duplicate or delete. Later changes to bundled templates do not rewrite existing projects.
 
 ## Navigate and search
 
@@ -40,6 +44,12 @@ Each screenshot has:
 Drag screenshot rows to change their order. Internal IDs remain stable; `Picture 1`, `Picture 2` and so on are assigned from the current order only when exporting.
 
 Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+
+## Capture an image (experimental)
+
+Enable region capture in Settings > Shortcuts > Experimental capture. With a project open, use Capture screen region in the collection toolbar or its configurable shortcut while Imnota is focused. Drag a rectangle on the display containing the pointer, then choose Save, Retake or Cancel. Saving adds a PNG screenshot to the active collection for annotation and export.
+
+Capture is off by default. It captures one region on one display, with no video, GIF conversion or background global shortcut. macOS requires Screen Recording permission. If capture is unavailable or permission is denied, use the operating system's screenshot tool and Import or Paste. Linux capture is disabled. Retina and mixed-DPI setups still need platform verification.
 
 ## Add text blocks and drawings
 
@@ -78,6 +88,8 @@ A screenshot needs neither a description nor an annotation. Its minimal Markdown
 
 The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. Some receiving apps paste only one format; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
 
+Markdown copy works without generating an image first. The fallback actions also provide generated files and their plain-text paths. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what it copied, not whether another app accepted it.
+
 ## Share a hosted link
 
 Choose **Share online**, check the bundle, and optionally enter your name. Imnota remembers the name on this device; you can edit or clear it in **Settings → Sharing**. New links expire after **1 day** by default; 7, 14 and 30 days are also available. Every new desktop share includes a downloadable ZIP. Turn on **I understand** to confirm that everyone with the link can open the bundle. This acknowledgement resets for each share.
@@ -95,6 +107,18 @@ Editable drawing sources, original project folders, local paths and recovery jou
 The site owner can sign in at [app.imnota.xyz/owner](https://app.imnota.xyz/owner) with the private owner access key. The dashboard lists hosted shares, filters active/expired/revoked links, and lets the owner revoke access. It is not a public account system.
 
 Usage counts start when this feature is deployed. They count successful page loads and Markdown, PNG and ZIP requests, not unique people. PNGs can load automatically when a page opens, and copying can request files too. No visitor IP addresses or browser identifiers are stored by these counters. Entries and counts disappear when the share is removed by the existing expiry/revocation cleanup policy.
+
+## Local backup and version history
+
+Open Settings > Backups & history. Select a project and choose Create snapshot to save its metadata, original screenshots, annotations, descriptions, Markdown and drawing files. Generated exports and recovery caches are excluded.
+
+Automatic history is off by default. When enabled, it creates snapshots before project-format migrations and whole-project deletion, not after every edit. Use Create snapshot to keep a particular version.
+
+The default location is `.imnota-backups` inside the workspace, outside individual projects. Change location selects a different parent folder without moving existing snapshots. Choose a separate drive for protection against failure of the project drive. Default retention is 20 snapshots per project and a maximum age of 90 days. Cleanup runs after snapshot creation and leaves invalid or unregistered snapshots untouched.
+
+Select a snapshot to validate its files and inspect its date, reason, size and schema. Restore as new project leaves the original untouched. Export archive saves a ZIP containing the manifest and a `data/` folder; after extraction, `data/` is the project folder. Archive export is capped at 256 MiB of snapshot content. Copy larger snapshots as folders.
+
+Restore in place asks for confirmation and creates a safety snapshot first. Imnota also retains the complete pre-restore folder, including extra files, and displays its recovery path. Retention does not remove these rollback folders. Reopening the workspace attempts recovery of an interrupted restore and preserves ambiguous recovery files. If restoration succeeds but opening fails, use Retry opening project instead of repeating the restore.
 
 ## Appearance, settings and onboarding
 

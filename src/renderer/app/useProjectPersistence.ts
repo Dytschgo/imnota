@@ -52,6 +52,7 @@ export interface ExternalProjectChange {
 export interface ProjectPersistenceOptions {
   snapshot: ProjectSnapshot | null;
   activeScreenshot: ScreenshotRecord | null;
+  sessionGeneration?: number;
   onProject(project: ProjectData): void;
   onSnapshot(snapshot: ProjectSnapshot, selectedItemId?: string): void;
   onSelectScreenshot(id: string): void;
@@ -72,6 +73,7 @@ export interface ProjectPersistenceController {
   markScreenshotDirty(screenshot: ScreenshotRecord): void;
   queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
+  flushProjectDrafts(): Promise<boolean>;
   flushProjectMetadata(): Promise<boolean>;
   saveProjectMetadata(project: ProjectData): Promise<boolean>;
   beginNativeMutation(): number;
@@ -81,7 +83,12 @@ export interface ProjectPersistenceController {
     selectScreenshotId?: string,
     nativeMutationToken?: number,
   ): Promise<boolean>;
-  adoptAuthoritativeSnapshot(snapshot: ProjectSnapshot, nativeMutationToken?: number): Promise<boolean>;
+  adoptAuthoritativeSnapshot(
+    snapshot: ProjectSnapshot,
+    nativeMutationToken?: number,
+    isCurrent?: () => boolean,
+  ): Promise<boolean>;
+  discardRestoredProject(projectPath: string): void;
   getSavedContext(collectionId: string): Promise<{ snapshot: ProjectSnapshot; collectionId: string }>;
   reloadExternal(options?: { discardLocalChanges?: boolean }): Promise<boolean>;
   dismissExternalChange(): void;
@@ -308,6 +315,7 @@ function mergeTrackedProjectMetadata(
 export function useProjectPersistence({
   snapshot,
   activeScreenshot,
+  sessionGeneration = 0,
   onProject,
   onSnapshot,
   onSelectScreenshot,
@@ -646,6 +654,19 @@ export function useProjectPersistence({
     }
   }, [saveKey]);
 
+  const flushProjectDrafts = useCallback(async () => {
+    const projectPath = snapshotRef.current?.projectPath;
+    if (!projectPath) return true;
+    while (true) {
+      const dirty = [...drafts.current.values()]
+        .filter((item) => item.projectPath === projectPath && item.editRevision !== item.savedRevision)
+        .map((item) => item.key);
+      if (!dirty.length) return true;
+      const saved = await Promise.all(dirty.map(saveKey));
+      if (saved.some((result) => !result)) return false;
+    }
+  }, [saveKey]);
+
   useEffect(() => {
     if (!draft || draft.editRevision === draft.savedRevision) return;
     const timer = window.setTimeout(() => void saveKey(draft.key), 650);
@@ -724,7 +745,13 @@ export function useProjectPersistence({
       watchId.current = null;
       publishAcceptedRevision(null);
     };
-  }, [hasDirtyDrafts, publishAcceptedRevision, publishExternalChange, snapshot?.projectPath]);
+  }, [
+    hasDirtyDrafts,
+    publishAcceptedRevision,
+    publishExternalChange,
+    sessionGeneration,
+    snapshot?.projectPath,
+  ]);
 
   const queueProjectMetadata = useCallback((project: ProjectData): number => {
     const generation = ++metadataGeneration.current;
@@ -915,7 +942,11 @@ export function useProjectPersistence({
   );
 
   const adoptAuthoritativeSnapshot = useCallback(
-    async (authoritativeSnapshot: ProjectSnapshot, nativeMutationToken?: number): Promise<boolean> => {
+    async (
+      authoritativeSnapshot: ProjectSnapshot,
+      nativeMutationToken?: number,
+      isCurrent: () => boolean = () => true,
+    ): Promise<boolean> => {
       if (
         nativeMutationTokens.current.size &&
         (nativeMutationToken === undefined || !nativeMutationTokens.current.has(nativeMutationToken))
@@ -946,7 +977,8 @@ export function useProjectPersistence({
         const id = watchId.current;
         if (!ready || !id) {
           await finishNativeMutation(nativeMutationToken, false);
-          setError('The reopened project could not establish a safe save revision. Try opening it again.');
+          if (isCurrent())
+            setError('The reopened project could not establish a safe save revision. Try opening it again.');
           return false;
         }
         try {
@@ -959,11 +991,18 @@ export function useProjectPersistence({
           revision = latest.projectRevision;
         } catch (reason) {
           await finishNativeMutation(nativeMutationToken, false);
-          setError(workflowMessage(reason, 'The reopened project could not be safely refreshed.'));
+          if (isCurrent())
+            setError(workflowMessage(reason, 'The reopened project could not be safely refreshed.'));
           return false;
         }
       }
 
+      // Navigation may have changed during flush, watch setup, or reload. Never publish
+      // that older snapshot (or clear its drafts) over the later destination.
+      if (!isCurrent()) {
+        await finishNativeMutation(nativeMutationToken, false);
+        return false;
+      }
       if (sameProject) {
         for (const [key, retained] of drafts.current) {
           if (retained.projectPath === next.projectPath && retained.editRevision === retained.savedRevision)
@@ -1021,6 +1060,7 @@ export function useProjectPersistence({
     },
     queueProjectMetadata,
     flush,
+    flushProjectDrafts,
     flushProjectMetadata,
     saveProjectMetadata,
     beginNativeMutation,
@@ -1108,6 +1148,26 @@ export function useProjectPersistence({
       }
     },
     adoptAuthoritativeSnapshot,
+    discardRestoredProject(projectPath) {
+      ++loadIdentity.current;
+      ++ownRevisionGeneration.current;
+      for (const [key, retained] of drafts.current)
+        if (retained.projectPath === projectPath) drafts.current.delete(key);
+      for (const [key] of inFlight.current)
+        if (key.startsWith(`${projectPath}\u0000`)) inFlight.current.delete(key);
+      pendingMetadata.current = null;
+      metadataInFlight.current = null;
+      metadataSave.current = null;
+      metadataDirty.current = false;
+      snapshotRef.current = null;
+      lastSavedSnapshot.current = null;
+      setDraft(null);
+      setSaveState('saved');
+      setError('');
+      setWarning('');
+      publishAcceptedRevision(null);
+      publishExternalChange(null);
+    },
     async getSavedContext(requestedCollectionId) {
       await watchReady.current;
       if (pendingExternalChange.current || !acceptedRevision.current)

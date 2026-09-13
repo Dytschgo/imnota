@@ -27,6 +27,7 @@ export interface PromptBundleUiController {
   copyMarkdown(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyImage(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   openFiles(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
+  copyPaths(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   openFolder(): Promise<PromptActionResult>;
   cancel(): Promise<PromptActionResult>;
   loadPreview(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
@@ -65,6 +66,7 @@ export function PromptBundleDialogHost({
         onCopyMarkdown={(selection) => run(controller.copyMarkdown(selection))}
         onCopyImage={(selection) => run(controller.copyImage(selection))}
         onOpenFiles={(selection) => run(controller.openFiles(selection))}
+        onCopyPaths={(selection) => run(controller.copyPaths(selection))}
         onOpenExportFolder={() => run(controller.openFolder())}
         onCancel={() => run(controller.cancel())}
         onRetryCleanup={() => run(controller.retryCleanup())}

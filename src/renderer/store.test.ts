@@ -1,4 +1,5 @@
 import { beforeEach, expect, it } from 'vitest';
+import { projectListItem } from '../shared/project-list';
 import type { ProjectSnapshot, ScreenshotRecord } from '../shared/types';
 import { emptyProject } from '../shared/utils';
 import { useAppStore } from './store';
@@ -40,11 +41,54 @@ function snapshot(): ProjectSnapshot {
 beforeEach(() => {
   localStorage.clear();
   useAppStore.setState({
+    projects: [],
     snapshot: null,
     activeCollectionId: '001-collection',
     activeScreenshotId: null,
     recentCollections: [],
   });
+});
+
+it('keeps project-list entries display-only after a project edit', () => {
+  const value = snapshot();
+  useAppStore.getState().setProject(value);
+  useAppStore.getState().set({ projects: [projectListItem(value.projectPath, value.project)] });
+  const project = {
+    ...value.project,
+    name: 'Updated name',
+    description: 'Searchable update',
+    contentItems: [
+      {
+        id: 'text',
+        kind: 'text' as const,
+        collectionId: '002-collection',
+        position: 2,
+        includeInExport: true,
+        createdAt: '2020',
+        updatedAt: '2020',
+        markdownFilename: 'text.md',
+        preview: 'Orbital lantern',
+      },
+    ],
+  };
+  useAppStore.getState().updateProject(project);
+  const item = useAppStore.getState().projects[0]!;
+  expect(item.projectPath).toBe(value.projectPath);
+  expect(item.name).toBe('Updated name');
+  expect(item.searchText).toContain('orbital lantern');
+  expect(item.searchText).toContain('searchable update');
+  expect(item).not.toHaveProperty('schemaVersion');
+  expect(item).not.toHaveProperty('contentItems');
+  expect(item).not.toHaveProperty('exportPreferences');
+  expect(item.screenshots).toEqual([{ id: 'later' }, { id: 'first' }]);
+  expect(Object.keys(item.collections[0]!).sort()).toEqual([
+    'archived',
+    'createdAt',
+    'id',
+    'name',
+    'updatedAt',
+  ]);
+  expect(useAppStore.getState().snapshot?.project).toBe(project);
 });
 
 it('remembers the last opened collection locally and selects its first sorted screenshot on reopen', () => {

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { readCollectionHistory, rememberCollection, type RecentCollection } from './navigation-history';
 import { orderedCollectionItems } from '../shared/content-items';
+import { projectListItem } from '../shared/project-list';
 import type {
   ProjectData,
   ProjectListItem,
@@ -134,9 +135,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       snapshot: state.snapshot ? { ...state.snapshot, project } : null,
       projects: state.projects.map((item) =>
-        item.id === project.id
-          ? { ...item, ...project, projectPath: state.snapshot?.projectPath ?? item.projectPath }
-          : item,
+        item.id === project.id ? projectListItem(item.projectPath, project) : item,
       ),
     })),
   activeScreenshot: () => {

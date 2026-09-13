@@ -3,9 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import type { BrowserWindow } from 'electron';
 import {
   NativeUiDriver,
+  createSmokeCheckpoint,
+  boundedSmokeDiagnostic,
+  withSmokeDeadline,
+  SMOKE_CAPTURE_PREPARATION,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -47,6 +52,154 @@ describe('native smoke driver', () => {
     );
     expect(() => safeArtifactPath(artifacts, '../escape.png')).toThrow();
     expect(pathIsWithin(artifacts, artifacts)).toBe(false);
+  });
+
+  it.each([
+    { width: 20, height: 20 },
+    { width: 20, height: 0 },
+    { width: 0, height: 0 },
+  ])(
+    'awaits visible image decoding at initial size %j without waiting on hidden lazy images',
+    async (size) => {
+      let completeVisible: (() => void) | undefined;
+      let visibleStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        visibleStarted = resolve;
+      });
+      const visibleDecode = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            completeVisible = resolve;
+            visibleStarted!();
+          }),
+      );
+      const lazyDecode = vi.fn(() => new Promise(() => undefined));
+      const image = (overrides = {}) => ({
+        getBoundingClientRect: () => ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20 }),
+        closest: () => null,
+        parentElement: null,
+        style: { display: 'block', visibility: 'visible' },
+        decode: lazyDecode,
+        ...overrides,
+      });
+      const frames = vi.fn((callback) => callback());
+      const result = runInNewContext(SMOKE_CAPTURE_PREPARATION, {
+        document: {
+          fonts: { ready: Promise.resolve() },
+          images: [
+            image({
+              decode: visibleDecode,
+              getBoundingClientRect: () => ({
+                ...size,
+                left: 0,
+                top: 0,
+                right: size.width,
+                bottom: size.height,
+              }),
+            }),
+            image({ closest: () => ({ hidden: true }) }),
+            image({ style: { display: 'none', visibility: 'visible' } }),
+            image({ parentElement: { style: { display: 'none', visibility: 'visible' } } }),
+            image({ style: { display: 'block', visibility: 'hidden' } }),
+            image({
+              getBoundingClientRect: () => ({
+                width: 20,
+                height: 20,
+                left: 900,
+                top: 0,
+                right: 920,
+                bottom: 20,
+              }),
+            }),
+          ],
+        },
+        getComputedStyle: (element: { style: object }) => element.style,
+        window: { innerWidth: 800, innerHeight: 600 },
+        requestAnimationFrame: frames,
+      });
+      await started;
+      expect(visibleDecode).toHaveBeenCalledOnce();
+      expect(lazyDecode).not.toHaveBeenCalled();
+      expect(frames).not.toHaveBeenCalled();
+      completeVisible!();
+      await result;
+      expect(frames).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('enforces required operation deadlines and preserves operation errors', async () => {
+    const failure = new Error('original operation failure');
+    await expect(
+      withSmokeDeadline(
+        async () => {
+          throw failure;
+        },
+        20,
+        'test operation',
+      ),
+    ).rejects.toBe(failure);
+    await expect(withSmokeDeadline(() => new Promise(() => undefined), 5, 'test operation')).rejects.toThrow(
+      'test operation timed out after 5ms',
+    );
+  });
+
+  it('preserves an explicit evaluation allowance longer than the driver default', async () => {
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve('ready'), 20))),
+      },
+    } as unknown as BrowserWindow;
+    await expect(new NativeUiDriver(window, 5).evaluate('existing longer prompt wait', 2_000)).resolves.toBe(
+      'ready',
+    );
+  });
+
+  it('times out a non-resolving renderer lookup and page capture', async () => {
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(() => new Promise(() => undefined)),
+        capturePage: vi.fn(() => new Promise(() => undefined)),
+      },
+    } as unknown as BrowserWindow;
+    const driver = new NativeUiDriver(window, 5);
+    await expect(driver.waitFor({ selector: '.missing' })).rejects.toThrow('Renderer evaluation timed out');
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    vi.mocked(window.webContents.executeJavaScript).mockResolvedValue(undefined);
+    await expect(driver.capture(parent, 'hung.png')).rejects.toThrow('Page capture hung.png timed out');
+    await expect(fs.stat(path.join(parent, 'hung.png'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('bounds optional diagnostics without masking the original verification failure', async () => {
+    await expect(boundedSmokeDiagnostic(async () => 'renderer state', 20)).resolves.toBe('renderer state');
+    await expect(
+      boundedSmokeDiagnostic(async () => {
+        throw new Error('renderer gone');
+      }, 20),
+    ).resolves.toBeUndefined();
+    await expect(boundedSmokeDiagnostic(() => new Promise(() => undefined), 5)).resolves.toBeUndefined();
+  });
+
+  it('persists fixture progress without replacing an existing artifact', async () => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-progress');
+    await fs.mkdir(artifacts);
+    let time = 100;
+    const checkpoint = await createSmokeCheckpoint(artifacts, () => time);
+    time = 150;
+    await checkpoint('history: before clipboard');
+    time = 180;
+    await checkpoint('history: clipboard complete');
+    const target = path.join(artifacts, 'verification-progress.json');
+    const recorded = await fs.readFile(target, 'utf8');
+    expect(JSON.parse(recorded)).toEqual([
+      { elapsedMs: 50, phase: 'history: before clipboard' },
+      { elapsedMs: 80, phase: 'history: clipboard complete' },
+    ]);
+    await expect(createSmokeCheckpoint(artifacts)).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await fs.readFile(target, 'utf8')).toBe(recorded);
+    await expect(createSmokeCheckpoint(parent)).rejects.toThrow('test-only name');
   });
 
   it('uses trusted webContents input events for click, drag, wheel, and keyboard actions', async () => {

@@ -2,6 +2,8 @@ import type { WorkflowBridge } from './workflow-bridge.js';
 import type { ContentBridge, ContentItem } from './content-items.js';
 import type { ProjectIconKey } from './project-icons.js';
 import type { ProjectSearchInput, ProjectSearchResponse } from './project-search.js';
+import type { ContentSearchRequest, ContentSearchResponse } from './content-search.js';
+import type { BackupBridge } from './backups.js';
 
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';
@@ -121,11 +123,17 @@ export interface ProjectSnapshot {
   recoveredContentDeletes?: Array<{ undoToken: string; itemId: string }>;
 }
 
-export type ProjectListItem = ProjectData & {
+/** Display-only metadata. Load a ProjectSnapshot before any project mutation. */
+export type ProjectListItem = Pick<
+  ProjectData,
+  'id' | 'name' | 'description' | 'createdAt' | 'updatedAt' | 'status' | 'favourite' | 'icon'
+> & {
   projectPath: string;
   searchText?: string;
-  /** Present on native list responses; optional for older bridge implementations and fixtures. */
+  /** Revision of the raw metadata used by compare-and-swap project edits. */
   projectRevision?: string;
+  collections: Array<Pick<Collection, 'id' | 'name' | 'archived' | 'createdAt' | 'updatedAt'>>;
+  screenshots: Array<Pick<ScreenshotRecord, 'id'>>;
 };
 
 export interface WorkspaceSettings {
@@ -189,16 +197,18 @@ export interface DeleteScreenshotResult {
   undoToken: string;
 }
 
-export interface ImnotaBridge extends WorkflowBridge, ContentBridge {
+export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridge {
   getSettings(): Promise<WorkspaceSettings>;
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;
   listProjects(): Promise<ProjectListItem[]>;
   searchProjects(input: ProjectSearchInput): Promise<ProjectSearchResponse>;
+  searchContent(input: ContentSearchRequest): Promise<ContentSearchResponse>;
   createProject(input: {
     name: string;
     description: string;
     icon?: ProjectIconKey;
+    templateId?: string;
   }): Promise<ProjectSnapshot>;
   openProjectDialog(): Promise<ProjectSnapshot | null>;
   loadProject(projectPath: string): Promise<ProjectSnapshot>;

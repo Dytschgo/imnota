@@ -1054,6 +1054,8 @@ export function AnnotationCanvas({
   return (
     <div
       className="canvas-wrap annotation-canvas canvas-workspace-surface"
+      tabIndex={-1}
+      data-testid="annotation-canvas"
       style={{ cursor: spaceHeld || pan.current ? 'grabbing' : tool === 'select' ? 'default' : 'crosshair' }}
       ref={wrapRef}
       data-image-x={viewport.x}

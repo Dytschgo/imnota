@@ -11,12 +11,16 @@ import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
 import { SharingSettings } from './SharingSettings';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
+import { BackupSettings } from './BackupSettings';
+import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
+import type { ProjectListItem } from '../../shared/types';
 
 export const SETTINGS_CATEGORIES = [
   'Appearance',
   'Shortcuts',
   'Workspace',
   'Sharing',
+  'Backups & history',
   'Updates & about',
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
@@ -30,6 +34,12 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
+  projects?: ProjectListItem[];
+  onBackupChange?(value: BackupPreferences): void | Promise<void>;
+  onBeforeBackupAction?(): boolean | Promise<boolean>;
+  onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
+  onBackupRestoreFailed?(): void;
+  onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
   onInstall?: () => Promise<void>;
@@ -51,6 +61,12 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
+  projects = [],
+  onBackupChange = async () => undefined,
+  onBeforeBackupAction = () => true,
+  onBackupRestored,
+  onBackupRestoreFailed,
+  onCaptureChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
   onInstall,
@@ -118,6 +134,25 @@ export function SettingsView({
             onChange={onShortcutChange}
             disabled={savingPreferences}
           />
+          <section className="settings-section" aria-labelledby="capture-settings-title">
+            <h2 id="capture-settings-title">Experimental capture</h2>
+            <label className="settings-switch">
+              <span>
+                <strong>Capture a screen region</strong>
+                <small>
+                  Windows and macOS only while platform validation is in progress. Captures stay local.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={preferences.capture.experimentalRegionCapture}
+                disabled={savingPreferences}
+                onChange={(event) =>
+                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
+                }
+              />
+            </label>
+          </section>
         </div>
         <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} onDownload={onDownload} />
@@ -127,6 +162,17 @@ export function SettingsView({
             disabled={savingPreferences}
           />
         </div>
+        {group === 'Backups & history' && (
+          <BackupSettings
+            value={preferences.backups}
+            projects={projects}
+            disabled={savingPreferences}
+            onChange={onBackupChange}
+            onBeforeAction={onBeforeBackupAction}
+            onRestored={onBackupRestored}
+            onRestoreFailed={onBackupRestoreFailed}
+          />
+        )}
         <div hidden={group !== 'Shortcuts'}>
           <section className="settings-section" aria-labelledby="behaviour-title">
             <h2 id="behaviour-title">Behaviour</h2>

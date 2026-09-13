@@ -24,6 +24,14 @@ afterEach(() => {
 });
 
 describe('annotation toolbar', () => {
+  test('only renders experimental capture when a capture action is available', () => {
+    const view = render(<Toolbar {...props()} />);
+    expect(screen.queryByRole('button', { name: /screen capture/i })).not.toBeInTheDocument();
+
+    view.rerender(<Toolbar {...props({ onCapture: vi.fn(), captureEnabled: true })} />);
+    expect(screen.getByRole('button', { name: 'Capture screen region' })).toBeEnabled();
+  });
+
   test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {
     vi.useFakeTimers();
     const setTool = vi.fn();

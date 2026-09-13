@@ -17,7 +17,13 @@ export type WorkflowErrorCode =
   | 'watch-failure'
   | 'network-failure'
   | 'pairing-expired'
-  | 'upload-rejected';
+  | 'upload-rejected'
+  | 'capture-unavailable'
+  | 'capture-permission-denied'
+  | 'capture-sources-unavailable'
+  | 'capture-empty-region'
+  | 'capture-failed'
+  | 'capture-cancelled';
 
 export interface WorkflowError {
   code: WorkflowErrorCode;
@@ -30,7 +36,9 @@ export type WorkflowResult<T> = { ok: true; value: T } | { ok: false; error: Wor
 
 export interface PreferenceSettingsUpdate {
   appearance?: Partial<PreferenceSettings['appearance']>;
+  backups?: Partial<PreferenceSettings['backups']>;
   shortcuts?: Partial<PreferenceSettings['shortcuts']>;
+  capture?: Partial<PreferenceSettings['capture']>;
   onboarding?: Partial<PreferenceSettings['onboarding']>;
 }
 
@@ -122,7 +130,7 @@ export interface PromptExportSourceAsset {
   source: string;
 }
 
-export type PromptExportCopyTarget = 'context' | 'markdown' | 'image';
+export type PromptExportCopyTarget = 'context' | 'markdown' | 'image' | 'paths';
 export type PromptExportOpenTarget = 'folder' | 'png' | 'markdown' | 'master';
 
 export interface ProjectRevisionSnapshot {
@@ -150,6 +158,10 @@ export interface WorkflowBridge {
   getPreferenceSettings(): Promise<WorkflowResult<PreferenceSettingsResult>>;
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
+  startRegionCapture(input: {
+    projectPath: string;
+    collectionId: string;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
 
   startPromptExport(input: {
     projectPath: string;

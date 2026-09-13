@@ -88,6 +88,7 @@ export const EMPTY_DRAWING_PNG = whitePng(160, 120);
 
 export interface ContentPersistenceDependencies {
   snapshot(projectPath: string): Promise<ProjectSnapshot>;
+  beforeSchemaMigration?(projectPath: string, project: ProjectData): Promise<void>;
   transactionOperations?: ScreenshotTransactionOperations;
   trashOperations?: ContentTrashOperations;
   trashItem(target: string): Promise<void>;
@@ -436,6 +437,8 @@ export class ContentPersistenceService {
     const collection = baseline.project.collections.find((entry) => entry.id === input.collectionId);
     if (!collection || collection.archived)
       throw new Error('Choose a current collection before adding content.');
+    if (baseline.project.schemaVersion === 3)
+      await this.dependencies.beforeSchemaMigration?.(input.projectPath, baseline.project);
     const identifier = `${input.kind}_${this.randomId()}`;
     if (!/^[a-zA-Z0-9_-]+$/.test(identifier) || identifier.length > 200)
       throw new Error('Could not create a safe content identifier.');

@@ -2166,6 +2166,83 @@ button.icon-button.new-collection-button svg {
 .modal-form {
   padding: 20px 22px 22px;
 }
+.template-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+}
+.template-picker-heading {
+  padding: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.template-picker > .muted {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.template-picker-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.template-picker-option {
+  position: relative;
+  min-height: 74px;
+  cursor: pointer;
+}
+.template-picker-option-copy {
+  display: block;
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+}
+.template-picker-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.template-picker-option:hover .template-picker-option-copy {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+}
+.template-picker-option input:focus-visible + .template-picker-option-copy {
+  outline: 2px solid var(--indigo-light);
+  outline-offset: 2px;
+}
+.template-picker-option.selected .template-picker-option-copy {
+  border-color: var(--indigo);
+  box-shadow: inset 0 0 0 1px var(--indigo);
+}
+.template-picker-option-copy strong,
+.template-picker-option-copy span {
+  display: block;
+}
+.template-picker-option-copy strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.template-picker-option-copy span {
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .sharing-content,
 .combined-copy {
   display: flex;

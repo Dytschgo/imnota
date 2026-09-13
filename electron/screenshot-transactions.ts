@@ -14,6 +14,7 @@ const KINDS = [
   'content-save',
   'content-conflict',
   'content-duplicate',
+  'capture',
 ] as const;
 const PHASES = ['staged', 'applying', 'committed'] as const;
 

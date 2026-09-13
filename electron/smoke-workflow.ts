@@ -7,8 +7,13 @@ import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/t
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
+import { exerciseRegionCapture } from './capture-smoke.js';
+import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
+import { exerciseLocalHistory } from './backup-smoke.js';
 import {
   NativeUiDriver,
+  createSmokeCheckpoint,
   SMOKE_VIEWPORTS,
   mapSourcePointToPromptPixel,
   pathIsWithin,
@@ -32,6 +37,8 @@ export interface SmokeWorkflowHost {
   restoreRecovery(projectPath: string): Promise<ProjectData>;
   /** Read the persisted legacy update/workspace settings through production code. */
   readSettings(): Promise<WorkspaceSettings>;
+  /** One-use native confirmation for an exact project inside this disposable fixture. */
+  approveNextBackupRestore(projectPath: string): Promise<void>;
 }
 
 export interface SmokeWorkflowOptions {
@@ -253,8 +260,15 @@ async function exerciseOnboarding(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
-): Promise<void> {
-  await driver.waitFor(SMOKE_UI_CONTRACT.onboardingDialog[0]);
+): Promise<boolean> {
+  const preferences = await driver.evaluate<PreferenceSettingsResult>(`(async () => {
+    const result = await window.imnota.getPreferenceSettings();
+    if (!result.ok) throw new Error('The onboarding smoke could not read preferences');
+    return result.value;
+  })()`);
+  await driver.waitFor({ selector: '[data-testid="app-shell"]' });
+  if (!shouldShowOnboarding(preferences.settings.onboarding, preferences.profile)) return false;
+  await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png'));
@@ -277,6 +291,7 @@ async function exerciseOnboarding(
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
   await driver.click({ text: 'Copy PNG + Markdown', exact: true });
   await driver.waitFor({ text: 'PNG and Markdown copied together' });
+  return true;
 }
 
 async function importImages(
@@ -1259,7 +1274,8 @@ async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Pro
 }
 
 async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number): Promise<void> {
-  await driver.evaluate(`new Promise((resolve, reject) => {
+  await driver.evaluate(
+    `new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
       const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
@@ -1274,7 +1290,9 @@ async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number):
       setTimeout(check, 50);
     };
     check();
-  })`);
+  })`,
+    30_000,
+  );
 }
 
 async function verifyPromptCopyOptions(driver: NativeUiDriver, bundleCount: number): Promise<void> {
@@ -1704,6 +1722,8 @@ export async function runSmokeWorkflow(
   const artifacts: SmokeCapture[] = [];
   const assertions: string[] = [];
   const timings: SmokeTiming[] = [];
+  const checkpoint = await createSmokeCheckpoint(artifactDirectory);
+  await checkpoint('starting isolated native workflow');
   const sources = await createFixtureSources(fixtureRoot);
   const driver = new NativeUiDriver(initialWindow, mode === 'stress' ? 30_000 : 15_000);
   if (!initialWindow.isVisible()) initialWindow.show();
@@ -1977,6 +1997,7 @@ export async function runSmokeWorkflow(
     );
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
 
+  await checkpoint('existing image, clipboard, recovery and benchmark checks complete');
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
@@ -1985,7 +2006,28 @@ export async function runSmokeWorkflow(
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
+  await checkpoint(
+    'mixed content and global search checks complete; starting templates and clipboard fallbacks',
+  );
+  artifacts.push(...(await exerciseNextFeatures(driver, host, artifactDirectory, checkpoint)));
+  assertions.push(
+    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths and read-only focused search',
+  );
+  await checkpoint('templates, clipboard fallbacks and library search complete; starting local history');
+  artifacts.push(...(await exerciseLocalHistory(driver, host, artifactDirectory, checkpoint)));
+  assertions.push('mixed-content snapshot, restore as new, in-place cache replacement, edit and reopen');
+  await checkpoint('local history restore and reopen complete; capturing light feature views');
+  artifacts.push(...(await captureNextFeatureLightViews(driver, artifactDirectory)));
 
+  const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
+  if (!captureSmoke.skipped) {
+    artifacts.push(...captureSmoke.artifacts);
+    assertions.push(
+      'synthetic-only region capture overlay select/retake/cancel leaves no files; save selects, annotates, and exports the result',
+    );
+  }
+
+  await checkpoint('all native workflow checks complete');
   const report: SmokeWorkflowReport = {
     passed: true,
     version: options.version,

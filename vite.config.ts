@@ -50,6 +50,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
+      input: { main: 'index.html', captureOverlay: 'capture-overlay.html' },
       output: {
         // Keep the screenshot engine cacheable independently of the application shell.
         // The larger drawing engine stays behind Workspace's existing lazy import.

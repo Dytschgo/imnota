@@ -63,7 +63,7 @@ it('sends plan and artifact freshness identity with the primary action', () => {
   expect(screen.getByText('2.0 MB estimated')).toBeInTheDocument();
 });
 
-it('uses an honest file action for oversized prompts and disables fallbacks before artifacts exist', () => {
+it('offers independent fallbacks before artifacts exist and an honest primary action for oversized prompts', () => {
   const onPrepareFreshFiles = vi.fn();
   render(
     <PromptBundleCard
@@ -79,6 +79,9 @@ it('uses an honest file action for oversized prompts and disables fallbacks befo
   expect(onPrepareFreshFiles).toHaveBeenCalledOnce();
   expect(screen.getByText('Use saved files.')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /options/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /markdown/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /image/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /^open files$/i })).toBeEnabled();
 });
 
 it('offers Open files before an artifact exists so the controller can prepare it', () => {
@@ -252,4 +255,23 @@ it('uses a native top-layer popover inside the dialog and keeps it within the vi
   await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
   expect(showPopover).toHaveBeenCalledTimes(2);
   expect(hidePopover).toHaveBeenCalledTimes(2);
+});
+
+it('identifies prepared formats and exposes generated filenames and path copying', () => {
+  const copyPaths = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model({ outcome: 'combined', filenames: ['Prompt-2.md', 'Prompt-2.png'] })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyPaths={copyPaths}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Markdown + image prepared');
+  expect(screen.getByText('Prompt-2.png')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /options/i }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy file paths' }));
+  expect(copyPaths).toHaveBeenCalledWith(
+    expect.objectContaining({ artifactSessionId: 'session-current', bundleNumber: 2 }),
+  );
 });

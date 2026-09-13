@@ -1,4 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, shell, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  dialog,
+  ipcMain,
+  nativeImage,
+  nativeTheme,
+  net,
+  shell,
+  session,
+  screen,
+  systemPreferences,
+} from 'electron';
 import os from 'node:os';
 import { nativeClipboard } from './native-clipboard.js';
 import { desktopMaterial } from './desktop-glass.js';
@@ -15,7 +28,6 @@ import type {
   ExportRequest,
   ImagePayload,
   ProjectData,
-  ProjectListItem,
   ProjectSnapshot,
   ScreenshotRecord,
   WorkspaceSettings,
@@ -48,7 +60,12 @@ import {
   filenameSchema,
 } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
-import { ensureCollection, addEmptyCollection, migrateProject, screenshotPath } from './collections.js';
+import {
+  ensureCollection,
+  addEmptyCollection,
+  migrateProjectWithBackup,
+  screenshotPath,
+} from './collections.js';
 import {
   deleteScreenshotToTrash,
   recoverScreenshotTrashTransactions,
@@ -89,11 +106,39 @@ import { ProjectWatchManager, projectRevisionForSource } from './project-watch.j
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
+import { WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
+import { listWorkspaceProjects } from './project-list.js';
+import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
 import { runSmokeWorkflow } from './smoke-workflow.js';
-import { pathIsWithin, validateCreatedSmokeDirectory } from './smoke-native-driver.js';
+import {
+  boundedSmokeDiagnostic,
+  pathIsWithin,
+  validateCreatedSmokeDirectory,
+} from './smoke-native-driver.js';
 import { ProjectSearchService } from './project-search.js';
+import { createTemplateProject } from './template-project.js';
+import { BackupService } from './backup-service.js';
+import { openCommittedBackupRestore } from './backup-restore-result.js';
+import {
+  createBackupInputSchema,
+  inspectBackupInputSchema,
+  restoreBackupInputSchema,
+} from '../src/shared/backups.js';
+import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
+import type { CaptureRectangle } from '../src/shared/capture.js';
+import { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { NativeWorkflowError } from './workflow-errors.js';
+import {
+  CaptureOverlaySession,
+  createOverlayReadinessGuard,
+  isCaptureOverlaySender,
+  type CaptureOverlayOutcome,
+} from './capture-overlay-session.js';
+import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
+import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
+import type { IpcMainInvokeEvent } from 'electron';
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -107,11 +152,15 @@ if (process.env.IMNOTA_SMOKE === '1') {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+// Main-process-only, one-use approval for the disposable native smoke fixture.
+let smokeBackupRestorePath: string | null = null;
 let updateController: UpdateController;
 let projectWatchManager: ProjectWatchManager | undefined;
+const contentSearch = new WorkspaceContentSearch();
 let promptBundleWorkflow: PromptBundleWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
+let backupService: BackupService | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -122,6 +171,24 @@ let settings: WorkspaceSettings = {
   sharingSenderName: '',
 };
 let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
+let captureOverlay: {
+  window: BrowserWindow;
+  session: CaptureOverlaySession;
+  readiness: ReturnType<typeof createOverlayReadinessGuard>;
+  displayBounds: Electron.Rectangle;
+} | null = null;
+const captureAdmissionGate = new CaptureAdmissionGate();
+const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
+
+function assertLiveCaptureAdmission(event: IpcMainInvokeEvent, admission: CaptureAdmission): void {
+  if (
+    !captureAdmissionGate.isActive(admission) ||
+    event.sender.isDestroyed() ||
+    mainWindow?.isDestroyed() ||
+    mainWindow?.webContents !== event.sender
+  )
+    throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+}
 
 function resolvedWindowBackground(
   mode: AppearanceMode,
@@ -135,18 +202,21 @@ async function atomicWrite(filePath: string, content: string | Uint8Array): Prom
   await writeAtomically(filePath, content);
   projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfWrite(filePath, content);
+  contentSearch.invalidatePath(filePath);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
   await fs.copyFile(filePath, targetPath);
   projectSearchService?.invalidateForPath(targetPath);
   projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
+  contentSearch.invalidatePath(targetPath);
 }
 
 async function unlinkTracked(filePath: string): Promise<void> {
   await fs.unlink(filePath);
   projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfDelete(filePath);
+  contentSearch.invalidatePath(filePath);
 }
 
 const screenshotTransactionOperations: ScreenshotTransactionOperations = {
@@ -173,6 +243,7 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
+  if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
   const persisted = preferenceSettingsEnvelope(
     nextSettings as unknown as Record<string, unknown>,
     nextPreferences,
@@ -186,6 +257,7 @@ const projectInput = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(3000),
   icon: z.enum(PROJECT_ICON_KEYS).optional(),
+  templateId: z.string().min(1).max(120).optional(),
 });
 const pathInput = z.string().min(1).max(2000);
 
@@ -198,6 +270,10 @@ async function assertProjectPath(projectPath: string): Promise<string> {
   pathInput.parse(projectPath);
   const workspace = workspaceOrThrow();
   const resolved = path.resolve(projectPath);
+  if (isReservedProjectPath(resolved))
+    throw new Error(
+      'Backup and recovery folders cannot be opened as active projects. Restore a snapshot first.',
+    );
   await assertNoLinks(resolved);
   if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
     throw new Error('Project path is outside the selected workspace.');
@@ -224,7 +300,11 @@ async function assertProjectPath(projectPath: string): Promise<string> {
 async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
   await assertNoLinks(path.join(projectPath, 'project.json'));
   const raw = await fs.readFile(path.join(projectPath, 'project.json'), 'utf8');
-  const parsed = await migrateProject(projectPath, parseProjectFile(JSON.parse(raw)));
+  const source = parseProjectFile(JSON.parse(raw));
+  const parsed = await migrateProjectWithBackup(projectPath, source, async () => {
+    if (preferenceSettingsResult.settings.backups.enabled)
+      await backupService!.createSnapshot(projectPath, 'migration');
+  });
   return {
     ...parsed,
     exportPreferences: { ...DEFAULT_EXPORT_PREFERENCES, ...parsed.exportPreferences },
@@ -534,6 +614,21 @@ async function uniqueProjectFolder(workspace: string, name: string): Promise<str
   return folder;
 }
 
+let projectCreationQueue: Promise<void> = Promise.resolve();
+async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = projectCreationQueue;
+  let release!: () => void;
+  projectCreationQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
   const base = sanitizeFilename(path.basename(original, ext), 'screenshot');
@@ -683,6 +778,284 @@ async function copyContextToClipboard(markdown: string, imageDataUrl: string): P
   await nativeClipboard.writeContext(markdown, html, image);
 }
 
+function captureService(): CaptureService {
+  return new CaptureService({
+    getCursorScreenPoint: () => screen.getCursorScreenPoint(),
+    getDisplayNearestPoint: (point) => screen.getDisplayNearestPoint(point),
+    physicalDisplaySize: (display) => {
+      // Bounds are DIP. Windows has an Electron conversion API; other supported
+      // platforms expose the physical scale factor directly on Display.
+      const physical =
+        process.platform === 'win32'
+          ? screen.dipToScreenRect(null, display.bounds)
+          : {
+              width: Math.round(display.bounds.width * display.scaleFactor),
+              height: Math.round(display.bounds.height * display.scaleFactor),
+            };
+      return { width: physical.width, height: physical.height };
+    },
+    getSources: async (options) => {
+      // This deliberately has two gates: it cannot be enabled outside the
+      // disposable native smoke profile and it synthesizes every pixel itself.
+      if (process.env.IMNOTA_SMOKE === '1' && process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') {
+        const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        // Exercise the same full-resolution validation path as a desktop
+        // source. The disposable smoke profile synthesizes these pixels.
+        const width = options.thumbnailSize.width;
+        const height = options.thumbnailSize.height;
+        return [
+          {
+            display_id: String(display.id),
+            thumbnail: nativeImage.createFromBitmap(Buffer.alloc(width * height * 4, 0x5a), {
+              width,
+              height,
+            }),
+          },
+        ];
+      }
+      return desktopCapturer.getSources(options);
+    },
+    createImage: (png) => nativeImage.createFromBuffer(png),
+  });
+}
+
+async function smokeDesktopCaptureCapability(): Promise<{
+  displayId: number;
+  displayDip: { width: number; height: number };
+  sourcePixels: { width: number; height: number };
+  cropPixels: { width: number; height: number };
+}> {
+  if (
+    process.env.IMNOTA_SMOKE !== '1' ||
+    process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY !== 'real-memory-only' ||
+    process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic'
+  )
+    throw new Error(
+      'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
+    );
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The smoke test window is unavailable.');
+  const windowBounds = mainWindow.getBounds();
+  const display = screen.getDisplayMatching(windowBounds);
+  const left = Math.max(windowBounds.x, display.bounds.x);
+  const top = Math.max(windowBounds.y, display.bounds.y);
+  const right = Math.min(windowBounds.x + windowBounds.width, display.bounds.x + display.bounds.width);
+  const bottom = Math.min(windowBounds.y + windowBounds.height, display.bounds.y + display.bounds.height);
+  if (right - left < 2 || bottom - top < 2)
+    throw new Error('The smoke window does not intersect its display.');
+  const selection: CaptureRectangle = {
+    x: left - display.bounds.x + 1,
+    y: top - display.bounds.y + 1,
+    width: Math.min(240, right - left - 1),
+    height: Math.min(160, bottom - top - 1),
+  };
+  const service = captureService();
+  const source = await service.captureDisplay(display);
+  const crop = service.crop(source, selection);
+  const cropImage = nativeImage.createFromBuffer(crop);
+  if (cropImage.isEmpty()) throw new Error('The in-memory capture crop could not be decoded.');
+  // Source and crop buffers are intentionally neither persisted nor returned.
+  return {
+    displayId: display.id,
+    displayDip: { width: display.bounds.width, height: display.bounds.height },
+    sourcePixels: source.imageSize,
+    cropPixels: cropImage.getSize(),
+  };
+}
+
+function settleCaptureOverlay(selection: CaptureRectangle | null): void {
+  const active = captureOverlay;
+  if (!active || !active.session.settle(selection)) return;
+  captureOverlay = null;
+  active.readiness.dispose();
+  if (!active.window.isDestroyed()) active.window.close();
+}
+
+function failCaptureOverlay(): void {
+  const active = captureOverlay;
+  if (!active || !active.session.fail()) return;
+  captureOverlay = null;
+  active.readiness.dispose();
+  if (!active.window.isDestroyed()) active.window.close();
+}
+
+async function chooseCaptureRegion(capture: CapturedDisplayImage): Promise<CaptureOverlayOutcome> {
+  if (captureOverlay) throw new Error('A screen capture is already in progress.');
+  const displayBounds = capture.display.bounds;
+  const overlay = new BrowserWindow({
+    x: Math.round(displayBounds.x),
+    y: Math.round(displayBounds.y),
+    width: Math.round(displayBounds.width),
+    height: Math.round(displayBounds.height),
+    useContentSize: true,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: true,
+    fullscreen: true,
+    simpleFullscreen: process.platform === 'darwin',
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  overlay.webContents.on('will-navigate', (event) => event.preventDefault());
+  const session = new CaptureOverlaySession();
+  const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
+  captureOverlay = { window: overlay, session, readiness, displayBounds };
+  overlay.once('closed', () => failCaptureOverlay());
+  overlay.once('unresponsive', () => failCaptureOverlay());
+  overlay.webContents.once('render-process-gone', () => failCaptureOverlay());
+  overlay.webContents.once('did-fail-load', () => failCaptureOverlay());
+  overlay.webContents.once('did-finish-load', () => {
+    if (captureOverlay?.window !== overlay || overlay.isDestroyed()) return;
+    overlay.webContents.send('capture-overlay:payload', {
+      imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
+    });
+  });
+  try {
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl) await overlay.loadURL(new URL('capture-overlay.html', `${devUrl}/`).toString());
+    else await overlay.loadFile(path.join(__dirname, '../../dist/capture-overlay.html'));
+  } catch {
+    failCaptureOverlay();
+    throw new CaptureServiceError('sources-unavailable', 'The screen selection window could not be opened.');
+  }
+  return session.result;
+}
+
+async function insertCapturedPng(
+  projectPath: string,
+  collectionId: string,
+  png: Buffer,
+  assertAdmission: () => void,
+): Promise<{
+  snapshot: ProjectSnapshot;
+  screenshotId: string;
+}> {
+  if (png.byteLength === 0 || png.byteLength > 100_000_000)
+    throw new NativeWorkflowError(
+      'capture-sources-unavailable',
+      'The captured PNG is not a safe size. Use Import or Paste instead.',
+    );
+  let image: Electron.NativeImage;
+  let dimensions: { width: number; height: number };
+  try {
+    image = nativeImage.createFromBuffer(png);
+    dimensions = image.getSize();
+  } catch {
+    throw new NativeWorkflowError(
+      'capture-sources-unavailable',
+      'The selected area could not be decoded as a PNG. Use Import or Paste instead.',
+    );
+  }
+  if (
+    image.isEmpty() ||
+    dimensions.width < 1 ||
+    dimensions.height < 1 ||
+    dimensions.width > MAX_CAPTURE_DIMENSION ||
+    dimensions.height > MAX_CAPTURE_DIMENSION ||
+    dimensions.width * dimensions.height > MAX_CAPTURE_PIXELS
+  )
+    throw new NativeWorkflowError(
+      'capture-sources-unavailable',
+      'The selected area could not be saved as a PNG. Use Import or Paste instead.',
+    );
+  const baseline = await readWithCaptureAdmission(
+    () => readProjectMutationBaseline(projectPath),
+    assertAdmission,
+  );
+  const project = baseline.project;
+  const collection = project.collections.find((candidate) => candidate.id === collectionId);
+  if (!collection || collection.archived)
+    throw new NativeWorkflowError(
+      'collection-not-found',
+      'The active collection is no longer available. Choose a current collection and try again.',
+    );
+  await ensureCollection(projectPath, collection.id);
+  assertAdmission();
+  const storedFilename = await uniqueStoredName(
+    projectPath,
+    `capture-${new Date().toISOString().replace(/[:.]/g, '-')}.png`,
+  );
+  assertAdmission();
+  const timestamp = nextProjectMutationTimestamp(project.updatedAt);
+  const screenshot: ScreenshotRecord = {
+    collectionId: collection.id,
+    id: `shot_${crypto.randomUUID()}`,
+    originalFilename: 'Screen capture.png',
+    storedFilename,
+    title: 'Screen capture',
+    description: '',
+    position: nextScreenshotPosition(project, collection.id),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    priority: 'medium',
+    annotationFile: `collections/${collection.id}/annotations/${storedFilename}.json`,
+    descriptionFile: `collections/${collection.id}/descriptions/${storedFilename}.md`,
+    originalWidth: dimensions.width,
+    originalHeight: dimensions.height,
+    includeInExport: true,
+  };
+  project.screenshots.push(screenshot);
+  project.updatedAt = timestamp;
+  const savedProject = validateProject(project);
+  const projectSource = Buffer.from(JSON.stringify(savedProject, null, 2));
+  const recoverySource = await readWithCaptureAdmission(
+    () => readOptionalFile(path.join(projectPath, '.imnota-recovery.json')),
+    assertAdmission,
+  );
+  await commitFileTransaction(
+    projectPath,
+    'capture',
+    [
+      {
+        relativePath: `collections/${collection.id}/screenshots/${storedFilename}`,
+        after: png,
+        expectedBefore: screenshotTransactionBaseline(null),
+      },
+      {
+        relativePath: screenshot.annotationFile,
+        after: Buffer.from('[]'),
+        expectedBefore: screenshotTransactionBaseline(null),
+      },
+      {
+        relativePath: screenshot.descriptionFile,
+        after: Buffer.from(''),
+        expectedBefore: screenshotTransactionBaseline(null),
+      },
+      {
+        relativePath: '.imnota-recovery.json',
+        after: null,
+        expectedBefore: screenshotTransactionBaseline(recoverySource),
+      },
+      {
+        relativePath: 'project.json',
+        after: projectSource,
+        expectedBefore: screenshotTransactionBaseline(baseline.projectSource),
+      },
+    ],
+    () =>
+      assertCaptureCommitAdmission(assertAdmission, () =>
+        assertProjectRevision(projectPath, baseline.projectRevision),
+      ),
+  );
+  return { snapshot: await makeSnapshot(projectPath), screenshotId: screenshot.id };
+}
+
 function registerIpc(): void {
   // One queue prevents concurrent read/modify/write handlers from losing updates.
   let pending: Promise<unknown> = Promise.resolve();
@@ -705,6 +1078,14 @@ function registerIpc(): void {
     .regex(/^[a-zA-Z0-9_-]+$/)
     .max(200);
   const workflowBundleNumber = z.number().int().min(1).max(999);
+  const captureRectangle = z
+    .object({
+      x: z.number().finite(),
+      y: z.number().finite(),
+      width: z.number().finite().positive(),
+      height: z.number().finite().positive(),
+    })
+    .strict();
   const workflowManifest = z
     .array(
       z
@@ -744,8 +1125,25 @@ function registerIpc(): void {
     'settings:get': z.tuple([]),
     'settings:choose-workspace': z.tuple([]),
     'settings:set': z.tuple([settingsPatchSchema]),
+    'backups:list': z.tuple([]),
+    'backups:choose-location': z.tuple([]),
+    'backups:create': z.tuple([createBackupInputSchema]),
+    'backups:inspect': z.tuple([inspectBackupInputSchema]),
+    'backups:export': z.tuple([inspectBackupInputSchema]),
+    'backups:restore': z.tuple([restoreBackupInputSchema]),
     'projects:list': z.tuple([]),
     'projects:search': z.tuple([searchInput]),
+    'projects:search-content': z.tuple([
+      z
+        .object({
+          workspacePath: pathInput,
+          query: z.string().max(500),
+          refresh: z.boolean().optional(),
+          favouritesOnly: z.boolean().optional(),
+          scope: z.enum(['active', 'archived']).optional(),
+        })
+        .strict(),
+    ]),
     'projects:create': z.tuple([projectInput]),
     'projects:open-dialog': z.tuple([]),
     'projects:save': z.tuple([pathInput, projectSchema]),
@@ -868,6 +1266,59 @@ function registerIpc(): void {
     'update:status': z.tuple([]),
     'update:install': z.tuple([]),
   };
+  // The selection window is not the main renderer. It receives no general
+  // bridge and these handlers accept only its current webContents instance.
+  ipcMain.handle('capture-overlay:ready', (event) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlay?.window.webContents.id,
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    if (!active.readiness.ready()) throw new Error('Capture overlay readiness has expired.');
+    active.window.show();
+    active.window.focus();
+  });
+  ipcMain.handle('capture-overlay:save', (event, raw) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlay?.window.webContents.id,
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay!;
+    const actual = active.window.getContentBounds();
+    const expected = active.displayBounds;
+    // Window managers can constrain an overlay to the work area. Never map a
+    // stretched preview's coordinates onto a differently sized source display.
+    if (
+      actual.x !== expected.x ||
+      actual.y !== expected.y ||
+      actual.width !== expected.width ||
+      actual.height !== expected.height
+    ) {
+      failCaptureOverlay();
+      return;
+    }
+    settleCaptureOverlay(captureRectangle.parse(raw));
+  });
+  ipcMain.handle('capture-overlay:cancel', (event) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlay?.window.webContents.id,
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    settleCaptureOverlay(null);
+  });
   const handle: typeof ipcMain.handle = (channel, listener) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
@@ -875,6 +1326,9 @@ function registerIpc(): void {
       const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
       if (channel.startsWith('update:')) return listener(event, ...validated);
       if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
+      // Search is read-only and owns a single cancellable scan. Do not queue obsolete queries
+      // behind mutations or block saves while the workspace text is being indexed.
+      if (channel === 'projects:search-content') return listener(event, ...validated);
       const result = pending.then(() => listener(event, ...validated));
       pending = result.catch(() => undefined);
       return result;
@@ -906,6 +1360,45 @@ function registerIpc(): void {
       }),
     );
   };
+  // Acquire before this request joins the shared IPC queue. Otherwise two rapid
+  // toolbar/shortcut invocations can each wait for a previous operation and
+  // subsequently create separate overlays.
+  const handleCaptureWorkflow = (
+    listener: (
+      event: IpcMainInvokeEvent,
+      admission: CaptureAdmission,
+      ...args: unknown[]
+    ) => Promise<unknown> | unknown,
+  ) => {
+    ipcMain.handle('workflow:capture:region', (event, ...args) =>
+      workflowOutcome(async () => {
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+          throw new Error('Untrusted IPC sender.');
+        if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
+        const admission = captureAdmissionGate.acquire();
+        if (!admission)
+          throw new NativeWorkflowError(
+            'capture-unavailable',
+            'A screen capture is already in progress. Finish or cancel it before starting another.',
+          );
+        const revoke = () => {
+          captureAdmissionGate.revoke(admission);
+          settleCaptureOverlay(null);
+        };
+        event.sender.once('destroyed', revoke);
+        event.sender.once('render-process-gone', revoke);
+        try {
+          const result = pending.then(() => listener(event, admission, ...args));
+          pending = result.catch(() => undefined);
+          return await result;
+        } finally {
+          event.sender.removeListener('destroyed', revoke);
+          event.sender.removeListener('render-process-gone', revoke);
+          captureAdmissionGate.release(admission);
+        }
+      }),
+    );
+  };
 
   projectWatchManager = new ProjectWatchManager({
     loadSnapshot: (projectPath) => makeSnapshot(projectPath),
@@ -921,6 +1414,7 @@ function registerIpc(): void {
       return makeSnapshot(projectPath);
     },
     emit: (event: ProjectWatchEvent) => {
+      contentSearch.invalidatePath(event.projectPath);
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('workflow:project-watch-event', event);
     },
@@ -930,8 +1424,17 @@ function registerIpc(): void {
     authorizeProject: assertProjectPath,
     assertNoLinks,
   });
+  backupService = new BackupService({
+    getLocation: () => preferenceSettingsResult.settings.backups.location,
+    getWorkspace: () => workspaceOrThrow(),
+    getPreferences: () => preferenceSettingsResult.settings.backups,
+  });
   const contentPersistence = new ContentPersistenceService({
     snapshot: makeSnapshot,
+    beforeSchemaMigration: async (projectPath) => {
+      if (preferenceSettingsResult.settings.backups.enabled)
+        await backupService!.createSnapshot(projectPath, 'migration');
+    },
     transactionOperations: screenshotTransactionOperations,
     trashOperations: contentTrashOperations,
     trashItem: async (target) => {
@@ -989,6 +1492,7 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;
+    contentSearch.invalidate();
     settings.workspacePath = result.filePaths[0];
     await persistApplicationSettings(settings);
     return settings;
@@ -1007,6 +1511,72 @@ function registerIpc(): void {
       await updateController.switchChannel(next.updateChannel, persist);
     else await persist();
     return settings;
+  });
+  handle('backups:list', () => backupService!.listSnapshots());
+  handle('backups:choose-location', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Choose local history location',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  handle('backups:create', async (_event, input) => {
+    const safePath = await assertProjectPath(input.projectPath);
+    return backupService!.createSnapshot(safePath, 'manual');
+  });
+  handle('backups:inspect', (_event, input) => backupService!.inspectSnapshot(input.snapshotId));
+  handle('backups:export', async (_event, input) => {
+    const inspection = await backupService!.inspectSnapshot(input.snapshotId);
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Export backup archive',
+      defaultPath: `${sanitizeFilename(inspection.summary.sourceProjectName, 'imnota-backup')} ${inspection.summary.createdAt.slice(0, 10)}.imnota-backup.zip`,
+      filters: [{ name: 'Imnota backup archive', extensions: ['zip'] }],
+    });
+    if (result.canceled || !result.filePath) return { cancelled: true };
+    await backupService!.exportSnapshot(input.snapshotId, result.filePath);
+    return { cancelled: false, filePath: result.filePath };
+  });
+  handle('backups:restore', async (_event, input) => {
+    if (input.mode === 'new') {
+      const restored = await backupService!.restoreNew(input.snapshotId);
+      const warnings = restored.warnings ?? [];
+      return openCommittedBackupRestore(
+        { mode: 'new', projectPath: restored.projectPath, warnings },
+        async (projectPath) => withSnapshotWarnings(await openWithRecovery(projectPath), warnings),
+      );
+    }
+    const safePath = await assertProjectPath(input.projectPath);
+    const inspection = await backupService!.inspectSnapshot(input.snapshotId);
+    const smokeApproved = process.env.IMNOTA_SMOKE === '1' && smokeBackupRestorePath === safePath;
+    smokeBackupRestorePath = null;
+    const answer = smokeApproved
+      ? { response: 1 }
+      : await dialog.showMessageBox(mainWindow!, {
+          type: 'warning',
+          buttons: ['Cancel', 'Restore in place'],
+          defaultId: 0,
+          cancelId: 0,
+          message: `Replace ${inspection.summary.sourceProjectName} with this snapshot?`,
+          detail:
+            'Imnota will create a safety snapshot first. The selected historical files then replace the current project in its existing folder.',
+        });
+    if (answer.response !== 1) throw new Error('Restore in place cancelled.');
+    projectWatchManager?.stopProject(safePath);
+    const restored = await backupService!.restoreInPlace(input.snapshotId, safePath);
+    const warnings = [
+      `The full pre-restore project remains recoverable at ${restored.rollbackPath}.`,
+      ...(restored.warnings ?? []),
+    ];
+    return openCommittedBackupRestore(
+      {
+        mode: 'in-place',
+        projectPath: restored.projectPath,
+        safetySnapshotId: restored.safetySnapshotId,
+        rollbackPath: restored.rollbackPath,
+        warnings,
+      },
+      async (projectPath) => withSnapshotWarnings(await openWithRecovery(projectPath), warnings),
+    );
   });
   handleWorkflow('workflow:preferences:get', (_event, ...args) => {
     z.tuple([]).parse(args);
@@ -1028,6 +1598,125 @@ function registerIpc(): void {
   handleWorkflow('workflow:performance:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
+  });
+  handleCaptureWorkflow(async (event, admission, ...args) => {
+    const [input] = z
+      .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
+      .parse(args);
+    assertLiveCaptureAdmission(event, admission);
+    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
+      );
+    if (process.platform === 'linux')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen capture is unavailable on Linux in this experimental release. Use Import or Paste instead.',
+      );
+    if (process.platform !== 'win32' && process.platform !== 'darwin')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen capture is unavailable on this platform. Use Import or Paste instead.',
+      );
+    if (process.platform === 'darwin') {
+      const permission = systemPreferences.getMediaAccessStatus('screen');
+      if (permission === 'denied' || permission === 'restricted')
+        throw new NativeWorkflowError(
+          'capture-permission-denied',
+          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+        );
+    }
+    const safeProjectPath = await assertProjectPath(input.projectPath);
+    const beforeCapture = await readProjectMetadata(safeProjectPath);
+    const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
+    if (!beforeCollection || beforeCollection.archived)
+      throw new NativeWorkflowError('collection-not-found', 'Choose a current collection before capturing.');
+    // The renderer flushes before it invokes this workflow and rechecks its
+    // project/collection identity. Recheck the originating renderer here as
+    // well because this request may have waited in the shared IPC queue.
+    assertLiveCaptureAdmission(event, admission);
+    const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
+    const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
+    try {
+      // Capture before creating the overlay; otherwise the selection UI would
+      // be present in the image. Hiding the main window prevents self-capture.
+      if (wasVisible) mainWindow?.hide();
+      let captured: CapturedDisplayImage;
+      try {
+        captured = await captureService().captureCursorDisplay();
+      } catch (error) {
+        if (error instanceof CaptureServiceError) {
+          if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
+            throw new NativeWorkflowError(
+              'capture-permission-denied',
+              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+            );
+          throw new NativeWorkflowError(
+            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
+            `${error.message} Use Import or Paste instead.`,
+            true,
+          );
+        }
+        throw new NativeWorkflowError(
+          'capture-sources-unavailable',
+          'The screen capture source could not be read. Use Import or Paste instead.',
+          true,
+        );
+      }
+      assertLiveCaptureAdmission(event, admission);
+      let outcome: CaptureOverlayOutcome;
+      try {
+        outcome = await chooseCaptureRegion(captured);
+      } catch (error) {
+        if (error instanceof CaptureServiceError)
+          throw new NativeWorkflowError(
+            'capture-sources-unavailable',
+            `${error.message} Use Import or Paste instead.`,
+            true,
+          );
+        throw new NativeWorkflowError(
+          'capture-sources-unavailable',
+          'The screen selection window could not be opened. Use Import or Paste instead.',
+          true,
+        );
+      }
+      assertLiveCaptureAdmission(event, admission);
+      if (outcome.kind === 'cancelled')
+        throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+      if (outcome.kind === 'failed')
+        throw new NativeWorkflowError(
+          'capture-failed',
+          'The screen selection window stopped before it was ready. Use Import or Paste instead.',
+          true,
+        );
+      const selection = outcome.selection;
+      let png: Buffer;
+      try {
+        png = captureService().crop(captured, selection);
+      } catch (error) {
+        if (error instanceof CaptureServiceError)
+          throw new NativeWorkflowError(
+            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
+            `${error.message} Use Import or Paste instead.`,
+            error.kind !== 'empty-region',
+          );
+        throw new NativeWorkflowError(
+          'capture-sources-unavailable',
+          'The selected screen area could not be prepared. Use Import or Paste instead.',
+          true,
+        );
+      }
+      assertLiveCaptureAdmission(event, admission);
+      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
+        assertLiveCaptureAdmission(event, admission),
+      );
+    } finally {
+      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        if (wasFocused) mainWindow.focus();
+      }
+    }
   });
   handleWorkflow('workflow:appearance:desktop', (event, ...args) => {
     const [input] = z.tuple([z.object({ enabled: z.boolean() }).strict()]).parse(args);
@@ -1159,7 +1848,7 @@ function registerIpc(): void {
           .object({
             sessionId: workflowSessionId,
             bundleNumber: workflowBundleNumber,
-            target: z.enum(['context', 'markdown', 'image']),
+            target: z.enum(['context', 'markdown', 'image', 'paths']),
           })
           .strict(),
       ])
@@ -1284,58 +1973,49 @@ function registerIpc(): void {
     true,
   );
   handle('projects:list', async () => {
+    contentSearch.invalidate();
     if (!settings.workspacePath) return [];
-    const entries = await fs.readdir(settings.workspacePath, { withFileTypes: true }).catch(() => []);
-    const projects: ProjectListItem[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      try {
-        const projectPath = path.join(settings.workspacePath, entry.name);
-        if (existsSync(path.join(projectPath, 'project.json'))) {
-          const baseline = await readProjectMutationBaseline(projectPath);
-          const project = baseline.project;
-          const searchable = [project.name, project.description, project.status];
-          for (const shot of project.screenshots) {
-            searchable.push(shot.title, shot.description, shot.priority);
-          }
-          for (const item of project.contentItems ?? [])
-            searchable.push(item.kind === 'drawing' ? item.title : (item.preview ?? ''));
-          projects.push({
-            ...project,
-            projectPath,
-            projectRevision: baseline.projectRevision,
-            searchText: searchable.join(' ').toLowerCase(),
-          });
-        }
-      } catch {
-        /* corrupt projects stay discoverable through open */
-      }
-    }
-    return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    await backupService!.recoverInterruptedRestores();
+    return listWorkspaceProjects(settings.workspacePath);
+  });
+  handle('projects:search-content', async (_event, input: ContentSearchRequest) => {
+    const workspacePath = workspaceOrThrow();
+    if (path.relative(workspacePath, input.workspacePath) !== '')
+      throw new Error('The workspace changed. Retry your search in the selected workspace.');
+    const response = await contentSearch.search({ ...input, workspacePath });
+    if (path.relative(workspaceOrThrow(), workspacePath) !== '')
+      throw new Error('The workspace changed while searching. Retry your search.');
+    return response;
   });
   handleConcurrent('projects:search', async (_event, input) => projectSearchService!.search(input));
-  handle('projects:create', async (_event, raw) => {
-    const input = projectInput.parse(raw);
-    const workspace = workspaceOrThrow();
-    await fs.mkdir(workspace, { recursive: true });
-    const folder = await uniqueProjectFolder(workspace, input.name);
-    await fs.mkdir(path.join(folder, 'exports'), { recursive: true });
-    await ensureCollection(folder, '001-collection');
-    await atomicWrite(
-      path.join(folder, 'project.json'),
-      JSON.stringify(
-        {
-          ...emptyProject(input.name, input.description, path.basename(workspace)),
-          ...(input.icon ? { icon: input.icon } : {}),
-          schemaVersion: 4,
-          contentItems: [],
-        },
-        null,
-        2,
-      ),
-    );
-    return makeSnapshot(folder);
-  });
+  handle('projects:create', async (_event, raw) =>
+    withinProjectCreationQueue(async () => {
+      const input = projectInput.parse(raw);
+      const workspace = workspaceOrThrow();
+      await fs.mkdir(workspace, { recursive: true });
+      if (input.templateId) {
+        const folder = await createTemplateProject(workspace, { ...input, templateId: input.templateId });
+        return makeSnapshot(folder);
+      }
+      const folder = await uniqueProjectFolder(workspace, input.name);
+      await fs.mkdir(path.join(folder, 'exports'), { recursive: true });
+      await ensureCollection(folder, '001-collection');
+      await atomicWrite(
+        path.join(folder, 'project.json'),
+        JSON.stringify(
+          {
+            ...emptyProject(input.name, input.description, path.basename(workspace)),
+            ...(input.icon ? { icon: input.icon } : {}),
+            schemaVersion: 4,
+            contentItems: [],
+          },
+          null,
+          2,
+        ),
+      );
+      return makeSnapshot(folder);
+    }),
+  );
   handle('projects:open-dialog', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Open Imnota project',
@@ -1343,12 +2023,14 @@ function registerIpc(): void {
       properties: ['openDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;
+    await backupService!.recoverInterruptedRestores();
     const projectPath = await assertProjectPath(result.filePaths[0]);
     return openWithRecovery(projectPath);
   });
-  handle('projects:load', async (_event, projectPath: string) =>
-    openWithRecovery(await assertProjectPath(projectPath)),
-  );
+  handle('projects:load', async (_event, projectPath: string) => {
+    await backupService!.recoverInterruptedRestores();
+    return openWithRecovery(await assertProjectPath(projectPath));
+  });
   handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
     const safePath = await assertProjectPath(projectPath);
     const current = await readProject(safePath);
@@ -1707,6 +2389,9 @@ function registerIpc(): void {
       detail: `All project files in ${safePath} will be moved to the system trash.`,
     });
     if (answer.response !== 1) throw new Error('Project deletion cancelled.');
+    if (preferenceSettingsResult.settings.backups.enabled)
+      await backupService!.createSnapshot(safePath, 'destructive-operation');
+    projectWatchManager?.stopProject(safePath);
     await shell.trashItem(safePath);
   });
   handle('exports:annotated-image', async (_event, input) => {
@@ -1995,6 +2680,12 @@ app.whenReady().then(async () => {
           async readSettings() {
             return structuredClone(settings);
           },
+          async approveNextBackupRestore(projectPath) {
+            const real = await fs.realpath(projectPath);
+            if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
+              throw new Error('Smoke restore approval must name a real disposable fixture project.');
+            smokeBackupRestorePath = real;
+          },
         },
         {
           fixtureRoot: fixture,
@@ -2004,26 +2695,51 @@ app.whenReady().then(async () => {
           mode: process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke',
         },
       );
+      if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
+        const capability = await smokeDesktopCaptureCapability();
+        result = {
+          ...(result as Record<string, unknown>),
+          captureCapability: capability,
+          assertions: [
+            ...((result as { assertions?: string[] }).assertions ?? []),
+            'real desktopCapturer dimensions and in-memory crop of the smoke window',
+          ],
+        };
+      }
     } catch (error) {
       exitCode = 1;
+      const failureMessage = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      let failureArtifactDirectory: string | undefined;
+      if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
+        try {
+          failureArtifactDirectory = await validateCreatedSmokeDirectory(
+            process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+            'artifact',
+          );
+          await fs.writeFile(
+            path.join(failureArtifactDirectory, 'verification-failure.json'),
+            JSON.stringify({ passed: false, version: app.getVersion(), error: failureMessage }, null, 2),
+            { flag: 'wx' },
+          );
+        } catch (artifactError) {
+          console.error('Failure report unavailable:', artifactError);
+        }
+      }
       let rendererState: unknown;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        rendererState = await mainWindow.webContents
-          .executeJavaScript(
+        const failedWindow = mainWindow;
+        rendererState = await boundedSmokeDiagnostic(() =>
+          failedWindow.webContents.executeJavaScript(
             `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
-          )
-          .catch(() => undefined);
-        if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
+          ),
+        );
+        if (failureArtifactDirectory) {
           try {
-            const artifactDirectory = await validateCreatedSmokeDirectory(
-              process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-              'artifact',
-            );
-            await fs.writeFile(
-              path.join(artifactDirectory, 'failure.png'),
-              (await mainWindow.webContents.capturePage()).toPNG(),
-              { flag: 'wx' },
-            );
+            const captured = await boundedSmokeDiagnostic(() => failedWindow.webContents.capturePage());
+            if (captured)
+              await fs.writeFile(path.join(failureArtifactDirectory, 'failure.png'), captured.toPNG(), {
+                flag: 'wx',
+              });
           } catch (captureError) {
             console.error('Failure capture unavailable:', captureError);
           }
@@ -2032,7 +2748,7 @@ app.whenReady().then(async () => {
       result = {
         passed: false,
         version: app.getVersion(),
-        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        error: failureMessage,
         rendererState,
       };
       console.error(error);

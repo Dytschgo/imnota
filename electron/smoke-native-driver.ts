@@ -1,6 +1,78 @@
 import type { BrowserWindow, Rectangle, WebContents } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { atomicWrite } from './files.js';
+
+export type SmokeCheckpoint = (phase: string) => Promise<void>;
+
+// Hidden settings panels retain lazy images that Chromium may never request.
+// Only images that can contribute pixels to this viewport need to decode.
+export const SMOKE_CAPTURE_PREPARATION = `(async () => {
+  await document.fonts.ready;
+  const visibleImages = [...document.images].filter(image => {
+    const rect = image.getBoundingClientRect();
+    const style = getComputedStyle(image);
+    if (image.closest('[hidden]') || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+    for (let element = image; element; element = element.parentElement) {
+      if (getComputedStyle(element).display === 'none') return false;
+    }
+    // Unloaded images may have zero intrinsic dimensions while still in view.
+    return rect.right >= 0 && rect.bottom >= 0 &&
+      rect.left < window.innerWidth && rect.top < window.innerHeight;
+  });
+  await Promise.all(visibleImages.map(image => image.decode().catch(() => undefined)));
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+})()`;
+
+export async function withSmokeDeadline<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function boundedSmokeDiagnostic<T>(
+  operation: () => Promise<T>,
+  timeoutMs = 2_000,
+): Promise<T | undefined> {
+  try {
+    return await withSmokeDeadline(operation, timeoutMs, 'Optional smoke diagnostic');
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist fixture-only progress because GUI builds may not inherit CI stdout. */
+export async function createSmokeCheckpoint(
+  artifactDirectory?: string,
+  now: () => number = Date.now,
+): Promise<SmokeCheckpoint> {
+  const started = now();
+  const entries: Array<{ elapsedMs: number; phase: string }> = [];
+  const target = artifactDirectory
+    ? path.join(
+        await validateCreatedSmokeDirectory(artifactDirectory, 'artifact'),
+        'verification-progress.json',
+      )
+    : undefined;
+  if (target) await fs.writeFile(target, '[]\n', { flag: 'wx' });
+  return async (phase) => {
+    entries.push({ elapsedMs: now() - started, phase });
+    if (target) await atomicWrite(target, JSON.stringify(entries, null, 2));
+    console.info(`Native verification +${entries.at(-1)!.elapsedMs}ms: ${phase}`);
+  };
+}
 
 export interface SmokeLocator {
   selector?: string;
@@ -155,9 +227,13 @@ export class NativeUiDriver {
     return this.window;
   }
 
-  async evaluate<T>(source: string): Promise<T> {
+  async evaluate<T>(source: string, timeoutMs = this.defaultTimeoutMs): Promise<T> {
     try {
-      return (await this.window.webContents.executeJavaScript(source, true)) as T;
+      return (await withSmokeDeadline(
+        () => this.window.webContents.executeJavaScript(source, true),
+        timeoutMs,
+        'Renderer evaluation',
+      )) as T;
     } catch (error) {
       const summary = source.replace(/\s+/g, ' ').trim().slice(0, 180);
       const message = error instanceof Error ? error.message : String(error);
@@ -167,9 +243,12 @@ export class NativeUiDriver {
     }
   }
 
-  async bounds(locator: SmokeLocator): Promise<(Rectangle & { text: string; disabled: boolean }) | null> {
+  async bounds(
+    locator: SmokeLocator,
+    timeoutMs = this.defaultTimeoutMs,
+  ): Promise<(Rectangle & { text: string; disabled: boolean }) | null> {
     try {
-      return await this.evaluate(locatorScript(locator));
+      return await this.evaluate(locatorScript(locator), timeoutMs);
     } catch (error) {
       if (isTransientLocatorExecutionError(error)) return null;
       throw error;
@@ -183,7 +262,7 @@ export class NativeUiDriver {
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
     const started = Date.now();
     do {
-      const found = await this.bounds(locator);
+      const found = await this.bounds(locator, Math.max(1, timeout - (Date.now() - started)));
       if (options.absent ? !found : found && (!options.enabled || !found.disabled)) {
         if (options.absent) return { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false };
         return found!;
@@ -317,18 +396,18 @@ export class NativeUiDriver {
     const target = safeArtifactPath(directory, filename);
     // DOM assertions and animation frames can precede Chromium's compositor update.
     // Decode assets first, then require a stable sequence of actual captured pixels.
-    await this.evaluate(`(async () => {
-      await document.fonts.ready;
-      await Promise.all([...document.images].map(image => image.decode().catch(() => undefined)));
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    })()`);
+    await this.evaluate(SMOKE_CAPTURE_PREPARATION);
     const deadline = Date.now() + this.defaultTimeoutMs;
     let previous: Buffer | undefined;
     let stableFrames = 0;
     let image;
     let png: Buffer;
     do {
-      image = await this.window.webContents.capturePage();
+      image = await withSmokeDeadline(
+        () => this.window.webContents.capturePage(),
+        Math.max(1, deadline - Date.now()),
+        `Page capture ${filename}`,
+      );
       if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
       png = image.toPNG();
       stableFrames = previous?.equals(png) ? stableFrames + 1 : 1;

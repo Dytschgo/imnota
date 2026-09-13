@@ -2,9 +2,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { inflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ProjectSnapshot } from '../src/shared/types.js';
+import type { ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import { validateProject } from '../src/shared/schema.js';
 import { emptyProject } from '../src/shared/utils.js';
@@ -15,6 +16,8 @@ import {
 } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
 import { recoverContentTrashTransactions } from './content-trash.js';
+import { BackupService } from './backup-service.js';
+import { DEFAULT_BACKUP_PREFERENCES } from '../src/shared/backups.js';
 
 const temporary: string[] = [];
 
@@ -22,7 +25,7 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((entry) => fs.rm(entry, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(beforeSchemaMigration?: (projectPath: string, project: ProjectData) => Promise<void>) {
   const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-content-')));
   temporary.push(projectPath);
   const project = emptyProject('Mixed content', '');
@@ -37,6 +40,7 @@ async function fixture() {
   });
   const service = new ContentPersistenceService({
     snapshot,
+    beforeSchemaMigration,
     trashItem: (target) => fs.unlink(target),
     randomId: () => `00000000-0000-4000-8000-${String(++identifier).padStart(12, '0')}`,
     now: () => new Date('2026-09-07T00:00:00.000Z'),
@@ -62,6 +66,50 @@ describe('native mixed content persistence', () => {
     expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(before);
     expect(await Promise.all(files.map((file) => fs.readFile(file)))).toEqual(bytes);
   });
+  it.each(['text', 'drawing'] as const)(
+    'publishes a real schema 3 snapshot before the first %s upgrades the project to schema 4',
+    async (kind) => {
+      const observations: Array<{ schemaVersion: number; contentExists: boolean }> = [];
+      const backupHolder: { current: BackupService | null } = { current: null };
+      let createdSnapshot = '';
+      const { projectPath, service } = await fixture(async (target, project) => {
+        observations.push({
+          schemaVersion: project.schemaVersion,
+          contentExists: Boolean(
+            await fs.stat(path.join(target, 'project.v3.backup.json')).catch(() => null),
+          ),
+        });
+        createdSnapshot = (await backupHolder.current!.createSnapshot(target, 'migration')).snapshotId;
+      });
+      const backupParent = `${projectPath}-backups`;
+      temporary.push(backupParent);
+      backupHolder.current = new BackupService({
+        getLocation: () => backupParent,
+        getWorkspace: () => path.dirname(projectPath),
+        getPreferences: () => ({ ...DEFAULT_BACKUP_PREFERENCES, enabled: true }),
+        now: () => new Date('2026-09-13T12:00:00.000Z'),
+        randomId: () => '00000000-0000-4000-8000-000000000099',
+      });
+      const beforeProject = await fs.readFile(path.join(projectPath, 'project.json'));
+      const created = await service.create({ projectPath, collectionId: '001-collection', kind });
+      expect(observations).toEqual([{ schemaVersion: 3, contentExists: false }]);
+      expect(created.project.schemaVersion).toBe(4);
+      expect((await backupHolder.current.inspectSnapshot(createdSnapshot)).summary).toMatchObject({
+        schemaVersion: 3,
+        reason: 'migration',
+      });
+      const snapshotProject = path.join(
+        backupParent,
+        '.imnota-backups',
+        'snapshots',
+        createHash('sha256').update(created.project.id).digest('hex').slice(0, 32),
+        createdSnapshot,
+        'data',
+        'project.json',
+      );
+      expect(await fs.readFile(snapshotProject)).toEqual(beforeProject);
+    },
+  );
 
   it('does not reuse an older migration backup even when it belongs to the same project', async () => {
     const { projectPath, service } = await fixture();

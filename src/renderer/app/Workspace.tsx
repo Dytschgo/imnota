@@ -53,6 +53,10 @@ export interface WorkspaceProps {
   onRedo(): void;
   onFit(): void;
   onActualSize(): void;
+  onCapture?(): void;
+  captureEnabled?: boolean;
+  captureShortcut?: string;
+  captureDisabledLabel?: string;
   onZoom(delta: number): void;
   onFlush(): Promise<boolean>;
   onSaveProject(project: ProjectData): Promise<boolean>;
@@ -199,6 +203,10 @@ export function Workspace(props: WorkspaceProps) {
               onZoom={props.onZoom}
               onFit={props.onFit}
               onActualSize={props.onActualSize}
+              onCapture={props.onCapture}
+              captureEnabled={props.captureEnabled}
+              captureShortcut={props.captureShortcut}
+              captureDisabledLabel={props.captureDisabledLabel}
               onColorSelect={props.onColor}
               selectedColor={props.paletteColor}
               shortcutLabels={props.shortcutLabels}
