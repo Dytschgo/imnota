@@ -6,6 +6,7 @@ import { Logo } from '../components/Logo';
 import { PROJECT_ICON_OPTIONS } from '../components/ProjectIcon';
 import { Button, Modal, TextArea, TextInput } from '../components/ui';
 import { ShortcutSettings } from '../settings';
+import { WORKFLOW_TEMPLATES, type WorkflowTemplateId } from '../../shared/workflow-templates';
 
 export type AppDialog = 'new-project' | 'edit-project' | 'shortcuts' | 'about' | 'delete-project' | null;
 
@@ -13,6 +14,7 @@ export interface NewProjectDraft {
   name: string;
   description: string;
   icon?: ProjectEditDraft['icon'];
+  templateId?: WorkflowTemplateId;
 }
 
 export interface ProjectEditDraft extends NewProjectDraft {
@@ -93,6 +95,43 @@ export function AppDialogs({
                 >
                   <Icon size={16} aria-hidden="true" />
                 </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="template-picker">
+            <legend className="template-picker-heading">Start from template</legend>
+            <p className="muted">Optional editable Markdown blocks are added to the first collection.</p>
+            <div className="template-picker-options">
+              <label className={`template-picker-option${!newProject.templateId ? ' selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="workflow-template"
+                  value="blank"
+                  checked={!newProject.templateId}
+                  onChange={() => onNewProjectChange({ ...newProject, templateId: undefined })}
+                />
+                <span className="template-picker-option-copy">
+                  <strong>Blank project</strong>
+                  <span>Start with an empty collection.</span>
+                </span>
+              </label>
+              {WORKFLOW_TEMPLATES.map((template) => (
+                <label
+                  className={`template-picker-option${newProject.templateId === template.id ? ' selected' : ''}`}
+                  key={template.id}
+                >
+                  <input
+                    type="radio"
+                    name="workflow-template"
+                    value={template.id}
+                    checked={newProject.templateId === template.id}
+                    onChange={() => onNewProjectChange({ ...newProject, templateId: template.id })}
+                  />
+                  <span className="template-picker-option-copy">
+                    <strong>{template.name}</strong>
+                    <span>{template.description}</span>
+                  </span>
+                </label>
               ))}
             </div>
           </fieldset>

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   DEFAULT_PREFERENCE_SETTINGS,
   type AppearancePreferences,
+  type CapturePreferences,
   type OnboardingPreferences,
   type PreferenceSettings,
   type PreferenceSettingsResult,
   type ShortcutPreferences,
 } from '../../shared/preferences';
+import type { BackupPreferences } from '../../shared/backups';
 import type { NativePerformanceProfile, PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
 import { getRendererBridge, workflowMessage, workflowValue } from './workflow';
 
@@ -27,6 +29,8 @@ export interface PreferenceController {
   save(update: PreferenceSettingsUpdate): Promise<PreferenceSettingsResult>;
   saveAppearance(value: AppearancePreferences): Promise<void>;
   saveShortcuts(value: ShortcutPreferences): Promise<void>;
+  saveBackups(value: BackupPreferences): Promise<void>;
+  saveCapture(value: CapturePreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
   clearError(): void;
 }
@@ -92,6 +96,12 @@ export function usePreferences(): PreferenceController {
     },
     saveShortcuts: async (shortcuts) => {
       await save({ shortcuts });
+    },
+    saveBackups: async (backups) => {
+      await save({ backups });
+    },
+    saveCapture: async (capture) => {
+      await save({ capture });
     },
     saveOnboarding: async (onboarding) => {
       await save({ onboarding });

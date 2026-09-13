@@ -9,5 +9,6 @@ export {
 } from './SettingsView';
 export { SharingSettings } from './SharingSettings';
 export * from './sharing-preferences';
+export { BackupSettings, type BackupSettingsProps } from './BackupSettings';
 export { useKeyboardShortcuts, type UseKeyboardShortcutsOptions } from './useKeyboardShortcuts';
 export * from './preferences';

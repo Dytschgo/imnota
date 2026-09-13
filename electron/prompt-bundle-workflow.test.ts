@@ -52,6 +52,41 @@ async function fixture() {
 }
 
 describe('main-owned prompt bundle grants', () => {
+  it('copies validated generated paths as text and preserves the clipboard when a file disappears', async () => {
+    const { workflow, projectPath, collectionId, copyText } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Context\n');
+    const final = await workflow.finish(session.sessionId);
+    const folder = path.join(projectPath, 'collections', collectionId, 'exports', session.setName);
+    const markdown = path.join(folder, final.bundles[0].markdownFilename);
+    const png = path.join(folder, final.bundles[0].pngFilename);
+    await workflow.copy(session.sessionId, 1, 'paths');
+    expect(copyText).toHaveBeenLastCalledWith(`${markdown}\n${png}`);
+    await fs.unlink(png);
+    await expect(workflow.copy(session.sessionId, 1, 'paths')).rejects.toThrow();
+    expect(copyText).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write any clipboard representation if combined preparation fails', async () => {
+    const { workflow, projectPath, collectionId, copyText, copyImage, copyContext } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Context\n');
+    const final = await workflow.finish(session.sessionId);
+    await fs.unlink(
+      path.join(
+        projectPath,
+        'collections',
+        collectionId,
+        'exports',
+        session.setName,
+        final.bundles[0].markdownFilename,
+      ),
+    );
+    await expect(workflow.copy(session.sessionId, 1, 'context')).rejects.toThrow();
+    expect(copyText).not.toHaveBeenCalled();
+    expect(copyImage).not.toHaveBeenCalled();
+    expect(copyContext).not.toHaveBeenCalled();
+  });
   it('derives collection identity, publishes a pair, and grants only session/bundle access', async () => {
     const { workflow, projectPath, collectionId, copyContext, openPath } = await fixture();
     await expect(workflow.start(projectPath, 'other', manifest)).rejects.toThrow(/does not belong/);

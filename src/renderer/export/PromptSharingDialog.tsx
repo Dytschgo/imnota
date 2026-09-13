@@ -21,6 +21,7 @@ export interface PromptSharingDialogProps {
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
@@ -58,6 +59,7 @@ export function PromptSharingDialog({
   onCopyMarkdown,
   onCopyImage,
   onOpenFiles,
+  onCopyPaths,
   onLoadPreview,
   onOpenExportFolder,
   onCancel,
@@ -77,7 +79,7 @@ export function PromptSharingDialog({
     <Modal
       hidden={hidden}
       title="Share bundles"
-      description="Copy the latest bundle, or choose a single format."
+      description="Copy the latest bundle, or choose a single format. Generated files and paths are verified against the current collection."
       onClose={onClose}
       closeTestId="prompt-sharing-close"
     >
@@ -129,6 +131,7 @@ export function PromptSharingDialog({
                 onCopyMarkdown={onCopyMarkdown}
                 onCopyImage={onCopyImage}
                 onOpenFiles={onOpenFiles}
+                onCopyPaths={onCopyPaths}
                 onLoadPreview={onLoadPreview}
               />
             ))}
@@ -137,7 +140,10 @@ export function PromptSharingDialog({
         <footer className="prompt-sharing-footer">
           <details className="prompt-sharing-info">
             <summary>Copying help</summary>
-            <p>Copy Bundle includes image and Markdown. Check the receiving app after pasting.</p>
+            <p>
+              Copy Bundle includes image and Markdown. Check the receiving app after pasting. If one is
+              missing, copy it separately or prepare fresh files; file paths are copied as text.
+            </p>
           </details>
           <div>
             {onOpenExportFolder && (

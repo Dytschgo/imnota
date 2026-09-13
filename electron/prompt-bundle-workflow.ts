@@ -191,6 +191,17 @@ export class PromptBundleWorkflow {
   async copy(sessionId: string, bundleNumber: number, target: PromptExportCopyTarget): Promise<void> {
     const bundle = this.bundleGrant(sessionId, bundleNumber);
     const grant = this.finalGrant(sessionId);
+    if (target === 'paths') {
+      const paths = [bundle.markdownPath, ...(bundle.pngFilename ? [bundle.pngPath] : [])];
+      for (const filePath of paths) {
+        await this.assertGrantedPath(grant, filePath);
+        if (!(await fs.stat(filePath)).isFile())
+          throw new NativeWorkflowError('io-failure', 'A generated prompt file is no longer available.');
+      }
+      // This copies plain paths, not operating-system file attachments.
+      await this.dependencies.copyText(paths.join('\n'));
+      return;
+    }
     if (target === 'markdown') {
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
       return;

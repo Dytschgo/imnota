@@ -191,3 +191,13 @@ export async function migrateProject(
   await atomicWrite(metadataPath, JSON.stringify(validated, null, 2));
   return validated;
 }
+
+export async function migrateProjectWithBackup(
+  projectPath: string,
+  project: ProjectData | LegacyProjectData,
+  beforeLegacyMigration?: () => Promise<void>,
+): Promise<ProjectData> {
+  if ((project.schemaVersion === 1 || project.schemaVersion === 2) && beforeLegacyMigration)
+    await beforeLegacyMigration();
+  return migrateProject(projectPath, project);
+}

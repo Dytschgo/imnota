@@ -8,8 +8,14 @@ import { SideNav } from './SideNav';
 const projects: ProjectListItem[] = [
   {
     projectPath: '/workspace/atlas',
+    id: 'atlas',
     name: 'Atlas',
+    description: '',
+    status: 'active',
     favourite: true,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-03T00:00:00.000Z',
+    screenshots: [],
     collections: [
       {
         id: 'atlas-recent',
@@ -17,11 +23,10 @@ const projects: ProjectListItem[] = [
         archived: false,
         createdAt: '2026-09-01T00:00:00.000Z',
         updatedAt: '2026-09-03T00:00:00.000Z',
-        overallContext: '',
       },
     ],
   },
-] as ProjectListItem[];
+];
 
 beforeEach(() => {
   useAppStore.setState({

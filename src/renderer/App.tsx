@@ -16,6 +16,7 @@ import type {
   ScreenshotRecord,
   UpdateStatus,
 } from '../shared/types';
+import type { ContentSearchResult } from '../shared/content-search';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -48,6 +49,8 @@ import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
+import { ContentSearchResults } from './search/ContentSearchResults';
+import { WorkflowRequestError, workflowValue } from './app/workflow';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -103,12 +106,19 @@ export default function App() {
     back: [] as NavigationLocation[],
     forward: [] as NavigationLocation[],
   });
+  const [projectSessionGeneration, setProjectSessionGeneration] = useState(0);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const metadataTimer = useRef<number | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
   const navigationIdentity = useRef(0);
+  const [searchTarget, setSearchTarget] = useState<{
+    result: ContentSearchResult;
+    identity: number;
+    query: string;
+  } | null>(null);
+  const captureBusyRef = useRef(false);
 
   const activeShot = store.activeScreenshot();
   const adoptSnapshot = useCallback((snapshot: ProjectSnapshot, selectScreenshotId?: string) => {
@@ -124,6 +134,7 @@ export default function App() {
   const persistence = useProjectPersistence({
     snapshot: store.snapshot,
     activeScreenshot: activeShot,
+    sessionGeneration: projectSessionGeneration,
     onProject: useCallback((project) => useAppStore.getState().updateProject(project), []),
     onSnapshot: adoptSnapshot,
     onSelectScreenshot: useCallback((id) => useAppStore.getState().set({ activeScreenshotId: id }), []),
@@ -139,6 +150,52 @@ export default function App() {
     acceptSnapshot: (snapshot, id, token) => persistence.acceptMutationSnapshot(snapshot, id, token),
     cancelMutation: persistence.cancelNativeMutation,
   });
+  useEffect(() => {
+    if (!searchTarget) return;
+    const { result, identity, query } = searchTarget;
+    if (
+      navigationIdentity.current !== identity ||
+      store.view !== 'workspace' ||
+      store.snapshot?.projectPath !== result.projectPath ||
+      store.snapshot.project.id !== result.projectId ||
+      (result.itemId && store.activeScreenshotId !== result.itemId)
+    )
+      return;
+    if (result.kind === 'text' && contentPersistence.content?.item.id !== result.itemId) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (identity !== navigationIdentity.current) return;
+      const current = useAppStore.getState();
+      if (
+        current.view !== 'workspace' ||
+        current.snapshot?.projectPath !== result.projectPath ||
+        (result.itemId && current.activeScreenshotId !== result.itemId)
+      )
+        return;
+      const editor =
+        result.kind === 'text'
+          ? document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown"]')
+          : null;
+      const target =
+        editor ??
+        document.querySelector<HTMLButtonElement>(
+          result.itemId ? '.shot-item.active .shot-select' : '[data-testid="collection-picker"]',
+        );
+      target?.focus();
+      if (editor) {
+        const term = query
+          .trim()
+          .toLocaleLowerCase()
+          .split(/\s+/)
+          .find((part) => editor.value.toLocaleLowerCase().includes(part));
+        if (term) {
+          const start = editor.value.toLocaleLowerCase().indexOf(term);
+          editor.setSelectionRange(start, start + term.length);
+        }
+      }
+      if (target) setSearchTarget(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchTarget, store.view, store.snapshot, store.activeScreenshotId, contentPersistence.content]);
   const getSavedPromptContext = useCallback(async () => {
     if (!(await contentPersistence.flush()))
       throw new Error('Save the current drawing or text before preparing the prompt.');
@@ -294,6 +351,16 @@ export default function App() {
       throw reason;
     }
   }, [flushAll]);
+  const prepareBackupAction = useCallback(async (): Promise<boolean> => {
+    if (metadataTimer.current !== null) {
+      window.clearTimeout(metadataTimer.current);
+      metadataTimer.current = null;
+    }
+    if (!(await contentPersistence.flush())) return false;
+    if (!(await persistence.flushProjectDrafts())) return false;
+    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
+    return true;
+  }, [persistence, contentPersistence]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -397,11 +464,17 @@ export default function App() {
 
   const guardedSnapshot = useCallback(
     async (action: () => Promise<ProjectSnapshot | null | undefined>, failure: string, recordOpen = true) => {
-      const identity = ++navigationIdentity.current;
-      if (!(await flushAll())) {
-        setError(`${failure} was cancelled so your unsaved work stays open.`);
+      if (captureBusyRef.current) {
+        setError('Finish or cancel the screen capture before changing projects.');
         return false;
       }
+      const identity = ++navigationIdentity.current;
+      if (!(await flushAll())) {
+        if (identity === navigationIdentity.current)
+          setError(`${failure} was cancelled so your unsaved work stays open.`);
+        return false;
+      }
+      if (identity !== navigationIdentity.current) return false;
       const nativeMutationToken = persistence.beginNativeMutation();
       try {
         const next = await action();
@@ -410,10 +483,18 @@ export default function App() {
           return false;
         }
         if (next) {
-          if (!(await persistence.adoptAuthoritativeSnapshot(next, nativeMutationToken))) {
-            setError(`${failure} could not safely adopt the latest project state.`);
+          if (
+            !(await persistence.adoptAuthoritativeSnapshot(
+              next,
+              nativeMutationToken,
+              () => identity === navigationIdentity.current,
+            ))
+          ) {
+            if (identity === navigationIdentity.current)
+              setError(`${failure} could not safely adopt the latest project state.`);
             return false;
           }
+          if (identity !== navigationIdentity.current) return false;
           if (identity !== navigationIdentity.current) return false;
           if (recordOpen) useAppStore.getState().recordCollectionOpen();
           return true;
@@ -436,6 +517,10 @@ export default function App() {
   }
 
   async function navigate(view: AppView) {
+    if (captureBusyRef.current) {
+      setError('Finish or cancel the screen capture before navigating.');
+      return;
+    }
     const identity = ++navigationIdentity.current;
     const previousLocation = currentLocation();
     if (!(await flushAll())) {
@@ -450,6 +535,7 @@ export default function App() {
         setError('Navigation was cancelled because newer edits could not be saved.');
         return;
       }
+      if (identity !== navigationIdentity.current) return;
       const state = useAppStore.getState();
       const currentIsLibrary =
         ['projects', 'recent', 'favourites', 'archived'].includes(state.view) && !state.snapshot;
@@ -663,6 +749,76 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The clipboard does not contain an image.');
     }
   }
+  async function captureRegion() {
+    if (captureBusyRef.current) return;
+    captureBusyRef.current = true;
+    let nativeMutationToken: number | null = null;
+    const current = useAppStore.getState();
+    try {
+      if (!current.snapshot) {
+        setError('Open a project and choose a current collection before capturing.');
+        return;
+      }
+      const collection = current.snapshot.project.collections.find(
+        (item) => item.id === current.activeCollectionId,
+      );
+      if (!collection || collection.archived) {
+        setError('Choose a current collection before capturing.');
+        return;
+      }
+      const target = {
+        projectPath: current.snapshot.projectPath,
+        projectId: current.snapshot.project.id,
+        collectionId: collection.id,
+        navigationIdentity: navigationIdentity.current,
+      };
+      nativeMutationToken = await beginCurrentProjectMutation();
+      if (nativeMutationToken === null) return;
+      const afterFlush = useAppStore.getState();
+      const afterSnapshot = afterFlush.snapshot;
+      const activeCollection = afterSnapshot?.project.collections.find(
+        (item) => item.id === target.collectionId,
+      );
+      if (
+        navigationIdentity.current !== target.navigationIdentity ||
+        !afterSnapshot ||
+        afterSnapshot.projectPath !== target.projectPath ||
+        afterSnapshot.project.id !== target.projectId ||
+        afterFlush.activeCollectionId !== target.collectionId ||
+        !activeCollection ||
+        activeCollection.archived
+      ) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+        return;
+      }
+      const result = workflowValue(
+        await window.imnota.startRegionCapture({
+          projectPath: target.projectPath,
+          collectionId: target.collectionId,
+        }),
+      );
+      const accepted = await persistence.acceptMutationSnapshot(
+        result.snapshot,
+        result.screenshotId,
+        nativeMutationToken,
+      );
+      nativeMutationToken = null;
+      if (!accepted) return;
+      await refreshProjects();
+      showToast('Screen capture added');
+      window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());
+    } catch (reason) {
+      if (nativeMutationToken !== null) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        nativeMutationToken = null;
+      }
+      if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'capture-cancelled') return;
+      setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
+    } finally {
+      captureBusyRef.current = false;
+    }
+  }
   async function selectShot(id: string) {
     const identity = ++navigationIdentity.current;
     const previousLocation = currentLocation();
@@ -774,6 +930,10 @@ export default function App() {
     }
   }
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
+    if (captureBusyRef.current) {
+      setError('Finish or cancel the screen capture before changing collections.');
+      return;
+    }
     const identity = navigationIdentityAtStart ?? ++navigationIdentity.current;
     if (identity !== navigationIdentity.current) return;
     clearSearchSelection();
@@ -825,6 +985,49 @@ export default function App() {
     setNavigationStack((stack) =>
       pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
     );
+  }
+  async function openContentSearchResult(result: ContentSearchResult) {
+    const opening = guardedSnapshot(async () => {
+      const next = await window.imnota.loadProject(result.projectPath);
+      const target = [
+        ...next.project.screenshots.map((item) => ({ ...item, kind: 'screenshot' })),
+        ...(next.project.contentItems ?? []),
+      ].find(
+        (item) =>
+          item.id === result.itemId && item.collectionId === result.collectionId && item.kind === result.kind,
+      );
+      if (
+        next.projectPath !== result.projectPath ||
+        next.project.id !== result.projectId ||
+        (result.collectionId &&
+          !next.project.collections.some((collection) => collection.id === result.collectionId)) ||
+        (result.itemId && !target)
+      )
+        throw new Error(
+          'This search result changed or is no longer available. Refresh search and try again.',
+        );
+      return next;
+    }, 'Opening the search result');
+    const identity = navigationIdentity.current;
+    if (!(await opening) || identity !== navigationIdentity.current) return;
+    const state = useAppStore.getState();
+    if (state.snapshot?.projectPath !== result.projectPath || state.snapshot.project.id !== result.projectId)
+      return;
+    if (
+      (result.collectionId &&
+        !state.snapshot.project.collections.some((collection) => collection.id === result.collectionId)) ||
+      (result.itemId &&
+        ![...state.snapshot.project.screenshots, ...(state.snapshot.project.contentItems ?? [])].some(
+          (item) => item.id === result.itemId && item.collectionId === result.collectionId,
+        ))
+    ) {
+      setError('This search result is no longer available. Refresh search and try again.');
+      return;
+    }
+    if (result.collectionId) state.setActiveCollection(result.collectionId);
+    if (result.itemId) state.set({ activeScreenshotId: result.itemId });
+    state.set({ leftPanelOpen: true });
+    setSearchTarget({ result, identity, query: state.search });
   }
   async function duplicateScreenshot() {
     const current = useAppStore.getState();
@@ -1157,6 +1360,15 @@ export default function App() {
     (id: ShortcutActionId) => formatShortcut(resolvedShortcuts[id], platform),
     [platform, resolvedShortcuts],
   );
+  const activeCaptureCollection = store.snapshot?.project.collections.find(
+    (item) => item.id === store.activeCollectionId,
+  );
+  const captureDisabledLabel =
+    platform === 'linux'
+      ? 'Screen capture is unavailable on Linux — use Import or Paste'
+      : !activeCaptureCollection || activeCaptureCollection.archived
+        ? 'Choose a current collection before capturing'
+        : 'Screen capture is experimental — enable it in Settings';
   const orderedShots = useMemo(
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
@@ -1190,6 +1402,7 @@ export default function App() {
         setSelectedAnnotationId(copy.id);
       } else void pasteImage();
     },
+    'capture.region': () => void captureRegion(),
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {
         changeAnnotations(persistence.annotations.filter((item) => item.id !== selectedAnnotationId));
@@ -1356,6 +1569,54 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
+            projects={store.projects}
+            onBackupChange={preferences.saveBackups}
+            onBeforeBackupAction={prepareBackupAction}
+            onBackupRestoreFailed={() => setProjectSessionGeneration((generation) => generation + 1)}
+            onBackupRestored={async (result) => {
+              const restoreNotices = [
+                ...new Set([
+                  ...(result.warnings ?? []),
+                  ...(result.rollbackPath
+                    ? [`The full pre-restore project remains recoverable at ${result.rollbackPath}.`]
+                    : []),
+                  ...(result.openError
+                    ? [
+                        `Restore committed at ${result.projectPath}, but the project could not be reopened: ${result.openError}`,
+                      ]
+                    : []),
+                ]),
+              ];
+              persistence.discardRestoredProject(result.projectPath);
+              contentPersistence.reset();
+              setHistory([]);
+              setRedo([]);
+              setDescriptionHistory({});
+              setSelectedAnnotationId(null);
+              copiedAnnotation.current = null;
+              setProjectSessionGeneration((generation) => generation + 1);
+              if (!result.snapshot) {
+                useAppStore.getState().set({ snapshot: null, activeScreenshotId: null });
+                setSnapshotNotice({
+                  projectPath: result.projectPath,
+                  warnings: restoreNotices,
+                });
+                await refreshProjects();
+                return;
+              }
+              adoptSnapshot({
+                ...result.snapshot,
+                warnings: [...new Set([...(result.snapshot.warnings ?? []), ...restoreNotices])],
+              });
+              useAppStore.getState().set({ view: 'workspace' });
+              await refreshProjects();
+              showToast(
+                result.mode === 'new'
+                  ? 'Snapshot restored as a new project'
+                  : 'Project restored with a safety snapshot',
+              );
+            }}
+            onCaptureChange={preferences.saveCapture}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
             onInstall={async () => {
@@ -1375,6 +1636,7 @@ export default function App() {
             onRestore={(path) => void setProjectArchived(path, false)}
             onSearch={openProjectSearch}
             onBrowseProjects={() => navigate('projects')}
+            onSelectContentResult={openContentSearchResult}
           />
         ) : (
           <Workspace
@@ -1447,6 +1709,16 @@ export default function App() {
             onRedo={redoAnnotations}
             onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
             onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
+            onCapture={
+              preferences.settings.capture.experimentalRegionCapture ? () => void captureRegion() : undefined
+            }
+            captureEnabled={
+              preferences.settings.capture.experimentalRegionCapture &&
+              platform !== 'linux' &&
+              Boolean(activeCaptureCollection && !activeCaptureCollection.archived)
+            }
+            captureShortcut={shortcutLabel('capture.region')}
+            captureDisabledLabel={captureDisabledLabel}
             onZoom={(delta) => dispatchCanvasCommand(stageRef.current, delta > 0 ? 'zoom-in' : 'zoom-out')}
             onFlush={flushAll}
             onSaveProject={persistence.saveProjectMetadata}
@@ -1638,6 +1910,7 @@ function Library({
   onRestore,
   onSearch,
   onBrowseProjects,
+  onSelectContentResult,
 }: {
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onNew(): void;
@@ -1648,11 +1921,13 @@ function Library({
   onRestore(projectPath: string): void;
   onSearch(): void | Promise<void>;
   onBrowseProjects(): void | Promise<void>;
+  onSelectContentResult(result: ContentSearchResult): void;
 }) {
   const { projects, search, set, view, settings, recentCollections } = useAppStore();
   const recent = resolveRecentCollections(projects, recentCollections).filter((entry) =>
     `${entry.name} ${entry.projectName}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
+  const normalizedQuery = search.trim();
   const filtered = projects.filter((project) => {
     if (view === 'archived') return project.status === 'archived';
     return project.status !== 'archived' && (view !== 'favourites' || project.favourite);
@@ -1701,18 +1976,32 @@ function Library({
           )}
         </div>
       ) : (
-        <button
-          className="search-line library-search-trigger"
-          type="button"
-          data-testid="library-full-search"
-          onClick={() => void onSearch()}
-        >
-          <Search size={16} aria-hidden="true" />
-          <span>
-            Search {view === 'archived' ? 'archived projects' : 'projects'}, screenshots, annotations, text,
-            and drawings
-          </span>
-        </button>
+        <>
+          <button
+            className="search-line library-search-trigger"
+            type="button"
+            data-testid="library-full-search"
+            onClick={() => void onSearch()}
+          >
+            <Search size={16} aria-hidden="true" />
+            <span>Search workspace</span>
+          </button>
+          <div className="search-line">
+            <Search size={16} aria-hidden="true" />
+            <input
+              aria-label="Search projects"
+              placeholder="Filter projects and local content"
+              maxLength={500}
+              value={search}
+              onChange={(event) => set({ search: event.target.value })}
+            />
+            {search && (
+              <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
+                Clear search
+              </button>
+            )}
+          </div>
+        </>
       )}
       {view === 'recent' ? (
         recent.length ? (
@@ -1749,6 +2038,15 @@ function Library({
             }
           />
         )
+      ) : normalizedQuery && settings.workspacePath ? (
+        <ContentSearchResults
+          query={normalizedQuery}
+          workspacePath={settings.workspacePath}
+          projects={projects}
+          favouritesOnly={view === 'favourites'}
+          scope={view === 'archived' ? 'archived' : 'active'}
+          onSelect={onSelectContentResult}
+        />
       ) : filtered.length ? (
         <div className="project-list">
           {filtered.map((project) => (

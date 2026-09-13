@@ -43,7 +43,11 @@ import {
   type PromptBundleComposition,
   type ResolvedPromptPicturePng,
 } from '../prompt-bundle-render';
-import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptBundleCard';
+import type {
+  PromptBundleActionRequest,
+  PromptBundleCardModel,
+  PromptDeliveryOutcome,
+} from './PromptBundleCard';
 
 export interface SavedPromptExportContext {
   snapshot: ProjectSnapshot;
@@ -57,6 +61,7 @@ export interface PromptExportBundleManifestInput {
 }
 
 export interface PromptBundleControllerBridge {
+  copyText?(text: string): Promise<void>;
   loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
     image: ImagePayload;
     annotations: Annotation[];
@@ -208,6 +213,7 @@ interface PromptExportArtifact {
   sessionId: string;
   planId: string;
   grants: ReadonlyMap<number, PromptExportBundleGrant>;
+  input: Readonly<PromptCollectionInput>;
 }
 
 interface ActiveRun {
@@ -428,6 +434,13 @@ function cardsForPlan(
   return prepared.plan.bundles.map((bundle) => ({
     planId: prepared.planId,
     artifactSessionId: artifact?.grants.has(bundle.number) ? artifact.sessionId : undefined,
+    filenames: artifact?.grants.has(bundle.number)
+      ? [
+          artifact.grants.get(bundle.number)!.markdownFilename,
+          artifact.grants.get(bundle.number)!.pngFilename,
+        ].filter(Boolean)
+      : undefined,
+    outcome: artifact?.grants.has(bundle.number) ? 'files' : undefined,
     bundleNumber: bundle.number,
     pictureNumbers: bundle.pictureNumbers,
     screenshotCount: bundle.pictures.length,
@@ -492,6 +505,18 @@ export class PromptBundleControllerEngine {
       cards: this.state.cards.map((card) =>
         card.bundleNumber === bundleNumber ? { ...card, state, error } : card,
       ),
+    });
+  }
+
+  private deliveryCompleted(bundleNumber: number, outcome: PromptDeliveryOutcome, primaryCopy = false): void {
+    this.emit({
+      error: undefined,
+      cards: this.state.cards.map((card) =>
+        card.bundleNumber === bundleNumber
+          ? { ...card, state: primaryCopy ? 'copied' : 'idle', outcome, error: undefined }
+          : card,
+      ),
+      progress: { phase: 'complete', bundleNumber, totalBundles: this.state.cards.length },
     });
   }
 
@@ -962,6 +987,7 @@ export class PromptBundleControllerEngine {
     const artifact: PromptExportArtifact = {
       sessionId: session.sessionId,
       planId: prepared.planId,
+      input: prepared.input,
       grants: new Map(finalized.bundles.map((grant) => [grant.bundleNumber, grant])),
     };
     this.latestArtifact = artifact;
@@ -1174,7 +1200,7 @@ export class PromptBundleControllerEngine {
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
-        this.setCardState(bundle.number, copyTarget === 'context' ? 'copied' : 'idle');
+        this.deliveryCompleted(bundle.number, bundle.pictures.length ? 'combined' : 'markdown', true);
       }
       this.emit({
         progress: { phase: 'complete', bundleNumber, totalBundles: prepared.plan.bundles.length },
@@ -1220,75 +1246,156 @@ export class PromptBundleControllerEngine {
 
   private async nativeArtifactAction(
     selection: PromptBundleSelection,
-    action: (sessionId: string, bundleNumber: number) => Promise<WorkflowResult<void>>,
+    action: (sessionId: string, bundleNumber: number, signal: AbortSignal) => Promise<WorkflowResult<void>>,
+    outcome: PromptDeliveryOutcome = 'files',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.activeRun) {
       const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
       return { ok: false, error: detail };
     }
+    let run: ActiveRun | undefined;
     try {
       if (this.disposed)
         throw failure('disposed', 'The prompt export controller is no longer available.', false);
+      // Fallbacks are usable before the first combined copy. Keep existing grants
+      // after a copy failure so retries need not render everything again.
+      if (typeof selection !== 'number' && !selection.artifactSessionId) {
+        const selectedCard = selection;
+        if (
+          this.state.cards.length &&
+          !this.state.cards.some(
+            (card) => card.planId === selectedCard.planId && card.bundleNumber === selectedCard.bundleNumber,
+          )
+        )
+          throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
+        const prepared = await this.prepareFreshFiles(selection);
+        if (!prepared.ok) return prepared;
+        selection = selection.bundleNumber;
+      } else if (typeof selection === 'number' && !this.latestArtifact) {
+        const prepared = await this.prepareFreshFiles(selection);
+        if (!prepared.ok) return prepared;
+      }
       const { artifact, bundleNumber } = this.artifactSelection(selection);
-      const result = await action(artifact.sessionId, bundleNumber);
+      run = this.beginRun();
+      const metadata = await this.prepareMetadata(run);
+      this.assertActive(run);
+      if ('kind' in metadata || JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
+        throw failure(
+          'content-changed',
+          'The collection changed since these files were generated. Prepare fresh files before using this fallback.',
+          true,
+          true,
+        );
+      this.setCardState(bundleNumber, 'copying');
+      this.emit({
+        error: undefined,
+        progress: {
+          phase: 'copying',
+          bundleNumber,
+          message: outcome === 'files' ? 'Opening generated files' : 'Preparing clipboard',
+        },
+      });
+      const result = await action(artifact.sessionId, bundleNumber, run.controller.signal);
       if (!result.ok) throw nativeFailure(result.error, true);
+      this.assertActive(run);
+      this.deliveryCompleted(bundleNumber, outcome);
+      this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
-      return this.resultError(error);
+      const number = selectionNumber(selection);
+      if (number !== undefined) this.setCardState(number, 'error', publicError(error).message);
+      return this.resultError(error, run);
     }
   }
 
-  copyMarkdown(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    if (typeof selection !== 'number' && !selection.artifactSessionId)
-      return this.fresh(selectionNumber(selection), true, 'markdown');
-    return this.nativeArtifactAction(selection, (sessionId, bundleNumber) =>
-      this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' }),
+  async copyMarkdown(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    const hasGrant =
+      typeof selection === 'number'
+        ? this.latestArtifact?.grants.has(selection)
+        : Boolean(selection.artifactSessionId);
+    if (!hasGrant && this.bridge.copyText) {
+      let run: ActiveRun | undefined;
+      try {
+        if (
+          typeof selection !== 'number' &&
+          !this.state.cards.some(
+            (card) => card.planId === selection.planId && card.bundleNumber === selection.bundleNumber,
+          )
+        )
+          throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
+        run = this.beginRun();
+        const metadata = await this.prepareMetadata(run);
+        if ('kind' in metadata) throw failure('no-content', metadata.message, true);
+        const prepared = this.planMetadata(metadata);
+        const bundle = prepared.plan.bundles.find((item) => item.number === selectionNumber(selection));
+        if (!bundle)
+          throw failure('invalid-bundle', 'That prompt is no longer in the saved collection.', true);
+        await this.verifyBundleContent(prepared, bundle, run.controller.signal);
+        for (const picture of bundle.pictures) {
+          if (picture.kind === 'drawing') continue;
+          const screenshot = prepared.context.snapshot.project.screenshots.find(
+            (item) => item.id === picture.screenshotId,
+          );
+          if (!screenshot)
+            throw failure('content-changed', 'The selected picture is no longer in the collection.', true);
+          const loaded = await this.bridge.loadScreenshotContent({
+            projectPath: prepared.context.snapshot.projectPath,
+            screenshot,
+          });
+          if (loaded.contentRevision !== picture.contentRevision)
+            throw failure(
+              'content-changed',
+              'A picture changed while Markdown was prepared. Save and copy again.',
+              true,
+            );
+        }
+        this.assertActive(run);
+        await this.bridge.copyText(bundle.markdown);
+        this.assertActive(run);
+        this.latestPlan = prepared;
+        this.emit({ cards: cardsForPlan(prepared) });
+        this.deliveryCompleted(bundle.number, 'markdown');
+        this.activeRun = undefined;
+        return { ok: true, bundleNumber: bundle.number };
+      } catch (error) {
+        return this.resultError(error, run);
+      }
+    }
+    return this.nativeArtifactAction(
+      selection,
+      (sessionId, bundleNumber) =>
+        this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' }),
+      'markdown',
     );
   }
 
   copyImage(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    if (typeof selection !== 'number' && !selection.artifactSessionId)
-      return this.fresh(selectionNumber(selection), true, 'image');
-    return this.nativeArtifactAction(selection, (sessionId, bundleNumber) =>
-      this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'image' }),
+    return this.nativeArtifactAction(
+      selection,
+      (sessionId, bundleNumber) =>
+        this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'image' }),
+      'image',
     );
   }
 
-  private openBundleFiles(sessionId: string, bundleNumber: number): Promise<WorkflowResult<void>> {
-    const grant =
-      this.latestArtifact?.sessionId === sessionId ? this.latestArtifact.grants.get(bundleNumber) : undefined;
-    if (grant?.pngFilename) {
-      return this.bridge
-        .openPromptExportBundle({ sessionId, bundleNumber, target: 'png' })
-        .then((png) =>
-          png.ok ? this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' }) : png,
-        );
-    }
-    return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
+  copyPaths(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    return this.nativeArtifactAction(
+      selection,
+      (sessionId, bundleNumber) =>
+        this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'paths' }),
+      'paths',
+    );
   }
 
-  async openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    const bundleNumber = selectionNumber(selection);
-    const artifact = this.latestArtifact;
-    const needsFreshExport =
-      bundleNumber === undefined ||
-      !artifact ||
-      !artifact.grants.has(bundleNumber) ||
-      (typeof selection !== 'number' && !selection.artifactSessionId);
-    if (needsFreshExport) {
-      const prepared = await this.fresh(bundleNumber, false);
-      if (!prepared.ok || !prepared.sessionId || prepared.bundleNumber === undefined) return prepared;
-      try {
-        const result = await this.openBundleFiles(prepared.sessionId, prepared.bundleNumber);
-        if (!result.ok) throw nativeFailure(result.error, true);
-        return prepared;
-      } catch (error) {
-        return this.resultError(error);
+  openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    return this.nativeArtifactAction(selection, async (sessionId, bundleNumber, signal) => {
+      if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
+        const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
+        if (!png.ok) return png;
       }
-    }
-    return this.nativeArtifactAction(selection, (sessionId, selectedBundleNumber) =>
-      this.openBundleFiles(sessionId, selectedBundleNumber),
-    );
+      throwIfAborted(signal);
+      return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
+    });
   }
 
   async openFolder(): Promise<PromptBundleControllerActionResult> {

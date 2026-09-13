@@ -3,9 +3,17 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { legacyProjectSchema, validateProject } from '../schema';
 import { emptyProject } from '../utils';
-import { addEmptyCollection, migrateProject, screenshotPath } from '../../../electron/collections';
+import {
+  addEmptyCollection,
+  migrateProject,
+  migrateProjectWithBackup,
+  screenshotPath,
+} from '../../../electron/collections';
+import { BackupService } from '../../../electron/backup-service';
+import { DEFAULT_BACKUP_PREFERENCES } from '../backups';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -77,6 +85,41 @@ async function fixture(version: 1 | 2) {
 }
 
 describe.each([1, 2] as const)('project v%s migration', (version) => {
+  it('publishes a byte-exact local-history snapshot before the real legacy migration', async () => {
+    const { dir, project, imagePath } = await fixture(version);
+    const backupParent = `${dir}-backups`;
+    temporary.push(backupParent);
+    const beforeProject = await fs.readFile(path.join(dir, 'project.json'));
+    const beforeImage = await fs.readFile(imagePath);
+    const backups = new BackupService({
+      getLocation: () => backupParent,
+      getWorkspace: () => path.dirname(dir),
+      getPreferences: () => ({ ...DEFAULT_BACKUP_PREFERENCES, enabled: true }),
+      now: () => new Date('2026-09-13T12:00:00.000Z'),
+      randomId: () => '00000000-0000-4000-8000-000000000001',
+    });
+    let createdSnapshot = '';
+    const migrated = await migrateProjectWithBackup(dir, project, async () => {
+      const created = await backups.createSnapshot(dir, 'migration');
+      createdSnapshot = created.snapshotId;
+    });
+
+    expect(migrated.schemaVersion).toBe(3);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'project.json'), 'utf8')).schemaVersion).toBe(3);
+    const inspection = await backups.inspectSnapshot(createdSnapshot);
+    expect(inspection.summary).toMatchObject({ schemaVersion: version, reason: 'migration' });
+    const snapshotRoot = path.join(
+      backupParent,
+      '.imnota-backups',
+      'snapshots',
+      createHash('sha256').update(project.id).digest('hex').slice(0, 32),
+      createdSnapshot,
+      'data',
+    );
+    expect(await fs.readFile(path.join(snapshotRoot, 'project.json'))).toEqual(beforeProject);
+    expect(await fs.readFile(path.join(snapshotRoot, path.relative(dir, imagePath)))).toEqual(beforeImage);
+  });
+
   it('copies content, preserves exact legacy Markdown and source files, and is idempotent', async () => {
     const { dir, project, imagePath, notes } = await fixture(version);
     const next = await migrateProject(dir, project);

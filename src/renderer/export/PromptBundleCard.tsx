@@ -4,13 +4,18 @@ import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import './prompt-bundles.css';
 
-// Intent: a developer moving a visual brief into an agent needs one unmistakable fresh-copy action and honest fallbacks.
-// Hierarchy: prompt identity and primary action lead; dimensions, counts, and compatibility details recede.
-// Palette/depth/surfaces: existing graphite/indigo tokens, borders-only layering, and semantic amber/green states.
-// Typography/spacing: existing system workbench type with weight-led hierarchy on a compact 4px rhythm.
-
 export type PromptBundleCardState =
   'idle' | 'preparing' | 'writing' | 'copying' | 'copied' | 'cancelled' | 'error';
+
+export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files';
+
+const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
+  combined: 'Markdown + image prepared',
+  markdown: 'Markdown copied',
+  image: 'Image copied',
+  paths: 'File paths copied',
+  files: 'Files ready',
+};
 
 export interface PromptBundleCardModel {
   planId: string;
@@ -28,6 +33,8 @@ export interface PromptBundleCardModel {
   warning?: string;
   state: PromptBundleCardState;
   error?: string;
+  outcome?: PromptDeliveryOutcome;
+  filenames?: readonly string[];
 }
 
 export interface PromptBundleActionRequest {
@@ -44,6 +51,7 @@ export interface PromptBundleCardProps {
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
@@ -75,6 +83,7 @@ export function PromptBundleCard({
   onCopyMarkdown,
   onCopyImage,
   onOpenFiles,
+  onCopyPaths,
   onLoadPreview,
 }: PromptBundleCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -84,8 +93,8 @@ export function PromptBundleCard({
   const restoreFocusAfterOption = useRef(false);
   const optionsMenuId = useId().replace(/:/g, '');
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
-  const request = requestFor(bundle);
   const copied = bundle.state === 'copied';
+  const request = requestFor(bundle);
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
 
@@ -101,7 +110,7 @@ export function PromptBundleCard({
         nativePopoverOpen = true;
       }
     } catch {
-      // A browser without the Popover API keeps the fixed-position fallback visible.
+      // Browsers without the Popover API retain the fixed-position menu.
     }
     const positionMenu = () => {
       const trigger = optionsRef.current?.querySelector<HTMLElement>('button');
@@ -167,29 +176,24 @@ export function PromptBundleCard({
     if (optionsOpen || !restoreFocusAfterOption.current) return;
     restoreFocusAfterOption.current = false;
     const trigger = optionsRef.current?.querySelector<HTMLButtonElement>('button');
-    if (trigger && !trigger.disabled) {
-      trigger.focus();
-      return;
-    }
+    if (trigger && !trigger.disabled) return void trigger.focus();
     const fallback = dialog?.querySelector<HTMLElement>(
       'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
     );
     (fallback ?? dialog)?.focus();
   }, [busy, dialog, disabled, optionsOpen]);
 
-  const runOption = (action?: (request: PromptBundleActionRequest) => void | Promise<void>) => {
+  const runOption = (action?: (selection: PromptBundleActionRequest) => void | Promise<void>) => {
     restoreFocusAfterOption.current = true;
     setOptionsOpen(false);
     void action?.(request);
   };
-
   const toggleOptions = () => {
-    if (optionsOpen) {
-      setOptionsOpen(false);
-      return;
+    if (optionsOpen) setOptionsOpen(false);
+    else {
+      setMenuPosition(undefined);
+      setOptionsOpen(true);
     }
-    setMenuPosition(undefined);
-    setOptionsOpen(true);
   };
 
   return (
@@ -239,8 +243,7 @@ export function PromptBundleCard({
               disabled={disabled}
               onClick={() => void onPrepareFreshFiles(request)}
             >
-              <FolderOpen size={15} aria-hidden="true" />
-              Prepare files
+              <FolderOpen size={15} aria-hidden="true" /> Prepare files
             </Button>
           )}
           <div className="prompt-bundle-options" ref={optionsRef}>
@@ -285,10 +288,21 @@ export function PromptBundleCard({
                   <button
                     type="button"
                     role="menuitem"
+                    disabled={!onCopyPaths}
+                    onClick={() => runOption(onCopyPaths)}
+                  >
+                    <Copy size={14} aria-hidden="true" /> Copy file paths
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
                     disabled={!onOpenFiles}
                     onClick={() => runOption(onOpenFiles)}
                   >
                     <FolderOpen size={14} aria-hidden="true" /> Open files
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => runOption(onPrepareFreshFiles)}>
+                    <FolderOpen size={14} aria-hidden="true" /> Prepare fresh files
                   </button>
                 </div>,
                 menuPortal,
@@ -302,6 +316,63 @@ export function PromptBundleCard({
             <h3 id={`prompt-bundle-${bundle.bundleNumber}`}>Bundle {bundle.bundleNumber}</h3>
             <p>{bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'}</p>
           </div>
+          {bundle.outcome && (
+            <span className="prompt-bundle-state prompt-bundle-state-success" role="status">
+              <Check size={13} aria-hidden="true" /> {outcomeLabels[bundle.outcome]}
+            </span>
+          )}
+        </div>
+        {bundle.filenames?.length ? (
+          <details className="prompt-bundle-files">
+            <summary>Generated files ({bundle.filenames.length})</summary>
+            <ul>
+              {bundle.filenames.map((filename) => (
+                <li key={filename}>{filename}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+        <div
+          className="prompt-bundle-fallbacks"
+          aria-label={`Bundle ${bundle.bundleNumber} fallback actions`}
+        >
+          <Button
+            variant="ghost"
+            disabled={busy || disabled || !onCopyMarkdown}
+            onClick={() => void onCopyMarkdown?.(request)}
+          >
+            <FileText size={14} aria-hidden="true" /> Copy Markdown only
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || disabled || !onCopyImage || !bundle.pictureNumbers.length}
+            onClick={() => void onCopyImage?.(request)}
+          >
+            <FileImage size={14} aria-hidden="true" /> Copy image only
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || disabled || !onOpenFiles}
+            onClick={() => void onOpenFiles?.(request)}
+          >
+            <FolderOpen size={14} aria-hidden="true" /> Open files
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || disabled || !onCopyPaths}
+            onClick={() => void onCopyPaths?.(request)}
+          >
+            <Copy size={14} aria-hidden="true" /> Copy file paths
+          </Button>
+          {bundle.delivery === 'clipboard' && (
+            <Button
+              variant="ghost"
+              disabled={busy || disabled}
+              onClick={() => void onPrepareFreshFiles(request)}
+            >
+              <FolderOpen size={14} aria-hidden="true" /> Prepare fresh files
+            </Button>
+          )}
         </div>
         <details className="prompt-bundle-details">
           <summary>Bundle details</summary>

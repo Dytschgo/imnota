@@ -50,6 +50,14 @@ New export sessions keep a matching ownership journal and timestamp reservation 
 
 Automatic splitting may produce several pairs. Original Picture numbers continue across pairs. Excluded screenshots stay in project data, do not appear in PNGs and are explicitly recorded in generated Markdown. Prompt outputs are sharing artifacts, not editable project backups; back up the full project folder to retain sources, annotations, descriptions, recovery data and exclusions.
 
+## Local history snapshots
+
+Local history lives outside active project folders, by default under the workspace's `.imnota-backups/`. Each snapshot has a version-1 `manifest.json` and a `data/` tree using the original relative paths. The manifest records project identity, name, schema, creation time, reason, file lengths and SHA-256 hashes.
+
+Snapshots include canonical metadata, screenshot sources, annotations, descriptions, Markdown and drawing sources/rendered images. Prompt exports and transient recovery caches are excluded. Restore and archive export validate the manifest and reject unsafe paths, links, missing files and changed contents. Archive export is capped at 256 MiB of source content.
+
+A root-local publication ledger identifies snapshots eligible for retention. Copied or unregistered snapshots remain readable but are not automatically deleted. In-place restore creates a safety snapshot and retains the entire previous project in a sibling rollback folder, including extra files. A durable journal supports interrupted folder-swap recovery. Rollback folders are excluded from project lists and automatic retention.
+
 ## Migration and compatibility
 
 Opening schema 1 or 2 data migrates feedback rounds/subfolders to collections. Existing screenshot descriptions and populated legacy note fields are merged into the single Description. Project-level desired outcome, AI instructions and technical constraints are merged into collection Overall context. Legacy `critical` priority becomes High; tags and screenshot statuses do not enter the schema 3 primary model.

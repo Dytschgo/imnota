@@ -16,6 +16,11 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 
 - Electron, React and TypeScript desktop application
 - Screenshot import, paste and drag-and-drop for PNG, JPEG and WebP
+- Five editable workflow templates for new projects
+- Local content search with links to matching items
+- Separate Markdown/image copy, generated-file access and file-path fallbacks
+- Manual local snapshots, optional automatic history and validated restore with safety copies
+- Experimental, opt-in rectangular screen capture saved as a PNG screenshot
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
 - Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
@@ -32,6 +37,8 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Secure Electron preload bridge with context isolation and no renderer Node.js access
 
 ## Supported platforms
+
+See the [feature verification record](docs/next-features-verification.md) for checks and limitations. Region capture is disabled by default; Linux capture, macOS permissions and mixed-DPI behavior need separate platform validation.
 
 Development and packaging targets are Windows, macOS and Linux. Unsigned artifacts are suitable for local testing. Production signing and notarisation are intentionally optional.
 

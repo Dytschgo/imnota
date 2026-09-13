@@ -8,8 +8,10 @@ import {
 } from './preferences.js';
 import type { PreferenceSettingsUpdate } from './workflow-bridge.js';
 import { SHORTCUT_ACTIONS } from './shortcuts.js';
+import { backupPreferencesSchema } from './backups.js';
 
 const shortcutValueSchema = z.string().max(100).nullable();
+const capturePreferencesSchema = z.object({ experimentalRegionCapture: z.boolean() }).strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -51,7 +53,14 @@ export const preferenceSettingsSchema = z
         desktopGlass: z.boolean().optional(),
       })
       .strict(),
+    backups: backupPreferencesSchema.default({
+      enabled: false,
+      location: '',
+      retentionCount: 20,
+      retentionAgeDays: 90,
+    }),
     shortcuts: z.object({ bindings: shortcutBindingsSchema }).strict(),
+    capture: capturePreferencesSchema.default({ experimentalRegionCapture: false }),
     onboarding: z
       .object({ completed: z.boolean(), completedVersion: z.number().int().nonnegative() })
       .strict(),
@@ -78,7 +87,9 @@ export const preferenceSettingsUpdateSchema = z
       .partial()
       .strict()
       .optional(),
+    backups: backupPreferencesSchema.partial().strict().optional(),
     shortcuts: z.object({ bindings: shortcutBindingsSchema.optional() }).strict().optional(),
+    capture: capturePreferencesSchema.partial().strict().optional(),
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
   })
   .strict();
@@ -86,7 +97,9 @@ export const preferenceSettingsUpdateSchema = z
 function cloneDefaults(): PreferenceSettings {
   return {
     appearance: { ...DEFAULT_PREFERENCE_SETTINGS.appearance },
+    backups: { ...DEFAULT_PREFERENCE_SETTINGS.backups },
     shortcuts: { bindings: { ...DEFAULT_PREFERENCE_SETTINGS.shortcuts.bindings } },
+    capture: { ...DEFAULT_PREFERENCE_SETTINGS.capture },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
   };
 }
@@ -156,11 +169,13 @@ export function mergePreferenceSettings(
   const update = preferenceSettingsUpdateSchema.parse(rawUpdate);
   return preferenceSettingsSchema.parse({
     appearance: { ...current.appearance, ...update.appearance },
+    backups: { ...current.backups, ...update.backups },
     shortcuts: {
       ...current.shortcuts,
       ...update.shortcuts,
       bindings: { ...current.shortcuts.bindings, ...update.shortcuts?.bindings },
     },
+    capture: { ...current.capture, ...update.capture },
     onboarding: { ...current.onboarding, ...update.onboarding },
   });
 }

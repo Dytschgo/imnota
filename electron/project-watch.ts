@@ -130,6 +130,12 @@ export class ProjectWatchManager {
     for (const watchId of [...this.watches.keys()]) this.stop(watchId);
   }
 
+  stopProject(projectPath: string): void {
+    const resolved = path.resolve(projectPath);
+    for (const [watchId, state] of this.watches)
+      if (path.resolve(state.projectPath) === resolved) this.stop(watchId);
+  }
+
   async reload(watchId: string): Promise<ProjectRevisionSnapshot> {
     const state = this.state(watchId);
     for (let attempt = 0; attempt < 3; attempt++) {

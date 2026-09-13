@@ -109,6 +109,108 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each(['before swap', 'after recovered rollback'])(
+    'saves through a fresh watch when restore fails %s',
+    async () => {
+      const source = snapshot();
+      const startProjectWatch = vi
+        .fn()
+        .mockResolvedValueOnce(
+          ok({
+            watchId: 'closed-by-restore',
+            projectPath: source.projectPath,
+            projectRevision: 'original-bytes',
+          }),
+        )
+        .mockResolvedValueOnce(
+          ok({
+            watchId: 'replacement-watch',
+            projectPath: source.projectPath,
+            projectRevision: 'original-bytes',
+          }),
+        );
+      const saveProjectCompareAndSwap = vi.fn(
+        async (input: { watchId: string; expectedRevision: string; project: ProjectData }) => {
+          if (input.watchId !== 'replacement-watch')
+            throw new Error('Project watch was not found or is closed.');
+          expect(input.expectedRevision).toBe('original-bytes');
+          return ok({
+            snapshot: { ...source, project: input.project },
+            projectRevision: 'edited-after-failure',
+          });
+        },
+      );
+      const mock = bridge({ startProjectWatch, saveProjectCompareAndSwap });
+      window.imnota = mock.value as never;
+      const { result, rerender } = renderHook(
+        ({ generation }) =>
+          useProjectPersistence({
+            snapshot: source,
+            activeScreenshot: source.project.screenshots[0],
+            sessionGeneration: generation,
+            onProject: vi.fn(),
+            onSnapshot: vi.fn(),
+            onSelectScreenshot: vi.fn(),
+          }),
+        { initialProps: { generation: 0 } },
+      );
+      await waitFor(() => expect(result.current.projectRevision).toBe('original-bytes'));
+      rerender({ generation: 1 });
+      await waitFor(() => expect(startProjectWatch).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        expect(
+          await result.current.saveProjectMetadata({
+            ...source.project,
+            description: 'Edited after failure',
+          }),
+        ).toBe(true);
+      });
+      expect(saveProjectCompareAndSwap).toHaveBeenCalledWith(
+        expect.objectContaining({
+          watchId: 'replacement-watch',
+          project: expect.objectContaining({ description: 'Edited after failure' }),
+        }),
+      );
+      expect(mock.value.stopProjectWatch).toHaveBeenCalledWith({ watchId: 'closed-by-restore' });
+    },
+  );
+
+  it('does not publish an older navigation after a delayed same-project reload', async () => {
+    let finishReload!: (value: unknown) => void;
+    const reloadWatchedProject = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishReload = resolve;
+        }),
+    );
+    const mock = bridge({ reloadWatchedProject });
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const onSnapshot = vi.fn();
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0],
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+    let current = true;
+    const token = result.current.beginNativeMutation();
+    let adoption!: Promise<boolean>;
+    act(() => {
+      adoption = result.current.adoptAuthoritativeSnapshot(source, token, () => current);
+    });
+    await waitFor(() => expect(reloadWatchedProject).toHaveBeenCalledOnce());
+    current = false;
+    await act(async () => finishReload(ok({ snapshot: source, projectRevision: 'late-revision' })));
+    expect(await adoption).toBe(false);
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(result.current.loadedScreenshotId).toBe('one');
+  });
+
   it('serializes a deferred save, preserves newer description text, and rebases the second write', async () => {
     let resolveFirst!: (value: unknown) => void;
     const first = new Promise((resolve) => {
@@ -639,6 +741,77 @@ describe('useProjectPersistence', () => {
       }),
     );
     expect(onSnapshot.mock.calls.at(-1)?.[0].project.description).toBe('Recovered S2');
+  });
+
+  it('discards same-ID screenshot drafts after restore and persists the next edit from restored bytes', async () => {
+    const source = snapshot();
+    const restored = {
+      ...source,
+      project: { ...source.project, updatedAt: '2026-01-03' },
+      projectRevision: 'project-restored',
+    };
+    const oldAnnotation: Annotation = {
+      id: 'old',
+      kind: 'arrow',
+      x: 1,
+      y: 1,
+      points: [0, 0, 5, 5],
+      zIndex: 0,
+    };
+    const restoredAnnotation: Annotation = { ...oldAnnotation, id: 'restored', x: 8 };
+    const nextAnnotation: Annotation = { ...oldAnnotation, id: 'next', x: 12 };
+    const loadScreenshotContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        image: { filename: 'one.png', dataUrl: 'data:image/png;base64,old', width: 100, height: 100 },
+        annotations: [oldAnnotation],
+        description: 'Before restore',
+        contentRevision: 'content-before-restore',
+      })
+      .mockResolvedValueOnce({
+        image: { filename: 'one.png', dataUrl: 'data:image/png;base64,restored', width: 100, height: 100 },
+        annotations: [restoredAnnotation],
+        description: 'Restored description',
+        contentRevision: 'content-restored',
+      });
+    const saveScreenshotContent = vi.fn(async ({ screenshot }: { screenshot: ScreenshotRecord }) => ({
+      project: project([{ ...screenshot, description: 'Restored description' }]),
+      savedScreenshotId: screenshot.id,
+      conflictCreated: false,
+      contentRevision: 'content-after-edit',
+      projectRevision: 'project-after-edit',
+    }));
+    const mock = bridge({ loadScreenshotContent, saveScreenshotContent });
+    window.imnota = mock.value as never;
+    const onSnapshot = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ current, generation }: { current: ProjectSnapshot; generation: number }) =>
+        useProjectPersistence({
+          snapshot: current,
+          activeScreenshot: current.project.screenshots[0]!,
+          sessionGeneration: generation,
+          onProject: vi.fn(),
+          onSnapshot,
+          onSelectScreenshot: vi.fn(),
+        }),
+      { initialProps: { current: source, generation: 0 } },
+    );
+    await waitFor(() => expect(result.current.annotations).toEqual([oldAnnotation]));
+
+    act(() => result.current.discardRestoredProject(source.projectPath));
+    rerender({ current: restored, generation: 1 });
+    await waitFor(() => expect(result.current.annotations).toEqual([restoredAnnotation]));
+    expect(result.current.image?.dataUrl).toBe('data:image/png;base64,restored');
+    expect(loadScreenshotContent).toHaveBeenCalledTimes(2);
+
+    act(() => result.current.changeAnnotations([nextAnnotation]));
+    await act(async () => expect(await result.current.flushProjectDrafts()).toBe(true));
+    expect(saveScreenshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentRevision: 'content-restored',
+        annotations: [nextAnnotation],
+      }),
+    );
   });
 
   it('reloads S3 after adoption saves a screenshot draft instead of trusting revision-bearing S2', async () => {

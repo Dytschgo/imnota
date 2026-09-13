@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
 import {
   ChevronDown,
   Circle,
+  Camera,
   Crop,
   Eraser,
   Grid2X2,
@@ -345,6 +346,10 @@ export interface ToolbarProps {
   onZoom: (delta: number) => void;
   onFit: () => void;
   onActualSize?: () => void;
+  onCapture?: () => void;
+  captureEnabled?: boolean;
+  captureShortcut?: string;
+  captureDisabledLabel?: string;
   /** Enables the compact quick palette when supplied. */
   onColorSelect?: (color: string) => void;
   selectedColor?: string;
@@ -361,6 +366,10 @@ export function Toolbar({
   onZoom,
   onFit,
   onActualSize,
+  onCapture,
+  captureEnabled = false,
+  captureShortcut,
+  captureDisabledLabel = 'Screen capture is experimental — enable it in Settings',
   onColorSelect,
   selectedColor,
   shortcutLabels = {},
@@ -599,6 +608,19 @@ export function Toolbar({
       <div className="toolbar-divider" />
       <div className="tool-group annotation-view-tools" aria-label="View">
         <span className="toolbar-group-label">View</span>
+        {onCapture && (
+          <IconButton
+            label={
+              captureEnabled
+                ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                : captureDisabledLabel
+            }
+            disabled={!captureEnabled}
+            onClick={onCapture}
+          >
+            <Camera size={17} />
+          </IconButton>
+        )}
         <IconButton
           label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}
           disabled={!canUndo}

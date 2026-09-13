@@ -1,4 +1,5 @@
 import type { ShortcutBindings } from './shortcuts.js';
+import { DEFAULT_BACKUP_PREFERENCES, type BackupPreferences } from './backups.js';
 
 export type AppearanceMode = 'system' | 'light' | 'dark';
 export type AccentPreset = 'graphite' | 'indigo' | 'emerald' | 'amber';
@@ -57,6 +58,11 @@ export interface ShortcutPreferences {
   bindings: ShortcutBindings;
 }
 
+/** Kept opt-in until native Windows and macOS capture verification is complete. */
+export interface CapturePreferences {
+  experimentalRegionCapture: boolean;
+}
+
 export interface OnboardingPreferences {
   completed: boolean;
   completedVersion: number;
@@ -64,7 +70,9 @@ export interface OnboardingPreferences {
 
 export interface PreferenceSettings {
   appearance: AppearancePreferences;
+  backups: BackupPreferences;
   shortcuts: ShortcutPreferences;
+  capture: CapturePreferences;
   onboarding: OnboardingPreferences;
 }
 
@@ -117,7 +125,9 @@ export const DEFAULT_ONBOARDING: OnboardingPreferences = {
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
+  backups: DEFAULT_BACKUP_PREFERENCES,
   shortcuts: { bindings: {} },
+  capture: { experimentalRegionCapture: false },
   onboarding: DEFAULT_ONBOARDING,
 };
 

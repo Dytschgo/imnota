@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
+import type { ContentSearchResult } from '../shared/content-search';
 import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
@@ -9,6 +10,7 @@ import App, { CollectionControls, matchesProjectSearch, SettingsView } from './A
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
+const navigatorPlatformDescriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
 vi.mock('./components/AnnotationCanvas', () => ({
   AnnotationCanvas: (props: unknown) => {
     annotationCanvasSpy(props);
@@ -28,6 +30,7 @@ afterEach(() => {
     rightPanelOpen: true,
     recentCollections: [],
   });
+  if (navigatorPlatformDescriptor) Object.defineProperty(navigator, 'platform', navigatorPlatformDescriptor);
 });
 
 const snapshot: ProjectSnapshot = {
@@ -966,6 +969,7 @@ describe('feedback controls', () => {
       ),
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(window.imnota.openProjectDialog).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     await screen.findByTestId('settings-view');
     await act(async () => resolveOpen(snapshot));
@@ -1069,6 +1073,86 @@ describe('feedback controls', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
+  });
+
+  it('does not reserve a toolbar capture control until experimental capture is enabled', async () => {
+    await renderEditingProject();
+    expect(screen.queryByRole('button', { name: /screen capture/i })).not.toBeInTheDocument();
+  });
+
+  it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let resolveCapture!: (value: unknown) => void;
+    const startRegionCapture = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+    const capture = await screen.findByRole('button', { name: /Capture screen region/ });
+    fireEvent.click(capture);
+    fireEvent.click(capture);
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(1));
+    await act(async () =>
+      resolveCapture({
+        ok: false,
+        error: { code: 'capture-cancelled', message: 'Screen capture cancelled.', retryable: false },
+      }),
+    );
+    expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
+  });
+
+  it('rechecks the initiating target after a delayed flush before starting capture', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let resolveSave!: (value: unknown) => void;
+    const saveScreenshotContent = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const startRegionCapture = vi.fn();
+    const { note, editingSnapshot } = await renderEditingProject({
+      saveScreenshotContent: saveScreenshotContent as never,
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+    fireEvent.change(note, { target: { value: 'Needs flushing' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    await waitFor(() => expect(saveScreenshotContent).toHaveBeenCalledTimes(1));
+    act(() => useAppStore.getState().set({ activeCollectionId: 'changed-during-flush' }));
+    await act(async () =>
+      resolveSave({
+        project: editingSnapshot.project,
+        savedScreenshotId: 'shot',
+        conflictCreated: false,
+        contentRevision: 'b'.repeat(64),
+        projectRevision: 'project-content-2',
+      }),
+    );
+    await waitFor(() => expect(startRegionCapture).not.toHaveBeenCalled());
   });
 
   it('preserves picker order and activates the last imported screenshot', async () => {
@@ -1615,6 +1699,151 @@ describe('feedback controls', () => {
     await screen.findByTestId('global-search-input');
     expect(useAppStore.getState().view).toBe('recent');
     expect(search).toHaveValue('recent filter');
+  });
+
+  it('shows a structured content result and opens its exact item', async () => {
+    const text = {
+      kind: 'text' as const,
+      id: 'second-text',
+      collectionId: 'archived',
+      position: 1,
+      includeInExport: false,
+      markdownFilename: 'second.md',
+      createdAt: 'now',
+      updatedAt: 'now',
+    };
+    const destination: ProjectSnapshot = {
+      ...snapshot,
+      project: {
+        ...snapshot.project,
+        schemaVersion: 4,
+        favourite: true,
+        status: 'archived',
+        collections: [
+          ...snapshot.project.collections,
+          { ...snapshot.project.collections[0], id: 'archived', name: 'Archived collection', archived: true },
+        ],
+        contentItems: [{ ...text, id: 'first-text', position: 0, markdownFilename: 'first.md' }, text],
+      },
+    };
+    const loadProject = vi.fn(async () => destination);
+    const found: ContentSearchResult = {
+      projectPath: destination.projectPath,
+      projectId: destination.project.id,
+      projectName: destination.project.name,
+      collectionId: 'archived',
+      collectionName: 'Archived collection',
+      itemId: text.id,
+      kind: 'text',
+      label: 'Found Markdown',
+      matchSource: 'markdown',
+      excerpt: 'Matching context.',
+    };
+    renderApp({
+      searchContent: async () => ({ results: [found], warnings: [], totalMatches: 1 }),
+      loadProject,
+      loadContentItem: async () => ({
+        item: text,
+        markdown: 'A matching context far beyond the preview.',
+        contentRevision: 'a'.repeat(64),
+      }),
+    });
+    const search = await screen.findByRole('textbox', { name: 'Search projects' });
+    fireEvent.change(search, { target: { value: 'context' } });
+    const result = await screen.findByRole('button', { name: /Found Markdown.*Matching context/i });
+    expect(screen.getByText('Projects and content')).toBeVisible();
+    fireEvent.click(result);
+    await waitFor(() => expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath));
+    const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+    await waitFor(() => expect(editor).toHaveFocus());
+    expect(useAppStore.getState().activeCollectionId).toBe('archived');
+    expect(useAppStore.getState().activeScreenshotId).toBe(text.id);
+    expect(useAppStore.getState().snapshot?.project).toEqual(destination.project);
+    await waitFor(() => expect((editor as HTMLTextAreaElement).selectionStart).toBe(11));
+  });
+
+  it.each(['resolve', 'reject'] as const)(
+    'keeps the newest search navigation when an earlier load later %ss',
+    async (completion) => {
+      const second: ProjectSnapshot = {
+        ...snapshot,
+        projectPath: '/workspace/second',
+        project: { ...snapshot.project, id: 'second', name: 'Second project' },
+      };
+      const found = (target: ProjectSnapshot): ContentSearchResult => ({
+        projectPath: target.projectPath,
+        projectId: target.project.id,
+        projectName: target.project.name,
+        kind: 'collection',
+        collectionId: target.project.collections[0].id,
+        label: target.project.name,
+        collectionName: target.project.collections[0].name,
+        matchSource: 'context',
+      });
+      let resolveFirst!: (value: ProjectSnapshot) => void;
+      let rejectFirst!: (error: Error) => void;
+      let resolveSecond!: (value: ProjectSnapshot) => void;
+      const firstLoad = new Promise<ProjectSnapshot>((yes, no) => {
+        resolveFirst = yes;
+        rejectFirst = no;
+      });
+      const secondLoad = new Promise<ProjectSnapshot>((yes) => {
+        resolveSecond = yes;
+      });
+      const loadProject = vi.fn((projectPath: string) =>
+        projectPath === snapshot.projectPath ? firstLoad : secondLoad,
+      );
+      renderApp({
+        searchContent: async () => ({
+          results: [found(snapshot), found(second)],
+          warnings: [],
+          totalMatches: 2,
+        }),
+        loadProject,
+      });
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Search projects' }), {
+        target: { value: 'context' },
+      });
+      const first = await screen.findByRole('button', { name: /^Project Project/ });
+      fireEvent.click(first);
+      await waitFor(() => expect(loadProject).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole('button', { name: /Second project.*matched context/ }));
+      await waitFor(() => expect(loadProject).toHaveBeenCalledTimes(2));
+      await act(async () => resolveSecond(second));
+      await waitFor(() => expect(useAppStore.getState().snapshot?.project.id).toBe('second'));
+      await act(async () =>
+        completion === 'resolve' ? resolveFirst(snapshot) : rejectFirst(new Error('old load failed')),
+      );
+      expect(useAppStore.getState().snapshot?.project.id).toBe('second');
+      expect(screen.queryByText('old load failed')).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Collection' })).toHaveFocus());
+    },
+  );
+
+  it('rejects a changed project identity or missing item without applying a search selection', async () => {
+    const found: ContentSearchResult = {
+      projectPath: snapshot.projectPath,
+      projectId: 'original-id',
+      projectName: 'Old project',
+      collectionId: '001-collection',
+      itemId: 'removed',
+      kind: 'text',
+      label: 'Old item',
+      matchSource: 'markdown',
+    };
+    renderApp({
+      searchContent: async () => ({ results: [found], warnings: [], totalMatches: 1 }),
+      loadProject: async () => snapshot,
+    });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search projects' }), {
+      target: { value: 'old' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Old item/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This search result changed or is no longer available',
+    );
+    expect(useAppStore.getState().snapshot).toBeNull();
+    expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
   it('trims project queries before matching project metadata', () => {
