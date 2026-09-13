@@ -1011,6 +1011,59 @@ describe('feedback controls', () => {
     expect(recovered.recoveredContentDeletes).toHaveLength(1);
   });
 
+  it('remembers the restored project as the most recently opened collection', async () => {
+    const restored = {
+      ...snapshot,
+      projectPath: '/workspace/restored',
+      project: { ...snapshot.project, id: 'restored-project', name: 'Restored project' },
+    };
+    const summary = {
+      snapshotId: 'snapshot-20260913T120000000Z-00000001000040008000000000000000',
+      sourceProjectId: snapshot.project.id,
+      sourceProjectName: snapshot.project.name,
+      createdAt: snapshot.project.createdAt,
+      schemaVersion: 3,
+      reason: 'manual' as const,
+      fileCount: 1,
+      totalSize: 100,
+    };
+    await renderEditingProject({
+      listProjects: async () => [
+        { ...snapshot.project, projectPath: snapshot.projectPath },
+        { ...restored.project, projectPath: restored.projectPath },
+      ],
+      getBackupHistory: async () => ({
+        location: '/workspace/.imnota-backups',
+        snapshots: [summary],
+        invalid: [],
+      }),
+      inspectBackupSnapshot: async () => ({
+        summary,
+        manifest: {
+          version: 1,
+          ...summary,
+          files: [{ path: 'project.json', size: 100, sha256: 'a'.repeat(64) }],
+        },
+      }),
+      restoreBackupSnapshot: async () => ({
+        mode: 'new',
+        projectPath: restored.projectPath,
+        snapshot: restored,
+      }),
+    });
+    act(() => useAppStore.getState().recordCollectionOpen());
+    fireEvent.click(screen.getByTestId('settings-button'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Backups & history' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Project.*Manual/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore as new project' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(restored.projectPath));
+    expect(useAppStore.getState().recentCollections[0]).toMatchObject({
+      projectPath: restored.projectPath,
+      collectionId: restored.project.collections[0].id,
+    });
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+  });
+
   it('keeps Description Undo separate from canvas annotation history', async () => {
     const { note } = await renderEditingProject();
     fireEvent.change(note, { target: { value: 'Rewritten description' } });

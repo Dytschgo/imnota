@@ -495,7 +495,6 @@ export default function App() {
             return false;
           }
           if (identity !== navigationIdentity.current) return false;
-          if (identity !== navigationIdentity.current) return false;
           if (recordOpen) useAppStore.getState().recordCollectionOpen();
           return true;
         }
@@ -1574,6 +1573,9 @@ export default function App() {
             onBeforeBackupAction={prepareBackupAction}
             onBackupRestoreFailed={() => setProjectSessionGeneration((generation) => generation + 1)}
             onBackupRestored={async (result) => {
+              const previousLocation = currentLocation();
+              ++navigationIdentity.current;
+              clearSearchSelection();
               const restoreNotices = [
                 ...new Set([
                   ...(result.warnings ?? []),
@@ -1609,6 +1611,10 @@ export default function App() {
                 warnings: [...new Set([...(result.snapshot.warnings ?? []), ...restoreNotices])],
               });
               useAppStore.getState().set({ view: 'workspace' });
+              useAppStore.getState().recordCollectionOpen();
+              setNavigationStack((stack) =>
+                pushNavigationLocation(replaceNavigationLocation(stack, previousLocation), currentLocation()),
+              );
               await refreshProjects();
               showToast(
                 result.mode === 'new'
