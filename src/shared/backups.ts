@@ -69,6 +69,17 @@ export const backupManifestSchema = z
     schemaVersion: z.number().int().min(1).max(10_000),
     reason: z.enum(BACKUP_SNAPSHOT_REASONS),
     files: z.array(backupManifestFileSchema).min(1).max(20_000),
+    // Legacy migration supplies defaults for these absent sidecars; a backup must not invent them.
+    absentLegacySidecars: z
+      .array(
+        backupRelativePathSchema.refine(
+          (value) => /^(?:rounds\/[^/]+\/)?(?:annotations|notes)\/[^/]+$/.test(value),
+          'Expected a legacy notes or annotations path.',
+        ),
+      )
+      .min(1)
+      .max(20_000)
+      .optional(),
   })
   .strict()
   .superRefine((manifest, context) => {
@@ -77,6 +88,16 @@ export const backupManifestSchema = z
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'Backup paths are aliased.' });
     if (!paths.includes('project.json'))
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'Backup has no project.json.' });
+    const absent = (manifest.absentLegacySidecars ?? []).map((value) => value.normalize('NFC').toLowerCase());
+    if (new Set([...paths, ...absent]).size !== paths.length + absent.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Absent legacy paths overlap or are aliased.',
+      });
+    if (manifest.absentLegacySidecars && manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2)
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Only legacy projects may omit sidecars.' });
+    if (paths.length + absent.length > 20_000)
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Too many authoritative backup paths.' });
   });
 
 export type BackupManifest = z.infer<typeof backupManifestSchema>;

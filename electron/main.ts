@@ -112,7 +112,11 @@ import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
 import { runSmokeWorkflow } from './smoke-workflow.js';
-import { pathIsWithin, validateCreatedSmokeDirectory } from './smoke-native-driver.js';
+import {
+  boundedSmokeDiagnostic,
+  pathIsWithin,
+  validateCreatedSmokeDirectory,
+} from './smoke-native-driver.js';
 import { ProjectSearchService } from './project-search.js';
 import { createTemplateProject } from './template-project.js';
 import { BackupService } from './backup-service.js';
@@ -2704,24 +2708,38 @@ app.whenReady().then(async () => {
       }
     } catch (error) {
       exitCode = 1;
+      const failureMessage = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      let failureArtifactDirectory: string | undefined;
+      if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
+        try {
+          failureArtifactDirectory = await validateCreatedSmokeDirectory(
+            process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+            'artifact',
+          );
+          await fs.writeFile(
+            path.join(failureArtifactDirectory, 'verification-failure.json'),
+            JSON.stringify({ passed: false, version: app.getVersion(), error: failureMessage }, null, 2),
+            { flag: 'wx' },
+          );
+        } catch (artifactError) {
+          console.error('Failure report unavailable:', artifactError);
+        }
+      }
       let rendererState: unknown;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        rendererState = await mainWindow.webContents
-          .executeJavaScript(
+        const failedWindow = mainWindow;
+        rendererState = await boundedSmokeDiagnostic(() =>
+          failedWindow.webContents.executeJavaScript(
             `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
-          )
-          .catch(() => undefined);
-        if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
+          ),
+        );
+        if (failureArtifactDirectory) {
           try {
-            const artifactDirectory = await validateCreatedSmokeDirectory(
-              process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-              'artifact',
-            );
-            await fs.writeFile(
-              path.join(artifactDirectory, 'failure.png'),
-              (await mainWindow.webContents.capturePage()).toPNG(),
-              { flag: 'wx' },
-            );
+            const captured = await boundedSmokeDiagnostic(() => failedWindow.webContents.capturePage());
+            if (captured)
+              await fs.writeFile(path.join(failureArtifactDirectory, 'failure.png'), captured.toPNG(), {
+                flag: 'wx',
+              });
           } catch (captureError) {
             console.error('Failure capture unavailable:', captureError);
           }
@@ -2730,7 +2748,7 @@ app.whenReady().then(async () => {
       result = {
         passed: false,
         version: app.getVersion(),
-        error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        error: failureMessage,
         rendererState,
       };
       console.error(error);

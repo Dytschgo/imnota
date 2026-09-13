@@ -199,6 +199,39 @@ function authoritativeProjectFiles(project: ProjectData | LegacyProjectData): st
   return uniquePortablePaths(files);
 }
 
+function legacyOptionalSidecars(project: ProjectData | LegacyProjectData): string[] {
+  if (project.schemaVersion !== 1 && project.schemaVersion !== 2) return [];
+  return project.screenshots.flatMap((shot) =>
+    (
+      [
+        ['annotations', shot.annotationFile],
+        ['notes', shot.notesFile],
+      ] as const
+    ).map(([folder, value]) => {
+      const relative = strictRelativePath(value);
+      const parts = relative.split('/');
+      if (
+        !(parts.length === 2 && parts[0] === folder) &&
+        !(parts.length === 4 && parts[0] === 'rounds' && parts[2] === folder)
+      )
+        throw new Error(`Invalid legacy ${folder} reference.`);
+      return relative;
+    }),
+  );
+}
+
+function snapshotProjectFiles(
+  project: ProjectData | LegacyProjectData,
+  absentLegacySidecars: readonly string[] = [],
+): string[] {
+  const files = authoritativeProjectFiles(project);
+  const optional = new Set(legacyOptionalSidecars(project));
+  if (absentLegacySidecars.some((relative) => !optional.has(relative)))
+    throw new Error('Backup declares an absence that is not an exact referenced legacy sidecar.');
+  const absent = new Set(absentLegacySidecars);
+  return files.filter((relative) => !absent.has(relative));
+}
+
 async function regularFile(target: string): Promise<Awaited<ReturnType<typeof fs.stat>>> {
   await assertNoLinks(target);
   const stat = await fs.stat(target);
@@ -616,6 +649,7 @@ export class BackupService {
     const projectSource = await fs.readFile(sourceProjectFile);
     const project = parseProjectFile(JSON.parse(projectSource.toString('utf8')));
     const files = authoritativeProjectFiles(project);
+    const optional = new Set(legacyOptionalSidecars(project));
     const id = snapshotId(this.now(), this.randomId());
     const key = projectKey(project.id);
     const finalDirectory = path.join(root, SNAPSHOTS_DIRECTORY, key, id);
@@ -625,11 +659,15 @@ export class BackupService {
     let manifestSource = '';
     try {
       const manifestFiles: BackupManifest['files'] = [];
+      const absentLegacySidecars: string[] = [];
       for (const relativePath of files) {
-        const integrity = await copyVerified(
-          targetForRelative(sourceRoot, relativePath),
-          targetForRelative(dataRoot, relativePath),
-        );
+        const source = targetForRelative(sourceRoot, relativePath);
+        // Only a missing optional source qualifies. Never reinterpret a failed copy as absence.
+        if (optional.has(relativePath) && !(await lstatOptional(source))) {
+          absentLegacySidecars.push(relativePath);
+          continue;
+        }
+        const integrity = await copyVerified(source, targetForRelative(dataRoot, relativePath));
         manifestFiles.push({ path: relativePath, ...integrity });
       }
       const currentProject = await hashFile(path.join(sourceRoot, 'project.json'));
@@ -645,6 +683,7 @@ export class BackupService {
         schemaVersion: project.schemaVersion,
         reason,
         files: manifestFiles,
+        ...(absentLegacySidecars.length ? { absentLegacySidecars } : {}),
       });
       manifestSource = JSON.stringify(manifest, null, 2);
       await atomicWrite(path.join(stage.directory, 'manifest.json'), manifestSource);
@@ -652,6 +691,9 @@ export class BackupService {
       await fs.mkdir(path.dirname(finalDirectory), { recursive: true });
       await assertNoLinks(path.dirname(finalDirectory));
       if (await lstatOptional(finalDirectory)) throw new Error('The allocated snapshot already exists.');
+      for (const relative of absentLegacySidecars)
+        if (await lstatOptional(targetForRelative(sourceRoot, relative)))
+          throw new Error('An absent legacy sidecar appeared while the snapshot was prepared.');
       await fs.unlink(path.join(stage.directory, OWNER_FILE));
       await this.rename(stage.directory, finalDirectory);
     } catch (error) {
@@ -715,7 +757,7 @@ export class BackupService {
       project.schemaVersion !== manifest.schemaVersion
     )
       throw new Error('Backup project metadata does not match its manifest.');
-    const authoritative = authoritativeProjectFiles(project)
+    const authoritative = snapshotProjectFiles(project, manifest.absentLegacySidecars)
       .map((value) => value.normalize('NFC').toLowerCase())
       .sort();
     const recorded = manifest.files.map((file) => file.path.normalize('NFC').toLowerCase()).sort();
@@ -965,7 +1007,7 @@ export class BackupService {
     const project = parseProjectFile(JSON.parse(await fs.readFile(projectPath, 'utf8')));
     if (project.id !== inspection.manifest.sourceProjectId)
       throw new Error('Restored project identity does not match the backup.');
-    const authoritative = authoritativeProjectFiles(project)
+    const authoritative = snapshotProjectFiles(project, inspection.manifest.absentLegacySidecars)
       .map((value) => value.normalize('NFC').toLowerCase())
       .sort();
     const recorded = inspection.manifest.files.map((file) => file.path.normalize('NFC').toLowerCase()).sort();
@@ -1108,7 +1150,7 @@ export class BackupService {
         path.join(target, RESTORE_OWNER_FILE),
         JSON.stringify({ version: 1, token }, null, 2),
       );
-      const restoredFiles = authoritativeProjectFiles(restored);
+      const restoredFiles = snapshotProjectFiles(restored, inspection.manifest.absentLegacySidecars);
       for (const relativePath of restoredFiles.filter((file) => file !== 'project.json')) {
         const expected = await hashFile(targetForRelative(stage, relativePath));
         await copyVerified(

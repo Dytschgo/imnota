@@ -1,6 +1,49 @@
 import type { BrowserWindow, Rectangle, WebContents } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { atomicWrite } from './files.js';
+
+export type SmokeCheckpoint = (phase: string) => Promise<void>;
+
+export async function boundedSmokeDiagnostic<T>(
+  operation: () => Promise<T>,
+  timeoutMs = 2_000,
+): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Persist fixture-only progress because GUI builds may not inherit CI stdout. */
+export async function createSmokeCheckpoint(
+  artifactDirectory?: string,
+  now: () => number = Date.now,
+): Promise<SmokeCheckpoint> {
+  const started = now();
+  const entries: Array<{ elapsedMs: number; phase: string }> = [];
+  const target = artifactDirectory
+    ? path.join(
+        await validateCreatedSmokeDirectory(artifactDirectory, 'artifact'),
+        'verification-progress.json',
+      )
+    : undefined;
+  if (target) await fs.writeFile(target, '[]\n', { flag: 'wx' });
+  return async (phase) => {
+    entries.push({ elapsedMs: now() - started, phase });
+    if (target) await atomicWrite(target, JSON.stringify(entries, null, 2));
+    console.info(`Native verification +${entries.at(-1)!.elapsedMs}ms: ${phase}`);
+  };
+}
 
 export interface SmokeLocator {
   selector?: string;

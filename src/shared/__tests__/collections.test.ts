@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { legacyProjectSchema, validateProject } from '../schema';
+import { legacyProjectSchema, parseProjectFile, validateProject } from '../schema';
 import { emptyProject } from '../utils';
 import {
   addEmptyCollection,
@@ -84,20 +84,34 @@ async function fixture(version: 1 | 2) {
   return { dir, project, imagePath, notes };
 }
 
+function backupFixture(dir: string) {
+  const backupParent = `${dir}-backups`;
+  temporary.push(backupParent);
+  let sequence = 0;
+  const backups = new BackupService({
+    getLocation: () => backupParent,
+    getWorkspace: () => path.dirname(dir),
+    getPreferences: () => ({ ...DEFAULT_BACKUP_PREFERENCES, enabled: true }),
+    now: () => new Date('2026-09-13T12:00:00.000Z'),
+    randomId: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
+  });
+  const snapshotRoot = (projectId: string, snapshotId: string) =>
+    path.join(
+      backupParent,
+      '.imnota-backups',
+      'snapshots',
+      createHash('sha256').update(projectId).digest('hex').slice(0, 32),
+      snapshotId,
+    );
+  return { backups, snapshotRoot };
+}
+
 describe.each([1, 2] as const)('project v%s migration', (version) => {
   it('publishes a byte-exact local-history snapshot before the real legacy migration', async () => {
     const { dir, project, imagePath } = await fixture(version);
-    const backupParent = `${dir}-backups`;
-    temporary.push(backupParent);
+    const { backups, snapshotRoot } = backupFixture(dir);
     const beforeProject = await fs.readFile(path.join(dir, 'project.json'));
     const beforeImage = await fs.readFile(imagePath);
-    const backups = new BackupService({
-      getLocation: () => backupParent,
-      getWorkspace: () => path.dirname(dir),
-      getPreferences: () => ({ ...DEFAULT_BACKUP_PREFERENCES, enabled: true }),
-      now: () => new Date('2026-09-13T12:00:00.000Z'),
-      randomId: () => '00000000-0000-4000-8000-000000000001',
-    });
     let createdSnapshot = '';
     const migrated = await migrateProjectWithBackup(dir, project, async () => {
       const created = await backups.createSnapshot(dir, 'migration');
@@ -108,16 +122,251 @@ describe.each([1, 2] as const)('project v%s migration', (version) => {
     expect(JSON.parse(await fs.readFile(path.join(dir, 'project.json'), 'utf8')).schemaVersion).toBe(3);
     const inspection = await backups.inspectSnapshot(createdSnapshot);
     expect(inspection.summary).toMatchObject({ schemaVersion: version, reason: 'migration' });
-    const snapshotRoot = path.join(
-      backupParent,
-      '.imnota-backups',
-      'snapshots',
-      createHash('sha256').update(project.id).digest('hex').slice(0, 32),
-      createdSnapshot,
-      'data',
+    expect(inspection.manifest).not.toHaveProperty('absentLegacySidecars');
+    const data = path.join(snapshotRoot(project.id, createdSnapshot), 'data');
+    expect(await fs.readFile(path.join(data, 'project.json'))).toEqual(beforeProject);
+    expect(await fs.readFile(path.join(data, path.relative(dir, imagePath)))).toEqual(beforeImage);
+  });
+
+  it.each(['notes', 'annotations', 'both'] as const)(
+    'backs up and restores missing %s without inventing files, then migrates with backups enabled',
+    async (missing) => {
+      const { dir, project, notes } = await fixture(version);
+      const { backups, snapshotRoot } = backupFixture(dir);
+      const shot = project.screenshots[0];
+      const absent = [
+        ...(missing !== 'notes' ? [shot.annotationFile] : []),
+        ...(missing !== 'annotations' ? [shot.notesFile] : []),
+      ];
+      for (const relative of absent) {
+        await fs.unlink(path.join(dir, relative));
+        await fs.rmdir(path.dirname(path.join(dir, relative)));
+      }
+      const beforeProject = await fs.readFile(path.join(dir, 'project.json'));
+      const assertAbsent = async (root: string) => {
+        for (const relative of absent)
+          await expect(fs.lstat(path.join(root, relative))).rejects.toMatchObject({ code: 'ENOENT' });
+      };
+      let createdSnapshot = '';
+      const migrated = await migrateProjectWithBackup(dir, project, async () => {
+        createdSnapshot = (await backups.createSnapshot(dir, 'migration')).snapshotId;
+        expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(beforeProject);
+        await assertAbsent(dir);
+      });
+      const inspection = await backups.inspectSnapshot(createdSnapshot);
+      expect(inspection.manifest.absentLegacySidecars).toEqual(absent);
+      expect(inspection.summary).toMatchObject({ schemaVersion: version, fileCount: 4 - absent.length });
+      const data = path.join(snapshotRoot(project.id, createdSnapshot), 'data');
+      expect(await fs.readFile(path.join(data, 'project.json'))).toEqual(beforeProject);
+      await assertAbsent(data);
+      await assertAbsent(dir);
+      const description =
+        missing === 'annotations'
+          ? `Existing description\n\n### Migrated legacy notes\n\n${notes}`
+          : 'Existing description';
+      expect(migrated.screenshots[0].description).toBe(description);
+
+      const restored = await backups.restoreNew(createdSnapshot);
+      temporary.push(restored.projectPath);
+      await assertAbsent(restored.projectPath);
+      for (const file of inspection.manifest.files.filter((entry) => entry.path !== 'project.json'))
+        expect(await fs.readFile(path.join(restored.projectPath, file.path))).toEqual(
+          await fs.readFile(path.join(data, file.path)),
+        );
+      const restoredProject = parseProjectFile(
+        JSON.parse(await fs.readFile(path.join(restored.projectPath, 'project.json'), 'utf8')),
+      );
+      expect(restoredProject.schemaVersion).toBe(version);
+      let restoredSnapshot = '';
+      const reopened = await migrateProjectWithBackup(restored.projectPath, restoredProject, async () => {
+        restoredSnapshot = (await backups.createSnapshot(restored.projectPath, 'migration')).snapshotId;
+      });
+      expect((await backups.inspectSnapshot(restoredSnapshot)).manifest.absentLegacySidecars).toEqual(absent);
+      expect(reopened.schemaVersion).toBe(3);
+      expect(reopened.screenshots[0].description).toBe(description);
+      expect(
+        await fs.readFile(path.join(restored.projectPath, reopened.screenshots[0].annotationFile), 'utf8'),
+      ).toBe('[]');
+      await assertAbsent(restored.projectPath);
+
+      if (missing === 'both') {
+        // Force the committed-restore recovery path to validate a legacy tree with explicit absences.
+        const unlink = fs.unlink.bind(fs);
+        let failed = false;
+        const injected = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
+          if (!failed && String(target) === path.join(dir, '.imnota-restore-owner.json')) {
+            failed = true;
+            throw new Error('injected restore marker cleanup failure');
+          }
+          await unlink(target);
+        });
+        try {
+          const inPlace = await backups.restoreInPlace(createdSnapshot, dir);
+          temporary.push(inPlace.rollbackPath);
+          expect(failed).toBe(true);
+          expect(inPlace.warnings?.join(' ')).not.toContain('Recovery files were preserved');
+          await assertAbsent(dir);
+          expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(beforeProject);
+          await expect(fs.lstat(path.join(dir, '.imnota-restore-owner.json'))).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
+        } finally {
+          injected.mockRestore();
+        }
+      }
+    },
+    15_000,
+  );
+
+  it('still rejects a missing required image before starting migration', async () => {
+    const { dir, project, imagePath } = await fixture(version);
+    const { backups } = backupFixture(dir);
+    const before = await fs.readFile(path.join(dir, 'project.json'));
+    await fs.unlink(imagePath);
+    await expect(
+      migrateProjectWithBackup(dir, project, async () => {
+        await backups.createSnapshot(dir, 'migration');
+      }),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+    await expect(fs.stat(path.join(dir, `project.v${version}.backup.json`))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect((await backups.listSnapshots()).snapshots).toEqual([]);
+  });
+
+  it.each(['notesFile', 'annotationFile'] as const)(
+    'does not treat permissions, non-files, or failed copies of %s as absence',
+    async (field) => {
+      const { dir, project } = await fixture(version);
+      const { backups } = backupFixture(dir);
+      const target = path.join(dir, project.screenshots[0][field]);
+      const before = await fs.readFile(path.join(dir, 'project.json'));
+      const copy = fs.copyFile.bind(fs);
+      for (const code of ['EACCES', 'ENOENT']) {
+        const injected = vi.spyOn(fs, 'copyFile').mockImplementation(async (source, destination, mode) => {
+          if (String(source) === target) throw Object.assign(new Error('injected copy failure'), { code });
+          await copy(source, destination, mode);
+        });
+        try {
+          await expect(backups.createSnapshot(dir, 'migration')).rejects.toMatchObject({ code });
+        } finally {
+          injected.mockRestore();
+        }
+      }
+      const lstat = fs.lstat.bind(fs);
+      const denied = vi.spyOn(fs, 'lstat').mockImplementation((candidate, options) => {
+        if (String(candidate) === target)
+          return Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+        return lstat(candidate, options);
+      });
+      try {
+        await expect(backups.createSnapshot(dir, 'migration')).rejects.toMatchObject({ code: 'EACCES' });
+      } finally {
+        denied.mockRestore();
+      }
+      await fs.unlink(target);
+      await fs.mkdir(target);
+      await expect(backups.createSnapshot(dir, 'migration')).rejects.toThrow('regular file');
+      expect(await fs.readFile(path.join(dir, 'project.json'))).toEqual(before);
+      expect((await backups.listSnapshots()).snapshots).toEqual([]);
+    },
+  );
+
+  it.each(['notesFile', 'annotationFile'] as const)('rejects linked parents of missing %s', async (field) => {
+    const { dir, project } = await fixture(version);
+    const { backups } = backupFixture(dir);
+    const target = path.join(dir, project.screenshots[0][field]);
+    const parent = path.dirname(target);
+    const outside = `${dir}-linked-sidecar`;
+    temporary.push(outside);
+    await fs.mkdir(outside);
+    await fs.unlink(target);
+    await fs.rmdir(parent);
+    await fs.symlink(outside, parent, process.platform === 'win32' ? 'junction' : 'dir');
+    await expect(backups.createSnapshot(dir, 'migration')).rejects.toThrow(/Linked|linked/);
+    expect((await backups.listSnapshots()).snapshots).toEqual([]);
+    expect(await fs.readdir(outside)).toEqual([]);
+  });
+
+  it('rejects a sidecar that appears after its absence was recorded', async () => {
+    const { dir, project } = await fixture(version);
+    const { backups } = backupFixture(dir);
+    const target = path.join(dir, project.screenshots[0].notesFile);
+    await fs.unlink(target);
+    const rename = fs.rename.bind(fs);
+    const injected = vi.spyOn(fs, 'rename').mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (path.basename(String(destination)) === 'manifest.json') await fs.writeFile(target, 'new notes');
+    });
+    try {
+      await expect(backups.createSnapshot(dir, 'migration')).rejects.toThrow('sidecar appeared');
+    } finally {
+      injected.mockRestore();
+    }
+    expect((await backups.listSnapshots()).snapshots).toEqual([]);
+    expect(await fs.readFile(target, 'utf8')).toBe('new notes');
+  });
+
+  it('rejects unrecorded omissions and forged absence declarations on every snapshot read', async () => {
+    const { dir, project, imagePath } = await fixture(version);
+    const { backups, snapshotRoot } = backupFixture(dir);
+    const absent = project.screenshots[0].notesFile;
+    await fs.unlink(path.join(dir, absent));
+    const created = await backups.createSnapshot(dir, 'migration');
+    const manifest = (await backups.inspectSnapshot(created.snapshotId)).manifest;
+    const root = snapshotRoot(project.id, created.snapshotId);
+    const imageRelative = path.relative(dir, imagePath).split(path.sep).join('/');
+    for (const absentLegacySidecars of [
+      undefined,
+      ['notes/unreferenced.md'],
+      [
+        absent.slice(0, absent.lastIndexOf('/') + 1) +
+          absent.slice(absent.lastIndexOf('/') + 1).toUpperCase(),
+      ],
+      [absent, 'notes/unreferenced.md'],
+    ]) {
+      await fs.writeFile(
+        path.join(root, 'manifest.json'),
+        JSON.stringify({ ...manifest, absentLegacySidecars }),
+      );
+      await expect(backups.inspectSnapshot(created.snapshotId)).rejects.toThrow();
+      await expect(backups.restoreNew(created.snapshotId)).rejects.toThrow();
+      await expect(backups.restoreInPlace(created.snapshotId, dir)).rejects.toThrow();
+      await expect(
+        backups.exportSnapshot(created.snapshotId, path.join(dir, 'invalid.zip')),
+      ).rejects.toThrow();
+    }
+    // A valid absence never authorizes another unrecorded omission from the full referenced set.
+    const annotation = project.screenshots[0].annotationFile;
+    const annotationPath = path.join(root, 'data', annotation);
+    const annotationBytes = await fs.readFile(annotationPath);
+    await fs.unlink(annotationPath);
+    await fs.writeFile(
+      path.join(root, 'manifest.json'),
+      JSON.stringify({
+        ...manifest,
+        files: manifest.files.filter((file) => file.path !== annotation),
+      }),
     );
-    expect(await fs.readFile(path.join(snapshotRoot, 'project.json'))).toEqual(beforeProject);
-    expect(await fs.readFile(path.join(snapshotRoot, path.relative(dir, imagePath)))).toEqual(beforeImage);
+    await expect(backups.inspectSnapshot(created.snapshotId)).rejects.toThrow(
+      'complete authoritative project file set',
+    );
+    await fs.writeFile(annotationPath, annotationBytes);
+    // An image cannot be reclassified as an optional sidecar even when its payload is removed too.
+    await fs.unlink(path.join(root, 'data', imageRelative));
+    await fs.writeFile(
+      path.join(root, 'manifest.json'),
+      JSON.stringify({
+        ...manifest,
+        files: manifest.files.filter((file) => file.path !== imageRelative),
+        absentLegacySidecars: [absent, imageRelative],
+      }),
+    );
+    await expect(backups.inspectSnapshot(created.snapshotId)).rejects.toThrow();
+    expect((await backups.listSnapshots()).snapshots).toEqual([]);
+    expect((await backups.listSnapshots()).invalid).toHaveLength(1);
+    await expect(fs.stat(path.join(dir, 'invalid.zip'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('copies content, preserves exact legacy Markdown and source files, and is idempotent', async () => {

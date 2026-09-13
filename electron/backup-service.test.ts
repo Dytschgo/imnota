@@ -4,7 +4,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_BACKUP_PREFERENCES, type BackupPreferences } from '../src/shared/backups.js';
+import {
+  DEFAULT_BACKUP_PREFERENCES,
+  backupManifestSchema,
+  type BackupPreferences,
+} from '../src/shared/backups.js';
 import { parseProjectFile } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { BackupService, backupReservedProjectDirectory } from './backup-service.js';
@@ -197,6 +201,7 @@ describe('BackupService', () => {
     expect(created.fileCount).toBe(7);
 
     const inspection = await backups.inspectSnapshot(created.snapshotId);
+    expect(inspection.manifest).not.toHaveProperty('absentLegacySidecars');
     expect(inspection.manifest.files.map((file) => file.path)).toEqual([
       'project.json',
       'collections/001-collection/screenshots/source.png',
@@ -227,6 +232,69 @@ describe('BackupService', () => {
     );
     expect(reopened.id).not.toBe(fixture.project.id);
     expect(reopened.name).toBe('Mixed project restored');
+  });
+
+  it.each([
+    [3, 'annotations/source.png.json'],
+    [3, 'descriptions/source.png.md'],
+    [4, 'annotations/source.png.json'],
+    [4, 'descriptions/source.png.md'],
+    [4, 'drawings/flow.json'],
+    [4, 'drawings/flow.png'],
+    [4, 'text/note.md'],
+  ] as const)('rejects a missing schema %s required file %s', async (version, relative) => {
+    const { projectPath, project } = await writeProject();
+    if (version === 3) {
+      await fs.writeFile(
+        path.join(projectPath, 'project.json'),
+        JSON.stringify({ ...project, schemaVersion: 3, contentItems: undefined }),
+      );
+    }
+    const before = await fs.readFile(path.join(projectPath, 'project.json'));
+    await fs.unlink(path.join(projectPath, 'collections/001-collection', relative));
+    await expect(service().createSnapshot(projectPath, 'migration')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(before);
+    expect((await service().listSnapshots()).snapshots).toEqual([]);
+  });
+
+  it('strictly validates absence declarations, including portable aliases and overlaps', async () => {
+    const { projectPath } = await writeProject();
+    const created = await service().createSnapshot(projectPath, 'manual');
+    const manifest = (await service().inspectSnapshot(created.snapshotId)).manifest;
+    const legacy = { ...manifest, schemaVersion: 1 };
+    for (const absentLegacySidecars of [
+      [],
+      ['../notes/file.md'],
+      ['/notes/file.md'],
+      ['notes\\file.md'],
+      ['notes/C:file.md'],
+      ['notes/file\0.md'],
+      ['screenshots/file.png'],
+      ['project.json'],
+      ['notes/a.md', 'notes/A.md'],
+      ['notes/caf\u00e9.md', 'notes/cafe\u0301.md'],
+      ['notes/a.md', 'notes/a.md'],
+      'notes/a.md',
+    ])
+      expect(backupManifestSchema.safeParse({ ...legacy, absentLegacySidecars }).success).toBe(false);
+    for (const schemaVersion of [3, 4])
+      expect(
+        backupManifestSchema.safeParse({ ...manifest, schemaVersion, absentLegacySidecars: ['notes/a.md'] })
+          .success,
+      ).toBe(false);
+    expect(
+      backupManifestSchema.safeParse({
+        ...legacy,
+        files: [...manifest.files, { ...manifest.files[0], path: 'notes/a.md' }],
+        absentLegacySidecars: ['notes/A.md'],
+      }).success,
+    ).toBe(false);
+    expect(
+      backupManifestSchema.safeParse({ ...legacy, absentLegacySidecars: ['notes/a.md'], unknown: true })
+        .success,
+    ).toBe(false);
   });
 
   it('reports corruption and traversal manifests without restoring or deleting outside data', async () => {

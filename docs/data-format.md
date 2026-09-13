@@ -56,6 +56,8 @@ Local history lives outside active project folders, by default under the workspa
 
 Snapshots include canonical metadata, screenshot sources, annotations, descriptions, Markdown and drawing sources/rendered images. Prompt exports and transient recovery caches are excluded. Restore and archive export validate the manifest and reject unsafe paths, links, missing files and changed contents. Archive export is capped at 256 MiB of source content.
 
+Schema 1/2 migration tolerates missing legacy notes and annotation sidecars. A snapshot records those specific absences in `absentLegacySidecars` and preserves them on restore; it does not create substitute source files. Missing screenshot images or required schema 3/4 files still block snapshot creation. Undeclared missing files and absence declarations for unrelated paths fail validation.
+
 A root-local publication ledger identifies snapshots eligible for retention. Copied or unregistered snapshots remain readable but are not automatically deleted. In-place restore creates a safety snapshot and retains the entire previous project in a sibling rollback folder, including extra files. A durable journal supports interrupted folder-swap recovery. Rollback folders are excluded from project lists and automatic retention.
 
 Retention journals the exact published manifest before moving a snapshot into a reserved deletion folder. If locked files interrupt removal, the next retention pass checks the remaining files against that journal and retries. Changed or unknown content stops cleanup. Publication ownership is removed only after deletion succeeds. Snapshot data and recovery folders cannot be opened as active projects; use the history restore actions instead.

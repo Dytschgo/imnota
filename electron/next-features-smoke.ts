@@ -1,7 +1,7 @@
 import { nativeClipboard } from './native-clipboard.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
+import type { NativeUiDriver, SmokeCapture, SmokeCheckpoint } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 
 /** Runs only from the isolated native verification workflow, with disposable projects. */
@@ -9,6 +9,7 @@ export async function exerciseNextFeatures(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
   artifactDirectory?: string,
+  checkpoint: SmokeCheckpoint = async () => undefined,
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
   const capture = async (filename: string) => {
@@ -75,7 +76,7 @@ export async function exerciseNextFeatures(
   await driver.fill({ selector: '[aria-label="Search projects"]' }, 'orbital lantern');
   await driver.waitFor({ selector: '.content-search-result', text: 'Feature verification' });
   await capture('next-content-search.png');
-  console.info('Native library search verification: opening focused result');
+  await checkpoint('library search: opening focused result');
   await driver.click({ selector: '.content-search-result', text: 'Feature verification' });
   await driver.waitFor({ selector: '[data-testid="markdown-input"]:focus' });
   await driver.evaluate(`new Promise((resolve, reject) => {
@@ -89,7 +90,7 @@ export async function exerciseNextFeatures(
     };
     check();
   })`);
-  console.info('Native library search verification: focused match selected; verifying unchanged metadata');
+  await checkpoint('library search: focused match selected; verifying unchanged metadata');
   if (!(await fs.readFile(path.join(projectPath, 'project.json'))).equals(beforeSearch))
     throw new Error('Content search modified project metadata or item order.');
   return captures;

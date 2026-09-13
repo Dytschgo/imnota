@@ -6,6 +6,8 @@ import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import {
   NativeUiDriver,
+  createSmokeCheckpoint,
+  boundedSmokeDiagnostic,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -47,6 +49,38 @@ describe('native smoke driver', () => {
     );
     expect(() => safeArtifactPath(artifacts, '../escape.png')).toThrow();
     expect(pathIsWithin(artifacts, artifacts)).toBe(false);
+  });
+
+  it('bounds optional diagnostics without masking the original verification failure', async () => {
+    await expect(boundedSmokeDiagnostic(async () => 'renderer state', 20)).resolves.toBe('renderer state');
+    await expect(
+      boundedSmokeDiagnostic(async () => {
+        throw new Error('renderer gone');
+      }, 20),
+    ).resolves.toBeUndefined();
+    await expect(boundedSmokeDiagnostic(() => new Promise(() => undefined), 5)).resolves.toBeUndefined();
+  });
+
+  it('persists fixture progress without replacing an existing artifact', async () => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-progress');
+    await fs.mkdir(artifacts);
+    let time = 100;
+    const checkpoint = await createSmokeCheckpoint(artifacts, () => time);
+    time = 150;
+    await checkpoint('history: before clipboard');
+    time = 180;
+    await checkpoint('history: clipboard complete');
+    const target = path.join(artifacts, 'verification-progress.json');
+    const recorded = await fs.readFile(target, 'utf8');
+    expect(JSON.parse(recorded)).toEqual([
+      { elapsedMs: 50, phase: 'history: before clipboard' },
+      { elapsedMs: 80, phase: 'history: clipboard complete' },
+    ]);
+    await expect(createSmokeCheckpoint(artifacts)).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await fs.readFile(target, 'utf8')).toBe(recorded);
+    await expect(createSmokeCheckpoint(parent)).rejects.toThrow('test-only name');
   });
 
   it('uses trusted webContents input events for click, drag, wheel, and keyboard actions', async () => {
