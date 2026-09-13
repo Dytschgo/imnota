@@ -12,8 +12,12 @@ export const SMOKE_CAPTURE_PREPARATION = `(async () => {
   const visibleImages = [...document.images].filter(image => {
     const rect = image.getBoundingClientRect();
     const style = getComputedStyle(image);
-    return !image.closest('[hidden]') && style.display !== 'none' && style.visibility !== 'hidden' &&
-      rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
+    if (image.closest('[hidden]') || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+    for (let element = image; element; element = element.parentElement) {
+      if (getComputedStyle(element).display === 'none') return false;
+    }
+    // Unloaded images may have zero intrinsic dimensions while still in view.
+    return rect.right >= 0 && rect.bottom >= 0 &&
       rect.left < window.innerWidth && rect.top < window.innerHeight;
   });
   await Promise.all(visibleImages.map(image => image.decode().catch(() => undefined)));

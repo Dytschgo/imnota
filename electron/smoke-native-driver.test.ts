@@ -54,60 +54,78 @@ describe('native smoke driver', () => {
     expect(pathIsWithin(artifacts, artifacts)).toBe(false);
   });
 
-  it('decodes visible capture images without waiting on hidden or offscreen lazy images', async () => {
-    let completeVisible: (() => void) | undefined;
-    let visibleStarted: (() => void) | undefined;
-    const started = new Promise<void>((resolve) => {
-      visibleStarted = resolve;
-    });
-    const visibleDecode = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          completeVisible = resolve;
-          visibleStarted!();
-        }),
-    );
-    const lazyDecode = vi.fn(() => new Promise(() => undefined));
-    const image = (overrides = {}) => ({
-      getBoundingClientRect: () => ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20 }),
-      closest: () => null,
-      style: { display: 'block', visibility: 'visible' },
-      decode: lazyDecode,
-      ...overrides,
-    });
-    const frames = vi.fn((callback) => callback());
-    const result = runInNewContext(SMOKE_CAPTURE_PREPARATION, {
-      document: {
-        fonts: { ready: Promise.resolve() },
-        images: [
-          image({ decode: visibleDecode }),
-          image({ closest: () => ({ hidden: true }) }),
-          image({ style: { display: 'none', visibility: 'visible' } }),
-          image({ style: { display: 'block', visibility: 'hidden' } }),
-          image({
-            getBoundingClientRect: () => ({
-              width: 20,
-              height: 20,
-              left: 900,
-              top: 0,
-              right: 920,
-              bottom: 20,
-            }),
+  it.each([
+    { width: 20, height: 20 },
+    { width: 20, height: 0 },
+    { width: 0, height: 0 },
+  ])(
+    'awaits visible image decoding at initial size %j without waiting on hidden lazy images',
+    async (size) => {
+      let completeVisible: (() => void) | undefined;
+      let visibleStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        visibleStarted = resolve;
+      });
+      const visibleDecode = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            completeVisible = resolve;
+            visibleStarted!();
           }),
-        ],
-      },
-      getComputedStyle: (element: { style: object }) => element.style,
-      window: { innerWidth: 800, innerHeight: 600 },
-      requestAnimationFrame: frames,
-    });
-    await started;
-    expect(visibleDecode).toHaveBeenCalledOnce();
-    expect(lazyDecode).not.toHaveBeenCalled();
-    expect(frames).not.toHaveBeenCalled();
-    completeVisible!();
-    await result;
-    expect(frames).toHaveBeenCalledTimes(2);
-  });
+      );
+      const lazyDecode = vi.fn(() => new Promise(() => undefined));
+      const image = (overrides = {}) => ({
+        getBoundingClientRect: () => ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20 }),
+        closest: () => null,
+        parentElement: null,
+        style: { display: 'block', visibility: 'visible' },
+        decode: lazyDecode,
+        ...overrides,
+      });
+      const frames = vi.fn((callback) => callback());
+      const result = runInNewContext(SMOKE_CAPTURE_PREPARATION, {
+        document: {
+          fonts: { ready: Promise.resolve() },
+          images: [
+            image({
+              decode: visibleDecode,
+              getBoundingClientRect: () => ({
+                ...size,
+                left: 0,
+                top: 0,
+                right: size.width,
+                bottom: size.height,
+              }),
+            }),
+            image({ closest: () => ({ hidden: true }) }),
+            image({ style: { display: 'none', visibility: 'visible' } }),
+            image({ parentElement: { style: { display: 'none', visibility: 'visible' } } }),
+            image({ style: { display: 'block', visibility: 'hidden' } }),
+            image({
+              getBoundingClientRect: () => ({
+                width: 20,
+                height: 20,
+                left: 900,
+                top: 0,
+                right: 920,
+                bottom: 20,
+              }),
+            }),
+          ],
+        },
+        getComputedStyle: (element: { style: object }) => element.style,
+        window: { innerWidth: 800, innerHeight: 600 },
+        requestAnimationFrame: frames,
+      });
+      await started;
+      expect(visibleDecode).toHaveBeenCalledOnce();
+      expect(lazyDecode).not.toHaveBeenCalled();
+      expect(frames).not.toHaveBeenCalled();
+      completeVisible!();
+      await result;
+      expect(frames).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('enforces required operation deadlines and preserves operation errors', async () => {
     const failure = new Error('original operation failure');
