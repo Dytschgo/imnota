@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import type { BrowserWindow } from 'electron';
 import {
   NativeUiDriver,
   createSmokeCheckpoint,
   boundedSmokeDiagnostic,
   withSmokeDeadline,
+  SMOKE_CAPTURE_PREPARATION,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -50,6 +52,61 @@ describe('native smoke driver', () => {
     );
     expect(() => safeArtifactPath(artifacts, '../escape.png')).toThrow();
     expect(pathIsWithin(artifacts, artifacts)).toBe(false);
+  });
+
+  it('decodes visible capture images without waiting on hidden or offscreen lazy images', async () => {
+    let completeVisible: (() => void) | undefined;
+    let visibleStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      visibleStarted = resolve;
+    });
+    const visibleDecode = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          completeVisible = resolve;
+          visibleStarted!();
+        }),
+    );
+    const lazyDecode = vi.fn(() => new Promise(() => undefined));
+    const image = (overrides = {}) => ({
+      getBoundingClientRect: () => ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20 }),
+      closest: () => null,
+      style: { display: 'block', visibility: 'visible' },
+      decode: lazyDecode,
+      ...overrides,
+    });
+    const frames = vi.fn((callback) => callback());
+    const result = runInNewContext(SMOKE_CAPTURE_PREPARATION, {
+      document: {
+        fonts: { ready: Promise.resolve() },
+        images: [
+          image({ decode: visibleDecode }),
+          image({ closest: () => ({ hidden: true }) }),
+          image({ style: { display: 'none', visibility: 'visible' } }),
+          image({ style: { display: 'block', visibility: 'hidden' } }),
+          image({
+            getBoundingClientRect: () => ({
+              width: 20,
+              height: 20,
+              left: 900,
+              top: 0,
+              right: 920,
+              bottom: 20,
+            }),
+          }),
+        ],
+      },
+      getComputedStyle: (element: { style: object }) => element.style,
+      window: { innerWidth: 800, innerHeight: 600 },
+      requestAnimationFrame: frames,
+    });
+    await started;
+    expect(visibleDecode).toHaveBeenCalledOnce();
+    expect(lazyDecode).not.toHaveBeenCalled();
+    expect(frames).not.toHaveBeenCalled();
+    completeVisible!();
+    await result;
+    expect(frames).toHaveBeenCalledTimes(2);
   });
 
   it('enforces required operation deadlines and preserves operation errors', async () => {

@@ -5,6 +5,21 @@ import { atomicWrite } from './files.js';
 
 export type SmokeCheckpoint = (phase: string) => Promise<void>;
 
+// Hidden settings panels retain lazy images that Chromium may never request.
+// Only images that can contribute pixels to this viewport need to decode.
+export const SMOKE_CAPTURE_PREPARATION = `(async () => {
+  await document.fonts.ready;
+  const visibleImages = [...document.images].filter(image => {
+    const rect = image.getBoundingClientRect();
+    const style = getComputedStyle(image);
+    return !image.closest('[hidden]') && style.display !== 'none' && style.visibility !== 'hidden' &&
+      rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
+      rect.left < window.innerWidth && rect.top < window.innerHeight;
+  });
+  await Promise.all(visibleImages.map(image => image.decode().catch(() => undefined)));
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+})()`;
+
 export async function withSmokeDeadline<T>(
   operation: () => Promise<T>,
   timeoutMs: number,
@@ -377,11 +392,7 @@ export class NativeUiDriver {
     const target = safeArtifactPath(directory, filename);
     // DOM assertions and animation frames can precede Chromium's compositor update.
     // Decode assets first, then require a stable sequence of actual captured pixels.
-    await this.evaluate(`(async () => {
-      await document.fonts.ready;
-      await Promise.all([...document.images].map(image => image.decode().catch(() => undefined)));
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    })()`);
+    await this.evaluate(SMOKE_CAPTURE_PREPARATION);
     const deadline = Date.now() + this.defaultTimeoutMs;
     let previous: Buffer | undefined;
     let stableFrames = 0;
