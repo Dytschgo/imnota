@@ -8,7 +8,7 @@ import { parseProjectFile, type LegacyProjectData } from '../src/shared/schema.j
 import type { ProjectData, ProjectListItem } from '../src/shared/types.js';
 import { emptyProject } from '../src/shared/utils.js';
 import { migrateProject } from './collections.js';
-import { SEARCH_LIMITS, WorkspaceContentSearch } from './content-search.js';
+import { SEARCH_LIMITS, WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
 
 const fixtures: string[] = [];
@@ -44,6 +44,17 @@ async function tree(root: string): Promise<unknown[]> {
 }
 
 describe('read-only project listing', () => {
+  it('rejects backup and recovery ancestry even when the selected workspace is inside it', () => {
+    expect(isReservedProjectPath(path.join('workspace', '.imnota-backups', 'snapshots', 'id', 'data'))).toBe(
+      true,
+    );
+    expect(isReservedProjectPath(path.join('workspace', '.IMNOTA-BACKUPS', 'nested-project'))).toBe(true);
+    expect(
+      isReservedProjectPath(path.join('workspace', `.imnota-restore-rollback-${'a'.repeat(32)}`, 'data')),
+    ).toBe(true);
+    expect(isReservedProjectPath(path.join('workspace', '.private-project'))).toBe(false);
+  });
+
   it.each([3, 4] as const)(
     'returns v%s display summaries and metadata search text without content reads',
     async (schemaVersion) => {

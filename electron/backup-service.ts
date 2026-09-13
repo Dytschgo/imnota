@@ -23,6 +23,7 @@ import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 const ROOT_DIRECTORY = '.imnota-backups';
 const ROOT_MARKER = '.imnota-backups-v1.json';
 const PUBLICATION_LEDGER = '.imnota-backup-publications-v1.json';
+const DELETION_JOURNAL_PATTERN = /^\.imnota-backup-delete-([0-9a-f]{32})\.json$/;
 const SNAPSHOTS_DIRECTORY = 'snapshots';
 const STAGING_DIRECTORY = 'staging';
 const PROJECT_KEY_PATTERN = /^[0-9a-f]{32}$/;
@@ -55,6 +56,30 @@ const publicationLedgerSchema = z
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'Duplicate backup publication record.' });
   });
 type PublicationLedger = z.infer<typeof publicationLedgerSchema>;
+type PublicationEntry = z.infer<typeof publicationEntrySchema>;
+
+const deletionJournalSchema = z
+  .object({
+    version: z.literal(1),
+    token: z.string().regex(/^[0-9a-f]{32}$/),
+    phase: z.enum(['prepared', 'deleting']),
+    publication: publicationEntrySchema,
+    manifest: backupManifestSchema,
+  })
+  .strict()
+  .superRefine((journal, context) => {
+    if (
+      journal.publication.projectKey !== projectKey(journal.manifest.sourceProjectId) ||
+      journal.publication.sourceProjectId !== journal.manifest.sourceProjectId ||
+      journal.publication.snapshotId !== journal.manifest.snapshotId ||
+      journal.publication.manifestSha256 !== sha256(JSON.stringify(journal.manifest, null, 2))
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Deletion journal ownership is inconsistent.',
+      });
+  });
+type DeletionJournal = z.infer<typeof deletionJournalSchema>;
 
 const restoreJournalSchema = z
   .object({
@@ -255,25 +280,30 @@ async function durableAtomicWrite(filePath: string, content: string): Promise<vo
     } finally {
       await committed.close();
     }
-    try {
-      const directory = await fs.open(parent, 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (process.platform !== 'win32' || !['EISDIR', 'EINVAL', 'ENOTSUP', 'EPERM'].includes(code ?? ''))
-        throw error;
-    }
+    await syncDirectory(parent);
   } finally {
     await handle?.close().catch(() => undefined);
     await fs.unlink(temporary).catch(() => undefined);
   }
 }
 
-async function exactTreeFiles(root: string): Promise<string[]> {
+async function syncDirectory(target: string): Promise<void> {
+  await assertNoLinks(target);
+  try {
+    const directory = await fs.open(target, 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform !== 'win32' || !['EISDIR', 'EINVAL', 'ENOTSUP', 'EPERM'].includes(code ?? ''))
+      throw error;
+  }
+}
+
+async function exactTreeFiles(root: string, allowedDirectories?: ReadonlySet<string>): Promise<string[]> {
   await assertNoLinks(root);
   const pending: Array<{ directory: string; relative: string }> = [{ directory: root, relative: '' }];
   const files: string[] = [];
@@ -287,8 +317,11 @@ async function exactTreeFiles(root: string): Promise<string[]> {
       await assertNoLinks(target);
       const relative = current.relative ? `${current.relative}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) throw new Error('Linked backup content is not supported.');
-      if (entry.isDirectory()) pending.push({ directory: target, relative });
-      else if (entry.isFile()) files.push(relative.replaceAll('\\', '/'));
+      if (entry.isDirectory()) {
+        if (allowedDirectories && !allowedDirectories.has(relative))
+          throw new Error('Deletion quarantine contains unowned directories; cleanup was stopped.');
+        pending.push({ directory: target, relative });
+      } else if (entry.isFile()) files.push(relative.replaceAll('\\', '/'));
       else throw new Error('Backup contains an unsupported filesystem entry.');
     }
   }
@@ -426,19 +459,114 @@ export class BackupService {
     return manifest.sha256 === record.manifestSha256;
   }
 
-  private async unregisterPublication(root: string, projectId: string, snapshot: string): Promise<void> {
+  private async unregisterPublication(root: string, publication: PublicationEntry): Promise<void> {
     const ledger = await this.readPublicationLedger(root);
-    const entries = ledger.entries.filter(
-      (entry) =>
-        !(
-          entry.projectKey === projectKey(projectId) &&
-          entry.snapshotId === snapshot &&
-          entry.sourceProjectId === projectId
-        ),
+    const record = ledger.entries.find(
+      (entry) => entry.projectKey === publication.projectKey && entry.snapshotId === publication.snapshotId,
     );
-    if (entries.length === ledger.entries.length)
-      throw new Error('Refusing to remove a snapshot without its publication record.');
-    await this.writePublicationLedger(root, { version: 1, entries });
+    // The directory is already gone. A previous durable ledger write may have
+    // succeeded before journal cleanup failed, so this reconciliation is idempotent.
+    if (!record) return;
+    if (JSON.stringify(record) !== JSON.stringify(publication))
+      throw new Error('Refusing to unregister a changed snapshot publication.');
+    await this.writePublicationLedger(root, {
+      version: 1,
+      entries: ledger.entries.filter((entry) => entry !== record),
+    });
+  }
+
+  private deletionPaths(root: string, journal: DeletionJournal) {
+    const parent = path.join(root, SNAPSHOTS_DIRECTORY, journal.publication.projectKey);
+    const source = path.join(parent, journal.publication.snapshotId);
+    const quarantine = path.join(parent, `.imnota-delete-${journal.token}`);
+    const record = path.join(root, `.imnota-backup-delete-${journal.token}.json`);
+    if (!isWithin(root, parent) || path.dirname(source) !== parent || path.dirname(quarantine) !== parent)
+      throw new Error('Deletion leaves the owned backup library.');
+    return { parent, source, quarantine, record };
+  }
+
+  private async writeDeletionJournal(root: string, journal: DeletionJournal): Promise<void> {
+    const validated = deletionJournalSchema.parse(journal);
+    await durableAtomicWrite(this.deletionPaths(root, validated).record, JSON.stringify(validated, null, 2));
+  }
+
+  private async validateDeletionRemnants(directory: string, journal: DeletionJournal): Promise<void> {
+    const expected = new Map<string, { sha256: string }>([
+      ['manifest.json', { sha256: journal.publication.manifestSha256 }],
+      ...journal.manifest.files.map((file) => [`data/${file.path}`, file] as const),
+    ]);
+    const directories = new Set<string>();
+    for (const relative of expected.keys()) {
+      const parts = relative.split('/');
+      for (let length = 1; length < parts.length; length++) directories.add(parts.slice(0, length).join('/'));
+    }
+    // Only a subset of the originally validated files may remain after a partial
+    // delete. A changed file or an added entry is never covered by the tombstone.
+    for (const relative of await exactTreeFiles(directory, directories)) {
+      const recorded = expected.get(relative);
+      if (!recorded || (await hashFile(targetForRelative(directory, relative))).sha256 !== recorded.sha256)
+        throw new Error('Deletion quarantine contains changed or unowned files; cleanup was stopped.');
+    }
+  }
+
+  private async finishDeletion(root: string, journal: DeletionJournal): Promise<void> {
+    const locations = this.deletionPaths(root, deletionJournalSchema.parse(journal));
+    const source = await lstatOptional(locations.source);
+    let quarantine = await lstatOptional(locations.quarantine);
+    if (
+      (source && !source.isDirectory()) ||
+      (quarantine && !quarantine.isDirectory()) ||
+      (source && quarantine)
+    )
+      throw new Error('Deletion paths are ambiguous; no cleanup was attempted.');
+    const ledger = await this.readPublicationLedger(root);
+    const registered = ledger.entries.some(
+      (entry) => JSON.stringify(entry) === JSON.stringify(journal.publication),
+    );
+    if (journal.phase === 'prepared') {
+      if (!registered || (!source && !quarantine))
+        throw new Error('Deletion preparation has no matching published snapshot.');
+      const directory = source ? locations.source : locations.quarantine;
+      await this.inspectDirectory(directory, journal.publication.snapshotId);
+      if (
+        (await hashFile(path.join(directory, 'manifest.json'))).sha256 !== journal.publication.manifestSha256
+      )
+        throw new Error('Deletion preparation no longer matches its publication.');
+      if (source) await this.rename(locations.source, locations.quarantine);
+      await syncDirectory(locations.parent);
+      journal = { ...journal, phase: 'deleting' };
+      // Commit deletion authority outside the recursive-delete target first.
+      await this.writeDeletionJournal(root, journal);
+      quarantine = await lstatOptional(locations.quarantine);
+    } else if (source) {
+      throw new Error('A snapshot reappeared after quarantine; cleanup was stopped.');
+    }
+    if (quarantine) {
+      if (!registered) throw new Error('Deletion quarantine has no matching publication record.');
+      await this.validateDeletionRemnants(locations.quarantine, journal);
+      await this.removeDirectory(locations.quarantine);
+      if (await lstatOptional(locations.quarantine))
+        throw new Error('Deletion quarantine was not fully removed.');
+    }
+    await syncDirectory(locations.parent);
+    // Keep both durable records until removal succeeds, including partial failures.
+    await this.unregisterPublication(root, journal.publication);
+    await fs.unlink(locations.record);
+    await syncDirectory(root);
+  }
+
+  private async recoverDeletions(root: string, projectId: string, keep: ReadonlySet<string>): Promise<void> {
+    for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+      const match = DELETION_JOURNAL_PATTERN.exec(entry.name);
+      if (!match) continue;
+      const record = path.join(root, entry.name);
+      await regularFile(record);
+      const journal = deletionJournalSchema.parse(JSON.parse(await fs.readFile(record, 'utf8')));
+      if (journal.token !== match[1]) throw new Error('Deletion journal identity does not match its name.');
+      if (journal.publication.sourceProjectId !== projectId || keep.has(journal.publication.snapshotId))
+        continue;
+      await this.finishDeletion(root, journal);
+    }
   }
 
   private async createStage(root: string): Promise<{ directory: string; token: string }> {
@@ -480,7 +608,8 @@ export class BackupService {
     const sourceStat = await fs.stat(sourceRoot).catch(() => null);
     if (!sourceStat?.isDirectory()) throw new Error('The project folder is unavailable.');
     const root = (await this.root(true))!;
-    if (isWithin(sourceRoot, root)) throw new Error('Backups must be stored outside the active project.');
+    if (isWithin(sourceRoot, root) || isWithin(root, sourceRoot))
+      throw new Error('Backups and active projects must be stored in separate folders.');
 
     const sourceProjectFile = path.join(sourceRoot, 'project.json');
     await regularFile(sourceProjectFile);
@@ -669,6 +798,7 @@ export class BackupService {
     if (!root) return;
     const preferences = this.options.getPreferences();
     const keep = new Set(retainedSnapshotIds.map((id) => backupSnapshotIdSchema.parse(id)));
+    await this.recoverDeletions(root, projectId, keep);
     const candidates: Array<{ directory: string; summary: BackupSnapshotSummary }> = [];
     for (const entry of await this.snapshotDirectories()) {
       if (entry.projectKey !== projectKey(projectId)) continue;
@@ -708,8 +838,24 @@ export class BackupService {
         !(await this.publicationMatches(root, candidate.directory, projectId, candidate.summary.snapshotId))
       )
         throw new Error('Refusing to remove a snapshot without its exact publication record.');
-      await this.unregisterPublication(root, projectId, candidate.summary.snapshotId);
-      await this.removeDirectory(candidate.directory);
+      const ledger = await this.readPublicationLedger(root);
+      const publication = ledger.entries.find(
+        (entry) =>
+          entry.projectKey === projectKey(projectId) && entry.snapshotId === candidate.summary.snapshotId,
+      );
+      if (!publication) throw new Error('The snapshot publication disappeared before retention.');
+      const journal = deletionJournalSchema.parse({
+        version: 1,
+        token: this.randomId().replaceAll('-', '').toLowerCase(),
+        phase: 'prepared',
+        publication,
+        manifest: inspection.manifest,
+      });
+      const locations = this.deletionPaths(root, journal);
+      if ((await lstatOptional(locations.record)) || (await lstatOptional(locations.quarantine)))
+        throw new Error('The allocated deletion journal or quarantine already exists.');
+      await this.writeDeletionJournal(root, journal);
+      await this.finishDeletion(root, journal);
     }
   }
 

@@ -106,7 +106,7 @@ import { ProjectWatchManager, projectRevisionForSource } from './project-watch.j
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { WorkspaceContentSearch } from './content-search.js';
+import { WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
@@ -266,6 +266,10 @@ async function assertProjectPath(projectPath: string): Promise<string> {
   pathInput.parse(projectPath);
   const workspace = workspaceOrThrow();
   const resolved = path.resolve(projectPath);
+  if (isReservedProjectPath(resolved))
+    throw new Error(
+      'Backup and recovery folders cannot be opened as active projects. Restore a snapshot first.',
+    );
   await assertNoLinks(resolved);
   if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
     throw new Error('Project path is outside the selected workspace.');

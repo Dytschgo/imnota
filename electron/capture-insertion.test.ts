@@ -19,7 +19,7 @@ afterEach(async () => {
 
 describe('capture insertion transaction', () => {
   it('writes image, sidecars, and metadata together through the capture journal', async () => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-'));
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-')));
     fixtures.push(directory);
     const projectBefore = Buffer.from('{"screenshots":[]}');
     const projectAfter = Buffer.from('{"screenshots":["capture"]}');
@@ -57,7 +57,7 @@ describe('capture insertion transaction', () => {
   });
 
   it('does not stage files or rewrite project metadata when admission is revoked during baseline read', async () => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-'));
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-')));
     fixtures.push(directory);
     const projectBefore = Buffer.from('{"screenshots":[]}');
     await atomicWrite(path.join(directory, 'project.json'), projectBefore);

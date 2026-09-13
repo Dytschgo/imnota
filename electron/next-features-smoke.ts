@@ -75,6 +75,7 @@ export async function exerciseNextFeatures(
   await driver.fill({ selector: '[aria-label="Search projects"]' }, 'orbital lantern');
   await driver.waitFor({ selector: '.content-search-result', text: 'Feature verification' });
   await capture('next-content-search.png');
+  console.info('Native library search verification: opening focused result');
   await driver.click({ selector: '.content-search-result', text: 'Feature verification' });
   await driver.waitFor({ selector: '[data-testid="markdown-input"]:focus' });
   await driver.evaluate(`new Promise((resolve, reject) => {
@@ -88,6 +89,7 @@ export async function exerciseNextFeatures(
     };
     check();
   })`);
+  console.info('Native library search verification: focused match selected; verifying unchanged metadata');
   if (!(await fs.readFile(path.join(projectPath, 'project.json'))).equals(beforeSearch))
     throw new Error('Content search modified project metadata or item order.');
   return captures;

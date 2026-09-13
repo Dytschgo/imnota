@@ -17,7 +17,12 @@ import { assertNoLinks, isWithin } from './files.js';
 const RESERVED_SEARCH_DIRECTORY = /^\.imnota-(?:restore-(?:rollback|stage)-[a-f0-9]{32}$|template-)/i;
 
 export function isReservedProjectDirectory(name: string): boolean {
-  return RESERVED_SEARCH_DIRECTORY.test(name);
+  return name.toLowerCase() === '.imnota-backups' || RESERVED_SEARCH_DIRECTORY.test(name);
+}
+
+/** Backup data and recovery copies are not editable workspace projects. */
+export function isReservedProjectPath(projectPath: string): boolean {
+  return path.resolve(projectPath).split(path.sep).some(isReservedProjectDirectory);
 }
 
 export const SEARCH_LIMITS = {

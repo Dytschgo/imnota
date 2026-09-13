@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function workspace(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-template-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-template-')));
   temporaryRoots.push(root);
   return root;
 }

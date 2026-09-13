@@ -212,6 +212,8 @@ interface SettledPromptPlan extends PreparedPromptPlan {
 interface PromptExportArtifact {
   sessionId: string;
   planId: string;
+  projectPath: string;
+  projectId: string;
   grants: ReadonlyMap<number, PromptExportBundleGrant>;
   input: Readonly<PromptCollectionInput>;
 }
@@ -559,8 +561,8 @@ export class PromptBundleControllerEngine {
     return this.bridge.loadContentItem(input);
   }
 
-  private async prepareMetadata(run: ActiveRun): Promise<PreparedPromptMetadata | PromptBundleNoContent> {
-    this.emit({ error: undefined, noContentMessage: undefined, progress: { phase: 'planning' } });
+  private async readSavedContext(signal: AbortSignal): Promise<Readonly<SavedPromptExportContext>> {
+    throwIfAborted(signal);
     let saved: SavedPromptExportContext;
     try {
       saved = await this.getSavedContext();
@@ -571,8 +573,47 @@ export class PromptBundleControllerEngine {
         true,
       );
     }
+    throwIfAborted(signal);
+    return cloneAndFreeze(saved);
+  }
+
+  private assertArtifactContext(
+    artifact: PromptExportArtifact,
+    context: Readonly<SavedPromptExportContext>,
+  ): void {
+    if (
+      artifact.projectPath !== context.snapshot.projectPath ||
+      artifact.projectId !== context.snapshot.project.id
+    )
+      throw failure(
+        'content-changed',
+        'These files belong to another project. Prepare fresh files for the current project.',
+      );
+    if (artifact.input.collectionId !== context.collectionId)
+      throw failure(
+        'content-changed',
+        'These files belong to another collection. Prepare fresh files for the current collection.',
+      );
+  }
+
+  private async validateArtifactContext(artifact: PromptExportArtifact, signal: AbortSignal): Promise<void> {
+    const context = await this.readSavedContext(signal);
+    this.assertArtifactContext(artifact, context);
+    if (this.latestArtifact !== artifact)
+      throw failure(
+        'invalid-bundle',
+        'These files belong to an older export session. Use the latest prompt card.',
+      );
+  }
+
+  private async prepareMetadata(
+    run: ActiveRun,
+    artifact?: PromptExportArtifact,
+  ): Promise<PreparedPromptMetadata | PromptBundleNoContent> {
+    this.emit({ error: undefined, noContentMessage: undefined, progress: { phase: 'planning' } });
+    const context = await this.readSavedContext(run.controller.signal);
     this.assertActive(run);
-    const context = cloneAndFreeze(saved);
+    if (artifact) this.assertArtifactContext(artifact, context);
     const collection = context.snapshot.project.collections.find((item) => item.id === context.collectionId);
     if (!collection)
       throw failure(
@@ -987,6 +1028,8 @@ export class PromptBundleControllerEngine {
     const artifact: PromptExportArtifact = {
       sessionId: session.sessionId,
       planId: prepared.planId,
+      projectPath: prepared.context.snapshot.projectPath,
+      projectId: prepared.context.snapshot.project.id,
       input: prepared.input,
       grants: new Map(finalized.bundles.map((grant) => [grant.bundleNumber, grant])),
     };
@@ -1246,7 +1289,11 @@ export class PromptBundleControllerEngine {
 
   private async nativeArtifactAction(
     selection: PromptBundleSelection,
-    action: (sessionId: string, bundleNumber: number, signal: AbortSignal) => Promise<WorkflowResult<void>>,
+    action: (
+      sessionId: string,
+      bundleNumber: number,
+      validate: () => Promise<void>,
+    ) => Promise<WorkflowResult<void>>,
     outcome: PromptDeliveryOutcome = 'files',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.activeRun) {
@@ -1277,7 +1324,7 @@ export class PromptBundleControllerEngine {
       }
       const { artifact, bundleNumber } = this.artifactSelection(selection);
       run = this.beginRun();
-      const metadata = await this.prepareMetadata(run);
+      const metadata = await this.prepareMetadata(run, artifact);
       this.assertActive(run);
       if ('kind' in metadata || JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
         throw failure(
@@ -1295,7 +1342,13 @@ export class PromptBundleControllerEngine {
           message: outcome === 'files' ? 'Opening generated files' : 'Preparing clipboard',
         },
       });
-      const result = await action(artifact.sessionId, bundleNumber, run.controller.signal);
+      const actionRun = run;
+      const validate = async () => {
+        await this.validateArtifactContext(artifact, actionRun.controller.signal);
+        this.assertActive(actionRun);
+      };
+      await validate();
+      const result = await action(artifact.sessionId, bundleNumber, validate);
       if (!result.ok) throw nativeFailure(result.error, true);
       this.assertActive(run);
       this.deliveryCompleted(bundleNumber, outcome);
@@ -1388,40 +1441,37 @@ export class PromptBundleControllerEngine {
   }
 
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    return this.nativeArtifactAction(selection, async (sessionId, bundleNumber, signal) => {
+    return this.nativeArtifactAction(selection, async (sessionId, bundleNumber, validate) => {
       if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
         const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
         if (!png.ok) return png;
+        await validate();
       }
-      throwIfAborted(signal);
       return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
     });
   }
 
   async openFolder(): Promise<PromptBundleControllerActionResult> {
-    const artifact = this.latestArtifact;
-    const bundleNumber = artifact?.grants.keys().next().value as number | undefined;
+    let artifact = this.latestArtifact;
+    let bundleNumber = artifact?.grants.keys().next().value as number | undefined;
     if (!artifact || bundleNumber === undefined) {
       const prepared = await this.fresh(undefined, false);
       if (!prepared.ok || !prepared.sessionId || prepared.bundleNumber === undefined) return prepared;
-      try {
-        const result = await this.bridge.openPromptExportBundle({
-          sessionId: prepared.sessionId,
-          bundleNumber: prepared.bundleNumber,
-          target: 'folder',
-        });
-        if (!result.ok) throw nativeFailure(result.error, true);
-        return prepared;
-      } catch (error) {
-        return this.resultError(error);
-      }
+      artifact = this.latestArtifact;
+      bundleNumber = prepared.bundleNumber;
     }
-    return this.nativeArtifactAction(bundleNumber, (sessionId, selectedBundleNumber) =>
-      this.bridge.openPromptExportBundle({
-        sessionId,
-        bundleNumber: selectedBundleNumber,
-        target: 'folder',
-      }),
+    if (!artifact)
+      return this.resultError(
+        failure('invalid-bundle', 'Prepare fresh files before opening the export folder.'),
+      );
+    return this.nativeArtifactAction(
+      { planId: artifact.planId, artifactSessionId: artifact.sessionId, bundleNumber },
+      (sessionId, selectedBundleNumber) =>
+        this.bridge.openPromptExportBundle({
+          sessionId,
+          bundleNumber: selectedBundleNumber,
+          target: 'folder',
+        }),
     );
   }
 
@@ -1440,6 +1490,10 @@ export class PromptBundleControllerEngine {
     try {
       const artifact = this.latestArtifact;
       const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
+      const requestedArtifact =
+        typeof selection !== 'number' && selection.artifactSessionId
+          ? this.artifactSelection(selection).artifact
+          : undefined;
       if (card && !card.pictureNumbers.length)
         throw failure('invalid-bundle', 'This text-only prompt has no image preview.', true);
       const cardUsesArtifact =
@@ -1447,11 +1501,13 @@ export class PromptBundleControllerEngine {
         card?.planId === artifact.planId &&
         card.artifactSessionId === artifact.sessionId &&
         artifact.grants.has(bundleNumber);
-      if (artifact && cardUsesArtifact) {
+      if (artifact && (requestedArtifact || cardUsesArtifact)) {
+        await this.validateArtifactContext(artifact, controller.signal);
+        if (sequence !== this.previewSequence) throw cancelledFailure();
         const content = unwrap(
           await this.bridge.readPromptExportBundle({ sessionId: artifact.sessionId, bundleNumber }),
         );
-        throwIfAborted(controller.signal);
+        await this.validateArtifactContext(artifact, controller.signal);
         if (sequence !== this.previewSequence) throw cancelledFailure();
         this.emit({
           preview: {

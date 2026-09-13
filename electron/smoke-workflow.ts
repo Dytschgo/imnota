@@ -1718,6 +1718,9 @@ export async function runSmokeWorkflow(
   const artifacts: SmokeCapture[] = [];
   const assertions: string[] = [];
   const timings: SmokeTiming[] = [];
+  const workflowStarted = Date.now();
+  const checkpoint = (phase: string) =>
+    console.info(`Native verification +${Date.now() - workflowStarted}ms: ${phase}`);
   const sources = await createFixtureSources(fixtureRoot);
   const driver = new NativeUiDriver(initialWindow, mode === 'stress' ? 30_000 : 15_000);
   if (!initialWindow.isVisible()) initialWindow.show();
@@ -1991,6 +1994,7 @@ export async function runSmokeWorkflow(
     );
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
 
+  checkpoint('existing image, clipboard, recovery and benchmark checks complete');
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
@@ -1999,12 +2003,15 @@ export async function runSmokeWorkflow(
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
+  checkpoint('mixed content and global search checks complete; starting templates and clipboard fallbacks');
   artifacts.push(...(await exerciseNextFeatures(driver, host, artifactDirectory)));
   assertions.push(
     'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths and read-only focused search',
   );
+  checkpoint('templates, clipboard fallbacks and library search complete; starting local history');
   artifacts.push(...(await exerciseLocalHistory(driver, host, artifactDirectory)));
   assertions.push('mixed-content snapshot, restore as new, in-place cache replacement, edit and reopen');
+  checkpoint('local history restore and reopen complete; capturing light feature views');
   artifacts.push(...(await captureNextFeatureLightViews(driver, artifactDirectory)));
 
   const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
@@ -2015,6 +2022,7 @@ export async function runSmokeWorkflow(
     );
   }
 
+  checkpoint('all native workflow checks complete');
   const report: SmokeWorkflowReport = {
     passed: true,
     version: options.version,

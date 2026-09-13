@@ -58,6 +58,8 @@ Snapshots include canonical metadata, screenshot sources, annotations, descripti
 
 A root-local publication ledger identifies snapshots eligible for retention. Copied or unregistered snapshots remain readable but are not automatically deleted. In-place restore creates a safety snapshot and retains the entire previous project in a sibling rollback folder, including extra files. A durable journal supports interrupted folder-swap recovery. Rollback folders are excluded from project lists and automatic retention.
 
+Retention journals the exact published manifest before moving a snapshot into a reserved deletion folder. If locked files interrupt removal, the next retention pass checks the remaining files against that journal and retries. Changed or unknown content stops cleanup. Publication ownership is removed only after deletion succeeds. Snapshot data and recovery folders cannot be opened as active projects; use the history restore actions instead.
+
 ## Migration and compatibility
 
 Opening schema 1 or 2 data migrates feedback rounds/subfolders to collections. Existing screenshot descriptions and populated legacy note fields are merged into the single Description. Project-level desired outcome, AI instructions and technical constraints are merged into collection Overall context. Legacy `critical` priority becomes High; tags and screenshot statuses do not enter the schema 3 primary model.

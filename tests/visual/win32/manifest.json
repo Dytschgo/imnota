@@ -21,5 +21,16 @@
   "sourceRevision": "64c65e137cd68a0c17f4b5b74a921b7351580ac6",
   "electron": "39.8.10",
   "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34327235444",
-  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all seven changed captures and their difference images individually reviewed. Four light workspaces and three light onboarding scenes adopt stronger graphite ink, surfaces, borders, and the light scrim. Existing adaptive toolbar layout is preserved. Seven dark/settings/backdrop captures retained within the unchanged strict tolerance. Native verification passed."
+  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all seven changed captures and their difference images individually reviewed. Four light workspaces and three light onboarding scenes adopt stronger graphite ink, surfaces, borders, and the light scrim. Existing adaptive toolbar layout is preserved. Seven dark/settings/backdrop captures retained within the unchanged strict tolerance. Native verification passed.",
+  "captureUpdates": {
+    "1440x900-settings.png": {
+      "reviewedAt": "2026-09-14",
+      "sourceRevision": "c46db381e992801fa5a6a58e7dd7533262e85778",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34786340794",
+      "review": "Baseline, candidate and highlighted difference individually reviewed. The added Backups & history tab redistributes the settings navigation; content and all existing controls remain intact. The other 13 baseline captures pass unchanged. The source run timed out later during feature verification; this approves only the settings image, not native workflow completion. Strict comparison tolerance is unchanged."
+    }
+  }
 }

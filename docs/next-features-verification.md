@@ -6,7 +6,11 @@ This record covers workflow templates, clipboard fallbacks, content search, loca
 
 The features are integrated with the 0.2.7 codebase and its Electron 44, React 19 and Zod 4 dependencies. Existing hosted sharing, project icons, revision-checked metadata edits, navigation and active/archived search remain available. Region capture stays disabled by default and does not occupy toolbar space until enabled.
 
-Integration checks passed 733 application tests, 45 script tests and 37 sharing-service tests, plus the share contract, formatting, lint, type checks and a production build on Windows. The script suite skipped its real macOS-package test. Subsequent targeted tests cover archived search isolation, capture opt-in visibility and the text-only primary copy state. Native and cross-platform release verification are still pending; the original implementation evidence below describes the older codebase.
+The corrected integration passed 778 application tests, 45 script tests and 37 sharing-service tests, plus the share contract, formatting, lint, type checks and a production build on Windows. The script suite skipped its real macOS-package test. Regression coverage includes archived search isolation, capture opt-in visibility, the text-only primary copy state, restore navigation, export grants bound to project identity, reserved backup paths and interrupted retention cleanup.
+
+The full Windows walkthrough passed 21 assertion groups with synthetic capture. A separate Electron 44 desktop-capture probe passed in memory without saving real desktop pixels. A locally packaged Windows application passed all 20 normal workflow groups in approximately 91 seconds, including restore/reopen and in-place image/draft replacement. Linux CI passed both development and packaged native verification. Cross-platform checks on the final reviewed commit are still required before release.
+
+The first Windows CI attempt reached its unchanged 180-second limit. Phase logging was added to distinguish slow progress from a stalled operation. All 13 existing workspace/onboarding/backdrop visual baselines passed on that runner; the remaining settings image was individually reviewed and updated for the new Backups & history tab. Comparison tolerances are unchanged. New macOS test fixtures now canonicalize the OS temporary-folder alias, matching existing fixture setup while preserving the application's link rejection.
 
 ## Original implementation checks
 

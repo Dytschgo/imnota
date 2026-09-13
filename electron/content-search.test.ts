@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function workspace() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-content-search-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-content-search-')));
   fixtures.push(root);
   return root;
 }

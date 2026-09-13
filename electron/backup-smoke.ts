@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { nativeImage } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
@@ -12,6 +13,7 @@ export async function exerciseLocalHistory(
   artifactDirectory?: string,
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
+  console.info('Native history verification: locating mixed fixture');
   const sourcePath = await driver.evaluate<string>(`(async () => {
     const projects = await window.imnota.listProjects();
     return projects.find(project => project.name === 'Mixed Content Verification').projectPath;
@@ -19,10 +21,13 @@ export async function exerciseLocalHistory(
   const project = await host.readProject(sourcePath);
   const initialPixels = Buffer.alloc(48 * 32 * 4, 0xcc);
   for (let offset = 3; offset < initialPixels.length; offset += 4) initialPixels[offset] = 255;
+  console.info('Native history verification: writing fixture image to clipboard');
   await nativeClipboard.writeImage(nativeImage.createFromBitmap(initialPixels, { width: 48, height: 32 }));
+  console.info('Native history verification: pasting fixture image');
   await driver.evaluate(
     `window.imnota.pasteImage(${JSON.stringify(sourcePath)}, ${JSON.stringify(project.collections[0].id)})`,
   );
+  console.info('Native history verification: mixed fixture image inserted');
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Backups & history', exact: true });
   await driver.waitFor({ selector: '[aria-label="Project snapshots"][aria-busy="false"]' });
@@ -42,6 +47,7 @@ export async function exerciseLocalHistory(
     resolve(document.querySelector('[aria-label="Project to snapshot"]').value)))`);
   if (selectedPath !== sourcePath)
     throw new Error('The snapshot chooser did not retain its selected project.');
+  console.info('Native history verification: creating snapshot');
   await driver.click({ selector: '.imnota-backup-manual button', text: 'Create snapshot', exact: true });
   await driver.waitFor({
     selector: '.imnota-backup-status',
@@ -63,6 +69,24 @@ export async function exerciseLocalHistory(
   const originals = new Map<string, Buffer>();
   for (const file of snapshot.files)
     originals.set(file.path, await fs.readFile(path.join(sourcePath, file.path)));
+  const backupRoot = await driver.evaluate<string>(
+    'window.imnota.getBackupHistory().then(value => value.location)',
+  );
+  const snapshotDataPath = path.join(
+    backupRoot,
+    'snapshots',
+    createHash('sha256').update(project.id).digest('hex').slice(0, 32),
+    snapshot.snapshotId,
+    'data',
+  );
+  const rejectedBackupOpen =
+    await driver.evaluate<boolean>(`window.imnota.loadProject(${JSON.stringify(snapshotDataPath)})
+    .then(() => false, error => error.message.includes('Backup and recovery folders cannot be opened'))`);
+  if (!rejectedBackupOpen) throw new Error('Snapshot data was admitted as an active project.');
+  if (
+    !(await fs.readFile(path.join(snapshotDataPath, 'project.json'))).equals(originals.get('project.json')!)
+  )
+    throw new Error('Rejected backup open modified the snapshot metadata.');
   if (artifactDirectory) {
     driver.browserWindow.show();
     driver.browserWindow.focus();
@@ -73,6 +97,7 @@ export async function exerciseLocalHistory(
     captures.push(await driver.capture(artifactDirectory, 'next-local-history.png'));
   }
   // Closing and reopening must not depend on an in-memory backup grant.
+  console.info('Native history verification: snapshot verified; reopening before restore');
   driver.setWindow(await host.reopenWindow());
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Backups & history', exact: true });
@@ -120,6 +145,7 @@ export async function exerciseLocalHistory(
   }
 
   // Exercise the same path/ID with a newer image already loaded in the editor.
+  console.info('Native history verification: restored copy reopened; checking in-place restore');
   // Only this isolated source fixture is modified; no real desktop or user files.
   const shot = restored.screenshots[0]!;
   await driver.click({ selector: `[data-testid="screenshot-${shot.id}"]` });

@@ -632,6 +632,166 @@ describe('prompt export controller orchestration', () => {
     expect(native.copies).toEqual([]);
   });
 
+  describe.each([
+    { name: 'project path', path: 'P:/different-project', id: 'project' },
+    { name: 'project ID', path: 'P:/opaque-project-grant', id: 'different-project' },
+    { name: 'project path and ID', path: 'P:/different-project', id: 'different-project' },
+  ])('retained artifact ownership: changed $name', ({ path, id }) => {
+    test.each(['openFolder', 'copyMarkdown', 'copyImage', 'copyPaths', 'openFiles', 'loadPreview'] as const)(
+      'rejects %s for an identical collection in another project without generating replacement files',
+      async (action) => {
+        let context = savedContext([screenshot(0)]);
+        const native = fakeBridge();
+        const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
+        native.bridge.copyText = vi.fn(async () => undefined);
+        const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+        expect((await controller.prepareFreshFiles()).ok).toBe(true);
+        const card = controller.getState().cards[0];
+        context = structuredClone(context);
+        context.snapshot.projectPath = path;
+        context.snapshot.project.id = id;
+        // Opening another collection rebuilds cards, but retains the previous export folder.
+        if (action === 'openFolder') await controller.open();
+
+        const result =
+          action === 'openFolder' ? await controller.openFolder() : await controller[action](card);
+
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: 'content-changed', fallbackAvailable: false },
+        });
+        expect(native.copies).toEqual([]);
+        expect(native.opens).toEqual([]);
+        expect(read).not.toHaveBeenCalled();
+        expect(native.bridge.copyText).not.toHaveBeenCalled();
+        expect(native.starts).toHaveLength(1);
+        expect(controller.getState().preview).toBeUndefined();
+      },
+    );
+  });
+
+  test('rejects numeric fallback selections after switching to an identical project', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    context = structuredClone(context);
+    context.snapshot.projectPath = 'P:/different-project';
+    context.snapshot.project.id = 'different-project';
+
+    expect(await controller.copyMarkdown(1)).toMatchObject({ ok: false, error: { code: 'content-changed' } });
+    expect(native.copies).toEqual([]);
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('does not open the Markdown file if the project switches while its PNG is opening', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    const open = native.bridge.openPromptExportBundle;
+    native.bridge.openPromptExportBundle = async (input) => {
+      const result = await open(input);
+      context = structuredClone(context);
+      context.snapshot.projectPath = 'P:/different-project';
+      return result;
+    };
+
+    expect(await controller.openFiles(controller.getState().cards[0])).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.opens).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'png' }]);
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('rechecks project ownership after asynchronous metadata validation', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    const load = native.bridge.loadScreenshotContent;
+    native.bridge.loadScreenshotContent = async (input) => {
+      const result = await load(input);
+      context = structuredClone(context);
+      context.snapshot.projectPath = 'P:/different-project';
+      return result;
+    };
+
+    expect(await controller.copyImage(controller.getState().cards[0])).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.copies).toEqual([]);
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('rejects an old preview grant after the dialog plans an identical collection in another project', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
+    const renderer = fakeRendering();
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+    await controller.prepareFreshFiles();
+    const card = controller.getState().cards[0];
+    context = structuredClone(context);
+    context.snapshot.projectPath = 'P:/different-project';
+    await controller.open();
+    const composeCount = renderer.stats.composeCount;
+
+    expect(await controller.loadPreview(card)).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(renderer.stats.composeCount).toBe(composeCount);
+    expect(controller.getState().preview).toBeUndefined();
+  });
+
+  test('does not publish a preview if the project switches while the artifact is read', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    const read = native.bridge.readPromptExportBundle;
+    native.bridge.readPromptExportBundle = async (input) => {
+      const result = await read(input);
+      context = structuredClone(context);
+      context.snapshot.project.id = 'different-project';
+      return result;
+    };
+
+    expect(await controller.loadPreview(controller.getState().cards[0])).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(controller.getState().preview).toBeUndefined();
+  });
+
+  test('keeps the latest preview when an older ownership check resolves later', async () => {
+    const context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const getSavedContext = vi.fn(async () => context);
+    const controller = engine(getSavedContext, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    const card = controller.getState().cards[0];
+    let release!: (context: SavedPromptExportContext) => void;
+    getSavedContext.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const first = controller.loadPreview(card);
+    expect((await controller.loadPreview(card)).ok).toBe(true);
+    const preview = controller.getState().preview;
+    release(context);
+
+    expect(await first).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(controller.getState().preview).toBe(preview);
+    expect(controller.getState().error).toBeUndefined();
+  });
+
   test('does not open a second file after cancellation during the first native open', async () => {
     const native = fakeBridge();
     const renderer = fakeRendering();

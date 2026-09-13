@@ -40,6 +40,39 @@ function snapshotDirectory(projectId: string, snapshotId: string): string {
   return path.join(backupParent, '.imnota-backups', 'snapshots', projectKey(projectId), snapshotId);
 }
 
+async function pendingDeletion() {
+  const root = service().location();
+  const records = (await fs.readdir(root)).filter((name) =>
+    /^\.imnota-backup-delete-[0-9a-f]{32}\.json$/.test(name),
+  );
+  expect(records).toHaveLength(1);
+  const record = path.join(root, records[0]);
+  const journal = JSON.parse(await fs.readFile(record, 'utf8')) as {
+    token: string;
+    phase: string;
+    publication: { projectKey: string; snapshotId: string };
+  };
+  return {
+    record,
+    journal,
+    quarantine: path.join(
+      root,
+      'snapshots',
+      journal.publication.projectKey,
+      `.imnota-delete-${journal.token}`,
+    ),
+  };
+}
+
+async function publishedSnapshotIds(): Promise<string[]> {
+  const ledger = JSON.parse(
+    await fs.readFile(path.join(service().location(), '.imnota-backup-publications-v1.json'), 'utf8'),
+  ) as {
+    entries: Array<{ snapshotId: string }>;
+  };
+  return ledger.entries.map((entry) => entry.snapshotId);
+}
+
 async function writeProject(name = 'Mixed project'): Promise<{ projectPath: string; project: ProjectData }> {
   const projectPath = path.join(workspace, 'mixed-project');
   const now = '2026-09-01T12:00:00.000Z';
@@ -135,7 +168,7 @@ async function writeProject(name = 'Mixed project'): Promise<{ projectPath: stri
 }
 
 beforeEach(async () => {
-  temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-backup-test-'));
+  temporaryRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-backup-test-')));
   workspace = path.join(temporaryRoot, 'workspace');
   backupParent = path.join(temporaryRoot, 'backup-location');
   await fs.mkdir(workspace, { recursive: true });
@@ -296,6 +329,19 @@ describe('BackupService', () => {
     });
   });
 
+  it('rejects snapshot data as an active source before retention can remove it', async () => {
+    const fixture = await writeProject();
+    const backups = service();
+    const original = await backups.createSnapshot(fixture.projectPath, 'manual');
+    const source = path.join(snapshotDirectory(fixture.project.id, original.snapshotId), 'data');
+    const before = await fs.readFile(path.join(source, 'project.json'));
+    preferences = { ...preferences, retentionCount: 1 };
+    clock = new Date('2026-09-14T12:00:00.000Z');
+    await expect(backups.createSnapshot(source, 'manual')).rejects.toThrow(/separate folders/);
+    expect(await fs.readFile(path.join(source, 'project.json'))).toEqual(before);
+    expect((await backups.listSnapshots()).snapshots).toHaveLength(1);
+  });
+
   it('applies count and age retention while leaving invalid snapshots untouched', async () => {
     const fixture = await writeProject();
     preferences = { ...preferences, retentionCount: 2, retentionAgeDays: 3650 };
@@ -374,8 +420,262 @@ describe('BackupService', () => {
     clock = new Date('2026-09-14T12:00:00.000Z');
     const committed = await warningService.createSnapshot(fixture.projectPath, 'manual');
     expect(committed.warnings?.join(' ')).toContain('retention cleanup is pending');
-    expect((await warningService.listSnapshots()).snapshots).toHaveLength(2);
+    expect((await warningService.listSnapshots()).snapshots).toHaveLength(1);
+    const pending = await pendingDeletion();
+    expect(pending.journal.publication.snapshotId).toBe(first.snapshotId);
+    expect(await fs.stat(path.join(pending.quarantine, 'manifest.json'))).toBeTruthy();
+    // The old snapshot is quarantined; a later process can finish removal after the lock clears.
+    clock = new Date('2026-09-15T12:00:00.000Z');
+    const latest = await service().createSnapshot(fixture.projectPath, 'manual');
+    expect((await service().listSnapshots()).snapshots.map((item) => item.snapshotId)).toEqual([
+      latest.snapshotId,
+    ]);
+    await expect(fs.stat(pending.quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(pending.record)).rejects.toMatchObject({ code: 'ENOENT' });
   });
+
+  it.each(['before deletion', 'after partial deletion'] as const)(
+    'recovers retention %s after a service restart',
+    async (failurePoint) => {
+      const fixture = await writeProject();
+      const first = await service().createSnapshot(fixture.projectPath, 'manual');
+      preferences = { ...preferences, retentionCount: 1 };
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      const interrupted = service({
+        removeDirectory: async (target) => {
+          if (path.basename(target).startsWith('.imnota-delete-')) {
+            if (failurePoint === 'after partial deletion') {
+              await fs.unlink(path.join(target, 'manifest.json'));
+              await fs.unlink(path.join(target, 'data', 'project.json'));
+            }
+            throw new Error('locked payload file');
+          }
+          await fs.rm(target, { recursive: true, force: true });
+        },
+      });
+      const committed = await interrupted.createSnapshot(fixture.projectPath, 'manual');
+      expect(committed.warnings?.join(' ')).toContain('locked payload file');
+      const pending = await pendingDeletion();
+      expect(pending.journal.phase).toBe('deleting');
+      expect(await publishedSnapshotIds()).toContain(first.snapshotId);
+      expect(
+        await fs.readFile(
+          path.join(pending.quarantine, 'data/collections/001-collection/text/note.md'),
+          'utf8',
+        ),
+      ).toBe('# Text block');
+      if (failurePoint === 'after partial deletion')
+        await expect(fs.stat(path.join(pending.quarantine, 'manifest.json'))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      const latest = await service().createSnapshot(fixture.projectPath, 'manual');
+      expect(latest.warnings).toBeUndefined();
+      await expect(fs.stat(pending.quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.stat(pending.record)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
+      expect((await service().listSnapshots()).invalid).toEqual([]);
+    },
+  );
+
+  it.each(['prepared journal', 'quarantine rename', 'deleting journal'] as const)(
+    'preserves a complete snapshot when the %s fails',
+    async (failurePoint) => {
+      const fixture = await writeProject();
+      const first = await service().createSnapshot(fixture.projectPath, 'manual');
+      preferences = { ...preferences, retentionCount: 1 };
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      const rename = fs.rename.bind(fs);
+      const remove = vi.fn(async (target: string) => {
+        await fs.rm(target, { recursive: true, force: true });
+      });
+      const injected = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+        if (
+          failurePoint === 'quarantine rename' &&
+          path.basename(String(target)).startsWith('.imnota-delete-')
+        )
+          throw new Error('quarantine rename failed');
+        if (/\.imnota-backup-delete-[0-9a-f]{32}\.json$/.test(String(target))) {
+          const phase = (JSON.parse(await fs.readFile(source, 'utf8')) as { phase: string }).phase;
+          if (failurePoint === `${phase} journal`) throw new Error('journal publication failed');
+        }
+        await rename(source, target);
+      });
+      try {
+        const created = await service({ removeDirectory: remove }).createSnapshot(
+          fixture.projectPath,
+          'manual',
+        );
+        expect(created.warnings?.join(' ')).toContain('retention cleanup is pending');
+        expect(remove).not.toHaveBeenCalled();
+      } finally {
+        injected.mockRestore();
+      }
+      const preserved =
+        failurePoint === 'deleting journal'
+          ? (await pendingDeletion()).quarantine
+          : snapshotDirectory(fixture.project.id, first.snapshotId);
+      expect(
+        await fs.readFile(path.join(preserved, 'data/collections/001-collection/text/note.md'), 'utf8'),
+      ).toBe('# Text block');
+      expect(await fs.stat(path.join(preserved, 'manifest.json'))).toBeTruthy();
+      expect(await publishedSnapshotIds()).toContain(first.snapshotId);
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      const latest = await service().createSnapshot(fixture.projectPath, 'manual');
+      expect(latest.warnings).toBeUndefined();
+      expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
+    },
+  );
+
+  it.each(['ledger update', 'journal cleanup'] as const)(
+    'reconciles a completed deletion after %s fails',
+    async (failurePoint) => {
+      const fixture = await writeProject();
+      const first = await service().createSnapshot(fixture.projectPath, 'manual');
+      preferences = { ...preferences, retentionCount: 1 };
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      let removed = false;
+      const rename = fs.rename.bind(fs);
+      const unlink = fs.unlink.bind(fs);
+      const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+        if (
+          removed &&
+          failurePoint === 'ledger update' &&
+          String(target).endsWith('.imnota-backup-publications-v1.json')
+        )
+          throw new Error('ledger update failed');
+        await rename(source, target);
+      });
+      const unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
+        if (
+          removed &&
+          failurePoint === 'journal cleanup' &&
+          /\.imnota-backup-delete-[0-9a-f]{32}\.json$/.test(String(target))
+        )
+          throw new Error('journal cleanup failed');
+        await unlink(target);
+      });
+      try {
+        const created = await service({
+          removeDirectory: async (target) => {
+            await fs.rm(target, { recursive: true, force: true });
+            if (path.basename(target).startsWith('.imnota-delete-')) removed = true;
+          },
+        }).createSnapshot(fixture.projectPath, 'manual');
+        expect(created.warnings?.join(' ')).toContain(`${failurePoint} failed`);
+      } finally {
+        renameSpy.mockRestore();
+        unlinkSpy.mockRestore();
+      }
+      const pending = await pendingDeletion();
+      await expect(fs.stat(pending.quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await publishedSnapshotIds()).includes(first.snapshotId)).toBe(
+        failurePoint === 'ledger update',
+      );
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      const latest = await service().createSnapshot(fixture.projectPath, 'manual');
+      expect(latest.warnings).toBeUndefined();
+      expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
+      await expect(fs.stat(pending.record)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it('leaves invalid snapshots and unjournaled quarantine or unknown folders untouched', async () => {
+    const fixture = await writeProject();
+    const first = await service().createSnapshot(fixture.projectPath, 'manual');
+    const directory = snapshotDirectory(fixture.project.id, first.snapshotId);
+    await fs.unlink(path.join(directory, 'manifest.json'));
+    const unowned = [
+      path.join(path.dirname(directory), 'personal-files'),
+      path.join(path.dirname(directory), `.imnota-delete-${'f'.repeat(32)}`),
+    ];
+    for (const target of unowned) {
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, 'keep.txt'), 'unowned');
+    }
+    preferences = { ...preferences, retentionCount: 1, retentionAgeDays: 1 };
+    clock = new Date('2026-09-15T12:00:00.000Z');
+    await service().createSnapshot(fixture.projectPath, 'manual');
+    for (const target of unowned)
+      expect(await fs.readFile(path.join(target, 'keep.txt'), 'utf8')).toBe('unowned');
+    expect(
+      await fs.readFile(path.join(directory, 'data/collections/001-collection/text/note.md'), 'utf8'),
+    ).toBe('# Text block');
+    expect(await publishedSnapshotIds()).toContain(first.snapshotId);
+  });
+
+  it.each(['file', 'empty directory'] as const)(
+    'refuses an unknown %s added to a journaled partial deletion',
+    async (kind) => {
+      const fixture = await writeProject();
+      const first = await service().createSnapshot(fixture.projectPath, 'manual');
+      preferences = { ...preferences, retentionCount: 1 };
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      await service({
+        removeDirectory: async (target) => {
+          await fs.unlink(path.join(target, 'manifest.json'));
+          throw new Error('partial deletion');
+        },
+      }).createSnapshot(fixture.projectPath, 'manual');
+      const pending = await pendingDeletion();
+      const added = path.join(pending.quarantine, 'personal');
+      if (kind === 'file') await fs.writeFile(added, 'must survive');
+      else await fs.mkdir(added);
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      const latest = await service().createSnapshot(fixture.projectPath, 'manual');
+      expect(latest.warnings?.join(' ')).toContain('unowned');
+      if (kind === 'file') expect(await fs.readFile(added, 'utf8')).toBe('must survive');
+      else expect((await fs.stat(added)).isDirectory()).toBe(true);
+      expect(await publishedSnapshotIds()).toContain(first.snapshotId);
+    },
+  );
+
+  it.each(['invalid journal', 'invalid snapshot', 'missing publication', 'occupied quarantine'] as const)(
+    'refuses deletion recovery with an %s',
+    async (change) => {
+      const fixture = await writeProject();
+      const first = await service().createSnapshot(fixture.projectPath, 'manual');
+      preferences = { ...preferences, retentionCount: 1 };
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      await service({
+        rename: async (source, target) => {
+          if (path.basename(target).startsWith('.imnota-delete-')) throw new Error('rename interrupted');
+          await fs.rename(source, target);
+        },
+      }).createSnapshot(fixture.projectPath, 'manual');
+      const pending = await pendingDeletion();
+      expect(pending.journal.phase).toBe('prepared');
+      const original = snapshotDirectory(fixture.project.id, first.snapshotId);
+      if (change === 'invalid journal') await fs.writeFile(pending.record, '{"version":0}');
+      if (change === 'invalid snapshot') await fs.unlink(path.join(original, 'manifest.json'));
+      if (change === 'missing publication') {
+        const ledgerPath = path.join(service().location(), '.imnota-backup-publications-v1.json');
+        const ledger = JSON.parse(await fs.readFile(ledgerPath, 'utf8')) as {
+          entries: Array<{ snapshotId: string }>;
+        };
+        ledger.entries = ledger.entries.filter((entry) => entry.snapshotId !== first.snapshotId);
+        await fs.writeFile(ledgerPath, JSON.stringify(ledger));
+      }
+      if (change === 'occupied quarantine') {
+        await fs.mkdir(pending.quarantine);
+        await fs.writeFile(path.join(pending.quarantine, 'keep.txt'), 'unowned');
+      }
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      const remove = vi.fn(async (target: string) => {
+        await fs.rm(target, { recursive: true, force: true });
+      });
+      const latest = await service({ removeDirectory: remove }).createSnapshot(fixture.projectPath, 'manual');
+      expect(latest.warnings?.join(' ')).toContain('retention cleanup is pending');
+      expect(remove).not.toHaveBeenCalled();
+      expect(
+        await fs.readFile(path.join(original, 'data/collections/001-collection/text/note.md'), 'utf8'),
+      ).toBe('# Text block');
+      expect(await fs.stat(pending.record)).toBeTruthy();
+      if (change === 'occupied quarantine')
+        expect(await fs.readFile(path.join(pending.quarantine, 'keep.txt'), 'utf8')).toBe('unowned');
+    },
+  );
 
   it('restores in place with a safety snapshot and preserves every original in a rollback folder', async () => {
     const fixture = await writeProject();
