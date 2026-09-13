@@ -1274,7 +1274,8 @@ async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Pro
 }
 
 async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number): Promise<void> {
-  await driver.evaluate(`new Promise((resolve, reject) => {
+  await driver.evaluate(
+    `new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
       const cards = [...document.querySelectorAll('[data-testid="prompt-bundle-card"], .prompt-bundle-card')];
@@ -1289,7 +1290,9 @@ async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number):
       setTimeout(check, 50);
     };
     check();
-  })`);
+  })`,
+    30_000,
+  );
 }
 
 async function verifyPromptCopyOptions(driver: NativeUiDriver, bundleCount: number): Promise<void> {

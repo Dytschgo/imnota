@@ -5,22 +5,32 @@ import { atomicWrite } from './files.js';
 
 export type SmokeCheckpoint = (phase: string) => Promise<void>;
 
-export async function boundedSmokeDiagnostic<T>(
+export async function withSmokeDeadline<T>(
   operation: () => Promise<T>,
-  timeoutMs = 2_000,
-): Promise<T | undefined> {
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       Promise.resolve().then(operation),
-      new Promise<undefined>((resolve) => {
-        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
       }),
     ]);
-  } catch {
-    return undefined;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function boundedSmokeDiagnostic<T>(
+  operation: () => Promise<T>,
+  timeoutMs = 2_000,
+): Promise<T | undefined> {
+  try {
+    return await withSmokeDeadline(operation, timeoutMs, 'Optional smoke diagnostic');
+  } catch {
+    return undefined;
   }
 }
 
@@ -198,9 +208,13 @@ export class NativeUiDriver {
     return this.window;
   }
 
-  async evaluate<T>(source: string): Promise<T> {
+  async evaluate<T>(source: string, timeoutMs = this.defaultTimeoutMs): Promise<T> {
     try {
-      return (await this.window.webContents.executeJavaScript(source, true)) as T;
+      return (await withSmokeDeadline(
+        () => this.window.webContents.executeJavaScript(source, true),
+        timeoutMs,
+        'Renderer evaluation',
+      )) as T;
     } catch (error) {
       const summary = source.replace(/\s+/g, ' ').trim().slice(0, 180);
       const message = error instanceof Error ? error.message : String(error);
@@ -210,9 +224,12 @@ export class NativeUiDriver {
     }
   }
 
-  async bounds(locator: SmokeLocator): Promise<(Rectangle & { text: string; disabled: boolean }) | null> {
+  async bounds(
+    locator: SmokeLocator,
+    timeoutMs = this.defaultTimeoutMs,
+  ): Promise<(Rectangle & { text: string; disabled: boolean }) | null> {
     try {
-      return await this.evaluate(locatorScript(locator));
+      return await this.evaluate(locatorScript(locator), timeoutMs);
     } catch (error) {
       if (isTransientLocatorExecutionError(error)) return null;
       throw error;
@@ -226,7 +243,7 @@ export class NativeUiDriver {
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
     const started = Date.now();
     do {
-      const found = await this.bounds(locator);
+      const found = await this.bounds(locator, Math.max(1, timeout - (Date.now() - started)));
       if (options.absent ? !found : found && (!options.enabled || !found.disabled)) {
         if (options.absent) return { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false };
         return found!;
@@ -371,7 +388,11 @@ export class NativeUiDriver {
     let image;
     let png: Buffer;
     do {
-      image = await this.window.webContents.capturePage();
+      image = await withSmokeDeadline(
+        () => this.window.webContents.capturePage(),
+        Math.max(1, deadline - Date.now()),
+        `Page capture ${filename}`,
+      );
       if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
       png = image.toPNG();
       stableFrames = previous?.equals(png) ? stableFrames + 1 : 1;

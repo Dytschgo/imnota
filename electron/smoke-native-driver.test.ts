@@ -8,6 +8,7 @@ import {
   NativeUiDriver,
   createSmokeCheckpoint,
   boundedSmokeDiagnostic,
+  withSmokeDeadline,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -49,6 +50,49 @@ describe('native smoke driver', () => {
     );
     expect(() => safeArtifactPath(artifacts, '../escape.png')).toThrow();
     expect(pathIsWithin(artifacts, artifacts)).toBe(false);
+  });
+
+  it('enforces required operation deadlines and preserves operation errors', async () => {
+    const failure = new Error('original operation failure');
+    await expect(
+      withSmokeDeadline(
+        async () => {
+          throw failure;
+        },
+        20,
+        'test operation',
+      ),
+    ).rejects.toBe(failure);
+    await expect(withSmokeDeadline(() => new Promise(() => undefined), 5, 'test operation')).rejects.toThrow(
+      'test operation timed out after 5ms',
+    );
+  });
+
+  it('preserves an explicit evaluation allowance longer than the driver default', async () => {
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve('ready'), 20))),
+      },
+    } as unknown as BrowserWindow;
+    await expect(new NativeUiDriver(window, 5).evaluate('existing longer prompt wait', 2_000)).resolves.toBe(
+      'ready',
+    );
+  });
+
+  it('times out a non-resolving renderer lookup and page capture', async () => {
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(() => new Promise(() => undefined)),
+        capturePage: vi.fn(() => new Promise(() => undefined)),
+      },
+    } as unknown as BrowserWindow;
+    const driver = new NativeUiDriver(window, 5);
+    await expect(driver.waitFor({ selector: '.missing' })).rejects.toThrow('Renderer evaluation timed out');
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    vi.mocked(window.webContents.executeJavaScript).mockResolvedValue(undefined);
+    await expect(driver.capture(parent, 'hung.png')).rejects.toThrow('Page capture hung.png timed out');
+    await expect(fs.stat(path.join(parent, 'hung.png'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('bounds optional diagnostics without masking the original verification failure', async () => {

@@ -50,6 +50,7 @@ export async function exerciseLocalHistory(
     throw new Error('The snapshot chooser did not retain its selected project.');
   await checkpoint('history: creating snapshot');
   await driver.click({ selector: '.imnota-backup-manual button', text: 'Create snapshot', exact: true });
+  await checkpoint('history: snapshot click returned');
   await driver.waitFor({
     selector: '.imnota-backup-status',
     text: 'Snapshot created for Mixed Content Verification.',
@@ -59,6 +60,7 @@ export async function exerciseLocalHistory(
     text: 'Restore as new project',
     exact: true,
   });
+  await checkpoint('history: snapshot status and restore action observed');
   const snapshot = await driver.evaluate<{
     snapshotId: string;
     files: Array<{ path: string }>;
@@ -67,9 +69,11 @@ export async function exerciseLocalHistory(
     const entry = history.snapshots.find(snapshot => snapshot.sourceProjectName === 'Mixed Content Verification');
     return (await window.imnota.inspectBackupSnapshot({ snapshotId: entry.snapshotId })).manifest;
   })()`);
+  await checkpoint('history: snapshot listed and inspected');
   const originals = new Map<string, Buffer>();
   for (const file of snapshot.files)
     originals.set(file.path, await fs.readFile(path.join(sourcePath, file.path)));
+  await checkpoint('history: original fixture files read');
   const backupRoot = await driver.evaluate<string>(
     'window.imnota.getBackupHistory().then(value => value.location)',
   );
@@ -88,14 +92,18 @@ export async function exerciseLocalHistory(
     !(await fs.readFile(path.join(snapshotDataPath, 'project.json'))).equals(originals.get('project.json')!)
   )
     throw new Error('Rejected backup open modified the snapshot metadata.');
+  await checkpoint('history: reserved-path rejection verified');
   if (artifactDirectory) {
     driver.browserWindow.show();
     driver.browserWindow.focus();
     await driver.resize({ width: 1280, height: 800 });
+    await checkpoint('history: viewport resized; waiting for rendered frames');
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
+    await checkpoint('history: rendered frames ready; capturing history');
     captures.push(await driver.capture(artifactDirectory, 'next-local-history.png'));
+    await checkpoint('history: history capture completed');
   }
   // Closing and reopening must not depend on an in-memory backup grant.
   await checkpoint('history: snapshot verified; reopening before restore');
