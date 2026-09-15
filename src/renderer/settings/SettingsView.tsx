@@ -17,6 +17,7 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
+  onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onInstall?: () => Promise<void>;
   onWorkspaceChanged?(): void | Promise<void>;
@@ -35,6 +36,7 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
+  onWorkbenchChange,
   onReplayOnboarding = () => undefined,
   onInstall,
   onWorkspaceChanged,
@@ -133,12 +135,27 @@ export function SettingsView({
             <label className="settings-switch">
               <span>
                 <strong>Confirm before deletion</strong>
-                <small>Ask before moving a project to the system trash.</small>
+                <small>Ask before moving a project, drawing, or text block to the system trash.</small>
               </span>
               <input
                 type="checkbox"
                 checked={settings.confirmBeforeDeletion}
                 onChange={(event) => void saveLegacy({ confirmBeforeDeletion: event.target.checked })}
+              />
+            </label>
+            <label className="settings-switch">
+              <span>
+                <strong>Separate add buttons</strong>
+                <small>
+                  Restore Import, Paste, Drawing and Text as four buttons instead of the compact Add
+                  screenshot menu.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={preferences.workbench.separateAddButtons}
+                disabled={savingPreferences || !onWorkbenchChange}
+                onChange={(event) => void onWorkbenchChange?.({ separateAddButtons: event.target.checked })}
               />
             </label>
           </section>

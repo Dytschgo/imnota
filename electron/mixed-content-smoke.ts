@@ -41,6 +41,7 @@ export async function exerciseMixedContent(
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.resize({ width: 1280, height: 800 });
+  await driver.click({ selector: '[data-testid="add-item-menu"]' });
   await driver.click({ text: 'Add drawing', exact: true });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
   await driver.click({ selector: '[data-testid="drawing-tool-rectangle"]' });

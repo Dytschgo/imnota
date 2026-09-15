@@ -21,7 +21,7 @@ Large collections are split automatically before clipboard preparation using out
 
 ## Pending compatibility matrix
 
-Manual verification must record OS/version, target application or browser and exact version, Imnota revision, whether Markdown arrived, whether the image arrived, whether both arrived in one paste, readability and whether each fallback worked.
+Record results in the [clipboard receiver matrix](clipboard-receiver-matrix.md). Manual verification must record OS/version, target application or browser and exact version, Imnota revision, whether Markdown arrived, whether the image arrived, whether both arrived in one paste, readability and whether each fallback worked.
 
 Run at least:
 

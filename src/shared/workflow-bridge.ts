@@ -29,6 +29,7 @@ export interface PreferenceSettingsUpdate {
   appearance?: Partial<PreferenceSettings['appearance']>;
   shortcuts?: Partial<PreferenceSettings['shortcuts']>;
   onboarding?: Partial<PreferenceSettings['onboarding']>;
+  workbench?: Partial<PreferenceSettings['workbench']>;
 }
 
 export interface NativePerformanceProfile {

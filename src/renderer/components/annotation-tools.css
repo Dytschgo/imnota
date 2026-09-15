@@ -11,8 +11,23 @@
 
 .annotation-primary-tools.tool-group,
 .annotation-view-tools.tool-group {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.annotation-primary-tools.tool-group {
+  position: relative;
+  z-index: 2;
+}
+
+.annotation-toolbar-extras {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .annotation-toolbar > .toolbar-divider {

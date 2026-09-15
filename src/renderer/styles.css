@@ -1347,6 +1347,54 @@ button.icon-button.new-collection-button svg {
 .rail-actions .btn {
   justify-content: flex-start;
 }
+.rail-add {
+  position: relative;
+}
+.rail-add-primary {
+  display: flex;
+  gap: 4px;
+}
+.rail-add-primary .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rail-add-primary .icon-button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+.rail-add-menu {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  left: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+.rail-add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+.rail-add-menu button:hover,
+.rail-add-menu button:focus-visible {
+  background: var(--surface-3);
+}
 .canvas-column {
   min-width: 0;
   min-height: 0;
@@ -2056,7 +2104,9 @@ button.icon-button.new-collection-button svg {
 .modal {
   width: min(100%, 460px);
   max-height: calc(100vh - 40px);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   background: var(--surface-2);
@@ -2064,10 +2114,17 @@ button.icon-button.new-collection-button svg {
 }
 .modal-header {
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   gap: 14px;
   padding: 21px 22px 15px;
   border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.modal > :not(.modal-header) {
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface-2);
 }
 .modal-header h2 {
   margin: 0 0 5px;
@@ -2081,7 +2138,10 @@ button.icon-button.new-collection-button svg {
   line-height: 1.45;
 }
 .modal-form {
+  min-height: 0;
+  overflow: auto;
   padding: 20px 22px 22px;
+  background: var(--surface-2);
 }
 .sharing-content,
 .combined-copy {
@@ -2166,7 +2226,14 @@ button.icon-button.new-collection-button svg {
   display: flex;
   justify-content: flex-end;
   gap: 7px;
-  margin-top: 18px;
+  margin: 0;
+  padding: 16px 22px 20px;
+  background: var(--surface-2);
+}
+.modal-form .modal-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 16px 0 0;
 }
 .modal-error {
   margin: 12px 0 0;

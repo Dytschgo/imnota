@@ -187,6 +187,7 @@ describe('prompt bundle planning', () => {
           position: 2,
           title: 'Flow',
           originalFilename: 'Flow',
+          description: 'Queue sits in front of the workers.',
           includeInExport: true,
           nativeWidth: 80,
           nativeHeight: 40,
@@ -209,6 +210,7 @@ describe('prompt bundle planning', () => {
     if (mixed.kind !== 'ready') return;
     expect(mixed.bundles[0].pictureNumbers).toEqual([1, 2]);
     expect(mixed.bundles[0].markdown).toMatch(/Start with this\.[\s\S]*## Picture 1[\s\S]*## Drawing 2/);
+    expect(mixed.bundles[0].markdown).toContain('Queue sits in front of the workers.');
     expect(mixed.bundles[0].markdown).toContain('## User heading');
     expect(mixed.bundles[0].markdown).not.toContain('## Text');
     expect(mixed.bundles[0].markdown).toContain('Picture 3 was intentionally excluded');

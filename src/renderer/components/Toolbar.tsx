@@ -118,6 +118,29 @@ const MORE_TOOLS: ToolDefinition[] = [
   },
 ];
 
+const ALL_ANNOTATION_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
+const TOOL_BUTTON_WIDTH = 29;
+const TOOL_GAP = 2;
+const MORE_BUTTON_WIDTH = 72;
+
+/** How many annotation tools fit inline before overflow. Zero available width keeps the original six. */
+export function countInlineAnnotationTools(
+  availableWidth: number,
+  total = ALL_ANNOTATION_TOOLS.length,
+  fallback = PRIMARY_TOOLS.length,
+): number {
+  const widthFor = (count: number, withMore: boolean) =>
+    count * TOOL_BUTTON_WIDTH +
+    Math.max(0, count - 1) * TOOL_GAP +
+    (withMore ? MORE_BUTTON_WIDTH + TOOL_GAP : 0);
+  if (availableWidth <= 0) return fallback;
+  if (widthFor(total, false) <= availableWidth) return total;
+  let count = Math.min(fallback, total - 1);
+  while (count < total - 1 && widthFor(count + 1, true) <= availableWidth) count += 1;
+  while (count > 1 && widthFor(count, true) > availableWidth) count -= 1;
+  return Math.max(1, count);
+}
+
 function ToolButton({
   definition,
   active,
@@ -181,8 +204,31 @@ export function Toolbar({
   shortcutLabels = {},
 }: ToolbarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const [inlineCount, setInlineCount] = useState(PRIMARY_TOOLS.length);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const extrasRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
-  const moreActive = MORE_TOOLS.some((definition) => definition.id === tool);
+  const inlineTools = ALL_ANNOTATION_TOOLS.slice(0, inlineCount);
+  const overflowTools = ALL_ANNOTATION_TOOLS.slice(inlineCount);
+  const moreActive = overflowTools.some((definition) => definition.id === tool);
+
+  useEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const extrasWidth = extrasRef.current?.offsetWidth ?? 0;
+      setInlineCount(countInlineAnnotationTools(toolbar.clientWidth - extrasWidth - 16));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    if (extrasRef.current) observer.observe(extrasRef.current);
+    measure();
+    return () => observer.disconnect();
+  }, [onColorSelect]);
+
+  useEffect(() => {
+    if (overflowTools.length === 0) setMoreOpen(false);
+  }, [overflowTools.length]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -201,9 +247,9 @@ export function Toolbar({
   }, [moreOpen]);
 
   return (
-    <div className="toolbar annotation-toolbar" role="toolbar" aria-label="Annotation tools">
+    <div ref={toolbarRef} className="toolbar annotation-toolbar" role="toolbar" aria-label="Annotation tools">
       <div className="tool-group annotation-primary-tools">
-        {PRIMARY_TOOLS.map((definition) => (
+        {inlineTools.map((definition) => (
           <ToolButton
             key={definition.id}
             definition={{ ...definition, shortcut: shortcutLabels[definition.id] }}
@@ -211,111 +257,122 @@ export function Toolbar({
             onClick={() => setTool(definition.id)}
           />
         ))}
-        <div className="annotation-more" ref={moreRef}>
-          <span className="annotation-tooltip-anchor">
-            <IconButton
-              data-testid="more-annotation-tools"
-              label="More annotation tools"
-              className={moreActive ? 'is-active' : ''}
-              aria-expanded={moreOpen}
-              aria-haspopup="menu"
-              onClick={() => setMoreOpen((open) => !open)}
-            >
-              <span className="annotation-more-icon">
-                <span>More</span>
-                <ChevronDown size={13} />
-              </span>
-            </IconButton>
-            {!moreOpen && (
-              <span className="annotation-tooltip" role="tooltip">
-                <strong>More tools</strong>
-                <span>Redaction, pixelation, crop, drawing, and additional shapes.</span>
-              </span>
+        {overflowTools.length > 0 && (
+          <div className="annotation-more" ref={moreRef}>
+            <span className="annotation-tooltip-anchor">
+              <IconButton
+                data-testid="more-annotation-tools"
+                label="More annotation tools"
+                className={moreActive ? 'is-active' : ''}
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                <span className="annotation-more-icon">
+                  <span>More</span>
+                  <ChevronDown size={13} />
+                </span>
+              </IconButton>
+              {!moreOpen && (
+                <span className="annotation-tooltip" role="tooltip">
+                  <strong>More tools</strong>
+                  <span>Additional annotation tools that do not fit in the current width.</span>
+                </span>
+              )}
+            </span>
+            {moreOpen && (
+              <div
+                className="annotation-more-menu"
+                role="menu"
+                aria-label="More annotation tools"
+                data-testid="more-annotation-tools-menu"
+              >
+                {overflowTools.map((definition) => {
+                  const Icon = definition.icon;
+                  return (
+                    <button
+                      key={definition.id}
+                      type="button"
+                      role="menuitemradio"
+                      data-testid={`tool-${definition.id}`}
+                      aria-label={definition.label}
+                      aria-checked={tool === definition.id}
+                      className={tool === definition.id ? 'is-active' : ''}
+                      onClick={() => {
+                        setTool(definition.id);
+                        setMoreOpen(false);
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span>
+                        <strong>{definition.label}</strong>
+                        <small>{definition.description}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
-          </span>
-          {moreOpen && (
-            <div className="annotation-more-menu" role="menu" aria-label="More annotation tools">
-              {MORE_TOOLS.map((definition) => {
-                const Icon = definition.icon;
-                return (
-                  <button
-                    key={definition.id}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={tool === definition.id}
-                    className={tool === definition.id ? 'is-active' : ''}
-                    onClick={() => {
-                      setTool(definition.id);
-                      setMoreOpen(false);
-                    }}
-                  >
-                    <Icon size={16} />
-                    <span>
-                      <strong>{definition.label}</strong>
-                      <small>{definition.description}</small>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {onColorSelect && (
-        <>
-          <div className="toolbar-divider" />
-          <div className="annotation-palette" role="group" aria-label="Quick annotation colors">
-            {ANNOTATION_COLORS.map((color) => (
-              <button
-                key={color}
-                type="button"
-                className={selectedColor?.toLowerCase() === color ? 'is-active' : ''}
-                aria-label={`Use color ${color}`}
-                aria-pressed={selectedColor?.toLowerCase() === color}
-                style={{ '--swatch': color } as CSSProperties}
-                onClick={() => onColorSelect(color)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      <div className="annotation-toolbar-extras" ref={extrasRef}>
+        {onColorSelect && (
+          <>
+            <div className="toolbar-divider" />
+            <div className="annotation-palette" role="group" aria-label="Quick annotation colors">
+              {ANNOTATION_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={selectedColor?.toLowerCase() === color ? 'is-active' : ''}
+                  aria-label={`Use color ${color}`}
+                  aria-pressed={selectedColor?.toLowerCase() === color}
+                  style={{ '--swatch': color } as CSSProperties}
+                  onClick={() => onColorSelect(color)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-      <div className="toolbar-divider" />
-      <div className="tool-group annotation-view-tools">
-        <IconButton
-          label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}
-          disabled={!canUndo}
-          onClick={onUndo}
-        >
-          <Undo2 size={17} />
-        </IconButton>
-        <IconButton
-          label={`Redo${shortcutLabels.redo ? ` (${shortcutLabels.redo})` : ''}`}
-          disabled={!canRedo}
-          onClick={onRedo}
-        >
-          <Redo2 size={17} />
-        </IconButton>
-        <span className="toolbar-divider" />
-        <IconButton label="Zoom out" onClick={() => onZoom(-0.1)}>
-          <ZoomOut size={17} />
-        </IconButton>
-        <IconButton label="Zoom in" onClick={() => onZoom(0.1)}>
-          <ZoomIn size={17} />
-        </IconButton>
-        <IconButton
-          label={`Fit screenshot${shortcutLabels.fit ? ` (${shortcutLabels.fit})` : ''}`}
-          onClick={onFit}
-        >
-          <Maximize2 size={17} />
-        </IconButton>
-        <IconButton
-          label={`Actual size${shortcutLabels.actualSize ? ` (${shortcutLabels.actualSize})` : ''}`}
-          onClick={onActualSize ?? (() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' })))}
-        >
-          <span className="actual-size-label">1:1</span>
-        </IconButton>
+        <div className="toolbar-divider" />
+        <div className="tool-group annotation-view-tools">
+          <IconButton
+            label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}
+            disabled={!canUndo}
+            onClick={onUndo}
+          >
+            <Undo2 size={17} />
+          </IconButton>
+          <IconButton
+            label={`Redo${shortcutLabels.redo ? ` (${shortcutLabels.redo})` : ''}`}
+            disabled={!canRedo}
+            onClick={onRedo}
+          >
+            <Redo2 size={17} />
+          </IconButton>
+          <span className="toolbar-divider" />
+          <IconButton label="Zoom out" onClick={() => onZoom(-0.1)}>
+            <ZoomOut size={17} />
+          </IconButton>
+          <IconButton label="Zoom in" onClick={() => onZoom(0.1)}>
+            <ZoomIn size={17} />
+          </IconButton>
+          <IconButton
+            label={`Fit screenshot${shortcutLabels.fit ? ` (${shortcutLabels.fit})` : ''}`}
+            onClick={onFit}
+          >
+            <Maximize2 size={17} />
+          </IconButton>
+          <IconButton
+            label={`Actual size${shortcutLabels.actualSize ? ` (${shortcutLabels.actualSize})` : ''}`}
+            onClick={onActualSize ?? (() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' })))}
+          >
+            <span className="actual-size-label">1:1</span>
+          </IconButton>
+        </div>
       </div>
     </div>
   );

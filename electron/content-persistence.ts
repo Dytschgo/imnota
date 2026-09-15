@@ -456,6 +456,7 @@ export class ContentPersistenceService {
         createdAt: timestamp,
         updatedAt: timestamp,
         title: `Drawing ${drawingNumber}`,
+        description: '',
         sourceFilename: `${identifier}.json`,
         imageFilename: `${identifier}.png`,
         originalWidth: 160,
