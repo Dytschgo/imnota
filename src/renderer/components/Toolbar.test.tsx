@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
-import { Toolbar, type ToolbarProps } from './Toolbar';
+import { countInlineAnnotationTools, Toolbar, type ToolbarProps } from './Toolbar';
 
 function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
   return {
@@ -17,6 +17,14 @@ function props(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
 }
 
 describe('annotation toolbar', () => {
+  test('keeps six tools when width is unknown and expands or overflows from available space', () => {
+    expect(countInlineAnnotationTools(0)).toBe(6);
+    expect(countInlineAnnotationTools(80)).toBe(1);
+    expect(countInlineAnnotationTools(2000)).toBe(15);
+    expect(countInlineAnnotationTools(400)).toBeGreaterThan(6);
+    expect(countInlineAnnotationTools(400)).toBeLessThan(15);
+  });
+
   test('keeps the six primary tools directly available and advanced tools in More', () => {
     const setTool = vi.fn();
     const { container } = render(<Toolbar {...props({ setTool })} />);

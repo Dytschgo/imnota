@@ -6,6 +6,7 @@ import {
   type PreferenceSettings,
   type PreferenceSettingsResult,
   type ShortcutPreferences,
+  type WorkbenchPreferences,
 } from '../../shared/preferences';
 import type { NativePerformanceProfile, PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
 import { getRendererBridge, workflowMessage, workflowValue } from './workflow';
@@ -28,6 +29,7 @@ export interface PreferenceController {
   saveAppearance(value: AppearancePreferences): Promise<void>;
   saveShortcuts(value: ShortcutPreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
+  saveWorkbench(value: WorkbenchPreferences): Promise<void>;
   clearError(): void;
 }
 
@@ -95,6 +97,9 @@ export function usePreferences(): PreferenceController {
     },
     saveOnboarding: async (onboarding) => {
       await save({ onboarding });
+    },
+    saveWorkbench: async (workbench) => {
+      await save({ workbench });
     },
     clearError: () => setError(''),
   };

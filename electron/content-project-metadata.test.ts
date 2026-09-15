@@ -28,6 +28,7 @@ function records(): [TextBlockRecord, DrawingRecord] {
       createdAt: timestamp,
       updatedAt: timestamp,
       title: 'Architecture',
+      description: '',
       sourceFilename: 'drawing_a.json',
       imageFilename: 'drawing_a.png',
       originalWidth: 160,
@@ -45,14 +46,19 @@ describe('mixed metadata preservation', () => {
     expect(saved.contentItems).toEqual(current.contentItems);
   });
 
-  it('allows order, visibility, and title edits while retaining native paths, preview, and dimensions', () => {
+  it('allows order, visibility, title, and description edits while retaining native paths, preview, and dimensions', () => {
     const current = { ...emptyProject('Mixed', ''), schemaVersion: 4 as const, contentItems: records() };
     const candidate = {
       ...current,
       updatedAt: '2026-09-07T00:00:01.000Z',
       contentItems: [
         { ...current.contentItems[0], position: 1, includeInExport: false, preview: 'Untrusted' },
-        { ...current.contentItems[1], position: 0, title: 'Edited architecture' },
+        {
+          ...current.contentItems[1],
+          position: 0,
+          title: 'Edited architecture',
+          description: 'Keep the queue in front of the workers.',
+        },
       ],
     };
     const saved = preserveMixedProjectMetadata(current, candidate);
@@ -68,6 +74,7 @@ describe('mixed metadata preservation', () => {
         id: 'drawing_a',
         position: 0,
         title: 'Edited architecture',
+        description: 'Keep the queue in front of the workers.',
         originalWidth: 160,
         updatedAt: candidate.updatedAt,
       }),

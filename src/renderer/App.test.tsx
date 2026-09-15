@@ -236,6 +236,7 @@ describe('feedback controls', () => {
     const editor = await screen.findByRole('textbox', { name: 'Markdown' });
     fireEvent.change(editor, { target: { value: 'Local edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete text' }));
+    fireEvent.click(screen.getByTestId('confirm-delete-content'));
     await waitFor(() =>
       expect(deleteContentItem).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -470,7 +471,8 @@ describe('feedback controls', () => {
         value: { snapshot: persisted, projectRevision: 'project-paste-2' },
       }),
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    fireEvent.click(screen.getByTestId('add-item-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Paste from clipboard' }));
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
   });
 

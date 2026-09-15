@@ -36,11 +36,14 @@ export function preserveMixedProjectMetadata(current: ProjectData, candidate: Pr
       const changed =
         update.position !== item.position ||
         update.includeInExport !== item.includeInExport ||
-        (item.kind === 'drawing' && update.kind === 'drawing' && update.title !== item.title);
+        (item.kind === 'drawing' &&
+          update.kind === 'drawing' &&
+          (update.title !== item.title || (update.description ?? '') !== (item.description ?? '')));
       return item.kind === 'drawing' && update.kind === 'drawing'
         ? {
             ...item,
             title: update.title,
+            description: update.description ?? '',
             position: update.position,
             includeInExport: update.includeInExport,
             updatedAt: changed ? candidate.updatedAt : item.updatedAt,

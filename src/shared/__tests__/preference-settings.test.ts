@@ -41,6 +41,10 @@ describe('profile-aware preference settings', () => {
     });
     expect(next.appearance).toMatchObject({ mode: 'system', accent: 'emerald' });
     expect(next.shortcuts.bindings).toEqual({ 'prompt.copy': 'Ctrl+Shift+P' });
+    expect(next.workbench.separateAddButtons).toBe(false);
+    expect(mergePreferenceSettings(next, { workbench: { separateAddButtons: true } }).workbench).toEqual({
+      separateAddButtons: true,
+    });
     expect(() =>
       mergePreferenceSettings(current, {
         appearance: { accent: 'violet' as 'indigo' },

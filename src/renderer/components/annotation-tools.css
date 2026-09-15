@@ -1,7 +1,7 @@
 .annotation-toolbar.toolbar {
   position: relative;
   flex: 1 1 360px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-content: center;
   gap: 4px;
   min-width: 0;
@@ -11,8 +11,18 @@
 
 .annotation-primary-tools.tool-group,
 .annotation-view-tools.tool-group {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.annotation-toolbar-extras {
+  display: flex;
   flex: 0 0 auto;
   flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .annotation-toolbar > .toolbar-divider {

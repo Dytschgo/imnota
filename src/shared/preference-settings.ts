@@ -10,6 +10,7 @@ import type { PreferenceSettingsUpdate } from './workflow-bridge.js';
 import { SHORTCUT_ACTIONS } from './shortcuts.js';
 
 const shortcutValueSchema = z.string().max(100).nullable();
+const workbenchPreferencesSchema = z.object({ separateAddButtons: z.boolean() }).strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -41,6 +42,7 @@ export const preferenceSettingsSchema = z
     onboarding: z
       .object({ completed: z.boolean(), completedVersion: z.number().int().nonnegative() })
       .strict(),
+    workbench: workbenchPreferencesSchema.default({ separateAddButtons: false }),
   })
   .strict();
 
@@ -49,6 +51,7 @@ export const preferenceSettingsUpdateSchema = z
     appearance: preferenceSettingsSchema.shape.appearance.partial().strict().optional(),
     shortcuts: z.object({ bindings: shortcutBindingsSchema.optional() }).strict().optional(),
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
+    workbench: workbenchPreferencesSchema.partial().strict().optional(),
   })
   .strict();
 
@@ -57,6 +60,7 @@ function cloneDefaults(): PreferenceSettings {
     appearance: { ...DEFAULT_PREFERENCE_SETTINGS.appearance },
     shortcuts: { bindings: { ...DEFAULT_PREFERENCE_SETTINGS.shortcuts.bindings } },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
+    workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
   };
 }
 
@@ -125,6 +129,7 @@ export function mergePreferenceSettings(
       bindings: { ...current.shortcuts.bindings, ...update.shortcuts?.bindings },
     },
     onboarding: { ...current.onboarding, ...update.onboarding },
+    workbench: { ...current.workbench, ...update.workbench },
   });
 }
 

@@ -32,6 +32,8 @@ export interface WorkspaceProps {
   onDuplicateContent?(): void | Promise<void>;
   onDeleteContent?(): void | Promise<void>;
   onDrawingTitle?(title: string): void;
+  onDrawingDescription?(description: string): void;
+  separateAddButtons?: boolean;
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
@@ -100,6 +102,7 @@ export function Workspace(props: WorkspaceProps) {
         onMessage={props.onMessage}
         onSnapshot={props.onSnapshot}
         onAddContent={props.onAddContent}
+        separateAddButtons={props.separateAddButtons}
       />
       <div className="canvas-column">
         <div className="workspace-toolbar">
@@ -200,21 +203,34 @@ export function Workspace(props: WorkspaceProps) {
         (item ? (
           <aside className="inspector content-inspector" aria-label="Content details">
             {item.kind === 'drawing' ? (
-              <label className="field">
-                <span className="field-label">Drawing title</span>
-                <input
-                  className="input"
-                  aria-label="Drawing title"
-                  value={item.title}
-                  onChange={(event) => props.onDrawingTitle?.(event.target.value)}
-                />
-              </label>
+              <>
+                <label className="field">
+                  <span className="field-label">Drawing title</span>
+                  <input
+                    className="input"
+                    aria-label="Drawing title"
+                    value={item.title}
+                    onChange={(event) => props.onDrawingTitle?.(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">Description</span>
+                  <textarea
+                    className="input"
+                    aria-label="Drawing description"
+                    rows={6}
+                    placeholder="Describe what the agent should understand from this drawing."
+                    value={item.description ?? ''}
+                    onChange={(event) => props.onDrawingDescription?.(event.target.value)}
+                  />
+                </label>
+              </>
             ) : (
               <p>Write Markdown directly. Your text appears at this position in the agent prompt.</p>
             )}
             <p className="content-hint">
               {item.kind === 'drawing'
-                ? 'Explain this diagram in a text block before or after it.'
+                ? 'The description is copied into the prompt Markdown under this drawing.'
                 : 'Use headings, lists, and code blocks to describe the task.'}
             </p>
             <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>

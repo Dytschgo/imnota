@@ -2,7 +2,7 @@
 
 Screenshots that AI understands.
 
-Imnota is a local-first desktop tool for turning annotated screenshots into prompt bundles for AI assistants and coding agents. Add screenshots to a collection, mark what matters, add an optional description, and copy the generated Markdown and high-resolution prompt image into the tool you already use.
+Imnota is a local-first desktop tool for turning annotated screenshots, drawings and Markdown into prompt bundles for AI assistants and coding agents. Add evidence to a collection, mark what matters, describe it, and copy the generated Markdown and high-resolution prompt image into the tool you already use.
 
 [imnota.xyz](https://imnota.xyz) · [Latest downloads](https://github.com/Dytschgo/imnota/releases/latest) · [User guide](docs/user-guide.md)
 
@@ -34,9 +34,11 @@ Projects are plain folders containing JSON, Markdown and image files. There is n
 
 - Electron, React and TypeScript desktop application
 - Screenshot import, paste and drag-and-drop for PNG, JPEG and WebP
+- Mixed collections of screenshots, Markdown text blocks and drawings
+- Screenshot-first Add control, with separate add buttons available in Settings
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
 - Collections with archive/restore controls and a single optional overall context
-- One optional Markdown description and Low, Medium or High agent priority per screenshot
+- One optional Markdown description per screenshot and per drawing, plus Low, Medium or High agent priority per screenshot
 - Direct include/exclude controls without deleting screenshots
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection
@@ -163,7 +165,17 @@ Pan with Select on the image, Space-drag, middle-drag or trackpad scrolling. Pin
 
 “Copy prompt bundle” creates a fresh timestamped PNG + Markdown set for the current collection. Imnota may split a large collection automatically; users do not choose split points. Excluded screenshots stay in the collection and are called out in Markdown, but do not appear in prompt PNGs or cause the remaining Picture numbers to change.
 
-Combined clipboard copy offers the matching Markdown and PNG together, but the receiving editor decides which clipboard formats it accepts. Imnota cannot promise that both will arrive in one paste. Use **Copy Markdown only**, **Copy image only**, or open the generated files/folder when a target accepts only one format. See the [user guide](docs/user-guide.md).
+Combined clipboard copy offers the matching Markdown and PNG together, but the receiving editor decides which clipboard formats it accepts. Imnota cannot promise that both will arrive in one paste. Use **Copy Markdown only**, **Copy image only**, or open the generated files/folder when a target accepts only one format. Record real editor results in the [clipboard receiver matrix](docs/clipboard-receiver-matrix.md). See the [user guide](docs/user-guide.md).
+
+## Next
+
+Keep the local-first boundary. The next measured work is paste into real editors, mixed-content polish, and the two plans below — not a new content type or a hosted service.
+
+- [Clipboard receiver matrix](docs/clipboard-receiver-matrix.md)
+- [Recovery unification plan](docs/recovery-unification-plan.md)
+- [Large-collection performance plan](docs/large-collection-performance-plan.md)
+
+Historical design notes in the repo are not the current product contract. Prefer this README, the [user guide](docs/user-guide.md), and the [data format](docs/data-format.md).
 
 ## Privacy and security
 

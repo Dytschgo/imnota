@@ -73,7 +73,10 @@ export function generateMarkdown(
     if (entry.kind === 'drawing') {
       if (!entry.item.includeInExport)
         out.push(`Drawing ${visualNumber} was intentionally excluded from this prompt bundle.`, '');
-      else out.push(`## Drawing ${visualNumber} — ${entry.item.title?.trim() || 'Untitled drawing'}`, '');
+      else {
+        out.push(`## Drawing ${visualNumber} — ${entry.item.title?.trim() || 'Untitled drawing'}`, '');
+        if (entry.item.description?.trim()) out.push(entry.item.description.trim(), '');
+      }
       continue;
     }
     const shot = entry.item as ScreenshotRecord;
