@@ -216,6 +216,22 @@ async function createFixtureSources(root: string): Promise<FixtureSource[]> {
   return sources;
 }
 
+async function waitForLaunchSurface(driver: NativeUiDriver): Promise<'onboarding' | 'library'> {
+  const started = Date.now();
+  do {
+    if (await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog)) return 'onboarding';
+    if (await existsAny(driver, SMOKE_UI_CONTRACT.newProject)) return 'library';
+    await delay(50);
+  } while (Date.now() - started < 15_000);
+  throw new Error('Launch did not show onboarding or the project library.');
+}
+
+async function dismissOnboardingIfPresent(driver: NativeUiDriver): Promise<void> {
+  if (!(await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog))) return;
+  await clickAny(driver, [{ selector: '.imnota-onboarding-dismiss' }, { text: 'Skip guide', exact: true }]);
+  await driver.waitFor(SMOKE_UI_CONTRACT.onboardingDialog[0], { absent: true });
+}
+
 async function createProjectThroughUi(
   driver: NativeUiDriver,
   name: string,
@@ -227,6 +243,7 @@ async function createProjectThroughUi(
       { text: 'Create your first project', exact: true },
     ]);
   } else {
+    await dismissOnboardingIfPresent(driver);
     await clickAny(driver, SMOKE_UI_CONTRACT.newProject);
   }
   await driver.waitFor({ selector: '[role="dialog"]', text: 'New project' });
@@ -251,7 +268,7 @@ async function exerciseOnboarding(
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<boolean> {
-  const present = await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog);
+  const present = (await waitForLaunchSurface(driver)) === 'onboarding';
   if (!present) return false;
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
