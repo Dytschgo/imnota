@@ -45,7 +45,8 @@ describe('annotation toolbar', () => {
     ]);
 
     fireEvent.click(screen.getByRole('button', { name: 'More annotation tools' }));
-    const menu = screen.getByRole('menu', { name: 'More annotation tools' });
+    const menu = screen.getByTestId('more-annotation-tools-menu');
+    expect(within(menu).getByTestId('tool-crop')).toBeVisible();
     fireEvent.click(within(menu).getByRole('menuitemradio', { name: /Pixelation/ }));
     expect(setTool).toHaveBeenCalledWith('pixelate');
   });

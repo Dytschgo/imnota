@@ -281,7 +281,12 @@ export function Toolbar({
               )}
             </span>
             {moreOpen && (
-              <div className="annotation-more-menu" role="menu" aria-label="More annotation tools">
+              <div
+                className="annotation-more-menu"
+                role="menu"
+                aria-label="More annotation tools"
+                data-testid="more-annotation-tools-menu"
+              >
                 {overflowTools.map((definition) => {
                   const Icon = definition.icon;
                   return (
@@ -289,6 +294,8 @@ export function Toolbar({
                       key={definition.id}
                       type="button"
                       role="menuitemradio"
+                      data-testid={`tool-${definition.id}`}
+                      aria-label={definition.label}
                       aria-checked={tool === definition.id}
                       className={tool === definition.id ? 'is-active' : ''}
                       onClick={() => {
