@@ -284,6 +284,13 @@ function mergeTrackedProjectMetadata(
                 item.title,
                 conflicts,
               ),
+              description: mergeField(
+                `drawing ${item.id} description`,
+                before.description ?? '',
+                edited.description ?? '',
+                item.description ?? '',
+                conflicts,
+              ),
             }
           : {}),
       };

@@ -422,6 +422,10 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
       lines.push(`${visualLabel} ${pictureNumber} was intentionally excluded from this export.`, '');
       continue;
     }
+    if (item.kind === 'drawing') {
+      const description = normalizedMarkdown(item.description ?? '');
+      if (description.trim()) lines.push(description, '');
+    }
     for (const note of includedById.get(screenshot.id)?.notes ?? [])
       lines.push(`#### Picture ${pictureNumber} / Note ${note.number}`, '', note.text, '');
   }
