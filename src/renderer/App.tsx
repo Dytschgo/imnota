@@ -1568,6 +1568,7 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
+            onWorkbenchChange={preferences.saveWorkbench}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -1663,6 +1664,19 @@ export default function App() {
                 ),
               });
             }}
+            onDrawingDescription={(description) => {
+              const current = useAppStore.getState().snapshot?.project;
+              if (!current) return;
+              queueProjectSave({
+                ...current,
+                contentItems: current.contentItems?.map((item) =>
+                  item.id === store.activeScreenshotId && item.kind === 'drawing'
+                    ? { ...item, description }
+                    : item,
+                ),
+              });
+            }}
+            screenshotFirstAdd={preferences.settings.workbench.screenshotFirstAdd}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}

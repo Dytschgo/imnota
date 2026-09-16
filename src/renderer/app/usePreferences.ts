@@ -7,6 +7,7 @@ import {
   type PreferenceSettings,
   type PreferenceSettingsResult,
   type ShortcutPreferences,
+  type WorkbenchPreferences,
 } from '../../shared/preferences';
 import type { BackupPreferences } from '../../shared/backups';
 import type { NativePerformanceProfile, PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
@@ -32,6 +33,7 @@ export interface PreferenceController {
   saveBackups(value: BackupPreferences): Promise<void>;
   saveCapture(value: CapturePreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
+  saveWorkbench(value: WorkbenchPreferences): Promise<void>;
   clearError(): void;
 }
 
@@ -105,6 +107,9 @@ export function usePreferences(): PreferenceController {
     },
     saveOnboarding: async (onboarding) => {
       await save({ onboarding });
+    },
+    saveWorkbench: async (workbench) => {
+      await save({ workbench });
     },
     clearError: () => setError(''),
   };

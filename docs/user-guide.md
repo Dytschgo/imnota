@@ -30,9 +30,13 @@ Choose **Search** to find project and collection information, screenshot descrip
 
 Search reports when its limits or unavailable files prevent complete results. Content files over 2 MB are skipped; each request also limits the number of projects, file operations and total bytes read. Project files remain unchanged by searching.
 
-## Add and organize screenshots
+## Add items
 
-Paste, drop or import PNG, JPEG or WebP images. Imnota appends them in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
+The collection rail’s primary action is **Add screenshot**. The adjacent menu adds a pasted clipboard image, a drawing, or a Markdown text block. Settings → Shortcuts → Combined Add item button restores the previous single Add item menu.
+
+Paste, drop or import still appends screenshots in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
+
+## Add and organize screenshots
 
 Each screenshot has:
 
@@ -53,7 +57,7 @@ Capture is off by default. It captures one region on one display, with no video,
 
 ## Add text blocks and drawings
 
-Text blocks contain Markdown and can be edited or previewed. Drawings use the embedded Excalidraw editor and save an editable local JSON source together with a rendered PNG used by exports. Both item types can be reordered with screenshots, included or excluded, duplicated, deleted with Undo and autosaved.
+Text blocks contain Markdown and can be edited or previewed. Drawings use the embedded Excalidraw editor and save an editable local JSON source together with a rendered PNG used by exports. A drawing also has an optional Description that is written into prompt Markdown under that drawing. Both item types can be reordered with screenshots, included or excluded, duplicated, deleted with Undo and autosaved.
 
 The mixed collection order is authoritative for Markdown and visual export. Text blocks do not create image assets; included screenshots and drawings do. The current drawing editor intentionally supports a focused toolset. Full `.excalidraw` import/export compatibility is planned separately.
 

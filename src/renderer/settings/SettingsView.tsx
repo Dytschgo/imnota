@@ -34,6 +34,7 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
+  onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -61,6 +62,7 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
+  onWorkbenchChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -209,6 +211,20 @@ export function SettingsView({
                 type="checkbox"
                 checked={settings.confirmBeforeDeletion}
                 onChange={(event) => void saveLegacy({ confirmBeforeDeletion: event.target.checked })}
+              />
+            </label>
+            <label className="settings-switch">
+              <span>
+                <strong>Combined Add item button</strong>
+                <small>
+                  Restore a single Add item menu instead of making Add screenshot the primary rail action.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={!preferences.workbench.screenshotFirstAdd}
+                disabled={savingPreferences || !onWorkbenchChange}
+                onChange={(event) => void onWorkbenchChange?.({ screenshotFirstAdd: !event.target.checked })}
               />
             </label>
           </section>

@@ -34,6 +34,8 @@ export interface CollectionRailProps {
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
   onDeleteProject?(): void;
+  /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
+  screenshotFirstAdd?: boolean;
 }
 
 export function CollectionControls({
@@ -342,6 +344,7 @@ export function CollectionRail({
   onAddContent,
   onDeleteItem,
   onDeleteProject,
+  screenshotFirstAdd = true,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -628,32 +631,71 @@ export function CollectionRail({
           </div>
           <div className="rail-actions">
             <div className="add-item-menu" ref={addMenuRef}>
-              <Button
-                ref={addMenuTriggerRef}
-                data-testid="add-item-trigger"
-                variant="primary"
-                disabled={collection?.archived}
-                aria-expanded={addMenuOpen}
-                aria-haspopup="menu"
-                aria-controls={addMenuId}
-                onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown' || event.key === 'Home') {
-                    event.preventDefault();
-                    openAddMenu(0);
-                  } else if (event.key === 'ArrowUp' || event.key === 'End') {
-                    event.preventDefault();
-                    openAddMenu(addItemOptions.length - 1);
-                  } else if (event.key === 'Escape' && addMenuOpen) {
-                    event.preventDefault();
-                    closeAddMenu(true);
-                  }
-                }}
-              >
-                <Plus size={15} aria-hidden="true" />
-                Add item
-                <ChevronDown size={14} aria-hidden="true" />
-              </Button>
+              {screenshotFirstAdd ? (
+                <div className="add-item-primary">
+                  <Button
+                    variant="primary"
+                    disabled={collection?.archived}
+                    data-testid="add-screenshot"
+                    onClick={onImport}
+                  >
+                    <Upload size={15} aria-hidden="true" />
+                    Add screenshot
+                  </Button>
+                  <Button
+                    ref={addMenuTriggerRef}
+                    data-testid="add-item-trigger"
+                    variant="soft"
+                    disabled={collection?.archived}
+                    aria-label="More ways to add"
+                    aria-expanded={addMenuOpen}
+                    aria-haspopup="menu"
+                    aria-controls={addMenuId}
+                    onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowDown' || event.key === 'Home') {
+                        event.preventDefault();
+                        openAddMenu(0);
+                      } else if (event.key === 'ArrowUp' || event.key === 'End') {
+                        event.preventDefault();
+                        openAddMenu(addItemOptions.length - 1);
+                      } else if (event.key === 'Escape' && addMenuOpen) {
+                        event.preventDefault();
+                        closeAddMenu(true);
+                      }
+                    }}
+                  >
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  ref={addMenuTriggerRef}
+                  data-testid="add-item-trigger"
+                  variant="primary"
+                  disabled={collection?.archived}
+                  aria-expanded={addMenuOpen}
+                  aria-haspopup="menu"
+                  aria-controls={addMenuId}
+                  onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown' || event.key === 'Home') {
+                      event.preventDefault();
+                      openAddMenu(0);
+                    } else if (event.key === 'ArrowUp' || event.key === 'End') {
+                      event.preventDefault();
+                      openAddMenu(addItemOptions.length - 1);
+                    } else if (event.key === 'Escape' && addMenuOpen) {
+                      event.preventDefault();
+                      closeAddMenu(true);
+                    }
+                  }}
+                >
+                  <Plus size={15} aria-hidden="true" />
+                  Add item
+                  <ChevronDown size={14} aria-hidden="true" />
+                </Button>
+              )}
               {addMenuOpen && (
                 <div
                   className="add-item-popover"

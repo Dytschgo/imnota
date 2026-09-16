@@ -25,6 +25,7 @@ export interface PromptDrawingInput {
   position: number;
   title: string;
   originalFilename: string;
+  description?: string;
   includeInExport: boolean;
   nativeWidth: number;
   nativeHeight: number;
@@ -291,6 +292,8 @@ function markdownForBundle(
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
+    } else if (normalized(picture.description).trim()) {
+      lines.push(normalized(picture.description), '');
     }
   }
   for (const visual of bundle.excludedVisuals)
@@ -338,7 +341,7 @@ function resolveRendered(
     kind: drawing ? 'drawing' : 'screenshot',
     title: item.title,
     originalFilename: item.originalFilename,
-    description: drawing ? '' : item.description,
+    description: drawing ? (item.description ?? '') : item.description,
     priority: drawing ? 'medium' : item.priority,
     contentRevision: item.contentRevision,
     notes: drawing ? [] : mapPromptTextNotes(item.annotations),

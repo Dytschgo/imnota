@@ -268,10 +268,21 @@ describe('CollectionRail', () => {
     expect(
       useAppStore.getState().snapshot?.project.contentItems?.find((item) => item.id === 'text')?.position,
     ).toBe(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeVisible();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
     expect(screen.getByRole('menu', { name: 'Add item' })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: /Drawing/ })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: /Text block/ })).toBeVisible();
+  });
+
+  it('makes Add screenshot the primary action and can restore the combined Add item button', () => {
+    const onImport = vi.fn();
+    const { rerender } = render(<CollectionRail {...props({ onImport, onAddContent: vi.fn() })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add screenshot' }));
+    expect(onImport).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Add item' })).toBeNull();
+    rerender(<CollectionRail {...props({ onImport, onAddContent: vi.fn(), screenshotFirstAdd: false })} />);
+    expect(screen.getByRole('button', { name: 'Add item' })).toBeVisible();
   });
 
   it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {
@@ -279,7 +290,7 @@ describe('CollectionRail', () => {
     const onAddContent = vi.fn();
     render(<CollectionRail {...props({ onImport, onAddContent })} />);
 
-    const trigger = screen.getByRole('button', { name: 'Add item' });
+    const trigger = screen.getByTestId('add-item-trigger');
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
     const screenshot = await screen.findByTestId('add-item-screenshot');
@@ -311,7 +322,7 @@ describe('CollectionRail', () => {
       const destination = screen.getByRole('button', { name: /Paste from clipboard/i });
       for (const [trigger, role] of [
         [screen.getByRole('button', { name: 'Collection' }), 'listbox'],
-        [screen.getByRole('button', { name: 'Add item' }), 'menu'],
+        [screen.getByTestId('add-item-trigger'), 'menu'],
       ] as const) {
         fireEvent.keyDown(trigger, { key: 'ArrowDown' });
         const popup = await screen.findByRole(role);
@@ -398,7 +409,8 @@ describe('CollectionRail', () => {
     });
     expect(onSnapshot).toHaveBeenNthCalledWith(1, expect.any(Object), 'alpha');
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
-    expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeDisabled();
+    expect(screen.getByTestId('add-item-trigger')).toBeDisabled();
     expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore' }));

@@ -15,6 +15,30 @@ describe('project schema', () => {
       validateProject({ ...emptyProject('Valid', ''), icon: 'unknown-plugin-icon' }).icon,
     ).toBeUndefined();
   });
+  it('accepts schema 4 drawings without a description and fills an empty default', () => {
+    const project = emptyProject('Drawings', '');
+    project.schemaVersion = 4;
+    project.contentItems = [
+      {
+        id: 'flow',
+        collectionId: '001-collection',
+        kind: 'drawing',
+        position: 0,
+        includeInExport: true,
+        createdAt: '2026-09-07T00:00:00.000Z',
+        updatedAt: '2026-09-07T00:00:00.000Z',
+        title: 'Flow',
+        sourceFilename: 'flow.json',
+        imageFilename: 'flow.png',
+        originalWidth: 160,
+        originalHeight: 120,
+      },
+    ];
+    expect(validateProject(project).contentItems).toEqual([
+      expect.objectContaining({ id: 'flow', kind: 'drawing', description: '' }),
+    ]);
+  });
+
   it('rejects two screenshot IDs that alias the same per-collection files', () => {
     const project = emptyProject('Aliased', '');
     const collectionId = project.collections[0].id;

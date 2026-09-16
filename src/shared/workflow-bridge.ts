@@ -40,6 +40,7 @@ export interface PreferenceSettingsUpdate {
   shortcuts?: Partial<PreferenceSettings['shortcuts']>;
   capture?: Partial<PreferenceSettings['capture']>;
   onboarding?: Partial<PreferenceSettings['onboarding']>;
+  workbench?: Partial<PreferenceSettings['workbench']>;
 }
 
 export interface NativePerformanceProfile {
