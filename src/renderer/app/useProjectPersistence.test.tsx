@@ -874,50 +874,94 @@ describe('useProjectPersistence', () => {
     expect(mock.value.reloadWatchedProject).toHaveBeenCalledOnce();
   });
 
-  it('holds debounced metadata behind a native mutation and saves it against the new revision', async () => {
-    const source = snapshot();
-    const imported = snapshot([shot('one'), shot('two')]);
-    const saveMetadata = vi.fn(async ({ project: next }: { project: ProjectData }) =>
-      ok({ snapshot: { ...imported, project: next }, projectRevision: 'project-after-context' }),
-    );
-    const mock = bridge({
-      reloadWatchedProject: vi.fn(async () =>
-        ok({ snapshot: imported, projectRevision: 'project-after-import' }),
-      ),
-      saveProjectCompareAndSwap: saveMetadata,
-    });
-    window.imnota = mock.value as never;
-    const { result } = renderHook(() =>
-      useProjectPersistence({
-        snapshot: source,
-        activeScreenshot: source.project.screenshots[0]!,
-        onProject: vi.fn(),
-        onSnapshot: vi.fn(),
-        onSelectScreenshot: vi.fn(),
-      }),
-    );
-    await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
-    const token = result.current.beginNativeMutation();
-    const typed = structuredClone(source.project);
-    typed.collections[0]!.overallContext = 'Typed during slow import';
-    act(() => result.current.queueProjectMetadata(typed));
-    const deferredSave = result.current.flushProjectMetadata();
-    await Promise.resolve();
-    expect(saveMetadata).not.toHaveBeenCalled();
-    await act(async () => {
-      await result.current.acceptMutationSnapshot(imported, 'two', token);
-    });
-    await expect(deferredSave).resolves.toBe(true);
-    expect(saveMetadata).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedRevision: 'project-after-import',
-        project: expect.objectContaining({
-          collections: [expect.objectContaining({ overallContext: 'Typed during slow import' })],
-          screenshots: expect.arrayContaining([expect.objectContaining({ id: 'two' })]),
+  it.each([false, true])(
+    'rebases queued drawing descriptions after native mutations (conflict: %s)',
+    async (conflicting) => {
+      const source = snapshot();
+      source.project.schemaVersion = 4;
+      source.project.contentItems = [
+        {
+          id: 'drawing',
+          collectionId: source.project.collections[0]!.id,
+          kind: 'drawing',
+          title: 'Queue',
+          description: 'Saved description',
+          position: 1,
+          includeInExport: true,
+          createdAt: source.project.createdAt,
+          updatedAt: source.project.updatedAt,
+          sourceFilename: 'drawing.json',
+          imageFilename: 'drawing.png',
+          originalWidth: 160,
+          originalHeight: 120,
+        },
+      ];
+      const imported = snapshot([shot('one'), shot('two')]);
+      imported.project.schemaVersion = 4;
+      imported.project.contentItems = structuredClone(source.project.contentItems);
+      if (conflicting) {
+        const externalDrawing = imported.project.contentItems[0]!;
+        if (externalDrawing.kind !== 'drawing') throw new Error('Expected a drawing fixture.');
+        externalDrawing.description = 'Competing external description';
+      }
+      const saveMetadata = vi.fn(async ({ project: next }: { project: ProjectData }) =>
+        ok({ snapshot: { ...imported, project: next }, projectRevision: 'project-after-context' }),
+      );
+      const mock = bridge({
+        reloadWatchedProject: vi.fn(async () =>
+          ok({ snapshot: imported, projectRevision: 'project-after-import' }),
+        ),
+        saveProjectCompareAndSwap: saveMetadata,
+      });
+      window.imnota = mock.value as never;
+      const onSnapshot = vi.fn();
+      const { result } = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: source.project.screenshots[0]!,
+          onProject: vi.fn(),
+          onSnapshot,
+          onSelectScreenshot: vi.fn(),
         }),
-      }),
-    );
-  });
+      );
+      await waitFor(() => expect(result.current.projectRevision).toBe('project-1'));
+      const token = result.current.beginNativeMutation();
+      const typed = structuredClone(source.project);
+      typed.collections[0]!.overallContext = 'Typed during slow import';
+      const drawing = typed.contentItems![0]!;
+      if (drawing.kind !== 'drawing') throw new Error('Expected a drawing fixture.');
+      drawing.description = 'Drawing description typed during slow import';
+      act(() => result.current.queueProjectMetadata(typed));
+      const deferredSave = result.current.flushProjectMetadata();
+      await Promise.resolve();
+      expect(saveMetadata).not.toHaveBeenCalled();
+      await act(async () => {
+        await result.current.acceptMutationSnapshot(imported, 'two', token);
+      });
+      if (conflicting) {
+        await expect(deferredSave).resolves.toBe(false);
+        expect(result.current.externalChange?.kind).toBe('metadata-conflict');
+        expect(saveMetadata).not.toHaveBeenCalled();
+        expect(onSnapshot.mock.calls.at(-1)?.[0].project.contentItems[0].description).toBe(
+          'Drawing description typed during slow import',
+        );
+        return;
+      }
+      await expect(deferredSave).resolves.toBe(true);
+      expect(saveMetadata).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedRevision: 'project-after-import',
+          project: expect.objectContaining({
+            collections: [expect.objectContaining({ overallContext: 'Typed during slow import' })],
+            screenshots: expect.arrayContaining([expect.objectContaining({ id: 'two' })]),
+            contentItems: [
+              expect.objectContaining({ description: 'Drawing description typed during slow import' }),
+            ],
+          }),
+        }),
+      );
+    },
+  );
 
   it('rebases a stale metadata CAS when an unsuspended native collection mutation is adopted', async () => {
     const source = snapshot();

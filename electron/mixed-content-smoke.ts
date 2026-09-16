@@ -52,7 +52,7 @@ export async function exerciseMixedContent(
     throw new Error('Text-only prompt copy must contain Markdown without a placeholder image.');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   await driver.resize({ width: 1280, height: 800 });
-  await driver.click({ text: 'Add item', exact: true });
+  await driver.click({ selector: '[data-testid="add-item-trigger"]' });
   await driver.click({ selector: '.add-item-popover [role="menuitem"]', text: 'Drawing' });
   await driver.waitFor({ selector: '[data-testid="drawing-editor"]' });
   await driver.waitFor({ selector: '.drawing-editor .excalidraw__canvas.interactive' });

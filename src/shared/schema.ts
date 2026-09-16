@@ -60,6 +60,7 @@ const contentItemBaseSchema = z.object({
 export const drawingRecordSchema = contentItemBaseSchema.extend({
   kind: z.literal('drawing'),
   title: z.string().max(500),
+  description: z.string().max(100_000).optional().default(''),
   sourceFilename: filenameSchema.refine((value) => value.endsWith('.json'), {
     message: 'Drawing source must be a JSON filename.',
   }),

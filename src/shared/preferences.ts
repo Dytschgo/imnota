@@ -68,12 +68,18 @@ export interface OnboardingPreferences {
   completedVersion: number;
 }
 
+/** Screenshot-first add is the default. Combined Add item restores the previous single menu. */
+export interface WorkbenchPreferences {
+  screenshotFirstAdd: boolean;
+}
+
 export interface PreferenceSettings {
   appearance: AppearancePreferences;
   backups: BackupPreferences;
   shortcuts: ShortcutPreferences;
   capture: CapturePreferences;
   onboarding: OnboardingPreferences;
+  workbench: WorkbenchPreferences;
 }
 
 export interface SettingsProfileProvenance {
@@ -123,12 +129,17 @@ export const DEFAULT_ONBOARDING: OnboardingPreferences = {
   completedVersion: 0,
 };
 
+export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
+  screenshotFirstAdd: true,
+};
+
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
   backups: DEFAULT_BACKUP_PREFERENCES,
   shortcuts: { bindings: {} },
   capture: { experimentalRegionCapture: false },
   onboarding: DEFAULT_ONBOARDING,
+  workbench: DEFAULT_WORKBENCH,
 };
 
 export function shouldShowOnboarding(

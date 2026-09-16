@@ -2741,6 +2741,27 @@ kbd {
   margin-left: auto;
 }
 
+.add-item-primary {
+  display: flex;
+  gap: 4px;
+}
+
+.add-item-primary > .btn:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.add-item-primary > .btn:last-child {
+  flex: none;
+  width: 36px;
+  padding-inline: 0;
+  justify-content: center;
+}
+
+.add-item-primary > .btn:last-child svg:last-child {
+  margin-left: 0;
+}
+
 .add-item-popover {
   position: absolute;
   z-index: 8;

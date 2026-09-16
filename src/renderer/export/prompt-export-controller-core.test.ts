@@ -1033,13 +1033,18 @@ describe('prompt export controller orchestration', () => {
       itemId: 'drawing-1',
     });
     context.snapshot.project.schemaVersion = 4;
-    context.snapshot.project.contentItems = [loaded.item];
+    if (loaded.item.kind !== 'drawing') throw new Error('Expected a drawing fixture.');
+    context.snapshot.project.contentItems = [
+      { ...loaded.item, description: '    Queue before workers.\r\n\r\nKeep ordering.' },
+    ];
     const renderer = fakeRendering({ preflightSize: { width: 180, height: 160 } });
     const preflight = vi.spyOn(renderer.rendering, 'preflight');
     const controller = engine(async () => context, native.bridge, renderer.rendering);
     expect((await controller.copyFresh(1)).ok).toBe(true);
     expect(preflight).not.toHaveBeenCalled();
     expect(native.writes[0].markdown).toContain('Drawing 1');
+    expect(native.writes[0].markdown).toContain('    Queue before workers.\n\nKeep ordering.');
+    expect(native.finishes[0].masterMarkdown).toContain('    Queue before workers.\n\nKeep ordering.');
     expect(native.writes[0].sourceAssets).toEqual([{ filename: 'drawing-1.json', source: loaded.source }]);
   });
 

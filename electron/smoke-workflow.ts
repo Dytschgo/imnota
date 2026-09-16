@@ -237,6 +237,13 @@ async function createProjectThroughUi(
       { text: 'Create your first project', exact: true },
     ]);
   } else {
+    if (await existsAny(driver, SMOKE_UI_CONTRACT.onboardingDialog)) {
+      await clickAny(driver, [
+        { selector: '.imnota-onboarding-dismiss' },
+        { text: 'Skip guide', exact: true },
+      ]);
+      await driver.waitFor(SMOKE_UI_CONTRACT.onboardingDialog[0], { absent: true });
+    }
     await clickAny(driver, SMOKE_UI_CONTRACT.newProject);
   }
   await driver.waitFor({ selector: '[role="dialog"]', text: 'New project' });
@@ -440,23 +447,26 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
   })()`);
 }
 
+const ANNOTATION_TOOL_TEST_IDS: Record<string, string> = {
+  Arrow: 'arrow',
+  Crop: 'crop',
+  'Redaction mask': 'blur',
+};
+
 async function selectTool(driver: NativeUiDriver, label: string): Promise<void> {
-  const toolId = label.toLowerCase().replaceAll(' ', '-');
-  const direct = {
-    selector: `[data-testid="tool-${toolId}"],[aria-label^="${label}"]`,
-  };
-  if (await driver.exists(direct)) {
-    await driver.click(direct);
+  const toolId = ANNOTATION_TOOL_TEST_IDS[label] ?? label.toLowerCase().replaceAll(' ', '-');
+  const tool = { selector: `[data-testid="tool-${toolId}"]` };
+  if (await driver.exists(tool)) {
+    await driver.click(tool);
     return;
   }
-  await clickAny(driver, [
-    { selector: '[data-testid="more-annotation-tools"]' },
-    { text: 'More annotation tools', exact: true },
-  ]);
-  await clickAny(driver, [
-    { selector: `[data-testid="tool-${toolId}"]` },
-    { selector: '[role="menuitemradio"]', text: label },
-  ]);
+  const more = { selector: '[data-testid="more-annotation-tools"]' };
+  const menu = { selector: '[data-testid="more-annotation-tools-menu"]' };
+  if (!(await driver.exists(more)))
+    throw new Error(`Annotation tool ${JSON.stringify(label)} is not in the toolbar or More menu.`);
+  await driver.click(more);
+  await driver.waitFor(menu);
+  await driver.click(tool);
 }
 
 async function waitForStableCanvas(driver: NativeUiDriver): Promise<void> {

@@ -3,8 +3,40 @@ import { describe, expect, it } from 'vitest';
 import { legacyProjectSchema } from '../schema';
 import { EMPTY_NOTES, emptyProject } from '../utils';
 import { normalizeRecoveredProject } from '../../../electron/recovery';
+import type { DrawingRecord } from '../content-items';
 
 describe('legacy recovery normalization', () => {
+  it.each(['Unsaved drawing description\n\n**Keep this context.**', '', undefined])(
+    'restores drawing descriptions while retaining trusted identity and files: %s',
+    (description) => {
+      const current = emptyProject('Recovered drawing', '');
+      current.schemaVersion = 4;
+      const drawing: DrawingRecord = {
+        id: 'drawing',
+        collectionId: current.collections[0].id,
+        kind: 'drawing',
+        title: 'Saved drawing',
+        description: 'Saved description',
+        position: 0,
+        includeInExport: true,
+        createdAt: 'created',
+        updatedAt: 'saved',
+        sourceFilename: 'drawing.json',
+        imageFilename: 'drawing.png',
+        originalWidth: 160,
+        originalHeight: 120,
+      };
+      current.contentItems = [drawing];
+      const recovered = {
+        ...current,
+        contentItems: [{ ...drawing, description, sourceFilename: 'untrusted.json', updatedAt: 'recovered' }],
+      };
+      expect(normalizeRecoveredProject(current, recovered).contentItems).toEqual([
+        { ...drawing, description: description ?? '', updatedAt: 'recovered' },
+      ]);
+    },
+  );
+
   it('restores v2 description, notes, title, priority and inclusion through trusted v3 paths', () => {
     const current = emptyProject('Recovered', '');
     current.screenshots = [

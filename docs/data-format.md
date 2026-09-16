@@ -36,7 +36,7 @@ The record's `position` orders screenshots within its collection. Picture number
 
 Schema 4 adds a `contentItems` array for text and drawing records. The application combines it with the screenshot records and sorts all records by `position`, using creation time and ID as deterministic tie-breakers. This combined order is used by the collection rail and export code.
 
-Text blocks reference a Markdown file under `collections/<collection>/text/`. Drawings reference an editable JSON source and rendered PNG under `collections/<collection>/drawings/`. Drawing JSON is authoritative for editing; the PNG is a derived export cache. All three item types have stable IDs, export visibility and recoverable deletion.
+Text blocks reference a Markdown file under `collections/<collection>/text/`. Drawings reference an editable JSON source and rendered PNG under `collections/<collection>/drawings/`. Drawing JSON is authoritative for editing; the PNG is a derived export cache. Drawings also have an optional Markdown description stored on the drawing record and copied into prompt Markdown under the drawing heading. All three item types have stable IDs, export visibility and recoverable deletion.
 
 Annotation JSON contains editable records in original-image coordinates. Canvas zoom does not alter them. Description sidecars preserve Markdown and line breaks. Missing descriptions are valid.
 

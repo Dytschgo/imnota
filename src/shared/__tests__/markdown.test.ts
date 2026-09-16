@@ -49,6 +49,31 @@ describe('collection Markdown generation', () => {
     expect(markdown).not.toContain('rectangle');
   });
 
+  it('writes drawing descriptions under the drawing heading', () => {
+    const project = emptyProject('Architecture', '');
+    project.schemaVersion = 4;
+    project.contentItems = [
+      {
+        id: 'flow',
+        collectionId: '001-collection',
+        kind: 'drawing',
+        position: 0,
+        includeInExport: true,
+        createdAt: '2026-09-07T00:00:00.000Z',
+        updatedAt: '2026-09-07T00:00:00.000Z',
+        title: 'Queue',
+        description: 'Workers pull from the left.',
+        sourceFilename: 'flow.json',
+        imageFilename: 'flow.png',
+        originalWidth: 160,
+        originalHeight: 120,
+      },
+    ];
+    expect(generateMarkdown(project, '001-collection', {})).toContain(
+      '## Drawing 1 — Queue\n\nWorkers pull from the left.',
+    );
+  });
+
   it('retains a minimal reference without description or text annotations', () => {
     const project = emptyProject('Review', '');
     project.screenshots = [screenshot('first', 0)];

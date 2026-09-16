@@ -1,6 +1,6 @@
 # Prompt bundle clipboard compatibility
 
-Status: combined clipboard preparation is experimental. Receiver compatibility, macOS behavior and cross-editor paste remain pending manual verification.
+Status: combined clipboard preparation is experimental. macOS paste into real editors works. Windows receiver checks are still being tested. Record results in the [clipboard receiver matrix](clipboard-receiver-matrix.md).
 
 ## Product contract
 

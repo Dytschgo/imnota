@@ -49,12 +49,21 @@ describe('profile-aware preference settings', () => {
     });
     expect(shouldShowOnboarding(result.settings.onboarding, result.profile)).toBe(true);
     expect(result.settings.capture.experimentalRegionCapture).toBe(false);
+    expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
   });
 
   it('keeps older saved preferences compatible while adding capture opt-in', () => {
     const current = resolvePreferenceSettings(undefined, false).settings;
     const restored = resolvePreferenceSettings({ preferences: { ...current, capture: undefined } }, true);
     expect(restored.settings.capture.experimentalRegionCapture).toBe(false);
+    const withoutWorkbench = resolvePreferenceSettings(
+      { preferences: { ...current, workbench: undefined } },
+      true,
+    );
+    expect(withoutWorkbench.settings.workbench.screenshotFirstAdd).toBe(true);
+    expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
+      screenshotFirstAdd: false,
+    });
   });
 
   it('migrates the legacy theme without keeping a duplicate authority', () => {

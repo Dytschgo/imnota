@@ -301,6 +301,8 @@ function MoreToolSection({
             type="button"
             role="menuitemradio"
             data-tool-id={definition.id}
+            data-testid={`tool-${definition.id}`}
+            aria-label={definition.label}
             aria-checked={activeTool === definition.id}
             className={activeTool === definition.id ? 'is-active' : ''}
             tabIndex={index === focusedIndex ? 0 : -1}
@@ -555,6 +557,7 @@ export function Toolbar({
                 id={moreMenuId}
                 role="menu"
                 aria-label="More annotation tools"
+                data-testid="more-annotation-tools-menu"
               >
                 {[
                   { label: 'Annotate', tools: PRIMARY_TOOLS },

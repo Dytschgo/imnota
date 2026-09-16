@@ -45,6 +45,7 @@ export function normalizeRecoveredProject(
               ? {
                   ...trustedItem,
                   title: recoveredItem.title,
+                  description: recoveredItem.description ?? '',
                   includeInExport: recoveredItem.includeInExport,
                   updatedAt: recoveredItem.updatedAt,
                 }
