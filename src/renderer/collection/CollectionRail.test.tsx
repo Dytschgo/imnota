@@ -217,8 +217,29 @@ describe('CollectionRail', () => {
     expect(
       useAppStore.getState().snapshot?.project.contentItems?.find((item) => item.id === 'text')?.position,
     ).toBe(0);
+    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeVisible();
+    fireEvent.click(screen.getByTestId('add-item-menu'));
+    expect(screen.getByRole('menuitem', { name: 'Add drawing' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Add text' })).toBeVisible();
+  });
+
+  it('puts screenshot add first and can restore the separate add buttons', () => {
+    const onImport = vi.fn();
+    const onPaste = vi.fn();
+    const onAddContent = vi.fn();
+    const { rerender } = render(<CollectionRail {...props({ onImport, onPaste, onAddContent })} />);
+    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Add screenshots' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add screenshot' }));
+    expect(onImport).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId('add-item-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Paste from clipboard' }));
+    expect(onPaste).toHaveBeenCalledOnce();
+    rerender(<CollectionRail {...props({ onImport, onPaste, onAddContent, separateAddButtons: true })} />);
+    expect(screen.getByRole('button', { name: 'Add screenshots' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Add drawing' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Add text' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Paste from clipboard' })).toBeVisible();
   });
 
   it('excludes a text block without altering screenshots', async () => {
@@ -278,8 +299,8 @@ describe('CollectionRail', () => {
     });
     expect(onSnapshot).toHaveBeenNthCalledWith(1, expect.any(Object), 'alpha');
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
-    expect(screen.getByRole('button', { name: /add screenshots/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /add screenshot/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /more ways to add/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
 

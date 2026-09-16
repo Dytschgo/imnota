@@ -1,6 +1,6 @@
 # User guide
 
-Imnota turns the screenshots in one collection into local Markdown + PNG prompt bundles. It does not upload projects, call an AI provider or synchronize through a cloud service.
+Imnota turns screenshots, Markdown text blocks and drawings in one collection into local Markdown + PNG prompt bundles. It does not upload projects, call an AI provider or synchronize through a cloud service.
 
 ## Start a project and collection
 
@@ -14,9 +14,13 @@ Choose a workspace folder, then create or open a project. Collections replace th
 
 Overall context is optional and applies to the active collection. Prompt 1 contains it in full; later prompts briefly point back to Prompt 1 instead of duplicating it.
 
-## Add and organize screenshots
+## Add items
 
-Paste, drop or import PNG, JPEG or WebP images. Imnota appends them in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
+The collection rail’s primary action is **Add screenshot**. It imports PNG, JPEG or WebP files. The adjacent menu adds a pasted clipboard image, a drawing, or a Markdown text block. Settings → Editing & shortcuts → Separate add buttons restores the previous four-button row.
+
+Paste, drop or import still appends screenshots in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
+
+## Add and organize screenshots
 
 Each screenshot has:
 
@@ -29,9 +33,15 @@ Drag screenshot rows to change their order. Internal IDs remain stable; `Picture
 
 Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
 
+## Add text blocks and drawings
+
+Text blocks are Markdown and appear in collection order in the prompt. Drawings use the embedded editor and save an editable local JSON source plus a rendered PNG for export. Both types can be reordered with screenshots, included or excluded, duplicated, and deleted with Undo.
+
+A drawing has a title and an optional Description. The description is written into prompt Markdown under that drawing. Deleting a drawing or text block asks for confirmation in the app (when Confirm before deletion is on) and does not show a second operating-system dialog.
+
 ## Annotate
 
-Select / Move is the default tool. Drag empty screenshot space to pan; drag an annotation to move only that annotation. The primary toolbar contains Select / Move, Text, Arrow, Rectangle, Highlight and Note / Step. Less common tools are under More tools, and tooltips show their purpose and shortcut.
+Select / Move is the default tool. Drag empty screenshot space to pan; drag an annotation to move only that annotation. The toolbar shows as many annotation tools as the current width allows and moves the rest into More tools. Tooltips show each tool’s purpose and shortcut.
 
 Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual-only marks remain visible in the PNG but are not converted to Markdown geometry.
 
@@ -58,7 +68,7 @@ Picture 3 was intentionally excluded from this prompt bundle.
 
 A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
 
-The combined Copy action writes Markdown and a PNG to the clipboard together. Operating systems and receiving editors negotiate clipboard formats differently, so a successful copy does not prove that the target accepted both. If only one arrives, use Copy Markdown only and Copy image only, or open the generated files/folder and attach the PNG manually.
+The combined Copy action writes Markdown and a PNG to the clipboard together. Operating systems and receiving editors negotiate clipboard formats differently, so a successful copy does not prove that the target accepted both. If only one arrives, use Copy Markdown only and Copy image only, or open the generated files/folder and attach the PNG manually. Record what each editor accepts in the [clipboard receiver matrix](clipboard-receiver-matrix.md).
 
 ## Appearance, settings and onboarding
 

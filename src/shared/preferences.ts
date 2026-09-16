@@ -48,10 +48,16 @@ export interface OnboardingPreferences {
   completedVersion: number;
 }
 
+/** Compact collection-rail add control. Separate buttons restore the previous four-action row. */
+export interface WorkbenchPreferences {
+  separateAddButtons: boolean;
+}
+
 export interface PreferenceSettings {
   appearance: AppearancePreferences;
   shortcuts: ShortcutPreferences;
   onboarding: OnboardingPreferences;
+  workbench: WorkbenchPreferences;
 }
 
 export interface SettingsProfileProvenance {
@@ -81,10 +87,15 @@ export const DEFAULT_ONBOARDING: OnboardingPreferences = {
   completedVersion: 0,
 };
 
+export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
+  separateAddButtons: false,
+};
+
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
   shortcuts: { bindings: {} },
   onboarding: DEFAULT_ONBOARDING,
+  workbench: DEFAULT_WORKBENCH,
 };
 
 export function shouldShowOnboarding(

@@ -5,7 +5,7 @@ import { Logo } from '../components/Logo';
 import { Button, Modal, TextArea, TextInput } from '../components/ui';
 import { ShortcutSettings } from '../settings';
 
-export type AppDialog = 'new-project' | 'shortcuts' | 'about' | 'delete-project' | null;
+export type AppDialog = 'new-project' | 'shortcuts' | 'about' | 'delete-project' | 'delete-content' | null;
 
 export interface NewProjectDraft {
   name: string;
@@ -21,6 +21,9 @@ export interface AppDialogsProps {
   onNewProjectChange(value: NewProjectDraft): void;
   onCreateProject(): void | Promise<void>;
   onDeleteProject(): void | Promise<void>;
+  onDeleteContent?(): void | Promise<void>;
+  deleteContentKind?: 'drawing' | 'text';
+  deleteContentName?: string;
   onShortcutChange(value: ShortcutPreferences): void | Promise<void>;
   onClose(): void;
 }
@@ -34,6 +37,9 @@ export function AppDialogs({
   onNewProjectChange,
   onCreateProject,
   onDeleteProject,
+  onDeleteContent,
+  deleteContentKind = 'text',
+  deleteContentName,
   onShortcutChange,
   onClose,
 }: AppDialogsProps) {
@@ -128,5 +134,31 @@ export function AppDialogs({
         </div>
       </Modal>
     );
+  if (dialog === 'delete-content') {
+    const drawing = deleteContentKind === 'drawing';
+    const label = deleteContentName?.trim() || (drawing ? 'this drawing' : 'this text block');
+    return (
+      <Modal
+        title={drawing ? 'Delete this drawing?' : 'Delete this text block?'}
+        description={`${label} and its local files will be moved to the operating-system trash. You can Undo from the in-app notice.`}
+        onClose={onClose}
+      >
+        <div className="modal-actions">
+          <Button variant="ghost" onClick={onClose}>
+            Keep {drawing ? 'drawing' : 'text'}
+          </Button>
+          <Button
+            variant="danger"
+            busy={busy}
+            onClick={() => void onDeleteContent?.()}
+            data-testid="confirm-delete-content"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+            Move to trash
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
   return null;
 }

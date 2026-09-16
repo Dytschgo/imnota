@@ -30,6 +30,8 @@ export interface CollectionRailProps {
   onMessage(message: string): void;
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
+  /** Restore the previous four-button add row. Default is screenshot-first compact add. */
+  separateAddButtons?: boolean;
 }
 
 export function CollectionControls({
@@ -318,6 +320,121 @@ export function CollectionControls({
   );
 }
 
+function AddItemControls({
+  disabled,
+  separateButtons,
+  onImport,
+  onPaste,
+  onAddContent,
+}: {
+  disabled: boolean;
+  separateButtons: boolean;
+  onImport(): void;
+  onPaste(): void;
+  onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', keydown);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', keydown);
+    };
+  }, [menuOpen]);
+
+  if (separateButtons)
+    return (
+      <>
+        <Button variant="soft" disabled={disabled} onClick={onImport}>
+          <Upload size={15} aria-hidden="true" />
+          Add screenshots
+        </Button>
+        <Button variant="ghost" disabled={disabled} onClick={onPaste}>
+          <Clipboard size={15} aria-hidden="true" />
+          Paste from clipboard
+        </Button>
+        {onAddContent && (
+          <>
+            <Button variant="soft" disabled={disabled} onClick={() => void onAddContent('drawing')}>
+              <Pencil size={15} aria-hidden="true" />
+              Add drawing
+            </Button>
+            <Button variant="soft" disabled={disabled} onClick={() => void onAddContent('text')}>
+              <FileText size={15} aria-hidden="true" />
+              Add text
+            </Button>
+          </>
+        )}
+      </>
+    );
+
+  return (
+    <div className="rail-add" ref={menuRef}>
+      <div className="rail-add-primary">
+        <Button variant="primary" disabled={disabled} onClick={onImport}>
+          <Upload size={15} aria-hidden="true" />
+          Add screenshot
+        </Button>
+        <IconButton
+          label="More ways to add"
+          data-testid="add-item-menu"
+          className={menuOpen ? 'is-active' : ''}
+          disabled={disabled}
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <ChevronDown size={16} aria-hidden="true" />
+        </IconButton>
+      </div>
+      {menuOpen && (
+        <div className="rail-add-menu" role="menu" aria-label="Add to collection">
+          <button type="button" role="menuitem" onClick={() => (setMenuOpen(false), onPaste())}>
+            <Clipboard size={15} aria-hidden="true" />
+            Paste from clipboard
+          </button>
+          {onAddContent && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void onAddContent('drawing');
+                }}
+              >
+                <Pencil size={15} aria-hidden="true" />
+                Add drawing
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void onAddContent('text');
+                }}
+              >
+                <FileText size={15} aria-hidden="true" />
+                Add text
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CollectionRail({
   onFlush,
   onSaveProject,
@@ -329,6 +446,7 @@ export function CollectionRail({
   onMessage,
   onSnapshot,
   onAddContent,
+  separateAddButtons = false,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -510,34 +628,13 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
-            {onAddContent && (
-              <>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('drawing')}
-                >
-                  <Pencil size={15} aria-hidden="true" />
-                  Add drawing
-                </Button>
-                <Button
-                  variant="soft"
-                  disabled={collection?.archived}
-                  onClick={() => void onAddContent('text')}
-                >
-                  <FileText size={15} aria-hidden="true" />
-                  Add text
-                </Button>
-              </>
-            )}
-            <Button variant="soft" disabled={collection?.archived} onClick={onImport}>
-              <Upload size={15} aria-hidden="true" />
-              Add screenshots
-            </Button>
-            <Button variant="ghost" disabled={collection?.archived} onClick={() => void onPaste()}>
-              <Clipboard size={15} aria-hidden="true" />
-              Paste from clipboard
-            </Button>
+            <AddItemControls
+              disabled={Boolean(collection?.archived)}
+              separateButtons={separateAddButtons}
+              onImport={onImport}
+              onPaste={() => void onPaste()}
+              onAddContent={onAddContent}
+            />
           </div>
         </>
       )}

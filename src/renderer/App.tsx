@@ -957,6 +957,7 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
+            onWorkbenchChange={preferences.saveWorkbench}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onInstall={async () => {
               if (await flushAll()) {
@@ -984,7 +985,13 @@ export default function App() {
             onContentRetry={contentPersistence.retry}
             onAddContent={addContent}
             onDuplicateContent={() => mutateContent('duplicate')}
-            onDeleteContent={() => mutateContent('delete')}
+            onDeleteContent={() => {
+              if (useAppStore.getState().settings.confirmBeforeDeletion) {
+                setDialog('delete-content');
+                return;
+              }
+              void mutateContent('delete');
+            }}
             onDrawingTitle={(title) => {
               const current = useAppStore.getState().snapshot?.project;
               if (!current) return;
@@ -995,6 +1002,19 @@ export default function App() {
                 ),
               });
             }}
+            onDrawingDescription={(description) => {
+              const current = useAppStore.getState().snapshot?.project;
+              if (!current) return;
+              queueProjectSave({
+                ...current,
+                contentItems: current.contentItems?.map((item) =>
+                  item.id === store.activeScreenshotId && item.kind === 'drawing'
+                    ? { ...item, description }
+                    : item,
+                ),
+              });
+            }}
+            separateAddButtons={preferences.settings.workbench.separateAddButtons}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
@@ -1104,6 +1124,19 @@ export default function App() {
         onNewProjectChange={setNewProject}
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
+        onDeleteContent={async () => {
+          setDialog(null);
+          await mutateContent('delete');
+        }}
+        deleteContentKind={
+          store.snapshot?.project.contentItems?.find((item) => item.id === store.activeScreenshotId)?.kind
+        }
+        deleteContentName={(() => {
+          const item = store.snapshot?.project.contentItems?.find(
+            (entry) => entry.id === store.activeScreenshotId,
+          );
+          return item?.kind === 'drawing' ? item.title : item?.kind === 'text' ? item.preview : undefined;
+        })()}
         onShortcutChange={preferences.saveShortcuts}
         onClose={() => setDialog(null)}
       />

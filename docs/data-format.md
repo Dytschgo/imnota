@@ -17,6 +17,8 @@ collections/001-collection/exports/Collection 01 - 260907-184205/
 
 `project.json` contains project identity and timestamps, ordered collections, ordered screenshot records and local export preferences. A collection has an immutable ID, editable name, creation/update timestamps, archived state and optional Overall context. A new collection starts empty. Renaming it never changes its folder ID.
 
+Schema 4 collections may also contain Markdown text blocks and drawings. The rail and exporters use one mixed order: screenshot records plus `contentItems`, sorted by `position`, then creation time, then ID.
+
 Each screenshot record contains:
 
 - Immutable ID and collection ID.
@@ -29,7 +31,9 @@ Each screenshot record contains:
 
 The record's `position` orders screenshots within its collection. Picture numbers are not stored identities: export derives them from the current order. Excluding or reordering a screenshot therefore never changes internal IDs.
 
-Annotation JSON contains editable records in original-image coordinates. Canvas zoom does not alter them. Description sidecars preserve Markdown and line breaks. Missing descriptions are valid.
+Drawing records store an editable JSON source, a rendered PNG cache, a title and an optional Markdown description in `project.json`. The description is copied into prompt Markdown under the drawing heading. Missing or empty drawing descriptions are valid and do not require a sidecar file.
+
+Annotation JSON contains editable records in original-image coordinates. Canvas zoom does not alter them. Screenshot description sidecars preserve Markdown and line breaks. Missing descriptions are valid.
 
 ## Prompt exports
 

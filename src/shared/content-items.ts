@@ -15,6 +15,8 @@ export interface ContentItemBase {
 export interface DrawingRecord extends ContentItemBase {
   kind: 'drawing';
   title: string;
+  /** Optional Markdown for the agent; omitted or empty is valid. */
+  description?: string;
   sourceFilename: string;
   imageFilename: string;
   originalWidth: number;
