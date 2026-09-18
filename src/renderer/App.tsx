@@ -298,7 +298,16 @@ export default function App() {
     preferences.result &&
     shouldShowOnboarding(preferences.result.settings.onboarding, preferences.result.profile);
   useEffect(() => {
-    if (onboardingPending || showOnboarding || !preferences.result || !whatsNewRelease) return;
+    if (
+      dialog ||
+      snapshotNotice ||
+      searchDialogOpen ||
+      onboardingPending ||
+      showOnboarding ||
+      !preferences.result ||
+      !whatsNewRelease
+    )
+      return;
     if (
       shouldShowWhatsNew(
         updateStatus?.currentVersion,
@@ -308,7 +317,16 @@ export default function App() {
       dismissedWhatsNewVersion.current !== updateStatus?.currentVersion
     )
       setShowWhatsNew(true);
-  }, [onboardingPending, preferences.result, showOnboarding, updateStatus?.currentVersion, whatsNewRelease]);
+  }, [
+    dialog,
+    onboardingPending,
+    preferences.result,
+    searchDialogOpen,
+    showOnboarding,
+    snapshotNotice,
+    updateStatus?.currentVersion,
+    whatsNewRelease,
+  ]);
 
   useEffect(() => {
     document.documentElement.style.fontSize = `${store.settings.interfaceScale * 100}%`;
