@@ -51,7 +51,7 @@ Deleting a screenshot moves its source image, annotations and description to the
 
 ## Capture an image (experimental)
 
-Enable region capture in Settings > Shortcuts > Experimental capture. With a project open, use Capture screen region in the collection toolbar or its configurable shortcut while Imnota is focused. Capture always uses the display under the pointer when it starts, whichever display Imnota is on; the selection overlay opens on that same display. Drag a rectangle there, then choose Save, Retake or Cancel. Saving adds a PNG screenshot to the active collection for annotation and export.
+Enable region capture in Settings > Shortcuts > Experimental capture. With a project open, use Capture screen region in the collection toolbar, **Take screenshot** in the collection rail's Add menu (both the Add screenshot dropdown and the combined Add item menu), or its configurable shortcut while Imnota is focused. All entry points share the same enablement: the menu item explains why capture is unavailable, for example when no current collection is selected. Capture always uses the display under the pointer when it starts, whichever display Imnota is on; the selection overlay opens on that same display. Drag a rectangle there, then choose Save, Retake or Cancel. Saving adds a PNG screenshot to the active collection for annotation and export.
 
 Capture is off by default. It captures one region on one display, with no video, GIF conversion or background global shortcut. macOS requires Screen Recording permission. If capture is unavailable or permission is denied, use the operating system's screenshot tool and Import or Paste. Linux capture is disabled. Retina and mixed-DPI setups still need platform verification.
 

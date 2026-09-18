@@ -1,5 +1,6 @@
 import {
   Archive,
+  Camera,
   Check,
   ChevronDown,
   Clipboard,
@@ -36,6 +37,10 @@ export interface CollectionRailProps {
   onDeleteProject?(): void;
   /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
   screenshotFirstAdd?: boolean;
+  /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
+  onCapture?(): void;
+  captureEnabled?: boolean;
+  captureDisabledLabel?: string;
 }
 
 export function CollectionControls({
@@ -345,6 +350,9 @@ export function CollectionRail({
   onDeleteItem,
   onDeleteProject,
   screenshotFirstAdd = true,
+  onCapture,
+  captureEnabled = false,
+  captureDisabledLabel,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -357,7 +365,14 @@ export function CollectionRail({
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
-  const addItemOptions = [
+  const addItemOptions: Array<{
+    id: string;
+    label: string;
+    description: string;
+    icon: typeof Upload;
+    run: () => void;
+    disabled?: boolean;
+  }> = [
     {
       id: 'screenshot',
       label: 'Screenshot',
@@ -365,6 +380,20 @@ export function CollectionRail({
       icon: Upload,
       run: onImport,
     },
+    ...(onCapture
+      ? [
+          {
+            id: 'capture',
+            label: 'Take screenshot',
+            description: captureEnabled
+              ? 'Capture a region of the display under the pointer'
+              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+            icon: Camera,
+            run: onCapture,
+            disabled: !captureEnabled,
+          },
+        ]
+      : []),
     ...(onAddContent
       ? [
           {
@@ -718,7 +747,9 @@ export function CollectionRail({
                         role="menuitem"
                         tabIndex={index === addMenuFocusedIndex ? 0 : -1}
                         data-testid={`add-item-${option.id}`}
+                        aria-disabled={option.disabled || undefined}
                         onClick={() => {
+                          if (option.disabled) return;
                           option.run();
                           closeAddMenu();
                         }}
