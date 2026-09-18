@@ -9,6 +9,12 @@ import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
 import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
+import {
+  describeCommonShortcut,
+  detectShortcutPlatform,
+  formatShortcut,
+  resolveShortcutBindings,
+} from '../../shared/shortcuts';
 import { SharingSettings } from './SharingSettings';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 import { BackupSettings } from './BackupSettings';
@@ -78,6 +84,13 @@ export function SettingsView({
   const [legacyError, setLegacyError] = useState('');
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
+  const shortcutPlatform = detectShortcutPlatform();
+  const captureShortcut = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform)[
+    'capture.region'
+  ];
+  const captureShortcutNote = captureShortcut
+    ? describeCommonShortcut(captureShortcut, shortcutPlatform)
+    : null;
   const selectCategory = (category: SettingsCategory) => {
     if (activeCategory === undefined) setUncontrolledCategory(category);
     onCategoryChange?.(category);
@@ -142,7 +155,15 @@ export function SettingsView({
               <span>
                 <strong>Capture a screen region</strong>
                 <small>
-                  Windows and macOS only while platform validation is in progress. Captures stay local.
+                  Windows and macOS only while platform validation is in progress. Captures stay local and use
+                  the display under the pointer.
+                </small>
+                <small data-testid="capture-shortcut-summary">
+                  Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
+                  {captureShortcut
+                    ? ' while Imnota is focused. Change it under Screenshots above.'
+                    : '. The toolbar camera button and the Add menu still work.'}
+                  {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>
               </span>
               <input
