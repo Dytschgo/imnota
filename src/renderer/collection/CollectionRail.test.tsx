@@ -285,6 +285,41 @@ describe('CollectionRail', () => {
     expect(screen.getByRole('button', { name: 'Add item' })).toBeVisible();
   });
 
+  it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
+    const onCapture = vi.fn();
+    const { rerender } = render(
+      <CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />,
+    );
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    const capture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
+    expect(capture).toHaveTextContent('display under the pointer');
+    fireEvent.click(capture);
+    expect(onCapture).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    rerender(
+      <CollectionRail
+        {...props({
+          onAddContent: vi.fn(),
+          onCapture,
+          captureEnabled: false,
+          captureDisabledLabel: 'Choose a current collection before capturing',
+          screenshotFirstAdd: false,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    const disabledCapture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
+    expect(disabledCapture).toHaveAttribute('aria-disabled', 'true');
+    expect(disabledCapture).toHaveTextContent('Choose a current collection before capturing');
+    fireEvent.click(disabledCapture);
+    expect(onCapture).toHaveBeenCalledOnce();
+    expect(screen.getByRole('menu')).toBeVisible();
+
+    rerender(<CollectionRail {...props({ onAddContent: vi.fn() })} />);
+    expect(screen.queryByRole('menuitem', { name: /Take screenshot/ })).not.toBeInTheDocument();
+  });
+
   it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {
     const onImport = vi.fn();
     const onAddContent = vi.fn();
