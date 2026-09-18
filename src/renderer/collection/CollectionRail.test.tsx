@@ -292,7 +292,7 @@ describe('CollectionRail', () => {
     );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     const capture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
-    expect(capture).toHaveTextContent('display under the pointer');
+    expect(capture).toHaveTextContent('Choose a display');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();

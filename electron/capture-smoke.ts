@@ -146,6 +146,11 @@ async function waitForRetake(driver: NativeUiDriver): Promise<void> {
 
 async function startCapture(driver: NativeUiDriver): Promise<NativeUiDriver> {
   await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    const display = screen.getDisplayMatching(driver.browserWindow.getBounds());
+    await driver.click({ selector: `[data-display-id="${display.id}"]` });
+  }
   const overlay = await waitForCaptureOverlay(driver.browserWindow);
   const overlayDriver = new NativeUiDriver(overlay);
   await waitForPaint(overlayDriver);
