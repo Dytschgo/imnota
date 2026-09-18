@@ -281,6 +281,15 @@ export class NativeUiDriver {
   async click(locator: SmokeLocator, clickCount = 1): Promise<SmokePoint> {
     await this.waitFor(locator, { enabled: true });
     await this.evaluate(locatorScript(locator, true));
+    // A DOM update or scroll can precede Chromium's native hit-test surface.
+    // Present the new frame before deriving coordinates for the one trusted click.
+    await this.evaluate(SMOKE_CAPTURE_PREPARATION);
+    const frame = await withSmokeDeadline(
+      () => this.window.webContents.capturePage(),
+      this.defaultTimeoutMs,
+      'Native click frame',
+    );
+    if (frame.isEmpty()) throw new Error('Native click frame is empty.');
     const bounds = await this.waitFor(locator, { enabled: true });
     const point = {
       x: Math.round(bounds.x + bounds.width / 2),
