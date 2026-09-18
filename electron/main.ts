@@ -144,6 +144,12 @@ import {
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
+import {
+  captureDisplayOptions,
+  captureDisplayWithStableGeometry,
+  selectedCaptureDisplay,
+} from './capture-display-selection.js';
+import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -797,8 +803,6 @@ async function copyContextToClipboard(
 
 function captureService(): CaptureService {
   return new CaptureService({
-    getCursorScreenPoint: () => screen.getCursorScreenPoint(),
-    getDisplayNearestPoint: (point) => screen.getDisplayNearestPoint(point),
     physicalDisplaySize: (display) => {
       // Bounds are DIP. Windows has an Electron conversion API; other supported
       // platforms expose the physical scale factor directly on Display.
@@ -815,20 +819,18 @@ function captureService(): CaptureService {
       // This deliberately has two gates: it cannot be enabled outside the
       // disposable native smoke profile and it synthesizes every pixel itself.
       if (process.env.IMNOTA_SMOKE === '1' && process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') {
-        const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
         // Exercise the same full-resolution validation path as a desktop
         // source. The disposable smoke profile synthesizes these pixels.
         const width = options.thumbnailSize.width;
         const height = options.thumbnailSize.height;
-        return [
-          {
-            display_id: String(display.id),
-            thumbnail: nativeImage.createFromBitmap(Buffer.alloc(width * height * 4, 0x5a), {
-              width,
-              height,
-            }),
-          },
-        ];
+        const thumbnail = nativeImage.createFromBitmap(Buffer.alloc(width * height * 4, 0x5a), {
+          width,
+          height,
+        });
+        return screen.getAllDisplays().map((display) => ({
+          display_id: String(display.id),
+          thumbnail,
+        }));
       }
       return desktopCapturer.getSources(options);
     },
@@ -837,10 +839,14 @@ function captureService(): CaptureService {
 }
 
 async function smokeDesktopCaptureCapability(): Promise<{
-  displayId: number;
-  displayDip: { width: number; height: number };
-  sourcePixels: { width: number; height: number };
-  cropPixels: { width: number; height: number };
+  displays: Array<{
+    displayId: number;
+    bounds: CaptureRectangle;
+    scaleFactor: number;
+    sourcePixels: { width: number; height: number };
+    cropDip: CaptureRectangle;
+    cropPixels: { width: number; height: number };
+  }>;
 }> {
   if (
     process.env.IMNOTA_SMOKE !== '1' ||
@@ -850,33 +856,18 @@ async function smokeDesktopCaptureCapability(): Promise<{
     throw new Error(
       'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
     );
-  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The smoke test window is unavailable.');
-  const windowBounds = mainWindow.getBounds();
-  const display = screen.getDisplayMatching(windowBounds);
-  const left = Math.max(windowBounds.x, display.bounds.x);
-  const top = Math.max(windowBounds.y, display.bounds.y);
-  const right = Math.min(windowBounds.x + windowBounds.width, display.bounds.x + display.bounds.width);
-  const bottom = Math.min(windowBounds.y + windowBounds.height, display.bounds.y + display.bounds.height);
-  if (right - left < 2 || bottom - top < 2)
-    throw new Error('The smoke window does not intersect its display.');
-  const selection: CaptureRectangle = {
-    x: left - display.bounds.x + 1,
-    y: top - display.bounds.y + 1,
-    width: Math.min(240, right - left - 1),
-    height: Math.min(160, bottom - top - 1),
-  };
   const service = captureService();
-  const source = await service.captureDisplay(display);
-  const crop = service.crop(source, selection);
-  const cropImage = nativeImage.createFromBuffer(crop);
-  if (cropImage.isEmpty()) throw new Error('The in-memory capture crop could not be decoded.');
-  // Source and crop buffers are intentionally neither persisted nor returned.
-  return {
-    displayId: display.id,
-    displayDip: { width: display.bounds.width, height: display.bounds.height },
-    sourcePixels: source.imageSize,
-    cropPixels: cropImage.getSize(),
-  };
+  return probeCaptureDisplays(screen.getAllDisplays(), {
+    capture: (display) =>
+      captureDisplayWithStableGeometry(
+        display,
+        (target) => service.captureDisplay(target),
+        () => screen.getAllDisplays(),
+      ),
+    crop: (source, selection) => service.crop(source, selection),
+    // Source and crop buffers are intentionally neither persisted nor returned.
+    decodeCrop: (png) => nativeImage.createFromBuffer(png),
+  });
 }
 
 function settleCaptureOverlay(selection: CaptureRectangle | null): void {
@@ -1650,9 +1641,38 @@ function registerIpc(): void {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
   });
+  handleWorkflow('workflow:capture:displays', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
+      );
+    if (process.platform !== 'win32')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Display selection is only available for Windows capture.',
+      );
+    const displays = captureDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+    if (displays.length === 0)
+      throw new NativeWorkflowError(
+        'capture-sources-unavailable',
+        'Windows did not report an available display to capture. Use Import or Paste instead.',
+        true,
+      );
+    return displays;
+  });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z
-      .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
+      .tuple([
+        z
+          .object({
+            projectPath: pathInput,
+            collectionId: filenameSchema,
+            displayId: z.number().int().optional(),
+          })
+          .strict(),
+      ])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
     if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
@@ -1687,6 +1707,19 @@ function registerIpc(): void {
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
     assertLiveCaptureAdmission(event, admission);
+    const selectedDisplay =
+      process.platform === 'win32'
+        ? selectedCaptureDisplay(screen.getAllDisplays(), input.displayId)
+        : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (!selectedDisplay)
+      throw new NativeWorkflowError(
+        'capture-sources-unavailable',
+        input.displayId === undefined
+          ? 'Choose a display before selecting a region.'
+          : 'The selected display is no longer available. Choose an available display and try again.',
+        true,
+      );
+    assertLiveCaptureAdmission(event, admission);
     const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
     const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
     try {
@@ -1695,8 +1728,20 @@ function registerIpc(): void {
       if (wasVisible) mainWindow?.hide();
       let captured: CapturedDisplayImage;
       try {
-        captured = await captureService().captureCursorDisplay();
+        const stableCapture = await captureDisplayWithStableGeometry(
+          selectedDisplay,
+          (display) => captureService().captureDisplay(display),
+          () => screen.getAllDisplays(),
+        );
+        if (!stableCapture)
+          throw new NativeWorkflowError(
+            'capture-sources-unavailable',
+            'The selected display changed while the capture was being prepared. Choose an available display and try again.',
+            true,
+          );
+        captured = stableCapture;
       } catch (error) {
+        if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
             throw new NativeWorkflowError(
@@ -1739,7 +1784,7 @@ function registerIpc(): void {
         throw new NativeWorkflowError(
           'capture-failed',
           outcome.reason === 'misplaced'
-            ? 'The selection window could not cover the display under the pointer. Move the pointer onto the display you want to capture and try again, or use Import or Paste instead.'
+            ? 'The selection window could not cover the selected display. Choose the display again, or use Import or Paste instead.'
             : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
           true,
         );
@@ -2772,7 +2817,7 @@ app.whenReady().then(async () => {
           captureCapability: capability,
           assertions: [
             ...((result as { assertions?: string[] }).assertions ?? []),
-            'real desktopCapturer dimensions and in-memory crop of the smoke window',
+            'exact desktopCapturer source and in-memory crop dimensions for every real display',
           ],
         };
       }

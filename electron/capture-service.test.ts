@@ -17,17 +17,15 @@ describe('CaptureService', () => {
     const cropped = image({ width: 2000, height: 1000 });
     const getSources = vi.fn(async () => [{ display_id: '42', thumbnail: source }]);
     const service = new CaptureService({
-      getCursorScreenPoint: () => ({ x: 1, y: 1 }),
-      getDisplayNearestPoint: () => ({
-        id: 42,
-        bounds: { x: 0, y: 0, width: 1000, height: 500 },
-        scaleFactor: 2,
-      }),
       physicalDisplaySize: () => ({ width: 2000, height: 1000 }),
       getSources,
       createImage: () => cropped,
     });
-    const capture = await service.captureCursorDisplay();
+    const capture = await service.captureDisplay({
+      id: 42,
+      bounds: { x: 0, y: 0, width: 1000, height: 500 },
+      scaleFactor: 2,
+    });
     expect(getSources).toHaveBeenCalledWith({
       types: ['screen'],
       thumbnailSize: { width: 2000, height: 1000 },
@@ -38,17 +36,17 @@ describe('CaptureService', () => {
 
   it('rejects an undersampled or aspect-mismatched source instead of upscaling it', async () => {
     const service = new CaptureService({
-      getCursorScreenPoint: () => ({ x: 1, y: 1 }),
-      getDisplayNearestPoint: () => ({
-        id: 42,
-        bounds: { x: 0, y: 0, width: 1000, height: 500 },
-        scaleFactor: 2,
-      }),
       physicalDisplaySize: () => ({ width: 2000, height: 1000 }),
       getSources: async () => [{ display_id: '42', thumbnail: image({ width: 1800, height: 900 }) }],
       createImage: () => image({ width: 1, height: 1 }),
     });
-    await expect(service.captureCursorDisplay()).rejects.toMatchObject({
+    await expect(
+      service.captureDisplay({
+        id: 42,
+        bounds: { x: 0, y: 0, width: 1000, height: 500 },
+        scaleFactor: 2,
+      }),
+    ).rejects.toMatchObject({
       kind: 'sources-unavailable',
       message: expect.stringContaining('full display resolution'),
     } satisfies Partial<CaptureServiceError>);
@@ -56,34 +54,32 @@ describe('CaptureService', () => {
 
   it('normalizes source and crop implementation failures', async () => {
     const rejectedSources = new CaptureService({
-      getCursorScreenPoint: () => ({ x: 1, y: 1 }),
-      getDisplayNearestPoint: () => ({
-        id: 42,
-        bounds: { x: 0, y: 0, width: 100, height: 100 },
-        scaleFactor: 1,
-      }),
       physicalDisplaySize: () => ({ width: 100, height: 100 }),
       getSources: async () => Promise.reject(new Error('denied')),
       createImage: () => image({ width: 1, height: 1 }),
     });
-    await expect(rejectedSources.captureCursorDisplay()).rejects.toMatchObject({
-      kind: 'sources-unavailable',
-    } satisfies Partial<CaptureServiceError>);
-
-    const cropFailure = new CaptureService({
-      getCursorScreenPoint: () => ({ x: 1, y: 1 }),
-      getDisplayNearestPoint: () => ({
+    await expect(
+      rejectedSources.captureDisplay({
         id: 42,
         bounds: { x: 0, y: 0, width: 100, height: 100 },
         scaleFactor: 1,
       }),
+    ).rejects.toMatchObject({
+      kind: 'sources-unavailable',
+    } satisfies Partial<CaptureServiceError>);
+
+    const cropFailure = new CaptureService({
       physicalDisplaySize: () => ({ width: 100, height: 100 }),
       getSources: async () => [{ display_id: '42', thumbnail: image({ width: 100, height: 100 }) }],
       createImage: () => {
         throw new Error('decode failed');
       },
     });
-    const capture = await cropFailure.captureCursorDisplay();
+    const capture = await cropFailure.captureDisplay({
+      id: 42,
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      scaleFactor: 1,
+    });
     expect(() => cropFailure.crop(capture, { x: 0, y: 0, width: 10, height: 10 })).toThrow(
       CaptureServiceError,
     );
@@ -91,17 +87,17 @@ describe('CaptureService', () => {
 
   it('does not fall back to a mismatched display source', async () => {
     const service = new CaptureService({
-      getCursorScreenPoint: () => ({ x: 1, y: 1 }),
-      getDisplayNearestPoint: () => ({
-        id: 42,
-        bounds: { x: 0, y: 0, width: 100, height: 100 },
-        scaleFactor: 1,
-      }),
       physicalDisplaySize: () => ({ width: 100, height: 100 }),
       getSources: async () => [{ display_id: 'other', thumbnail: image({ width: 100, height: 100 }) }],
       createImage: () => image({ width: 1, height: 1 }),
     });
-    await expect(service.captureCursorDisplay()).rejects.toMatchObject({
+    await expect(
+      service.captureDisplay({
+        id: 42,
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        scaleFactor: 1,
+      }),
+    ).rejects.toMatchObject({
       kind: 'sources-unavailable',
     } satisfies Partial<CaptureServiceError>);
   });
