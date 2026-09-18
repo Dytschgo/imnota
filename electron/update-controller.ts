@@ -14,6 +14,18 @@ interface Operations {
   emit: (status: UpdateStatus) => void;
 }
 
+function terminalUpdateCacheKey(release: ReleaseCandidate, selectedChannel: UpdateChannel) {
+  return JSON.stringify({
+    selectedChannel,
+    sourceChannel: release.sourceChannel ?? selectedChannel,
+    version: release.version,
+    url: release.url,
+    feedUrl: release.feedUrl,
+    assetUrls: release.assetUrls,
+    checksumUrl: release.checksumUrl,
+  });
+}
+
 /** One update operation at a time: a selected release can never cross channels. */
 export class UpdateController {
   private status: UpdateStatus;
@@ -22,6 +34,7 @@ export class UpdateController {
   private pendingIsBackground = false;
   private switching = false;
   private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
+  private terminalUpdateKey: string | null = null;
   private launchingTerminal = false;
   constructor(
     private channel: UpdateChannel,
@@ -48,6 +61,8 @@ export class UpdateController {
       await persist();
       this.channel = channel;
       this.candidate = null;
+      this.terminalUpdate = null;
+      this.terminalUpdateKey = null;
       this.send({ state: 'idle' });
     } finally {
       this.switching = false;
@@ -75,10 +90,14 @@ export class UpdateController {
         this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
       return Promise.resolve();
     }
-    const previous = { status: this.getStatus(), candidate: this.candidate, terminal: this.terminalUpdate };
+    const previous = {
+      status: this.getStatus(),
+      candidate: this.candidate,
+      terminal: this.terminalUpdate,
+      terminalKey: this.terminalUpdateKey,
+    };
     let nativePreparationStarted = false;
     this.candidate = null;
-    this.terminalUpdate = null;
     this.pendingIsBackground = options.background === true;
     if (!options.background) this.send({ state: 'checking' });
     this.pending = this.performCheck(() => {
@@ -88,6 +107,7 @@ export class UpdateController {
         if (this.pendingIsBackground && !nativePreparationStarted) {
           this.candidate = previous.candidate;
           this.terminalUpdate = previous.terminal;
+          this.terminalUpdateKey = previous.terminalKey;
           this.status = previous.status;
           return;
         }
@@ -135,6 +155,15 @@ export class UpdateController {
       onNativePreparationStart();
       await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
     }
+    const terminalKey = terminalUpdateCacheKey(candidate, this.channel);
+    if (
+      this.ops.manual &&
+      this.ops.prepareTerminal &&
+      (!this.terminalUpdate || this.terminalUpdateKey !== terminalKey)
+    ) {
+      this.terminalUpdate = await this.ops.prepareTerminal(candidate);
+      this.terminalUpdateKey = terminalKey;
+    }
     this.candidate = candidate;
     this.send({
       state: 'available',
@@ -143,7 +172,7 @@ export class UpdateController {
       releaseNotes: candidate.releaseNotes,
       sourceChannel: candidate.sourceChannel,
       manualDownload: this.ops.manual,
-      terminalCommand: this.terminalUpdate?.command,
+      terminalCommand: this.terminalUpdateKey === terminalKey ? this.terminalUpdate?.command : undefined,
       message: stableFallback
         ? `Stable ${candidate.version} is newer than the latest nightly. Nightly remains selected for future checks.`
         : undefined,
@@ -158,21 +187,11 @@ export class UpdateController {
     if (this.pending) await this.check();
     if (!this.candidate) throw new Error('No update is available to download.');
     if (this.status.manualDownload) {
-      if (!this.terminalUpdate && this.ops.prepareTerminal && this.status.state === 'available') {
-        try {
-          this.terminalUpdate = await this.ops.prepareTerminal(this.candidate);
-          this.send({ ...this.status, terminalCommand: this.terminalUpdate.command });
-        } catch {
-          this.candidate = null;
-          this.send({
-            state: 'error',
-            message:
-              'The download could not be prepared. Check for updates to retry. Your projects are unchanged.',
-          });
-          return;
-        }
-      }
-      if (this.terminalUpdate) {
+      if (
+        this.terminalUpdate &&
+        this.terminalUpdateKey === terminalUpdateCacheKey(this.candidate, this.channel) &&
+        this.status.state === 'available'
+      ) {
         if (this.launchingTerminal) return;
         this.launchingTerminal = true;
         try {
