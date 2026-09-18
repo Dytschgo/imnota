@@ -1861,7 +1861,9 @@ export default function App() {
       />
       {showOnboarding && (
         <OnboardingDemo
-          onCopyBundle={({ markdown, imageDataUrl }) => window.imnota.copyContext({ markdown, imageDataUrl })}
+          onCopyBundle={async ({ markdown, imageDataUrl }) => {
+            await window.imnota.copyContext({ markdown, imageDataUrl });
+          }}
           onMarkCompleted={preferences.saveOnboarding}
           onCreateFirstProject={async () => {
             if (!useAppStore.getState().settings.workspacePath && !(await chooseWorkspace()))
