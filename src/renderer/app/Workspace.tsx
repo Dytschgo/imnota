@@ -186,6 +186,9 @@ export function Workspace(props: WorkspaceProps) {
         onSnapshot={props.onSnapshot}
         onAddContent={props.onAddContent}
         screenshotFirstAdd={props.screenshotFirstAdd}
+        onCapture={props.onCapture}
+        captureEnabled={props.captureEnabled}
+        captureDisabledLabel={props.captureDisabledLabel}
         onDeleteItem={props.onDeleteItem}
         onDeleteProject={props.onDeleteProject}
       />
