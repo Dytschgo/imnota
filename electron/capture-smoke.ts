@@ -144,8 +144,12 @@ async function waitForRetake(driver: NativeUiDriver): Promise<void> {
   throw new Error('Retake did not clear the capture selection.');
 }
 
-async function startCapture(driver: NativeUiDriver): Promise<NativeUiDriver> {
-  await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+async function startCapture(
+  driver: NativeUiDriver,
+  trigger: 'toolbar' | 'shortcut' = 'toolbar',
+): Promise<NativeUiDriver> {
+  if (trigger === 'shortcut') await driver.press('5', ['control', 'shift']);
+  else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
   if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
     await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
     const display = screen.getDisplayMatching(driver.browserWindow.getBounds());
@@ -223,7 +227,7 @@ export async function exerciseRegionCapture(
   )
     throw new Error('Cancelled capture changed the project screenshot records.');
 
-  overlay = await startCapture(driver);
+  overlay = await startCapture(driver, process.platform === 'win32' ? 'shortcut' : 'toolbar');
   await selectRegion(overlay);
   if (artifactDirectory)
     artifacts.push(await overlay.capture(artifactDirectory, 'capture-overlay-synthetic.png'));
