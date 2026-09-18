@@ -217,6 +217,7 @@ describe('native smoke driver', () => {
         executeJavaScript,
         sendInputEvent,
         insertText: vi.fn(async () => {}),
+        capturePage: vi.fn(async () => ({ isEmpty: () => false })),
       },
     } as unknown as BrowserWindow;
     const driver = new NativeUiDriver(window, 100);
@@ -258,12 +259,77 @@ describe('native smoke driver', () => {
           disabled: ++reads === 1,
         })),
         sendInputEvent,
+        capturePage: vi.fn(async () => ({ isEmpty: () => false })),
       },
     } as unknown as BrowserWindow;
     await new NativeUiDriver(window, 1_000).click({ text: 'Save' });
     expect(sendInputEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'mouseDown', button: 'left' }),
     );
+  });
+
+  it('waits for the presented frame and uses its updated bounds for a single native click', async () => {
+    let presented = false;
+    let completeFrame!: () => void;
+    let startedFrame!: () => void;
+    const started = new Promise<void>((resolve) => {
+      startedFrame = resolve;
+    });
+    const sendInputEvent = vi.fn();
+    const executeJavaScript = vi.fn(async () => ({
+      x: presented ? 100 : 10,
+      y: 20,
+      width: 40,
+      height: 20,
+      disabled: false,
+    }));
+    const window = {
+      webContents: {
+        executeJavaScript,
+        sendInputEvent,
+        capturePage: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              completeFrame = () => {
+                presented = true;
+                resolve({ isEmpty: () => false });
+              };
+              startedFrame();
+            }),
+        ),
+      },
+    } as unknown as BrowserWindow;
+    const click = new NativeUiDriver(window, 1_000).click({ text: 'Create project' });
+    await started;
+    expect(executeJavaScript).toHaveBeenLastCalledWith(SMOKE_CAPTURE_PREPARATION, true);
+    expect(sendInputEvent).not.toHaveBeenCalled();
+    completeFrame();
+    await click;
+    expect(sendInputEvent.mock.calls.map(([event]) => event.type)).toEqual([
+      'mouseMove',
+      'mouseDown',
+      'mouseUp',
+    ]);
+    expect(sendInputEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mouseDown', x: 120, y: 30 }),
+    );
+  });
+
+  it.each(['empty', 'hung'])('refuses native input when the presented frame is %s', async (state) => {
+    const sendInputEvent = vi.fn();
+    const window = {
+      webContents: {
+        executeJavaScript: vi.fn(async () => ({ x: 0, y: 0, width: 10, height: 10, disabled: false })),
+        sendInputEvent,
+        capturePage: vi.fn(() =>
+          state === 'empty' ? Promise.resolve({ isEmpty: () => true }) : new Promise(() => undefined),
+        ),
+      },
+    } as unknown as BrowserWindow;
+    await expect(new NativeUiDriver(window, 20).click({ text: 'Create project' })).rejects.toThrow(
+      state === 'empty' ? 'Native click frame is empty' : 'Native click frame timed out',
+    );
+    expect(sendInputEvent).not.toHaveBeenCalled();
   });
 
   it('queues both native clicks before a delayed scheduler can split the gesture', async () => {

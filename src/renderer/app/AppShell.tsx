@@ -24,6 +24,8 @@ export interface AppShellProps {
   onDropFiles?(files: FileList): void | Promise<void>;
   onSelectProject?(projectPath: string): void | Promise<void>;
   navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites', string>>;
+  /** Rendered beside About while navigation is open; otherwise shown lower-left. */
+  renderUpdateControl?(placement: 'nav' | 'floating'): ReactNode;
 }
 
 export function AppShell({
@@ -46,6 +48,7 @@ export function AppShell({
   onDropFiles,
   onSelectProject,
   navigationShortcuts,
+  renderUpdateControl,
 }: AppShellProps) {
   const store = useAppStore();
   const shellRef = useRef<HTMLDivElement>(null);
@@ -91,7 +94,9 @@ export function AppShell({
         onOpenCollection={onOpenCollection}
         onSetNavigationOpen={(navigationOpen) => store.set({ navigationOpen })}
         onSelectProject={onSelectProject}
+        updateControl={store.navigationOpen ? renderUpdateControl?.('nav') : undefined}
       />
+      {!store.navigationOpen && renderUpdateControl?.('floating')}
       <main className="main-shell">
         <header className="topbar">
           {!store.navigationOpen && (
