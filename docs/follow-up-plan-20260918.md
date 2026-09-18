@@ -75,3 +75,7 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 2. 1.4 and the matrix runs for #72 and #76, which then decide 2.1 and 2.2.
 3. 1.3 before the next release preparation.
 4. 1.2 after the product decision on discoverability.
+
+## Related
+
+- [Engineering follow-up plan](engineering-follow-up-20260918.md) — codebase structure, evidence, and housekeeping items with code sketches and sequencing.
