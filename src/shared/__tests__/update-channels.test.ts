@@ -426,6 +426,23 @@ it('invalidates a cached candidate when background native preparation fails', as
   await expect(instance.download()).rejects.toThrow('No update is available');
   expect(ops.download).not.toHaveBeenCalled();
 });
+it('invalidates a cached candidate when background terminal preparation fails', async () => {
+  const { ops, candidate } = controller(true);
+  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run: vi.fn() }));
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+  await instance.check();
+  ops.discover.mockResolvedValueOnce({
+    ...candidate,
+    assetUrls: [...candidate.assetUrls, `${candidate.feedUrl}Imnota-rebuilt-mac.zip`],
+  });
+  prepareTerminal.mockRejectedValueOnce(new Error('helper write failed'));
+
+  await instance.check({ background: true });
+
+  expect(instance.getStatus()).toMatchObject({ state: 'error' });
+  await expect(instance.download()).rejects.toThrow('No update is available');
+  expect(ops.download).not.toHaveBeenCalled();
+});
 it('turns a joined background check into a manual check and reports its failure', async () => {
   const { instance, ops } = controller();
   let reject!: (reason?: unknown) => void;

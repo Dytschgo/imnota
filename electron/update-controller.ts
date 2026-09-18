@@ -73,8 +73,8 @@ export class UpdateController {
    * Manual checks report progress and failures. Background checks (startup,
    * hourly) stay silent: they never flash a "checking" state over an already
    * discovered update and a discovery failure keeps the previous status. A
-   * failed native preparation must invalidate the previous candidate because
-   * electron-updater may already be configured for the new manifest.
+   * failed preparation must invalidate the previous candidate because a
+   * native updater or terminal helper may already target the new release.
    */
   check(options: { background?: boolean } = {}): Promise<void> {
     if (this.pending) {
@@ -96,15 +96,15 @@ export class UpdateController {
       terminal: this.terminalUpdate,
       terminalKey: this.terminalUpdateKey,
     };
-    let nativePreparationStarted = false;
+    let preparationStarted = false;
     this.candidate = null;
     this.pendingIsBackground = options.background === true;
     if (!options.background) this.send({ state: 'checking' });
     this.pending = this.performCheck(() => {
-      nativePreparationStarted = true;
+      preparationStarted = true;
     })
       .catch(() => {
-        if (this.pendingIsBackground && !nativePreparationStarted) {
+        if (this.pendingIsBackground && !preparationStarted) {
           this.candidate = previous.candidate;
           this.terminalUpdate = previous.terminal;
           this.terminalUpdateKey = previous.terminalKey;
@@ -124,7 +124,7 @@ export class UpdateController {
       });
     return this.pending;
   }
-  private async performCheck(onNativePreparationStart: () => void) {
+  private async performCheck(onPreparationStart: () => void) {
     const candidate = await this.ops.discover(this.channel);
     if (!candidate) {
       this.send({ state: 'not-available', message: `No ${this.channel} build is available yet.` });
@@ -152,7 +152,7 @@ export class UpdateController {
       return;
     }
     if (!this.ops.manual) {
-      onNativePreparationStart();
+      onPreparationStart();
       await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
     }
     const terminalKey = terminalUpdateCacheKey(candidate, this.channel);
@@ -161,6 +161,7 @@ export class UpdateController {
       this.ops.prepareTerminal &&
       (!this.terminalUpdate || this.terminalUpdateKey !== terminalKey)
     ) {
+      onPreparationStart();
       this.terminalUpdate = await this.ops.prepareTerminal(candidate);
       this.terminalUpdateKey = terminalKey;
     }
