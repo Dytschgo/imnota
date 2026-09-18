@@ -132,6 +132,24 @@ export interface PromptExportSourceAsset {
 }
 
 export type PromptExportCopyTarget = 'context' | 'markdown' | 'image' | 'paths';
+
+/**
+ * What the operating-system clipboard reports after a combined write. Read
+ * back from the clipboard, not inferred from the request, so the UI can say
+ * exactly which formats were placed. The receiving app still chooses which
+ * one it pastes.
+ */
+export interface ClipboardFormatsReport {
+  text: boolean;
+  html: boolean;
+  image: boolean;
+}
+
+export interface PromptExportCopyResult {
+  target: PromptExportCopyTarget;
+  /** Present for combined copies only. */
+  placed?: ClipboardFormatsReport;
+}
 export type PromptExportOpenTarget = 'folder' | 'png' | 'markdown' | 'master';
 
 export interface ProjectRevisionSnapshot {
@@ -190,7 +208,7 @@ export interface WorkflowBridge {
     sessionId: string;
     bundleNumber: number;
     target: PromptExportCopyTarget;
-  }): Promise<WorkflowResult<void>>;
+  }): Promise<WorkflowResult<PromptExportCopyResult>>;
   openPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;

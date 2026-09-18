@@ -90,7 +90,7 @@ Picture 3 was intentionally excluded from this prompt bundle.
 
 A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
 
-The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. Some receiving apps paste only one format; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
+The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. After a combined copy Imnota reads the clipboard back and reports what the operating system kept: the card says **Markdown + image prepared** only when both formats are confirmed, and otherwise names the missing format and the separate copy to use for it (Windows in particular may keep only one). Some receiving apps still paste only one format even when both are present; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
 
 Markdown copy works without generating an image first. The fallback actions also provide generated files and their plain-text paths. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what it copied, not whether another app accepted it.
 

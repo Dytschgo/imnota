@@ -65,6 +65,31 @@ describe('main-process clipboard completion', () => {
     expect(mocks.clipboard.writeText).not.toHaveBeenCalled();
   });
 
+  it('reports the formats the clipboard actually holds after a combined write', async () => {
+    mocks.clipboard.read.mockResolvedValueOnce([
+      { types: ['text/plain', 'text/html', 'image/png'], getType: vi.fn() },
+    ]);
+    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+      text: true,
+      html: true,
+      image: true,
+    });
+    // Windows can drop formats from a multi-format write; report the gap, not the request.
+    mocks.clipboard.read.mockResolvedValueOnce([{ types: ['text/plain', 'text/html'], getType: vi.fn() }]);
+    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+      text: true,
+      html: true,
+      image: false,
+    });
+    mocks.clipboard.read.mockRejectedValueOnce(new Error('Clipboard busy'));
+    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+      text: false,
+      html: false,
+      image: false,
+    });
+    expect(mocks.clipboard.write).toHaveBeenCalledTimes(3);
+  });
+
   it('writes an image without retaining stale text formats', async () => {
     await nativeClipboard.writeImage(image);
     const items = mocks.clipboard.write.mock.calls[0][0];
