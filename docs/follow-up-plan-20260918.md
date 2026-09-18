@@ -24,21 +24,21 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 ### 1.3 Add an "Unreleased" section to `CHANGELOG.md`
 
 - Observation: the changelog only has per-release sections. PRs #72–#76 each change user-visible behaviour and none of them could add an entry without inventing a version heading.
-- Proposal: add `## Unreleased` at the top; the release script moves it under the version heading during `chore(release)`. Check `scripts/release.mjs` and `scripts/release-readiness.test.mjs` for assumptions about the first heading before doing this.
-- Verification: `node --test scripts/release-readiness.test.mjs` plus a dry run of the release script.
+- Proposal: make a separate release-preparation PR to decide whether `## Unreleased` belongs in the changelog and, if so, add its release workflow there. Do not make `scripts/release.mjs` rewrite the changelog after acceptance: the current release contract requires a clean, exact `main` candidate whose version and changelog are already merged.
+- Verification: review the release-preparation PR against `docs/release-readiness.md`; run `node --test scripts/release-readiness.test.mjs` and a dry run of the release script.
 
 ### 1.4 Record the manual matrices as living documents
 
-- Observation: the feedback plan (§6) defines a manual test record for capture and clipboard, but nothing in `docs/` holds results. `docs/clipboard-receiver-matrix.md` exists for clipboard; there is no equivalent for multi-display capture.
-- Proposal: add `docs/capture-display-matrix.md` with the display/scaling/entry-point grid from the feedback plan, filled in per nightly build. Link it from `docs/nightly-verification-audit.md`.
+- Observation: `docs/clipboard-receiver-matrix.md` exists for clipboard, but there is no equivalent record for multi-display capture.
+- Proposal: add `docs/capture-display-matrix.md`, filled in per nightly build, with the exact build and OS; display count, arrangement and scaling; entry point; pointer and overlay displays; saved image dimensions; and whether the crop matches the selection. Link it from `docs/nightly-verification-audit.md`.
 - Why: #72 was reasoned from Electron's Windows fullscreen behaviour, not observed on a two-display machine. The matrix is the only way to close it.
 
 ## 2. Do only if the matrix shows it
 
 ### 2.1 Tolerance in `overlayCoversDisplay`
 
-- `electron/capture-overlay-placement.ts` (#72) requires the overlay's content bounds to equal the display bounds exactly. On Windows with mixed scaling (100 % + 150 %), window managers occasionally report a one-pixel difference after `show()`.
-- Do **not** add a tolerance pre-emptively: a stretched overlay would map selection coordinates onto the wrong pixels, which is exactly the bug the check prevents. If the capture matrix shows `misplaced` failures on scaled displays, add a ±1 px tolerance together with the failing display configuration as a test case.
+- `electron/capture-overlay-placement.ts` (#72) requires the overlay's content bounds to equal the display bounds exactly. A one-pixel difference after `show()` on Windows mixed-scaling displays is a hypothesis to test, not an observed failure.
+- Do **not** add a tolerance pre-emptively: a stretched overlay would map selection coordinates onto the wrong pixels, which is exactly the bug the check prevents. If the capture matrix reproduces `misplaced` failures on scaled displays and isolates a one-pixel reporting difference, add a ±1 px tolerance together with the failing display configuration as a test case.
 
 ### 2.2 Windows clipboard: write the image first, or write the formats separately
 
@@ -55,19 +55,19 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 
 ### 3.1 Do not split `electron/main.ts` or `src/renderer/App.tsx` as a prerequisite
 
-- They are 2 773 and 2 149 lines. Both are large, but the five feedback PRs touched disjoint regions and merged cleanly. AGENTS.md explicitly says not to require a refactor before every small fix. Extract only when a specific boundary needs testing in isolation (the capture workflow in `main.ts` is the first candidate, because it now has three pure helper modules around it).
+- Both are large. AGENTS.md explicitly says not to require a refactor before every small fix. Extract only when a specific boundary needs testing in isolation (the capture workflow in `main.ts` is the first candidate, because it now has three pure helper modules around it). Do not treat the related PRs as evidence that they merged cleanly until the integrated revision and checks are reviewed.
 
 ### 3.2 Do not add a "capture the display of the Imnota window" option
 
-- The feedback plan proposed one explicit rule (display under the pointer) and asked that it be communicated. #72 documents it and the shortcut PR shows it in Settings. Offering a second rule as a preference would reintroduce the ambiguity that caused the report.
+- The proposed rule is to capture the display under the pointer and communicate that rule. #72 documents it and the shortcut PR shows it in Settings. Offering a second rule as a preference would reintroduce the ambiguity that caused the report.
 
 ### 3.3 Do not make update checks more frequent than hourly or auto-download
 
-- Hourly discovery (#74) is enough for a local-first app and stays within the "no surprise install" acceptance. Auto-download would violate the explicit-download decision in the feedback plan.
+- Hourly discovery (#74) is enough for a local-first app and stays within the "no surprise install" acceptance. Auto-download would violate this plan's explicit-download proposal.
 
 ### 3.4 Do not treat synthetic capture smoke as nightly evidence
 
-- `IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic` exercises the pipeline on one virtual display. It cannot see the Windows fullscreen placement bug that #72 fixes. Nightly promotion of capture changes needs the real matrix (§1.4).
+- `IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic` exercises the basic capture pipeline using synthetic pixels on the host's real display. It does not prove multi-display placement, scaling or crop correctness. Nightly promotion of capture changes needs the real matrix described in §1.4.
 
 ## Suggested order
 
