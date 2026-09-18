@@ -1710,7 +1710,6 @@ async function writeReportArtifact(
 }
 
 export async function runSmokeWorkflow(
-  initialWindow: BrowserWindow,
   host: SmokeWorkflowHost,
   options: SmokeWorkflowOptions,
 ): Promise<SmokeWorkflowReport> {
@@ -1729,15 +1728,20 @@ export async function runSmokeWorkflow(
   )
     throw new Error('Artifact directory must be outside the disposable smoke fixture.');
   await host.setWorkspace(fixtureRoot);
+  // The first window may already have read the empty smoke settings. Reopen
+  // through the production path so the renderer initializes with the fixture
+  // workspace before onboarding can create a project.
+  let activeWindow = await host.reopenWindow();
   const artifacts: SmokeCapture[] = [];
   const assertions: string[] = [];
   const timings: SmokeTiming[] = [];
   const checkpoint = await createSmokeCheckpoint(artifactDirectory);
   await checkpoint('starting isolated native workflow');
   const sources = await createFixtureSources(fixtureRoot);
-  const driver = new NativeUiDriver(initialWindow, mode === 'stress' ? 30_000 : 15_000);
-  if (!initialWindow.isVisible()) initialWindow.show();
-  initialWindow.focus();
+  const driver = new NativeUiDriver(activeWindow, mode === 'stress' ? 30_000 : 15_000);
+  if (!activeWindow.isVisible()) activeWindow.show();
+  activeWindow.focus();
+  await driver.waitFor({ selector: '.library' });
 
   const updateState = await driver.evaluate<{ state: string; currentVersion?: string }>(`(async () => {
     if (!window.imnota) throw new Error('Preload bridge is missing');
@@ -1764,7 +1768,7 @@ export async function runSmokeWorkflow(
   await importImages(driver, projectPath, sources, 10);
   assertions.push('real new-project prompt and collection import');
 
-  let activeWindow = await host.reopenWindow();
+  activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
