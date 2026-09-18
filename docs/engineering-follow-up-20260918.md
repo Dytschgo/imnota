@@ -297,7 +297,7 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 | When                                | Item                                                                    | Type                     |
 | ----------------------------------- | ----------------------------------------------------------------------- | ------------------------ |
 | This week                           | 0.1 move root plans, 0.3 docs index                                     | docs PR                  |
-| This week                           | 0.2 prune worktrees/branches                                            | local, no PR             |
+| When separately authorized          | 0.2 per-worktree maintenance                                            | local, no PR             |
 | Next nightly (carrying #72 and #76) | 1.1 capture matrix + probe, 1.2 receiver matrix                         | native evidence          |
 | After #72 merges and 1.1 has run    | 2.1 capture workflow extraction                                         | mechanical PR            |
 | Right after 2.1                     | 2.2 smoke profile module                                                | mechanical PR + one test |
