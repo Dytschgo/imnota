@@ -1,9 +1,10 @@
-import { AlertTriangle, Check, Download, ExternalLink } from 'lucide-react';
+import { AlertTriangle, Check, Download, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { UpdateStatus } from '../../shared/types';
 import { IconButton } from './ui';
 
 export interface FloatingUpdateControlProps {
   status: UpdateStatus | null;
+  onCheck(): void | Promise<void>;
   onDownload(): void | Promise<void>;
   onInstall(): void | Promise<void>;
   onRetry(): void | Promise<void>;
@@ -13,64 +14,69 @@ export interface FloatingUpdateControlProps {
 
 export function FloatingUpdateControl({
   status,
+  onCheck,
   onDownload,
   onInstall,
   onRetry,
   placement = 'floating',
 }: FloatingUpdateControlProps) {
-  if (
-    !status ||
-    ['idle', 'checking'].includes(status.state) ||
-    (status.state === 'not-available' && !status.manualDownload)
-  )
-    return null;
-
-  const downloading = status.state === 'downloading';
-  const downloaded = status.state === 'downloaded';
-  const failed = status.state === 'error';
-  const available = status.state === 'available';
-  const percent = Math.round(status.percent ?? 0);
-  const channelLabel = status.sourceChannel ?? status.channel;
+  const current = status ?? { state: 'idle' as const };
+  const downloading = current.state === 'downloading';
+  const checking = current.state === 'checking';
+  const downloaded = current.state === 'downloaded';
+  const failed = current.state === 'error';
+  const available = current.state === 'available';
+  const manualDownload = current.manualDownload === true;
+  const percent = Math.round(current.percent ?? 0);
+  const channelLabel = current.sourceChannel ?? current.channel;
   const label = failed
     ? 'Retry update check'
     : downloaded
       ? 'Restart to update'
-      : downloading
-        ? `Downloading update, ${percent}% complete`
-        : status.terminalCommand
-          ? 'Run update in Terminal'
-          : status.manualDownload
-            ? 'Open download'
-            : 'Download update';
+      : checking
+        ? 'Checking for updates'
+        : downloading
+          ? `Downloading update, ${percent}% complete`
+          : current.terminalCommand
+            ? 'Run update in Terminal'
+            : manualDownload
+              ? 'Open download'
+              : available
+                ? 'Download update'
+                : 'Check for updates';
 
   return (
     <div
-      className={`floating-update floating-update-${placement} floating-update-${status.state}`}
+      className={`floating-update floating-update-${placement} floating-update-${current.state}`}
       data-testid="update-indicator"
     >
       <div className="floating-update-popover" role="status">
         <strong>
-          {status.version ? `Update ${status.version}` : 'Imnota update'}
+          {current.version ? `Update ${current.version}` : 'Imnota updates'}
           {channelLabel ? ` · ${channelLabel}` : ''}
         </strong>
         <p>
           {failed
-            ? (status.message ?? 'The update check failed.')
+            ? (current.message ?? 'The update check failed.')
             : downloaded
               ? 'Downloaded. Restart Imnota to install it.'
               : downloading
                 ? `Downloading… ${percent}%`
-                : (status.message ??
-                  `A newer ${channelLabel ?? ''} version is available. Nothing downloads until you choose to.`)}
+                : checking
+                  ? 'Checking for updates…'
+                  : (current.message ??
+                    (available || manualDownload
+                      ? `A newer ${channelLabel ?? ''} version is available. Nothing downloads until you choose to.`
+                      : 'Check for a newer version of Imnota.'))}
         </p>
-        {status.releaseNotes?.trim() && (
+        {current.releaseNotes?.trim() && (
           <div className="floating-update-notes">
             <strong>What’s changed</strong>
-            <pre>{status.releaseNotes.trim()}</pre>
+            <pre>{current.releaseNotes.trim()}</pre>
           </div>
         )}
-        {status.releaseUrl && (
-          <a href={status.releaseUrl} target="_blank" rel="noreferrer">
+        {current.releaseUrl && (
+          <a href={current.releaseUrl} target="_blank" rel="noreferrer">
             View release details <ExternalLink size={12} aria-hidden="true" />
           </a>
         )}
@@ -78,14 +84,15 @@ export function FloatingUpdateControl({
       <IconButton
         className="floating-update-button"
         label={label}
+        disabled={checking || downloading || current.installing === true}
         onClick={() =>
           void (failed
             ? onRetry()
             : downloaded
               ? onInstall()
-              : available || status.manualDownload
+              : available || manualDownload
                 ? onDownload()
-                : undefined)
+                : onCheck())
         }
       >
         {failed ? (
@@ -96,8 +103,12 @@ export function FloatingUpdateControl({
           <span className="floating-update-progress" aria-hidden="true">
             {percent}%
           </span>
-        ) : (
+        ) : checking ? (
+          <LoaderCircle className="spin" size={18} aria-hidden="true" />
+        ) : available || manualDownload ? (
           <Download size={18} aria-hidden="true" />
+        ) : (
+          <RefreshCw size={18} aria-hidden="true" />
         )}
       </IconButton>
       {downloading && <span className="floating-update-percent">{percent}%</span>}

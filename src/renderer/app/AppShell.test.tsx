@@ -99,6 +99,7 @@ describe('AppShell navigation', () => {
           <FloatingUpdateControl
             status={{ state: 'available', version: '0.3.0', channel: 'nightly' }}
             placement={placement}
+            onCheck={vi.fn()}
             onDownload={onDownload}
             onInstall={vi.fn()}
             onRetry={vi.fn()}

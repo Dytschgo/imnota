@@ -1976,4 +1976,52 @@ describe('feedback controls', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Interface scale' }), { target: { value: '1.1' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('This preference could not be saved');
   });
+
+  it('shows eligible release guidance once and leaves Later available when acknowledgement persistence fails', async () => {
+    const preferences = {
+      ...DEFAULT_PREFERENCE_SETTINGS,
+      updates: { whatsNewAcknowledgedVersion: undefined },
+    };
+    const savePreferences = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'io-failure' as const, message: 'disk unavailable', retryable: true },
+    }));
+    renderApp({
+      getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }),
+      getPreferenceSettings: async () => ({
+        ok: true as const,
+        value: {
+          settings: preferences,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      setPreferenceSettings: savePreferences,
+    });
+
+    expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(savePreferences).toHaveBeenCalledWith({ updates: { whatsNewAcknowledgedVersion: '0.2.8' } }),
+    );
+  });
+
+  it('does not reopen acknowledged guidance on a repeat launch', async () => {
+    renderApp({
+      getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }),
+      getPreferenceSettings: async () => ({
+        ok: true as const,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            updates: { whatsNewAcknowledgedVersion: '0.2.8' },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    await screen.findByTestId('app-shell');
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+  });
 });

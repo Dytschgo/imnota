@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
 import { UpdateControl } from '../components/UpdateControl';
+import { WhatsNewSettings, type WhatsNewAction } from '../components/WhatsNew';
 import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
@@ -20,6 +21,7 @@ import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 import { BackupSettings } from './BackupSettings';
 import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
 import type { ProjectListItem } from '../../shared/types';
+import type { UpdateStatus } from '../../shared/types';
 
 export const SETTINGS_CATEGORIES = [
   'Appearance',
@@ -50,6 +52,9 @@ export interface SettingsViewProps {
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
   onInstall?: () => Promise<void>;
+  updateStatus?: UpdateStatus | null;
+  onReplayWhatsNew?(): void;
+  onWhatsNewAction?(action: WhatsNewAction): void;
   onWorkspaceChanged?(): void | Promise<void>;
 }
 
@@ -78,6 +83,9 @@ export function SettingsView({
   onReplayOnboarding = () => undefined,
   onDownload,
   onInstall,
+  updateStatus,
+  onReplayWhatsNew = () => undefined,
+  onWhatsNewAction = () => undefined,
   onWorkspaceChanged,
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
@@ -179,6 +187,13 @@ export function SettingsView({
         </div>
         <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} onDownload={onDownload} />
+          <WhatsNewSettings
+            version={updateStatus?.currentVersion}
+            channel={updateStatus?.channel ?? settings.updateChannel}
+            releaseUrl={updateStatus?.releaseUrl}
+            onReplay={onReplayWhatsNew}
+            onAction={onWhatsNewAction}
+          />
           <OnboardingSettings
             value={preferences.onboarding}
             onReplay={onReplayOnboarding}

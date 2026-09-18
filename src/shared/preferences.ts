@@ -73,6 +73,11 @@ export interface WorkbenchPreferences {
   screenshotFirstAdd: boolean;
 }
 
+/** Application-level acknowledgement; never stored with a project. */
+export interface UpdatePreferences {
+  whatsNewAcknowledgedVersion?: string;
+}
+
 export interface PreferenceSettings {
   appearance: AppearancePreferences;
   backups: BackupPreferences;
@@ -80,6 +85,7 @@ export interface PreferenceSettings {
   capture: CapturePreferences;
   onboarding: OnboardingPreferences;
   workbench: WorkbenchPreferences;
+  updates: UpdatePreferences;
 }
 
 export interface SettingsProfileProvenance {
@@ -133,6 +139,8 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
   screenshotFirstAdd: true,
 };
 
+export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
+
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
   backups: DEFAULT_BACKUP_PREFERENCES,
@@ -140,6 +148,7 @@ export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   capture: { experimentalRegionCapture: false },
   onboarding: DEFAULT_ONBOARDING,
   workbench: DEFAULT_WORKBENCH,
+  updates: DEFAULT_UPDATE_PREFERENCES,
 };
 
 export function shouldShowOnboarding(
