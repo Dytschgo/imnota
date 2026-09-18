@@ -58,6 +58,53 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ bindings: {} }));
   });
 
+  it('shows recording state, confirms common OS combinations, and reports the saved keys', async () => {
+    const onChange = vi.fn(async () => {});
+    render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
+    const recorder = screen.getByRole('button', {
+      name: 'Shortcut for Capture screen region (experimental)',
+    });
+    expect(recorder).toHaveTextContent('Ctrl + Shift + 5');
+
+    fireEvent.click(recorder);
+    expect(recorder).toHaveTextContent('Press keys…');
+    expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+    // Modifier-only presses never save a partial combination.
+    fireEvent.keyDown(recorder, { key: 'Control', ctrlKey: true });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(recorder, { key: 's', ctrlKey: true, shiftKey: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Ctrl + Shift + S is also used by');
+
+    fireEvent.keyDown(recorder, { key: 's', ctrlKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({ bindings: { 'capture.region': 'Ctrl+Shift+S' } }),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Saved Ctrl + Shift + S.');
+  });
+
+  it('resets one shortcut to its default and clears one shortcut', async () => {
+    const onChange = vi.fn(async () => {});
+    render(
+      <ShortcutSettings
+        value={{ bindings: { 'tool.text': 'Ctrl+Shift+X' } }}
+        onChange={onChange}
+        platform="windows"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Reset Arrow shortcut to default' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Text shortcut to default' }));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ bindings: {} }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Arrow shortcut' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        bindings: { 'tool.text': 'Ctrl+Shift+X', 'tool.arrow': null },
+      }),
+    );
+  });
+
   it('records shifted top-row digits from their Digit code', async () => {
     const onChange = vi.fn(async () => {});
     render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);

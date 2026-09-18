@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeCommonShortcut,
   findShortcutConflicts,
   formatShortcut,
+  getDefaultShortcut,
   getDefaultShortcuts,
   isReservedShortcut,
   keyboardEventToShortcut,
@@ -49,6 +51,17 @@ describe('shortcut normalization', () => {
     expect(isReservedShortcut('Alt+F4', 'windows')).toBe(true);
     expect(isReservedShortcut('option+cmd+escape', 'mac')).toBe(true);
     expect(validateShortcut('tool.arrow', 'Alt+F4', bindings, 'windows')).toMatchObject({ kind: 'reserved' });
+  });
+
+  it('explains common operating-system and app combinations without blocking them', () => {
+    expect(describeCommonShortcut('ctrl+shift+s', 'windows')).toContain('Ctrl + Shift + S is also used by');
+    expect(describeCommonShortcut('cmd+shift+5', 'mac')).toContain('⌘⇧5 is also used by');
+    expect(describeCommonShortcut('Ctrl+Shift+5', 'windows')).toBeNull();
+    expect(
+      validateShortcut('capture.region', 'Ctrl+Shift+S', getDefaultShortcuts('windows'), 'windows'),
+    ).toBeNull();
+    expect(getDefaultShortcut('capture.region', 'windows')).toBe('Ctrl+Shift+5');
+    expect(getDefaultShortcut('capture.region', 'mac')).toBe('Meta+Shift+5');
   });
 
   it('formats compact macOS labels', () => {
