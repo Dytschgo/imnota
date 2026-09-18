@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Download, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react';
+import { Check, Download, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { UpdateStatus } from '../../shared/types';
 import { IconButton } from './ui';
 
@@ -96,7 +96,7 @@ export function FloatingUpdateControl({
         }
       >
         {failed ? (
-          <AlertTriangle size={18} aria-hidden="true" />
+          <RefreshCw size={18} aria-hidden="true" />
         ) : downloaded ? (
           <Check size={18} aria-hidden="true" />
         ) : downloading ? (
