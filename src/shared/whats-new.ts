@@ -70,6 +70,14 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         description: 'Use the short guided sample to see an annotated screenshot and its context together.',
         action: { kind: 'onboarding' },
       },
+      {
+        id: 'capture-display',
+        title: 'Choose the screen to capture',
+        description:
+          'On Windows, select the display before Imnota captures a region. Capture pixels stay local.',
+        imageSrc: new URL('../renderer/assets/whats-new-capture-chooser.png', import.meta.url).href,
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
     ],
   },
   {
@@ -91,6 +99,14 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         title: 'Try the complete handoff',
         description: 'Use the short guided sample to see an annotated screenshot and its context together.',
         action: { kind: 'onboarding' },
+      },
+      {
+        id: 'capture-display',
+        title: 'Choose the screen to capture',
+        description:
+          'On Windows, select the display before Imnota captures a region. Capture pixels stay local.',
+        imageSrc: new URL('../renderer/assets/whats-new-capture-chooser.png', import.meta.url).href,
+        action: { kind: 'settings', category: 'Shortcuts' },
       },
     ],
   },

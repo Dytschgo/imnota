@@ -23,6 +23,9 @@ describe('what’s new releases', () => {
     expect(findWhatsNewRelease('0.2.8-nightly.20260918.35402081017')?.features[0]?.imageSrc).toMatch(
       /whats-new-updates\.png$/,
     );
+    expect(findWhatsNewRelease('0.2.8-nightly.20260918.35402081017')?.features[2]?.imageSrc).toMatch(
+      /whats-new-capture-chooser\.png$/,
+    );
     expect(findWhatsNewRelease('0.2.7')).toBeUndefined();
     expect(findWhatsNewRelease('0.2.8')?.preview).toBe(false);
   });
