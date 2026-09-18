@@ -10,7 +10,7 @@ import {
   Plus,
   Settings2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
 import { ProjectIcon } from '../components/ProjectIcon';
@@ -45,6 +45,8 @@ export interface SideNavProps {
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onSetNavigationOpen(open: boolean): void;
   onSelectProject?(projectPath: string): void | Promise<void>;
+  /** Update indicator rendered beside About; null while no update needs attention. */
+  updateControl?: ReactNode;
 }
 
 const disclosureKey = 'imnota:sidenav-disclosures';
@@ -92,6 +94,7 @@ export function SideNav({
   onOpenCollection,
   onSetNavigationOpen,
   onSelectProject,
+  updateControl,
 }: SideNavProps) {
   const [disclosures, setDisclosures] = useState<DisclosureState>(getStoredDisclosures);
   const recentCollections = useMemo(
@@ -418,6 +421,7 @@ export function SideNav({
             <Info size={16} aria-hidden="true" />
             <span>About</span>
           </button>
+          {updateControl}
         </div>
       </nav>
     </aside>

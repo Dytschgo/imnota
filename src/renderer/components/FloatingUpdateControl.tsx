@@ -7,6 +7,8 @@ export interface FloatingUpdateControlProps {
   onDownload(): void | Promise<void>;
   onInstall(): void | Promise<void>;
   onRetry(): void | Promise<void>;
+  /** `nav` sits beside About in the workspace navigation; `floating` is the lower-left fallback while navigation is hidden. */
+  placement?: 'nav' | 'floating';
 }
 
 export function FloatingUpdateControl({
@@ -14,6 +16,7 @@ export function FloatingUpdateControl({
   onDownload,
   onInstall,
   onRetry,
+  placement = 'floating',
 }: FloatingUpdateControlProps) {
   if (
     !status ||
@@ -27,6 +30,7 @@ export function FloatingUpdateControl({
   const failed = status.state === 'error';
   const available = status.state === 'available';
   const percent = Math.round(status.percent ?? 0);
+  const channelLabel = status.sourceChannel ?? status.channel;
   const label = failed
     ? 'Retry update check'
     : downloaded
@@ -40,11 +44,14 @@ export function FloatingUpdateControl({
             : 'Download update';
 
   return (
-    <div className={`floating-update floating-update-${status.state}`}>
+    <div
+      className={`floating-update floating-update-${placement} floating-update-${status.state}`}
+      data-testid="update-indicator"
+    >
       <div className="floating-update-popover" role="status">
         <strong>
           {status.version ? `Update ${status.version}` : 'Imnota update'}
-          {status.sourceChannel ? ` · ${status.sourceChannel}` : ''}
+          {channelLabel ? ` · ${channelLabel}` : ''}
         </strong>
         <p>
           {failed
@@ -53,7 +60,8 @@ export function FloatingUpdateControl({
               ? 'Downloaded. Restart Imnota to install it.'
               : downloading
                 ? `Downloading… ${percent}%`
-                : (status.message ?? 'A newer version is available.')}
+                : (status.message ??
+                  `A newer ${channelLabel ?? ''} version is available. Nothing downloads until you choose to.`)}
         </p>
         {status.releaseNotes?.trim() && (
           <div className="floating-update-notes">

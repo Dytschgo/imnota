@@ -1492,6 +1492,26 @@ export default function App() {
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
+        renderUpdateControl={(placement) => (
+          <FloatingUpdateControl
+            status={updateStatus}
+            placement={placement}
+            onDownload={downloadUpdate}
+            onRetry={() =>
+              window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
+            }
+            onInstall={async () => {
+              try {
+                if (await flushAll()) {
+                  checkpointSession();
+                  await installUpdate();
+                }
+              } catch (reason) {
+                setError(reason instanceof Error ? reason.message : 'The update could not be installed.');
+              }
+            }}
+          />
+        )}
       >
         {visibleError && (
           <div className="error-banner" role="alert">
@@ -1779,23 +1799,6 @@ export default function App() {
           }}
         />
       </AppShell>
-      <FloatingUpdateControl
-        status={updateStatus}
-        onDownload={downloadUpdate}
-        onRetry={() =>
-          window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
-        }
-        onInstall={async () => {
-          try {
-            if (await flushAll()) {
-              checkpointSession();
-              await installUpdate();
-            }
-          } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'The update could not be installed.');
-          }
-        }}
-      />
       {toast && (
         <div className="toast" role="status">
           <Check size={16} aria-hidden="true" />

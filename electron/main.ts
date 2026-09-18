@@ -2527,6 +2527,8 @@ function registerIpc(): void {
 }
 
 let updateInstallPending = false;
+const UPDATE_STARTUP_CHECK_DELAY_MS = 8_000;
+const UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 function configureAutoUpdates(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -2562,8 +2564,14 @@ function configureAutoUpdates(): void {
   autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
   // Check/download promises own their errors; installation also reports asynchronous native failures.
   autoUpdater.on('error', () => updateController.installationFailed());
-  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1')
-    setTimeout(() => void updateController.check(), 8000);
+  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1') {
+    // Startup and hourly checks are background checks: the controller
+    // coalesces them with manual checks, skips them during a download and
+    // keeps the last known status when offline. Discovery only; nothing
+    // downloads until the user chooses to.
+    setTimeout(() => void updateController.check({ background: true }), UPDATE_STARTUP_CHECK_DELAY_MS);
+    setInterval(() => void updateController.check({ background: true }), UPDATE_RECHECK_INTERVAL_MS);
+  }
 }
 
 async function createWindow(): Promise<BrowserWindow> {

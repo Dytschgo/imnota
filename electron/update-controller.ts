@@ -53,18 +53,31 @@ export class UpdateController {
     }
     void this.check();
   }
-  check(): Promise<void> {
+  /**
+   * Manual checks report progress and failures. Background checks (startup,
+   * hourly) stay silent: they never flash a "checking" state over an already
+   * discovered update and an offline failure keeps the previous status.
+   */
+  check(options: { background?: boolean } = {}): Promise<void> {
     if (this.pending) return this.pending;
     if (this.switching || ['downloading', 'downloaded'].includes(this.status.state)) return Promise.resolve();
     if (!this.ops.enabled) {
-      this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
+      if (!options.background)
+        this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
       return Promise.resolve();
     }
+    const previous = { status: this.getStatus(), candidate: this.candidate, terminal: this.terminalUpdate };
     this.candidate = null;
     this.terminalUpdate = null;
-    this.send({ state: 'checking' });
+    if (!options.background) this.send({ state: 'checking' });
     this.pending = this.performCheck()
       .catch(() => {
+        if (options.background) {
+          this.candidate = previous.candidate;
+          this.terminalUpdate = previous.terminal;
+          this.status = previous.status;
+          return;
+        }
         this.candidate = null;
         this.send({
           state: 'error',

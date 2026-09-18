@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectListItem } from '../../shared/types';
 import { useAppStore } from '../store';
+import { FloatingUpdateControl } from '../components/FloatingUpdateControl';
 import { AppShell } from './AppShell';
 import { SideNav } from './SideNav';
 
@@ -79,6 +80,48 @@ describe('AppShell navigation', () => {
     fireEvent.click(back);
     expect(onBack).toHaveBeenCalledOnce();
     expect(screen.getByTestId('search-trigger')).toHaveTextContent('Search');
+  });
+
+  it('shows the update indicator beside About and lower-left while navigation is hidden', () => {
+    const onDownload = vi.fn();
+    const shell = (
+      <AppShell
+        searchShortcut="Ctrl+F"
+        onNavigate={vi.fn()}
+        onNewProject={vi.fn()}
+        onOpenProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSearch={vi.fn()}
+        onOpenPromptBundles={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        onAbout={vi.fn()}
+        renderUpdateControl={(placement) => (
+          <FloatingUpdateControl
+            status={{ state: 'available', version: '0.3.0', channel: 'nightly' }}
+            placement={placement}
+            onDownload={onDownload}
+            onInstall={vi.fn()}
+            onRetry={vi.fn()}
+          />
+        )}
+      >
+        <div>Workbench</div>
+      </AppShell>
+    );
+    const { rerender } = render(shell);
+    const about = screen.getByRole('button', { name: 'About' });
+    const download = screen.getByRole('button', { name: 'Download update' });
+    expect(about.parentElement).toBe(screen.getByTestId('update-indicator').parentElement);
+    expect(about.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('status')).toHaveTextContent('Update 0.3.0 · nightly');
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing downloads until you choose to.');
+    fireEvent.click(download);
+    expect(onDownload).toHaveBeenCalledOnce();
+
+    useAppStore.setState({ navigationOpen: false });
+    rerender(shell);
+    expect(screen.getByTestId('update-indicator')).toHaveClass('floating-update-floating');
+    expect(screen.getByRole('button', { name: 'Download update' })).toBeVisible();
   });
 
   it('keeps library destinations separate from quick access disclosures', () => {

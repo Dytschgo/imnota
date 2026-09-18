@@ -133,3 +133,7 @@ You can use the same background for both themes or choose separate Light and Dar
 Onboarding appears only for a genuinely new local application profile. It uses an isolated demo project, never the real workspace, and covers importing, annotating and copying a prompt bundle. Completion is stored with local application settings rather than project files, so normal updates do not show it again. Replay it at any time from Settings.
 
 Keyboard shortcuts are configurable in Settings with Windows/macOS-aware defaults, conflict explanations and Reset to defaults. Mouse controls remain available for the complete workflow.
+
+## Updates
+
+Installed builds check the selected channel (Stable or Nightly) shortly after Imnota starts and about once an hour while it stays open. These background checks are discovery only: when a newer version exists, a download indicator appears beside **About** in the workspace navigation (lower-left when navigation is hidden) showing the channel and version. Nothing downloads or installs until you choose **Download update** there or in Settings > Updates & about, where you can also check manually and switch channels. Background checks stay quiet while offline; a manual check reports the failure.

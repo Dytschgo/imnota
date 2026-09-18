@@ -2396,13 +2396,17 @@ kbd {
 }
 
 .floating-update {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
+  position: relative;
   z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* Lower-left fallback while the workspace navigation is hidden. */
+.floating-update-floating {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
 }
 .floating-update-button {
   width: 42px;
@@ -2412,6 +2416,19 @@ kbd {
   background: var(--surface-3);
   color: var(--ink);
   box-shadow: var(--shadow);
+}
+/* Beside About: same footprint as a navigation item, no floating shadow. */
+.floating-update-nav {
+  flex: none;
+}
+.floating-update-nav .floating-update-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.floating-update-nav .floating-update-percent {
+  display: none;
 }
 .floating-update-available .floating-update-button,
 .floating-update-downloaded .floating-update-button {
@@ -2430,7 +2447,7 @@ kbd {
 }
 .floating-update-popover {
   position: absolute;
-  right: 0;
+  left: 0;
   bottom: 52px;
   display: none;
   width: min(360px, calc(100vw - 40px));

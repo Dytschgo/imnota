@@ -372,6 +372,29 @@ it('retries after check failure and invalidates failed downloads', async () => {
   await expect(instance.install()).rejects.toThrow();
   await expect(instance.download()).rejects.toThrow(/Check/);
 });
+it('keeps background checks silent while offline and does not flash a checking state', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  expect(instance.getStatus().state).toBe('available');
+  const states: string[] = [];
+  ops.emit.mockImplementation((status: { state: string }) => states.push(status.state));
+  ops.discover.mockRejectedValueOnce(new Error('offline'));
+  await instance.check({ background: true });
+  expect(states).toEqual([]);
+  expect(instance.getStatus().state).toBe('available');
+  await instance.download();
+  expect(ops.download).toHaveBeenCalled();
+});
+it('reports a newer background discovery without an intermediate checking state', async () => {
+  const { instance, ops, candidate } = controller();
+  await instance.check();
+  const states: string[] = [];
+  ops.emit.mockImplementation((status: { state: string }) => states.push(status.state));
+  ops.discover.mockResolvedValueOnce({ ...candidate, version: '0.4.0' });
+  await instance.check({ background: true });
+  expect(states).toEqual(['available']);
+  expect(instance.getStatus().version).toBe('0.4.0');
+});
 it('sets native channel before resetting downgrades and rejects a mismatched manifest', async () => {
   const { candidate } = controller();
   let channel: string | null = null;
