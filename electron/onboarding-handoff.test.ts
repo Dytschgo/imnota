@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OnboardingHandoffWorkflow } from './onboarding-handoff.js';
+import { onboardingHandoffRoot, OnboardingHandoffWorkflow } from './onboarding-handoff.js';
 
 const roots: string[] = [];
 
@@ -37,6 +37,16 @@ async function fixture() {
 }
 
 describe('onboarding handoff grants', () => {
+  it('keeps production handoffs in temp and smoke handoffs inside the isolated profile', () => {
+    const paths = { temporaryDirectory: path.resolve('temp'), userDataDirectory: path.resolve('profile') };
+    expect(onboardingHandoffRoot(paths, false)).toBe(
+      path.join(paths.temporaryDirectory, 'imnota-onboarding-handoffs'),
+    );
+    expect(onboardingHandoffRoot(paths, true)).toBe(
+      path.join(paths.userDataDirectory, 'onboarding-handoffs'),
+    );
+  });
+
   it('materializes a matching Markdown/PNG pair and uses it for the production combined copy', async () => {
     const { workflow, grant, copyContext } = await fixture();
     await expect(workflow.copy(grant.sessionId, 'context')).resolves.toEqual({

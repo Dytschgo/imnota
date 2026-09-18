@@ -13,6 +13,15 @@ import { NativeWorkflowError } from './workflow-errors.js';
 const MAX_ACTIVE_HANDOFF_GRANTS = 4;
 const RETIRED_HANDOFF_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
+export function onboardingHandoffRoot(
+  paths: { temporaryDirectory: string; userDataDirectory: string },
+  smoke = process.env.IMNOTA_SMOKE === '1',
+): string {
+  return smoke
+    ? path.join(paths.userDataDirectory, 'onboarding-handoffs')
+    : path.join(paths.temporaryDirectory, 'imnota-onboarding-handoffs');
+}
+
 export interface OnboardingHandoffDependencies {
   root: string;
   copyContext(

@@ -15,7 +15,7 @@ import {
 import os from 'node:os';
 import { deliverClipboardWithFileHandoff, nativeClipboard } from './native-clipboard.js';
 import { selectWindowsFilePair } from './windows-file-handoff.js';
-import { OnboardingHandoffWorkflow } from './onboarding-handoff.js';
+import { onboardingHandoffRoot, OnboardingHandoffWorkflow } from './onboarding-handoff.js';
 import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -1503,7 +1503,10 @@ function registerIpc(): void {
     new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
   );
   onboardingHandoffWorkflow = new OnboardingHandoffWorkflow({
-    root: path.join(app.getPath('temp'), 'imnota-onboarding-handoffs'),
+    root: onboardingHandoffRoot({
+      temporaryDirectory: app.getPath('temp'),
+      userDataDirectory: app.getPath('userData'),
+    }),
     copyContext: (markdown, imageDataUrl, filePaths) =>
       copyContextToClipboard(markdown, imageDataUrl, filePaths),
     copyText: copyTextToClipboard,

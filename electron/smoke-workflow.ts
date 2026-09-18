@@ -1,5 +1,6 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
+import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/prefer
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
@@ -289,7 +291,10 @@ async function exerciseOnboarding(
   ]);
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-annotate.png'));
-  const handoffRoot = path.join(app.getPath('temp'), 'imnota-onboarding-handoffs');
+  const handoffRoot = onboardingHandoffRoot({
+    temporaryDirectory: app.getPath('temp'),
+    userDataDirectory: app.getPath('userData'),
+  });
   const previousHandoffDirectories = new Set(
     await fs.readdir(handoffRoot).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -357,7 +362,10 @@ async function exerciseOnboarding(
     )
       throw new Error(`${context} changed the exact onboarding PNG pixels.`);
   };
-  if ((await nativeClipboard.readText()) !== markdown || !(await nativeClipboard.readHTML()))
+  if (
+    (await nativeClipboard.readText()) !== markdown ||
+    (await nativeClipboard.readHTML()) !== clipboardContextHtml(markdown)
+  )
     throw new Error('Onboarding combined copy did not preserve exact Markdown and HTML.');
   await assertExactImage('Onboarding combined copy');
 
