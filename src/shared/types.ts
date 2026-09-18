@@ -1,4 +1,4 @@
-import type { WorkflowBridge } from './workflow-bridge.js';
+import type { ClipboardFormatsReport, WorkflowBridge } from './workflow-bridge.js';
 import type { ContentBridge, ContentItem } from './content-items.js';
 import type { ProjectIconKey } from './project-icons.js';
 import type { ProjectSearchInput, ProjectSearchResponse } from './project-search.js';
@@ -262,7 +262,7 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
   copyText(text: string): Promise<void>;
-  copyContext(input: { markdown: string; imageDataUrl: string }): Promise<void>;
+  copyContext(input: { markdown: string; imageDataUrl: string }): Promise<ClipboardFormatsReport>;
   copyImage(dataUrl: string): Promise<void>;
   saveRecovery(input: {
     projectPath: string;

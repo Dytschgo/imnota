@@ -7,7 +7,7 @@ vi.mock('../clipboard-image', () => ({ prepareClipboardImage: vi.fn() }));
 const copyContext = vi.fn();
 beforeEach(() => {
   vi.mocked(prepareClipboardImage).mockReset();
-  copyContext.mockReset().mockResolvedValue(undefined);
+  copyContext.mockReset().mockResolvedValue({ text: true, html: true, image: true });
   Object.defineProperty(window, 'imnota', { configurable: true, value: { copyContext } });
 });
 afterEach(cleanup);
@@ -23,6 +23,13 @@ it('prepares annotated output before one typed clipboard write and explains comp
   expect(prepareClipboardImage).toHaveBeenCalledWith(images);
   expect(await screen.findByRole('status')).toHaveTextContent('some apps accept only one');
   expect(busy.mock.calls).toEqual([[true], [false]]);
+});
+it('reports a clipboard that kept only one format instead of claiming both', async () => {
+  vi.mocked(prepareClipboardImage).mockResolvedValue('combined-png');
+  copyContext.mockResolvedValueOnce({ text: true, html: true, image: false });
+  render(<CombinedContextCopy markdown="# Brief" images={images} onBusyChange={() => undefined} />);
+  fireEvent.click(screen.getByRole('button'));
+  expect(await screen.findByRole('status')).toHaveTextContent('Only the text reached the clipboard');
 });
 it('does not touch the clipboard on preparation failure and can retry', async () => {
   vi.mocked(prepareClipboardImage)

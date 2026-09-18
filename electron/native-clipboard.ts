@@ -1,4 +1,5 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
+import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
 
 async function readBlob(types: string[]): Promise<Blob | undefined> {
   const items = await clipboard.read();
@@ -36,9 +37,21 @@ export const nativeClipboard = {
   async writeImage(image: NativeImage): Promise<void> {
     await clipboard.write([new ClipboardItem({ 'image/png': pngBlob(image) })]);
   },
-  async writeContext(text: string, html: string, image: NativeImage): Promise<void> {
+  /**
+   * Writes all three formats in one native operation, then reads the clipboard
+   * back so callers can report what the OS actually holds. Windows in
+   * particular may keep only some formats; a read-back failure reports every
+   * format as unverified (false) rather than claiming success.
+   */
+  async writeContext(text: string, html: string, image: NativeImage): Promise<ClipboardFormatsReport> {
     await clipboard.write([
       new ClipboardItem({ 'text/plain': text, 'text/html': html, 'image/png': pngBlob(image) }),
     ]);
+    try {
+      const types = new Set((await clipboard.read()).flatMap((item) => item.types));
+      return { text: types.has('text/plain'), html: types.has('text/html'), image: types.has('image/png') };
+    } catch {
+      return { text: false, html: false, image: false };
+    }
   },
 };

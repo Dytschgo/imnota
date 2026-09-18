@@ -26,7 +26,7 @@ async function fixture() {
   temporary.push(projectPath);
   const collectionId = '001-collection';
   await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
-  const copyContext = vi.fn();
+  const copyContext = vi.fn(async () => ({ text: true, html: true, image: true }));
   const copyText = vi.fn();
   const copyImage = vi.fn();
   const openPath = vi.fn();
@@ -103,8 +103,17 @@ describe('main-owned prompt bundle grants', () => {
     const content = await workflow.read(session.sessionId, 1);
     expect(content.markdown).toBe('# Prompt\n');
     expect(content.imageDataUrl).toBe(pngDataUrl());
-    await workflow.copy(session.sessionId, 1, 'context');
+    await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
+      target: 'context',
+      placed: { text: true, html: true, image: true },
+    });
     expect(copyContext).toHaveBeenCalledWith('# Prompt\n', pngDataUrl());
+    // The workflow reports what the clipboard holds, never what was requested.
+    copyContext.mockResolvedValueOnce({ text: true, html: true, image: false });
+    await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
+      target: 'context',
+      placed: { text: true, html: true, image: false },
+    });
     await workflow.open(session.sessionId, 1, 'png');
     expect(openPath).toHaveBeenCalledWith(expect.stringMatching(/ - 01\.png$/));
     await workflow.open(session.sessionId, 1, 'master');
@@ -133,7 +142,7 @@ describe('main-owned prompt bundle grants', () => {
     const markdownPath = path.join(folder, finalized.bundles[0].markdownFilename);
 
     await fs.truncate(pngPath, MAX_PROMPT_BUNDLE_PNG_BYTES + 1);
-    await expect(workflow.copy(session.sessionId, 1, 'markdown')).resolves.toBeUndefined();
+    await expect(workflow.copy(session.sessionId, 1, 'markdown')).resolves.toEqual({ target: 'markdown' });
     expect(copyText).toHaveBeenCalledWith('# Safe Markdown\n');
     expect(copyImage).not.toHaveBeenCalled();
     await expect(workflow.copy(session.sessionId, 1, 'image')).rejects.toThrow(/safe .*byte read limit/);
@@ -169,7 +178,7 @@ describe('main-owned prompt bundle grants', () => {
     const workflow = new PromptBundleWorkflow(
       {
         authorize: async () => ({ projectPath, collectionId, collectionName: 'Collection' }),
-        copyContext: () => undefined,
+        copyContext: () => ({ text: true, html: true, image: true }),
         copyText: () => undefined,
         copyImage: () => undefined,
         openPath: async () => undefined,
