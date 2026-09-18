@@ -127,6 +127,33 @@ const RESERVED_BY_PLATFORM: Record<ShortcutPlatform, ReadonlySet<string>> = {
 
 const RESERVED_ALL = new Set(['F5', 'F12']);
 
+/**
+ * Combinations other common apps or the OS already use. They still work
+ * inside a focused Imnota window, so they are allowed, but the recorder
+ * explains the clash and asks for confirmation before saving.
+ */
+const COMMON_BY_PLATFORM: Record<ShortcutPlatform, Readonly<Record<string, string>>> = {
+  windows: {
+    'Ctrl+Shift+S': 'Save As in many Windows apps and the screenshot shortcut in some browsers',
+    'Meta+Shift+S': 'the Windows Snipping Tool',
+    'Meta+PrintScreen': 'the Windows screenshot shortcut',
+    'Alt+PrintScreen': 'the Windows window screenshot shortcut',
+    'Meta+G': 'the Windows Game Bar',
+    'Meta+V': 'the Windows clipboard history',
+    'Ctrl+Shift+Escape': 'Task Manager',
+  },
+  mac: {
+    'Meta+Shift+3': 'the macOS screenshot shortcut',
+    'Meta+Shift+4': 'the macOS screenshot shortcut',
+    'Meta+Shift+5': 'the macOS screenshot toolbar',
+    'Meta+Shift+S': 'Save As in many macOS apps',
+  },
+  linux: {
+    'Shift+PrintScreen': 'the desktop screenshot shortcut',
+    'Ctrl+Shift+S': 'Save As in many apps',
+  },
+};
+
 function canonicalKey(rawKey: string): string | null {
   const trimmed = rawKey.trim();
   if (!trimmed) return null;
@@ -193,6 +220,10 @@ export function keyboardEventToShortcut(
   return normalizeShortcut(parts.join('+'), platform);
 }
 
+export function getDefaultShortcut(actionId: ShortcutActionId, platform: ShortcutPlatform): string | null {
+  return getDefaultShortcuts(platform)[actionId];
+}
+
 export function getDefaultShortcuts(platform: ShortcutPlatform): ResolvedShortcutBindings {
   const modifier = platform === 'mac' ? 'Meta' : 'Ctrl';
   return Object.fromEntries(
@@ -235,6 +266,14 @@ export function isReservedShortcut(binding: string, platform: ShortcutPlatform):
   return (
     normalized !== null && (RESERVED_ALL.has(normalized) || RESERVED_BY_PLATFORM[platform].has(normalized))
   );
+}
+
+/** Why a normalized combination may surprise the user; null when nothing is known. */
+export function describeCommonShortcut(binding: string, platform: ShortcutPlatform): string | null {
+  const normalized = normalizeShortcut(binding, platform);
+  if (!normalized) return null;
+  const owner = COMMON_BY_PLATFORM[platform][normalized];
+  return owner ? `${formatShortcut(normalized, platform)} is also used by ${owner}.` : null;
 }
 
 export function validateShortcut(

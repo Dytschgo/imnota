@@ -1757,7 +1757,9 @@ export default function App() {
               platform !== 'linux' &&
               Boolean(activeCaptureCollection && !activeCaptureCollection.archived)
             }
-            captureShortcut={shortcutLabel('capture.region')}
+            captureShortcut={
+              resolvedShortcuts['capture.region'] ? shortcutLabel('capture.region') : undefined
+            }
             captureDisabledLabel={captureDisabledLabel}
             onZoom={(delta) => dispatchCanvasCommand(stageRef.current, delta > 0 ? 'zoom-in' : 'zoom-out')}
             onFlush={flushAll}
