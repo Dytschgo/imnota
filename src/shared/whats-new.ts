@@ -68,6 +68,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         id: 'handoff',
         title: 'Try the complete handoff',
         description: 'Use the short guided sample to see an annotated screenshot and its context together.',
+        imageSrc: new URL('../renderer/assets/whats-new-handoff.png', import.meta.url).href,
         action: { kind: 'onboarding' },
       },
       {
@@ -98,6 +99,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         id: 'handoff',
         title: 'Try the complete handoff',
         description: 'Use the short guided sample to see an annotated screenshot and its context together.',
+        imageSrc: new URL('../renderer/assets/whats-new-handoff.png', import.meta.url).href,
         action: { kind: 'onboarding' },
       },
       {
