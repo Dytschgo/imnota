@@ -2795,6 +2795,11 @@ kbd {
   color: var(--ink);
 }
 
+.add-item-popover button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .add-item-popover strong,
 .add-item-popover small {
   display: block;

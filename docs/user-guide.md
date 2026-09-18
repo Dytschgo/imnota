@@ -51,7 +51,7 @@ Deleting a screenshot moves its source image, annotations and description to the
 
 ## Capture an image (experimental)
 
-Enable region capture in Settings > Shortcuts > Experimental capture. With a project open, use Capture screen region in the collection toolbar or its configurable shortcut while Imnota is focused. Drag a rectangle on the display containing the pointer, then choose Save, Retake or Cancel. Saving adds a PNG screenshot to the active collection for annotation and export.
+Enable region capture in Settings > Shortcuts > Experimental capture. With a project open, use Capture screen region in the collection toolbar, **Take screenshot** in the collection rail's Add menu (both the Add screenshot dropdown and the combined Add item menu), or its configurable shortcut while Imnota is focused. All entry points share the same enablement: the menu item explains why capture is unavailable, for example when no current collection is selected. Drag a rectangle on the display containing the pointer, then choose Save, Retake or Cancel. Saving adds a PNG screenshot to the active collection for annotation and export.
 
 Capture is off by default. It captures one region on one display, with no video, GIF conversion or background global shortcut. macOS requires Screen Recording permission. If capture is unavailable or permission is denied, use the operating system's screenshot tool and Import or Paste. Linux capture is disabled. Retina and mixed-DPI setups still need platform verification.
 
@@ -90,7 +90,7 @@ Picture 3 was intentionally excluded from this prompt bundle.
 
 A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
 
-The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. Some receiving apps paste only one format; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
+The green **Copy Bundle** button below the image copies Markdown and PNG together. It turns gray after copying and remains available to copy again. Its dropdown offers **Copy Markdown** and **Copy PNG** separately. After a combined copy Imnota reads the clipboard back and reports what the operating system kept: the card says **Markdown + image prepared** only when both formats are confirmed, and otherwise names the missing format and the separate copy to use for it (Windows in particular may keep only one). Some receiving apps still paste only one format even when both are present; use the separate options or attach the saved PNG when needed. Text-only bundles copy Markdown without an image.
 
 Markdown copy works without generating an image first. The fallback actions also provide generated files and their plain-text paths. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what it copied, not whether another app accepted it.
 

@@ -84,6 +84,8 @@ interface FakeBridgeOptions {
   annotations?: Readonly<Record<string, Annotation[]>>;
   revisionForLoad?: (screenshotId: string, callNumber: number) => string;
   failContextCopy?: boolean;
+  /** Clipboard read-back for combined copies; defaults to every format present. */
+  placed?: { text: boolean; html: boolean; image: boolean };
   failFinish?: boolean;
 }
 
@@ -235,7 +237,13 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
             retryable: true,
           },
         };
-      return ok(undefined);
+      return ok({
+        target: input.target,
+        placed:
+          input.target === 'context'
+            ? (options.placed ?? { text: true, html: true, image: true })
+            : undefined,
+      });
     },
     async openPromptExportBundle(input) {
       opens.push(structuredClone(input));
@@ -593,6 +601,22 @@ describe('prompt export controller orchestration', () => {
       outcome: 'paths',
       filenames: ['Prompt-1.md', 'Prompt-1.png'],
     });
+  });
+
+  test('reports a partial Windows clipboard write and points at the separate fallback', async () => {
+    const native = fakeBridge({ placed: { text: true, html: true, image: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      outcome: 'markdown',
+      warning: expect.stringContaining('Copy image'),
+    });
+    const image = await controller.copyImage(controller.getState().cards[0]);
+    expect(image.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({ outcome: 'image', warning: undefined });
   });
 
   test('exposes same-session fallbacks when combined clipboard copy fails', async () => {
