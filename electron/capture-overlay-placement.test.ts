@@ -10,6 +10,7 @@ describe('capture overlay placement', () => {
       fullscreen: false,
       fullscreenable: false,
       simpleFullscreen: false,
+      roundedCorners: false,
     });
   });
 
