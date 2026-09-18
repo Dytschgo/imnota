@@ -22,6 +22,7 @@ import { BackupSettings } from './BackupSettings';
 import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
 import type { ProjectListItem } from '../../shared/types';
 import type { UpdateStatus } from '../../shared/types';
+import { findWhatsNewRelease, whatsNewReleaseUrl } from '../../shared/whats-new';
 
 export const SETTINGS_CATEGORIES = [
   'Appearance',
@@ -190,7 +191,11 @@ export function SettingsView({
           <WhatsNewSettings
             version={updateStatus?.currentVersion}
             channel={updateStatus?.channel ?? settings.updateChannel}
-            releaseUrl={updateStatus?.releaseUrl}
+            releaseUrl={
+              findWhatsNewRelease(updateStatus?.currentVersion)
+                ? whatsNewReleaseUrl(updateStatus?.currentVersion)
+                : undefined
+            }
             onReplay={onReplayWhatsNew}
             onAction={onWhatsNewAction}
           />

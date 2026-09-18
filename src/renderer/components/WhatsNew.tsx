@@ -1,6 +1,11 @@
 import { ExternalLink, Sparkles } from 'lucide-react';
 import type { UpdateChannel } from '../../shared/types';
-import { findWhatsNewRelease, type WhatsNewFeature, type WhatsNewRelease } from '../../shared/whats-new';
+import {
+  findWhatsNewRelease,
+  releaseChannelForVersion,
+  type WhatsNewFeature,
+  type WhatsNewRelease,
+} from '../../shared/whats-new';
 import { Button, Modal } from './ui';
 
 export type WhatsNewAction = WhatsNewFeature['action'];
@@ -77,7 +82,8 @@ export function WhatsNewSettings({
   onReplay(): void;
   onAction(action: WhatsNewAction): void;
 }) {
-  const release = findWhatsNewRelease(version, channel);
+  const release = findWhatsNewRelease(version);
+  const installedChannel = releaseChannelForVersion(version) ?? channel;
   return (
     <section className="settings-section whats-new-settings" aria-labelledby="whats-new-title">
       <div className="whats-new-heading">
@@ -85,7 +91,7 @@ export function WhatsNewSettings({
           <h2 id="whats-new-title">What’s new</h2>
           <p>
             {version ? `Imnota ${version}` : 'Installed version unavailable'}
-            {channel === 'nightly' ? ' · Nightly preview' : ' · Stable'}
+            {installedChannel === 'nightly' ? ' · Nightly preview' : ' · Stable'}
           </p>
         </div>
         <Sparkles size={18} aria-hidden="true" />

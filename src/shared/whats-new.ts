@@ -9,7 +9,7 @@ export interface WhatsNewFeature {
 }
 
 export interface WhatsNewRelease {
-  minVersion: string;
+  afterVersion: string;
   channel: UpdateChannel;
   title: string;
   summary: string;
@@ -42,10 +42,16 @@ export function compareWhatsNewVersions(left: string, right: string): number | n
   return 0;
 }
 
+export function releaseChannelForVersion(version: string | undefined): UpdateChannel | undefined {
+  if (!version) return undefined;
+  const match = versionPattern.exec(version);
+  return match ? (match[4] === undefined ? 'stable' : 'nightly') : undefined;
+}
+
 /** Local release content. Screenshot paths are optional while an asset is unavailable. */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
   {
-    minVersion: '0.2.7-nightly.20260919.1',
+    afterVersion: '0.2.8-nightly.20260918.35402081016',
     channel: 'nightly',
     title: 'What’s new in this Nightly',
     summary: 'Preview the next update controls and guided handoff improvements before they reach Stable.',
@@ -66,7 +72,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
     ],
   },
   {
-    minVersion: '0.2.8',
+    afterVersion: '0.2.7',
     channel: 'stable',
     title: 'What’s new',
     summary: 'A clearer update path and a guided way to prepare local handoff context.',
@@ -88,14 +94,19 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
   },
 ];
 
-export function findWhatsNewRelease(version: string | undefined, channel: UpdateChannel | undefined) {
+export function findWhatsNewRelease(version: string | undefined) {
+  const channel = releaseChannelForVersion(version);
   if (!version || !channel) return undefined;
-  return WHATS_NEW_RELEASES.filter(
-    (release) =>
-      release.channel === channel &&
-      compareWhatsNewVersions(version, release.minVersion) !== null &&
-      compareWhatsNewVersions(version, release.minVersion)! >= 0,
-  ).at(-1);
+  return WHATS_NEW_RELEASES.filter((release) => {
+    const comparison = compareWhatsNewVersions(version, release.afterVersion);
+    return release.channel === channel && comparison !== null && comparison > 0;
+  }).at(-1);
+}
+
+export function whatsNewReleaseUrl(version: string | undefined): string | undefined {
+  return releaseChannelForVersion(version)
+    ? `https://github.com/Dytschgo/imnota/releases/tag/v${encodeURIComponent(version!)}`
+    : undefined;
 }
 
 export function shouldShowWhatsNew(

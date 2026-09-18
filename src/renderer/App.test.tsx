@@ -2004,6 +2004,7 @@ describe('feedback controls', () => {
     await waitFor(() =>
       expect(savePreferences).toHaveBeenCalledWith({ updates: { whatsNewAcknowledgedVersion: '0.2.8' } }),
     );
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
   });
 
   it('does not reopen acknowledged guidance on a repeat launch', async () => {

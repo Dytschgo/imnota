@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { compareWhatsNewVersions, findWhatsNewRelease, shouldShowWhatsNew } from '../whats-new';
+import {
+  compareWhatsNewVersions,
+  findWhatsNewRelease,
+  releaseChannelForVersion,
+  shouldShowWhatsNew,
+} from '../whats-new';
 
 describe('what’s new releases', () => {
   it('orders Imnota stable and nightly versions without using lexical comparison', () => {
@@ -11,14 +16,16 @@ describe('what’s new releases', () => {
     expect(compareWhatsNewVersions('unknown', '0.2.7')).toBeNull();
   });
 
-  it('keeps nightly content out of stable and older installs', () => {
-    expect(findWhatsNewRelease('0.2.7-nightly.20260919.1', 'nightly')?.preview).toBe(true);
-    expect(findWhatsNewRelease('0.2.7', 'stable')).toBeUndefined();
-    expect(findWhatsNewRelease('0.2.8', 'stable')?.preview).toBe(false);
+  it('uses the installed build channel and excludes the preceding nightly', () => {
+    expect(releaseChannelForVersion('0.2.8-nightly.20260918.35402081017')).toBe('nightly');
+    expect(findWhatsNewRelease('0.2.8-nightly.20260918.35402081016')).toBeUndefined();
+    expect(findWhatsNewRelease('0.2.8-nightly.20260918.35402081017')?.preview).toBe(true);
+    expect(findWhatsNewRelease('0.2.7')).toBeUndefined();
+    expect(findWhatsNewRelease('0.2.8')?.preview).toBe(false);
   });
 
   it('shows each eligible release only when the installed version is newer than its acknowledgement', () => {
-    const release = findWhatsNewRelease('0.2.8', 'stable');
+    const release = findWhatsNewRelease('0.2.8');
     expect(shouldShowWhatsNew('0.2.8', undefined, release)).toBe(true);
     expect(shouldShowWhatsNew('0.2.8', '0.2.8', release)).toBe(false);
     expect(shouldShowWhatsNew('0.2.8', '0.2.9', release)).toBe(false);

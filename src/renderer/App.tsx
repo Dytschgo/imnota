@@ -115,6 +115,7 @@ export default function App() {
   const metadataTimer = useRef<number | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
+  const dismissedWhatsNewVersion = useRef<string | null>(null);
   const navigationIdentity = useRef(0);
   const [searchTarget, setSearchTarget] = useState<{
     result: ContentSearchResult;
@@ -292,24 +293,22 @@ export default function App() {
       setShowOnboarding(true);
   }, [preferences.result]);
 
-  const whatsNewRelease = findWhatsNewRelease(
-    updateStatus?.currentVersion,
-    updateStatus?.channel ?? store.settings.updateChannel,
-  );
+  const whatsNewRelease = findWhatsNewRelease(updateStatus?.currentVersion);
   const onboardingPending =
     preferences.result &&
     shouldShowOnboarding(preferences.result.settings.onboarding, preferences.result.profile);
   useEffect(() => {
-    if (onboardingPending || !preferences.result || !whatsNewRelease) return;
+    if (onboardingPending || showOnboarding || !preferences.result || !whatsNewRelease) return;
     if (
       shouldShowWhatsNew(
         updateStatus?.currentVersion,
         preferences.result.settings.updates.whatsNewAcknowledgedVersion,
         whatsNewRelease,
-      )
+      ) &&
+      dismissedWhatsNewVersion.current !== updateStatus?.currentVersion
     )
       setShowWhatsNew(true);
-  }, [onboardingPending, preferences.result, updateStatus?.currentVersion, whatsNewRelease]);
+  }, [onboardingPending, preferences.result, showOnboarding, updateStatus?.currentVersion, whatsNewRelease]);
 
   useEffect(() => {
     document.documentElement.style.fontSize = `${store.settings.interfaceScale * 100}%`;
@@ -1327,6 +1326,7 @@ export default function App() {
     setShowWhatsNew(false);
     const version = updateStatus?.currentVersion;
     if (!version) return;
+    dismissedWhatsNewVersion.current = version;
     void preferences
       .saveUpdates({ ...preferences.settings.updates, whatsNewAcknowledgedVersion: version })
       // Closing this optional guidance must not block the app. A failed save is retried on the next launch.
@@ -1926,7 +1926,7 @@ export default function App() {
           onDismiss={() => setShowOnboarding(false)}
         />
       )}
-      {showWhatsNew && whatsNewRelease && (
+      {!showOnboarding && showWhatsNew && whatsNewRelease && (
         <WhatsNewDialog
           release={whatsNewRelease}
           onClose={acknowledgeWhatsNew}
