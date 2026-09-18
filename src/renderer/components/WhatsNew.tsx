@@ -47,12 +47,7 @@ export function WhatsNewDialog({
   onAction(action: WhatsNewAction): void;
 }) {
   return (
-    <Modal
-      title={release.title}
-      description={release.summary}
-      variant={release.preview ? 'preview' : 'default'}
-      onClose={onClose}
-    >
+    <Modal title={release.title} description={release.summary} onClose={onClose}>
       <div className="whats-new-dialog" data-testid="whats-new-dialog">
         {release.preview && <p className="whats-new-preview">Nightly preview · feedback welcome</p>}
         <FeatureCards release={release} onAction={onAction} />

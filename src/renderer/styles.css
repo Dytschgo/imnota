@@ -2377,6 +2377,9 @@ button.icon-button.new-collection-button svg {
   gap: 14px;
   padding: 0 22px 22px;
 }
+.modal:has(.whats-new-dialog) {
+  width: min(100%, 1000px);
+}
 .whats-new-preview {
   color: var(--imnota-accent-hover);
   font-size: 12px;
