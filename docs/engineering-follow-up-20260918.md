@@ -2,7 +2,7 @@
 
 Status: proposal only. Nothing here is authorized; each phase needs its own decision and its own PR. It complements [the feedback follow-up plan](follow-up-plan-20260918.md), which covers product-facing items that came out of the feedback round. This document covers the codebase itself: structure, tests, evidence and housekeeping.
 
-Baseline for every number below: `main` at `36ff189` (2026-09-18) with PRs #72–#76 open.
+Historical baseline for measurements below: `main` at `36ff189` (2026-09-18), when PRs #72–#76 were open. It is not a statement about the current branch.
 
 Principles, taken from [AGENTS.md](../AGENTS.md):
 
@@ -14,7 +14,7 @@ Principles, taken from [AGENTS.md](../AGENTS.md):
 
 ### 0.1 Move finished root-level plans into `docs/`
 
-Why: 11 Markdown files sit in the repository root. Five are dated execution plans whose work is merged and released (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`). Every agent session pays context cost for them, and `implementation plan.md` (with a space) breaks tab-completion and some link checkers.
+Why: 11 Markdown files sit in the repository root. Five are dated execution plans (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`) that may belong with historical records once their delivery and release status are verified. Every agent session pays context cost for them; filenames with spaces require quoting in shell commands.
 
 What:
 
@@ -26,30 +26,27 @@ git mv Nightly-UI-Merge-Plan.md        docs/history/nightly-ui-merge-plan-202609
 git mv Dependency-Migration-Plan.md    docs/history/dependency-migration-plan-20260916.md
 ```
 
-Keep `AGENTS.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` in the root. Add `docs/history/README.md` with one line per file saying what it was and which PRs delivered it. Update inbound links (`grep -rn "implementation plan.md\|appUIoverhaul" --include=*.md`).
+Keep `AGENTS.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` in the root. Add `docs/history/README.md` with one line per file saying what it was and which PRs delivered it, when that can be verified. Before and after the move, use `rg` to check links to all five old names and all five destination names, including links between the moved documents and links from `README.md` and `docs/`.
 
 When: first, in one docs-only PR. It conflicts with nothing.
 
-Verification: documentation tier — `prettier --check` on moved files and a link grep.
+Verification: documentation tier — `prettier --check` on moved files and an `rg` link search.
 
-### 0.2 Prune merged worktrees and branches
+### 0.2 Keep local worktree maintenance out of this plan
 
-Why: 91 worktrees under `D:/Code/imnota-*` and 128 local branches. Most are merged (`feature/all-plan-*`, `review/nightly-*`, `fix/ui-*`). Stale worktrees keep old `node_modules` and confuse `git worktree list` output that agents read.
+Why: worktrees, branches and stashes are local to each clone and can contain another person's uncommitted work. They are not a repository delivery phase.
 
-What (local only, not a PR; do it by hand once):
+What: when separately authorized, inventory first and work on one explicitly identified worktree at a time:
 
 ```bash
 git worktree prune
-for b in $(git branch --merged origin/main --format='%(refname:short)' | grep -v '^main$'); do
-  wt=$(git worktree list --porcelain | grep -B2 "branch refs/heads/$b" | grep '^worktree' | cut -d' ' -f2)
-  [ -n "$wt" ] && git worktree remove --force "$wt"
-  git branch -d "$b"
-done
+git worktree list --porcelain
+git branch --merged origin/main --format='%(refname:short)'
 ```
 
-Review the list before running; keep anything with uncommitted work (the loop only deletes branches that are fully merged, and `git branch -d` refuses otherwise). The `stash@{0}` from `feature/mixed-content-implementation` should be inspected and either applied to a branch or dropped.
+For each proposed worktree, first confirm its absolute path and branch identity from the inventory, then run `git -C <worktree-path> status --short`. Stop when it is not clean or its identity is unclear. Only after confirming that its branch is merged and the worktree is clean, run `git worktree remove <worktree-path>` without `--force`; then use `git branch -d <branch>`. Do not drop or apply stashes as part of this maintenance; inspect them separately and preserve them until their owner decides.
 
-When: same day as 0.1.
+When: not scheduled by this plan.
 
 ### 0.3 Add `docs/README.md` as the index
 
@@ -65,9 +62,9 @@ When: same PR as 0.1.
 
 Why: #72 fixes overlay placement based on Electron's documented Windows fullscreen behaviour, not on a two-display observation. The synthetic smoke (`IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic`) exercises the basic pipeline with synthetic pixels on the host's real display; it does not prove multi-display placement, scaling or crop correctness.
 
-What:
+What (proposed matrix and probe outline):
 
-1. `docs/capture-display-matrix.md` with the grid from the feedback plan §6 (arrangement × scaling × entry point × pointer display × outcome), one table per OS, filled per nightly build.
+1. `docs/capture-display-matrix.md` with the grid (arrangement × scaling × entry point × pointer display × outcome), one table per OS, filled per nightly build.
 2. A `smoke:capture` script that starts the packaged app with the real capture path and prints the values the matrix needs, so the human only has to move the pointer and press keys:
 
 ```ts
@@ -92,6 +89,8 @@ console.log(
 
 3. `docs/nightly-verification-audit.md` links the matrix and states that capture changes are not promoted without a filled row per OS.
 
+Use a disposable or synthetic desktop scene, or obtain authorization for any real content that may enter the capture. Captured pixels remain local and must not be included in the matrix record.
+
 When: before the nightly that carries #72. Decides items 2.1 and 2.2 of the feedback follow-up plan.
 
 Verification: filesystem/native tier — run on Windows with two displays and on macOS; Linux is not applicable.
@@ -110,9 +109,9 @@ Each item is one mechanical-move PR followed, only if needed, by a behaviour PR.
 
 ### 2.1 `electron/main.ts`: extract the capture workflow
 
-Why: `main.ts` is 2 773 lines with 68 IPC handlers. The capture workflow (`captureService`, `chooseCaptureRegion`, `settleCaptureOverlay`, `failCaptureOverlay`, `insertCapturedPng`, the `workflow:capture:region` handler and the three `capture-overlay:*` handlers, roughly lines 781–1060 and 1271–1320 and 1602–1690) is the area with the most open questions (display matrix, tolerance, global shortcut). It already has four pure helper modules around it (`capture-service`, `capture-overlay-session`, `capture-overlay-placement`, `capture-admission`) but the orchestration is still inline.
+Why: The capture workflow (`captureService`, `chooseCaptureRegion`, `settleCaptureOverlay`, `failCaptureOverlay`, `insertCapturedPng`, the `workflow:capture:region` handler and the `capture-overlay:*` handlers) is the area with the most open questions (display matrix, tolerance, global shortcut). It already has pure helper modules around it (`capture-service`, `capture-overlay-session`, `capture-overlay-placement`, `capture-admission`) but the orchestration is still inline.
 
-What: new `electron/capture-workflow.ts` exporting a factory that receives its dependencies instead of reaching for module-level state:
+What (illustrative boundary sketch only; an implementation must retain the existing capture admission guards, project/session liveness checks and IPC validation): new `electron/capture-workflow.ts` exporting a factory that receives its dependencies instead of reaching for module-level state:
 
 ```ts
 // electron/capture-workflow.ts
@@ -154,7 +153,7 @@ Why a factory and not a class with globals: the current `captureOverlay` module 
 
 When: after #72 merges and the matrix has run once, so the extraction moves settled code. Mechanical PR first (no behaviour change, existing smoke must pass); then, if 1.1 asks for a tolerance, that is a separate 10-line PR with a test.
 
-Verification: application tier plus `pnpm smoke` (the synthetic capture smoke exercises this path end to end).
+Verification: filesystem/native tier. Run the affected native checks on Windows and macOS, then use `IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic corepack pnpm smoke` only for the synthetic branch; ordinary `pnpm smoke` does not exercise that capture source. Review the affected capture UI and permission/failure states.
 
 ### 2.2 `electron/main.ts`: isolate smoke-only branches
 
@@ -195,9 +194,11 @@ export function readSmokeProfile(env: NodeJS.ProcessEnv, ci = env.CI === 'true')
 
 When: right after 2.1; the capture extraction is the first consumer.
 
+Verification: filesystem/native tier, including the affected smoke modes and their failure boundaries on each supported OS.
+
 ### 2.3 `src/renderer/App.tsx`: extract the workflows that the feedback PRs touched
 
-Why: `App.tsx` is 2 149 lines with 35 `useState`/`useEffect` calls and owns capture, paste, import, undo/redo, navigation history, prompt bundles, onboarding and update install. Two of the five feedback PRs (#73, #75) edited it within twenty lines of each other. The `app/` folder already shows the intended pattern (`useProjectPersistence.ts`, `session.ts`, `workflow.ts`).
+Why: `App.tsx` owns capture, paste, import, undo/redo, navigation history, prompt bundles, onboarding and update install. The `app/` folder already shows the intended pattern (`useProjectPersistence.ts`, `session.ts`, `workflow.ts`).
 
 What, in order of merge-conflict risk:
 
@@ -225,13 +226,13 @@ Each extraction moves code verbatim, then the matching `App.test.tsx` cases move
 
 When: one hook per PR, after the feedback PRs have merged (they are the ones that would conflict). Do not start until #73 and #75 are in.
 
-Verification: application tier; `App.test.tsx` and the new hook tests must both pass; no UI change to review.
+Verification: application tier; `App.test.tsx` and the new hook tests must both pass, and the affected UI flows need review even when their intended appearance is unchanged. `useRegionCapture` also needs filesystem/native-tier evidence on each affected supported OS.
 
 ### 2.4 `App.test.tsx` flake
 
-Why: `feedback controls › cancels and confirms screenshot deletion when confirmation is enabled` failed once in a full parallel run on 2026-09-18 and passed on three re-runs. It is timing-based.
+Why: A prior full parallel run reportedly failed `feedback controls › cancels and confirms screenshot deletion when confirmation is enabled`; the observation needs reproduction before concluding that it is timing-based.
 
-What: read the test; replace any `waitFor` on a side effect with a wait on the dialog state, and pin the store before the click. If it is a genuine race in the confirm flow, that is a behaviour fix and gets its own PR. Track it in `docs/verification-timing.md`, which already discusses timing-sensitive checks.
+What: reproduce the reported failure and retain the CI/run reference when available. Change the test only when that evidence identifies an incorrect wait condition; if the confirmation flow itself races, treat it as a separate behaviour fix. Track the result in `docs/verification-timing.md`, which already discusses timing-sensitive checks.
 
 When: alongside the first hook extraction from 2.3, since the test moves anyway.
 
@@ -264,7 +265,7 @@ When: with the first PR that touches `Toolbar.tsx` again, or as a 30-line standa
 
 ### 3.2 `UpdateController.switchChannel` should use a background check
 
-Why: after #74, `switchChannel` still calls `void this.check()` (manual style), so switching channels in Settings flashes `checking` and, when offline, replaces an already-shown update with an error. A channel switch is closer to a background discovery than a user pressing "Check now".
+Why: after #74, `switchChannel` clears the prior candidate and sends `idle` for the new channel before it calls `void this.check()` in manual style. Switching may therefore flash `checking` and report an offline failure, but it does not retain an older candidate. A channel switch may be closer to a background discovery than a user pressing "Check now".
 
 What:
 
@@ -285,7 +286,7 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 
 ## Phase 4 — Do not do
 
-- **Do not add coverage thresholds.** 827 tests in ~90 s already cover the pure logic well (zero `: any` in non-test code, every feedback fix had a pure helper to test). The gaps are native evidence (Phase 1), not line coverage.
+- **Do not add coverage thresholds.** This plan identifies native evidence (Phase 1), rather than line coverage, as the current gap.
 - **Do not change tooling.** Electron 44, Vite, Vitest 4, Zod 4 and React 19 are current after the migration PRs (#66–#68). Nothing in this plan needs a tool change.
 - **Do not split `share-service` into a separate repository.** It has its own contract tests (`test:share-contract`) and CI job; the monorepo keeps the client and service contract in one review.
 - **Do not refactor `content-persistence.ts`, `screenshot-transactions.ts`, `backup-service.ts` or `content-trash.ts` as part of this plan.** They are the consequential persistence and recovery paths, each has a large test file, and nothing in the feedback round touched them. They get changed only for a reported defect, with independent review.
@@ -306,4 +307,4 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 | Next `Toolbar.tsx` change           | 3.1 `shortcutHint`                                                      | small PR                 |
 | Before next release prep            | Decide on an `Unreleased` changelog section (feedback plan 1.3)         | release-preparation PR   |
 
-Every PR above should be reviewable in under 15 minutes. If one is not, it is doing two things and should be split.
+Aim for one independently reviewable outcome per PR. Split separable outcomes, and explain why any cohesive larger change belongs together.
