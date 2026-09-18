@@ -84,9 +84,7 @@ export function ShortcutSettings({
   };
 
   const resetToDefault = async (actionId: ShortcutActionId) => {
-    const rest = { ...value.bindings };
-    delete rest[actionId];
-    if (await save({ bindings: rest })) {
+    if (await save({ bindings: { ...value.bindings, [actionId]: defaults[actionId] } })) {
       stopRecording();
       setNotice({
         actionId,
@@ -145,7 +143,7 @@ export function ShortcutSettings({
           type="button"
           className="imnota-secondary-button"
           disabled={disabled || busy}
-          onClick={() => void save({ bindings: {} })}
+          onClick={() => void save({ bindings: defaults })}
         >
           <RotateCcw size={14} aria-hidden="true" />
           Reset defaults
