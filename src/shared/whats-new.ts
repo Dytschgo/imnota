@@ -106,5 +106,5 @@ export function shouldShowWhatsNew(
   if (!version || !release) return false;
   if (!acknowledgedVersion) return true;
   const comparison = compareWhatsNewVersions(version, acknowledgedVersion);
-  return comparison !== null && comparison > 0;
+  return comparison === null || comparison > 0;
 }

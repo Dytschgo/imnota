@@ -23,5 +23,6 @@ describe('what’s new releases', () => {
     expect(shouldShowWhatsNew('0.2.8', '0.2.8', release)).toBe(false);
     expect(shouldShowWhatsNew('0.2.8', '0.2.9', release)).toBe(false);
     expect(shouldShowWhatsNew('0.2.9', '0.2.8', release)).toBe(true);
+    expect(shouldShowWhatsNew('0.2.8', 'not-a-version', release)).toBe(true);
   });
 });
