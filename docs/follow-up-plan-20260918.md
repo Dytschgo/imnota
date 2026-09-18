@@ -24,8 +24,8 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 ### 1.3 Add an "Unreleased" section to `CHANGELOG.md`
 
 - Observation: the changelog only has per-release sections. PRs #72–#76 each change user-visible behaviour and none of them could add an entry without inventing a version heading.
-- Proposal: add `## Unreleased` at the top; the release script moves it under the version heading during `chore(release)`. Check `scripts/release.mjs` and `scripts/release-readiness.test.ts` for assumptions about the first heading before doing this.
-- Verification: `node --test scripts/release-readiness.test.ts` plus a dry run of the release script.
+- Proposal: add `## Unreleased` at the top; the release script moves it under the version heading during `chore(release)`. Check `scripts/release.mjs` and `scripts/release-readiness.test.mjs` for assumptions about the first heading before doing this.
+- Verification: `node --test scripts/release-readiness.test.mjs` plus a dry run of the release script.
 
 ### 1.4 Record the manual matrices as living documents
 
