@@ -575,7 +575,7 @@
   border-bottom: 0;
 }
 
-.imnota-shortcut-row > div {
+.imnota-shortcut-row > div:first-child {
   display: flex;
   min-width: 0;
   flex-direction: column;
