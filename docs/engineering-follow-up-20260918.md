@@ -63,7 +63,7 @@ When: same PR as 0.1.
 
 ### 1.1 Capture display matrix document and a runnable native check
 
-Why: #72 fixes overlay placement based on Electron's documented Windows fullscreen behaviour, not on a two-display observation. The synthetic smoke (`IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic`) runs on one virtual display and cannot see this class of bug.
+Why: #72 fixes overlay placement based on Electron's documented Windows fullscreen behaviour, not on a two-display observation. The synthetic smoke (`IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic`) exercises the basic pipeline with synthetic pixels on the host's real display; it does not prove multi-display placement, scaling or crop correctness.
 
 What:
 
@@ -304,6 +304,6 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 | With the first 2.3 PR               | 2.4 deletion-confirm flake                                              | test fix                 |
 | After #74 merges                    | 3.2 background check on channel switch                                  | 2-line PR + test         |
 | Next `Toolbar.tsx` change           | 3.1 `shortcutHint`                                                      | small PR                 |
-| Before next release prep            | `Unreleased` changelog section (feedback plan 1.3)                      | docs/script PR           |
+| Before next release prep            | Decide on an `Unreleased` changelog section (feedback plan 1.3)         | release-preparation PR   |
 
 Every PR above should be reviewable in under 15 minutes. If one is not, it is doing two things and should be split.
