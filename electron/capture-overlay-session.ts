@@ -1,7 +1,11 @@
 import type { CaptureRectangle } from '../src/shared/capture.js';
 
+export type CaptureOverlayFailure = 'not-ready' | 'misplaced';
+
 export type CaptureOverlayOutcome =
-  { kind: 'selected'; selection: CaptureRectangle } | { kind: 'cancelled' } | { kind: 'failed' };
+  | { kind: 'selected'; selection: CaptureRectangle }
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; reason: CaptureOverlayFailure };
 
 export interface OverlayReadinessTimer {
   set(callback: () => void, milliseconds: number): ReturnType<typeof setTimeout>;
@@ -32,10 +36,10 @@ export class CaptureOverlaySession {
     return true;
   }
 
-  fail(): boolean {
+  fail(reason: CaptureOverlayFailure = 'not-ready'): boolean {
     if (this.finished) return false;
     this.finished = true;
-    this.complete({ kind: 'failed' });
+    this.complete({ kind: 'failed', reason });
     return true;
   }
 }

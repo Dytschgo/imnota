@@ -138,8 +138,10 @@ import {
   CaptureOverlaySession,
   createOverlayReadinessGuard,
   isCaptureOverlaySender,
+  type CaptureOverlayFailure,
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
+import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -877,9 +879,9 @@ function settleCaptureOverlay(selection: CaptureRectangle | null): void {
   if (!active.window.isDestroyed()) active.window.close();
 }
 
-function failCaptureOverlay(): void {
+function failCaptureOverlay(reason: CaptureOverlayFailure = 'not-ready'): void {
   const active = captureOverlay;
-  if (!active || !active.session.fail()) return;
+  if (!active || !active.session.fail(reason)) return;
   captureOverlay = null;
   active.readiness.dispose();
   if (!active.window.isDestroyed()) active.window.close();
@@ -888,11 +890,11 @@ function failCaptureOverlay(): void {
 async function chooseCaptureRegion(capture: CapturedDisplayImage): Promise<CaptureOverlayOutcome> {
   if (captureOverlay) throw new Error('A screen capture is already in progress.');
   const displayBounds = capture.display.bounds;
+  // Windows places a window constructed with `fullscreen: true` on the primary
+  // display regardless of `x`/`y`; the overlay then covered the wrong display.
+  const placement = captureOverlayWindowOptions(displayBounds, process.platform);
   const overlay = new BrowserWindow({
-    x: Math.round(displayBounds.x),
-    y: Math.round(displayBounds.y),
-    width: Math.round(displayBounds.width),
-    height: Math.round(displayBounds.height),
+    ...placement,
     useContentSize: true,
     show: false,
     frame: false,
@@ -901,9 +903,6 @@ async function chooseCaptureRegion(capture: CapturedDisplayImage): Promise<Captu
     movable: false,
     minimizable: false,
     maximizable: false,
-    fullscreenable: true,
-    fullscreen: true,
-    simpleFullscreen: process.platform === 'darwin',
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
@@ -918,6 +917,7 @@ async function chooseCaptureRegion(capture: CapturedDisplayImage): Promise<Captu
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (!placement.fullscreen) overlay.setBounds(displayBounds);
   overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   overlay.webContents.on('will-navigate', (event) => event.preventDefault());
   const session = new CaptureOverlaySession();
@@ -1288,6 +1288,16 @@ function registerIpc(): void {
     if (!active) throw new Error('Capture overlay is no longer available.');
     if (!active.readiness.ready()) throw new Error('Capture overlay readiness has expired.');
     active.window.show();
+    // Showing can re-snap a non-fullscreen window to the work area or another
+    // display. Re-assert the bounds once, then refuse a misplaced overlay so
+    // its selection is never mapped onto pixels from a different display.
+    if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
+      active.window.setBounds(active.displayBounds);
+      if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
+        failCaptureOverlay('misplaced');
+        return;
+      }
+    }
     active.window.focus();
   });
   ipcMain.handle('capture-overlay:save', (event, raw) => {
@@ -1300,17 +1310,10 @@ function registerIpc(): void {
     )
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay!;
-    const actual = active.window.getContentBounds();
-    const expected = active.displayBounds;
     // Window managers can constrain an overlay to the work area. Never map a
     // stretched preview's coordinates onto a differently sized source display.
-    if (
-      actual.x !== expected.x ||
-      actual.y !== expected.y ||
-      actual.width !== expected.width ||
-      actual.height !== expected.height
-    ) {
-      failCaptureOverlay();
+    if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
+      failCaptureOverlay('misplaced');
       return;
     }
     settleCaptureOverlay(captureRectangle.parse(raw));
@@ -1694,7 +1697,9 @@ function registerIpc(): void {
       if (outcome.kind === 'failed')
         throw new NativeWorkflowError(
           'capture-failed',
-          'The screen selection window stopped before it was ready. Use Import or Paste instead.',
+          outcome.reason === 'misplaced'
+            ? 'The selection window could not cover the display under the pointer. Move the pointer onto the display you want to capture and try again, or use Import or Paste instead.'
+            : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
           true,
         );
       const selection = outcome.selection;
@@ -2534,6 +2539,8 @@ function registerIpc(): void {
 }
 
 let updateInstallPending = false;
+const UPDATE_STARTUP_CHECK_DELAY_MS = 8_000;
+const UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 function configureAutoUpdates(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -2569,8 +2576,14 @@ function configureAutoUpdates(): void {
   autoUpdater.on('download-progress', (progress) => updateController.progress(progress.percent));
   // Check/download promises own their errors; installation also reports asynchronous native failures.
   autoUpdater.on('error', () => updateController.installationFailed());
-  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1')
-    setTimeout(() => void updateController.check(), 8000);
+  if (app.isPackaged && process.env.IMNOTA_SMOKE !== '1') {
+    // Startup and hourly checks are background checks: the controller
+    // coalesces them with manual checks, skips them during a download and
+    // keeps the last known status when offline. Discovery only; nothing
+    // downloads until the user chooses to.
+    setTimeout(() => void updateController.check({ background: true }), UPDATE_STARTUP_CHECK_DELAY_MS);
+    setInterval(() => void updateController.check({ background: true }), UPDATE_RECHECK_INTERVAL_MS);
+  }
 }
 
 async function createWindow(): Promise<BrowserWindow> {

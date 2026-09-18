@@ -14,13 +14,27 @@ interface Operations {
   emit: (status: UpdateStatus) => void;
 }
 
+function terminalUpdateCacheKey(release: ReleaseCandidate, selectedChannel: UpdateChannel) {
+  return JSON.stringify({
+    selectedChannel,
+    sourceChannel: release.sourceChannel ?? selectedChannel,
+    version: release.version,
+    url: release.url,
+    feedUrl: release.feedUrl,
+    assetUrls: release.assetUrls,
+    checksumUrl: release.checksumUrl,
+  });
+}
+
 /** One update operation at a time: a selected release can never cross channels. */
 export class UpdateController {
   private status: UpdateStatus;
   private candidate: ReleaseCandidate | null = null;
   private pending: Promise<void> | null = null;
+  private pendingIsBackground = false;
   private switching = false;
   private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
+  private terminalUpdateKey: string | null = null;
   private launchingTerminal = false;
   constructor(
     private channel: UpdateChannel,
@@ -47,24 +61,56 @@ export class UpdateController {
       await persist();
       this.channel = channel;
       this.candidate = null;
+      this.terminalUpdate = null;
+      this.terminalUpdateKey = null;
       this.send({ state: 'idle' });
     } finally {
       this.switching = false;
     }
     void this.check();
   }
-  check(): Promise<void> {
-    if (this.pending) return this.pending;
+  /**
+   * Manual checks report progress and failures. Background checks (startup,
+   * hourly) stay silent: they never flash a "checking" state over an already
+   * discovered update and a discovery failure keeps the previous status. A
+   * failed preparation must invalidate the previous candidate because a
+   * native updater or terminal helper may already target the new release.
+   */
+  check(options: { background?: boolean } = {}): Promise<void> {
+    if (this.pending) {
+      if (!options.background && this.pendingIsBackground) {
+        this.pendingIsBackground = false;
+        this.send({ state: 'checking' });
+      }
+      return this.pending;
+    }
     if (this.switching || ['downloading', 'downloaded'].includes(this.status.state)) return Promise.resolve();
     if (!this.ops.enabled) {
-      this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
+      if (!options.background)
+        this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
       return Promise.resolve();
     }
+    const previous = {
+      status: this.getStatus(),
+      candidate: this.candidate,
+      terminal: this.terminalUpdate,
+      terminalKey: this.terminalUpdateKey,
+    };
+    let preparationStarted = false;
     this.candidate = null;
-    this.terminalUpdate = null;
-    this.send({ state: 'checking' });
-    this.pending = this.performCheck()
+    this.pendingIsBackground = options.background === true;
+    if (!options.background) this.send({ state: 'checking' });
+    this.pending = this.performCheck(() => {
+      preparationStarted = true;
+    })
       .catch(() => {
+        if (this.pendingIsBackground && !preparationStarted) {
+          this.candidate = previous.candidate;
+          this.terminalUpdate = previous.terminal;
+          this.terminalUpdateKey = previous.terminalKey;
+          this.status = previous.status;
+          return;
+        }
         this.candidate = null;
         this.send({
           state: 'error',
@@ -74,10 +120,11 @@ export class UpdateController {
       })
       .finally(() => {
         this.pending = null;
+        this.pendingIsBackground = false;
       });
     return this.pending;
   }
-  private async performCheck() {
+  private async performCheck(onPreparationStart: () => void) {
     const candidate = await this.ops.discover(this.channel);
     if (!candidate) {
       this.send({ state: 'not-available', message: `No ${this.channel} build is available yet.` });
@@ -104,9 +151,20 @@ export class UpdateController {
       });
       return;
     }
-    if (!this.ops.manual) await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
-    if (this.ops.manual && this.ops.prepareTerminal)
+    if (!this.ops.manual) {
+      onPreparationStart();
+      await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
+    }
+    const terminalKey = terminalUpdateCacheKey(candidate, this.channel);
+    if (
+      this.ops.manual &&
+      this.ops.prepareTerminal &&
+      (!this.terminalUpdate || this.terminalUpdateKey !== terminalKey)
+    ) {
+      onPreparationStart();
       this.terminalUpdate = await this.ops.prepareTerminal(candidate);
+      this.terminalUpdateKey = terminalKey;
+    }
     this.candidate = candidate;
     this.send({
       state: 'available',
@@ -115,7 +173,7 @@ export class UpdateController {
       releaseNotes: candidate.releaseNotes,
       sourceChannel: candidate.sourceChannel,
       manualDownload: this.ops.manual,
-      terminalCommand: this.terminalUpdate?.command,
+      terminalCommand: this.terminalUpdateKey === terminalKey ? this.terminalUpdate?.command : undefined,
       message: stableFallback
         ? `Stable ${candidate.version} is newer than the latest nightly. Nightly remains selected for future checks.`
         : undefined,
@@ -126,9 +184,15 @@ export class UpdateController {
       this.send({ ...this.status, percent: Math.max(0, Math.min(percent, 100)) });
   }
   async download() {
-    if (!this.candidate || this.switching || this.pending) throw new Error('Check for an update first.');
+    if (this.switching) throw new Error('Check for an update first.');
+    if (this.pending) await this.check();
+    if (!this.candidate) throw new Error('No update is available to download.');
     if (this.status.manualDownload) {
-      if (this.terminalUpdate && this.status.state === 'available') {
+      if (
+        this.terminalUpdate &&
+        this.terminalUpdateKey === terminalUpdateCacheKey(this.candidate, this.channel) &&
+        this.status.state === 'available'
+      ) {
         if (this.launchingTerminal) return;
         this.launchingTerminal = true;
         try {
