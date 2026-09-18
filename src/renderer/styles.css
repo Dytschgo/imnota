@@ -2355,7 +2355,7 @@ button.icon-button.new-collection-button svg {
   max-height: 150px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  object-fit: cover;
+  object-fit: contain;
 }
 .whats-new-card > .btn {
   margin-top: auto;
