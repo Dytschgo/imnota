@@ -24,7 +24,7 @@ describe('capture overlay session', () => {
     const session = new CaptureOverlaySession();
     expect(session.fail()).toBe(true);
     expect(session.settle(null)).toBe(false);
-    await expect(session.result).resolves.toEqual({ kind: 'failed' });
+    await expect(session.result).resolves.toEqual({ kind: 'failed', reason: 'not-ready' });
   });
 
   it('settles a stalled overlay readiness phase and ignores a late ready signal', () => {
