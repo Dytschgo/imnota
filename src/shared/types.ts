@@ -1,4 +1,10 @@
-import type { ClipboardFormatsReport, WorkflowBridge } from './workflow-bridge.js';
+import type {
+  ClipboardFormatsReport,
+  OnboardingHandoffAction,
+  OnboardingHandoffGrant,
+  OnboardingHandoffOpenTarget,
+  WorkflowBridge,
+} from './workflow-bridge.js';
 import type { ContentBridge, ContentItem } from './content-items.js';
 import type { ProjectIconKey } from './project-icons.js';
 import type { ProjectSearchInput, ProjectSearchResponse } from './project-search.js';
@@ -264,6 +270,17 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   copyText(text: string): Promise<void>;
   copyContext(input: { markdown: string; imageDataUrl: string }): Promise<ClipboardFormatsReport>;
   copyImage(dataUrl: string): Promise<void>;
+  prepareOnboardingHandoff(input: {
+    markdown: string;
+    imageDataUrl: string;
+    markdownFilename: string;
+    pngFilename: string;
+  }): Promise<OnboardingHandoffGrant>;
+  copyOnboardingHandoff(input: {
+    sessionId: string;
+    action: OnboardingHandoffAction;
+  }): Promise<ClipboardFormatsReport | void>;
+  openOnboardingHandoff(input: { sessionId: string; target: OnboardingHandoffOpenTarget }): Promise<void>;
   saveRecovery(input: {
     projectPath: string;
     project: ProjectData;

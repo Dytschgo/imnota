@@ -3,6 +3,9 @@ import {
   ArrowRight,
   Check,
   Clipboard,
+  FileImage,
+  FileText,
+  FolderOpen,
   Highlighter,
   MousePointer2,
   RectangleHorizontal,
@@ -12,7 +15,14 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
+import type {
+  ClipboardFormatsReport,
+  OnboardingHandoffAction,
+  OnboardingHandoffGrant,
+  OnboardingHandoffOpenTarget,
+} from '../../shared/workflow-bridge';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
+import { describeCombinedCopyMessage } from '../export/clipboard-delivery';
 import { renderAnnotatedImage } from '../export-image';
 import { completedOnboarding, ONBOARDING_VERSION, type OnboardingPreferences } from '../settings/preferences';
 import {
@@ -39,7 +49,12 @@ export interface OnboardingDemoProps {
   ) => void | Promise<void>;
   onCreateFirstProject: () => void | Promise<void>;
   onDismiss?: () => void;
-  onCopyBundle?: (bundle: OnboardingBundle) => void | Promise<void>;
+  onPrepareHandoff?: (bundle: OnboardingBundle) => Promise<OnboardingHandoffGrant>;
+  onCopyHandoff?: (
+    grant: OnboardingHandoffGrant,
+    action: OnboardingHandoffAction,
+  ) => Promise<ClipboardFormatsReport | void>;
+  onOpenHandoff?: (grant: OnboardingHandoffGrant, target: OnboardingHandoffOpenTarget) => Promise<void>;
   onboardingVersion?: number;
 }
 
@@ -50,25 +65,13 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
   { tool: 'highlight', label: 'Highlight', icon: Highlighter },
 ];
 
-async function writeBundleToBrowserClipboard(bundle: OnboardingBundle) {
-  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write)
-    throw new Error('Combined clipboard access is unavailable in this renderer.');
-  const response = await fetch(bundle.imageDataUrl);
-  const image = await response.blob();
-  await navigator.clipboard.write([
-    new ClipboardItem({
-      'image/png': image,
-      'text/markdown': new Blob([bundle.markdown], { type: 'text/markdown' }),
-      'text/plain': new Blob([bundle.markdown], { type: 'text/plain' }),
-    }),
-  ]);
-}
-
 export function OnboardingDemo({
   onMarkCompleted,
   onCreateFirstProject,
   onDismiss,
-  onCopyBundle,
+  onPrepareHandoff,
+  onCopyHandoff,
+  onOpenHandoff,
   onboardingVersion = ONBOARDING_VERSION,
 }: OnboardingDemoProps) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
@@ -77,7 +80,11 @@ export function OnboardingDemo({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
   const [bundle, setBundle] = useState<OnboardingBundle | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [handoff, setHandoff] = useState<OnboardingHandoffGrant | null>(null);
+  const [copyStatus, setCopyStatus] = useState('');
+  const [explanation, setExplanation] = useState(
+    'Keep the component search visible while someone reviews several results.',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sampleImage] = useState<ImagePayload | null>(() => {
@@ -90,7 +97,10 @@ export function OnboardingDemo({
   const dialogRef = useRef<HTMLElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const dismissRef = useRef<() => Promise<void>>(async () => {});
-  const markdown = useMemo(() => buildSamplePromptMarkdown(annotations), [annotations]);
+  const markdown = useMemo(
+    () => buildSamplePromptMarkdown(annotations, explanation),
+    [annotations, explanation],
+  );
 
   const dismiss = async () => {
     if (busy) return;
@@ -159,12 +169,16 @@ export function OnboardingDemo({
     try {
       const annotatedImageDataUrl = await renderAnnotatedImage(image, annotations);
       const imageDataUrl = await composeSamplePromptPng(annotatedImageDataUrl);
-      setBundle({
+      const preparedBundle: OnboardingBundle = {
         filename: 'component-search.png',
         markdownFilename: 'component-search.md',
         imageDataUrl,
         markdown,
-      });
+      };
+      const preparedHandoff = onPrepareHandoff ? await onPrepareHandoff(preparedBundle) : null;
+      setBundle(preparedBundle);
+      setHandoff(preparedHandoff);
+      setCopyStatus('');
       setStep(2);
     } catch {
       setError('The annotated sample could not be prepared. Try the step again.');
@@ -178,12 +192,37 @@ export function OnboardingDemo({
     setBusy(true);
     setError('');
     try {
-      await (onCopyBundle ? onCopyBundle(bundle) : writeBundleToBrowserClipboard(bundle));
-      setCopied(true);
+      if (!handoff || !onCopyHandoff) throw new Error('The native handoff is unavailable.');
+      const placed = await onCopyHandoff(handoff, 'context');
+      if (placed) setCopyStatus(describeCombinedCopyMessage(placed));
+      else setCopyStatus('The combined copy was not confirmed. Use a fallback below.');
     } catch {
       setError(
         'The clipboard is unavailable right now. Try copying again, or continue to create your project.',
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runFallback = async (
+    label: string,
+    action: OnboardingHandoffAction | OnboardingHandoffOpenTarget,
+  ) => {
+    if (!handoff || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (action === 'files' || action === 'folder') {
+        if (!onOpenHandoff) throw new Error('Opening generated files is unavailable.');
+        await onOpenHandoff(handoff, action);
+      } else {
+        if (!onCopyHandoff) throw new Error('Clipboard access is unavailable.');
+        await onCopyHandoff(handoff, action);
+      }
+      setCopyStatus(label);
+    } catch {
+      setError('That handoff action could not be completed. Try another option below.');
     } finally {
       setBusy(false);
     }
@@ -316,6 +355,15 @@ export function OnboardingDemo({
                   Double-click the screenshot to add editable text. Drag empty canvas space to pan, or drag a
                   marker over an area.
                 </small>
+                <label className="imnota-onboarding-explanation">
+                  Markdown explanation
+                  <textarea
+                    value={explanation}
+                    onChange={(event) => setExplanation(event.target.value)}
+                    rows={3}
+                    maxLength={600}
+                  />
+                </label>
               </aside>
               <div className="imnota-demo-canvas">
                 <AnnotationCanvas
@@ -342,28 +390,77 @@ export function OnboardingDemo({
                 </div>
               </div>
               <div className="imnota-onboarding-instruction">
-                <h2>{copied ? 'The handoff is ready' : 'Copy the matching bundle'}</h2>
+                <h2>{copyStatus ? 'The handoff is ready' : 'Copy the matching bundle'}</h2>
                 <p>
                   The PNG carries the visual marks. The Markdown carries the picture reference, priority,
                   description, and text notes. Clipboard access is optional in this practice guide.
                 </p>
                 <pre>{bundle.markdown}</pre>
-                {!copied ? (
-                  <button
-                    type="button"
-                    className="imnota-onboarding-primary"
-                    onClick={() => void copyBundle()}
-                    disabled={busy}
-                  >
-                    <Clipboard size={15} aria-hidden="true" />
-                    {busy ? 'Copying…' : 'Copy PNG + Markdown'}
-                  </button>
-                ) : (
+                <button
+                  type="button"
+                  className="imnota-onboarding-primary"
+                  onClick={() => void copyBundle()}
+                  disabled={busy}
+                >
+                  <Clipboard size={15} aria-hidden="true" />
+                  {busy ? 'Preparing…' : 'Copy PNG + Markdown'}
+                </button>
+                {copyStatus && (
                   <div className="imnota-copy-success" role="status">
                     <Check size={15} aria-hidden="true" />
-                    PNG and Markdown copied together
+                    {copyStatus}
                   </div>
                 )}
+                {handoff && (
+                  <div className="imnota-onboarding-fallbacks" aria-label="Bundle fallback actions">
+                    <button
+                      type="button"
+                      onClick={() => void runFallback('Markdown copied.', 'markdown')}
+                      disabled={busy}
+                    >
+                      <FileText size={14} aria-hidden="true" /> Copy Markdown
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runFallback('Image copied.', 'image')}
+                      disabled={busy}
+                    >
+                      <FileImage size={14} aria-hidden="true" /> Copy image
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runFallback('Generated files opened.', 'files')}
+                      disabled={busy}
+                    >
+                      Open files
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runFallback('File paths copied.', 'paths')}
+                      disabled={busy}
+                    >
+                      Copy file paths
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runFallback('Export folder opened.', 'folder')}
+                      disabled={busy}
+                    >
+                      <FolderOpen size={14} aria-hidden="true" /> Open export folder
+                    </button>
+                  </div>
+                )}
+                <details className="imnota-onboarding-checklist">
+                  <summary>Final workflow checklist</summary>
+                  <ul>
+                    <li>Capture, paste, or import screenshots.</li>
+                    <li>Annotate the region and add an explanation.</li>
+                    <li>Arrange screenshots in a collection.</li>
+                    <li>Copy or open the Markdown and PNG bundle.</li>
+                    <li>Use search to find earlier work.</li>
+                    <li>Restore local history when you need it.</li>
+                  </ul>
+                </details>
               </div>
             </div>
           )}
@@ -402,6 +499,7 @@ export function OnboardingDemo({
               </button>
             ) : (
               <button
+                data-testid="onboarding-create-project"
                 type="button"
                 className="imnota-onboarding-primary"
                 disabled={busy}

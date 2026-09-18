@@ -2,6 +2,7 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+  koffi: true
 
 # Keep the drawing engine's pinned transitive packages on patched releases.
 overrides:

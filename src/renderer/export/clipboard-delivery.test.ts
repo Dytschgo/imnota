@@ -6,7 +6,10 @@ describe('combined clipboard delivery reporting', () => {
     expect(describeCombinedDelivery({ text: true, html: true, image: true }, true)).toEqual({
       outcome: 'combined',
     });
-    expect(describeCombinedDelivery(undefined, true)).toEqual({ outcome: 'combined' });
+    expect(describeCombinedDelivery(undefined, true)).toMatchObject({
+      outcome: 'files',
+      warning: expect.stringContaining('could not be confirmed'),
+    });
     expect(describeCombinedDelivery({ text: true, html: true, image: true }, false)).toEqual({
       outcome: 'markdown',
     });
@@ -36,5 +39,34 @@ describe('combined clipboard delivery reporting', () => {
     expect(describeCombinedCopyMessage({ text: false, html: false, image: false })).toMatch(
       /could not confirm/,
     );
+  });
+
+  it('reports the opened generated-pair folder as the practical one-click fallback', () => {
+    expect(
+      describeCombinedDelivery({ text: true, html: true, image: true, fileHandoff: 'opened' }, true),
+    ).toMatchObject({
+      outcome: 'files',
+      warning: expect.stringContaining('Markdown and image formats were confirmed'),
+    });
+    expect(
+      describeCombinedCopyMessage({ text: true, html: true, image: true, fileHandoff: 'opened' }),
+    ).toMatch(/Markdown and image formats were confirmed.*selected for attachment/i);
+    expect(
+      describeCombinedDelivery({ text: true, html: true, image: true, fileHandoff: 'failed' }, true),
+    ).toMatchObject({
+      outcome: 'files',
+      warning: expect.stringContaining('could not be opened'),
+    });
+    expect(
+      describeCombinedCopyMessage({
+        text: false,
+        html: false,
+        image: false,
+        fileHandoff: 'opened',
+      }),
+    ).toMatch(/No clipboard format was confirmed.*selected for attachment/i);
+    expect(
+      describeCombinedDelivery({ text: true, html: true, image: false, fileHandoff: 'failed' }, true).warning,
+    ).toMatch(/Only Markdown was confirmed.*could not be opened and selected/i);
   });
 });

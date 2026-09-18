@@ -26,7 +26,12 @@ async function fixture() {
   temporary.push(projectPath);
   const collectionId = '001-collection';
   await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
-  const copyContext = vi.fn(async () => ({ text: true, html: true, image: true }));
+  const copyContext = vi.fn(async () => ({
+    text: true,
+    html: true,
+    image: true,
+    fileHandoff: 'opened' as const,
+  }));
   const copyText = vi.fn();
   const copyImage = vi.fn();
   const openPath = vi.fn();
@@ -105,14 +110,17 @@ describe('main-owned prompt bundle grants', () => {
     expect(content.imageDataUrl).toBe(pngDataUrl());
     await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
       target: 'context',
-      placed: { text: true, html: true, image: true },
+      placed: { text: true, html: true, image: true, fileHandoff: 'opened' },
     });
-    expect(copyContext).toHaveBeenCalledWith('# Prompt\n', pngDataUrl());
+    expect(copyContext).toHaveBeenCalledWith('# Prompt\n', pngDataUrl(), [
+      expect.stringMatching(/ - 01\.md$/),
+      expect.stringMatching(/ - 01\.png$/),
+    ]);
     // The workflow reports what the clipboard holds, never what was requested.
-    copyContext.mockResolvedValueOnce({ text: true, html: true, image: false });
+    copyContext.mockResolvedValueOnce({ text: true, html: true, image: false, fileHandoff: 'opened' });
     await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
       target: 'context',
-      placed: { text: true, html: true, image: false },
+      placed: { text: true, html: true, image: false, fileHandoff: 'opened' },
     });
     await workflow.open(session.sessionId, 1, 'png');
     expect(openPath).toHaveBeenCalledWith(expect.stringMatching(/ - 01\.png$/));
@@ -178,7 +186,7 @@ describe('main-owned prompt bundle grants', () => {
     const workflow = new PromptBundleWorkflow(
       {
         authorize: async () => ({ projectPath, collectionId, collectionName: 'Collection' }),
-        copyContext: () => ({ text: true, html: true, image: true }),
+        copyContext: () => ({ text: true, html: true, image: true, fileHandoff: 'opened' }),
         copyText: () => undefined,
         copyImage: () => undefined,
         openPath: async () => undefined,

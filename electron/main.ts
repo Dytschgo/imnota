@@ -13,7 +13,9 @@ import {
   systemPreferences,
 } from 'electron';
 import os from 'node:os';
-import { nativeClipboard } from './native-clipboard.js';
+import { deliverClipboardWithFileHandoff, nativeClipboard } from './native-clipboard.js';
+import { selectWindowsFilePair } from './windows-file-handoff.js';
+import { OnboardingHandoffWorkflow } from './onboarding-handoff.js';
 import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -164,6 +166,7 @@ let updateController: UpdateController;
 let projectWatchManager: ProjectWatchManager | undefined;
 const contentSearch = new WorkspaceContentSearch();
 let promptBundleWorkflow: PromptBundleWorkflow | undefined;
+let onboardingHandoffWorkflow: OnboardingHandoffWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
@@ -781,10 +784,15 @@ async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
 async function copyContextToClipboard(
   markdown: string,
   imageDataUrl: string,
+  filePaths: readonly string[] = [],
 ): Promise<ClipboardFormatsReport> {
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
-  return nativeClipboard.writeContext(markdown, html, image);
+  return deliverClipboardWithFileHandoff(
+    () => nativeClipboard.writeContext(markdown, html, image),
+    filePaths,
+    selectWindowsFilePair,
+  );
 }
 
 function captureService(): CaptureService {
@@ -1261,6 +1269,27 @@ function registerIpc(): void {
         .strict(),
     ]),
     'system:copy-image': z.tuple([png]),
+    'onboarding:prepare-handoff': z.tuple([
+      z
+        .object({
+          markdown: z.string().min(1).max(2_000_000),
+          imageDataUrl: png.max(MAX_CLIPBOARD_PNG_LENGTH),
+          markdownFilename: z.literal('component-search.md'),
+          pngFilename: z.literal('component-search.png'),
+        })
+        .strict(),
+    ]),
+    'onboarding:copy-handoff': z.tuple([
+      z
+        .object({
+          sessionId: z.uuid(),
+          action: z.enum(['context', 'markdown', 'image', 'paths']),
+        })
+        .strict(),
+    ]),
+    'onboarding:open-handoff': z.tuple([
+      z.object({ sessionId: z.uuid(), target: z.enum(['files', 'folder']) }).strict(),
+    ]),
     'recovery:save': z.tuple([
       z.object({
         projectPath: pathInput,
@@ -1471,7 +1500,8 @@ function registerIpc(): void {
           collectionName: collection.name,
         };
       },
-      copyContext: (markdown, imageDataUrl) => copyContextToClipboard(markdown, imageDataUrl),
+      copyContext: (markdown, imageDataUrl, filePaths) =>
+        copyContextToClipboard(markdown, imageDataUrl, filePaths),
       copyText: (markdown) => copyTextToClipboard(markdown),
       copyImage: (imageDataUrl) => copyImageToClipboard(imageDataUrl),
       openPath: async (targetPath) => {
@@ -1481,6 +1511,17 @@ function registerIpc(): void {
     },
     new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
   );
+  onboardingHandoffWorkflow = new OnboardingHandoffWorkflow({
+    root: path.join(app.getPath('temp'), 'imnota-onboarding-handoffs'),
+    copyContext: (markdown, imageDataUrl, filePaths) =>
+      copyContextToClipboard(markdown, imageDataUrl, filePaths),
+    copyText: copyTextToClipboard,
+    copyImage: copyImageToClipboard,
+    openPath: async (targetPath) => {
+      const error = await shell.openPath(targetPath);
+      if (error) throw new Error(error);
+    },
+  });
   hostedShareClient = new HostedShareClient(
     app.getPath('userData'),
     async (url) => {
@@ -2508,6 +2549,16 @@ function registerIpc(): void {
   });
   handle('system:copy-context', (_event, input) =>
     copyContextToClipboard(input.markdown, input.imageDataUrl),
+  );
+  handle('onboarding:prepare-handoff', async (_event, input) => {
+    clipboardImage(input.imageDataUrl);
+    return onboardingHandoffWorkflow!.prepare(input);
+  });
+  handle('onboarding:copy-handoff', (_event, input) =>
+    onboardingHandoffWorkflow!.copy(input.sessionId, input.action),
+  );
+  handle('onboarding:open-handoff', (_event, input) =>
+    onboardingHandoffWorkflow!.open(input.sessionId, input.target),
   );
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);

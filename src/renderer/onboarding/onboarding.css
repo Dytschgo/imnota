@@ -193,6 +193,11 @@
   min-height: 0;
 }
 
+.imnota-copy-step > .imnota-onboarding-instruction {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
 .imnota-onboarding-intro {
   display: grid;
   grid-template-columns: minmax(440px, 1.3fr) minmax(300px, 0.7fr);
@@ -319,6 +324,28 @@
   line-height: 1.5;
 }
 
+.imnota-onboarding-explanation {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--ink-2, #b3bac8);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.imnota-onboarding-explanation textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border-radius: 7px;
+  padding: 8px;
+  background: var(--input, #0f1218);
+  color: var(--ink, #f4f5f7);
+  font: inherit;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
 .imnota-demo-canvas {
   min-width: 0;
   min-height: 0;
@@ -400,6 +427,38 @@
   color: var(--success, #22c55e);
   font-size: 11px;
   font-weight: 600;
+}
+
+.imnota-onboarding-fallbacks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.imnota-onboarding-fallbacks button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  background: var(--surface-2, #191d27);
+  color: var(--ink-2, #b3bac8);
+}
+
+.imnota-onboarding-checklist {
+  margin-top: 11px;
+  color: var(--ink-2, #b3bac8);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.imnota-onboarding-checklist summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.imnota-onboarding-checklist ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 .imnota-onboarding-footer {
