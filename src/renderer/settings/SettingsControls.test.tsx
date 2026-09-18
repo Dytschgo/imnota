@@ -2,8 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
-import { DEFAULT_APPEARANCE } from './preferences';
+import { DEFAULT_APPEARANCE, DEFAULT_PREFERENCE_SETTINGS, type PreferenceSettings } from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
+import { mergePreferenceSettings } from '../../shared/preference-settings';
 
 afterEach(cleanup);
 
@@ -55,7 +56,74 @@ describe('preference controls', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('reserved');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset defaults' }));
-    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ bindings: {} }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        bindings: expect.objectContaining({ 'capture.region': 'Ctrl+Shift+5', 'tool.text': 'T' }),
+      }),
+    );
+  });
+
+  it('shows recording state, confirms common OS combinations, and reports the saved keys', async () => {
+    const onChange = vi.fn(async () => {});
+    render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
+    const recorder = screen.getByRole('button', {
+      name: 'Shortcut for Capture screen region (experimental)',
+    });
+    expect(recorder).toHaveTextContent('Ctrl + Shift + 5');
+
+    fireEvent.click(recorder);
+    expect(recorder).toHaveTextContent('Press keys…');
+    expect(recorder).toHaveAttribute('aria-pressed', 'true');
+
+    // Modifier-only presses never save a partial combination.
+    fireEvent.keyDown(recorder, { key: 'Control', ctrlKey: true });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(recorder, { key: 's', ctrlKey: true, shiftKey: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Ctrl + Shift + S is also used by');
+
+    fireEvent.keyDown(recorder, { key: 's', ctrlKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({ bindings: { 'capture.region': 'Ctrl+Shift+S' } }),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Saved Ctrl + Shift + S.');
+  });
+
+  it('resets one shortcut to its default and clears one shortcut', async () => {
+    let settings: PreferenceSettings = {
+      ...DEFAULT_PREFERENCE_SETTINGS,
+      shortcuts: {
+        bindings: {
+          'capture.region': 'Ctrl+Alt+Y',
+          'tool.text': 'Ctrl+Shift+X',
+        },
+      },
+    };
+    const onChange = vi.fn(async (next) => {
+      settings = mergePreferenceSettings(settings, { shortcuts: next });
+      rerender(<ShortcutSettings value={settings.shortcuts} onChange={onChange} platform="windows" />);
+    });
+    const { rerender } = render(
+      <ShortcutSettings value={settings.shortcuts} onChange={onChange} platform="windows" />,
+    );
+    expect(screen.getByRole('button', { name: 'Reset Arrow shortcut to default' })).toBeDisabled();
+    const capture = screen.getByRole('button', { name: 'Shortcut for Capture screen region (experimental)' });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear Capture screen region (experimental) shortcut' }),
+    );
+    await waitFor(() => expect(capture).toHaveTextContent('Not set'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Reset Capture screen region (experimental) shortcut to default' }),
+    );
+    await waitFor(() => expect(capture).toHaveTextContent('Ctrl + Shift + 5'));
+    expect(settings.shortcuts.bindings['capture.region']).toBe('Ctrl+Shift+5');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset defaults' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Shortcut for Text' })).toHaveTextContent('T'),
+    );
+    expect(settings.shortcuts.bindings).toMatchObject({ 'capture.region': 'Ctrl+Shift+5', 'tool.text': 'T' });
   });
 
   it('records shifted top-row digits from their Digit code', async () => {
