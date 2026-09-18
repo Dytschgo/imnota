@@ -8,8 +8,8 @@ export interface FloatingUpdateControlProps {
   onDownload(): void | Promise<void>;
   onInstall(): void | Promise<void>;
   onRetry(): void | Promise<void>;
-  /** `nav` sits beside About in the workspace navigation; `floating` is the lower-left fallback while navigation is hidden. */
-  placement?: 'nav' | 'floating';
+  /** `nav` sits beside About; `topbar` sits by navigation history when the side navigation is hidden. */
+  placement?: 'nav' | 'topbar';
 }
 
 export function FloatingUpdateControl({
@@ -18,7 +18,7 @@ export function FloatingUpdateControl({
   onDownload,
   onInstall,
   onRetry,
-  placement = 'floating',
+  placement = 'topbar',
 }: FloatingUpdateControlProps) {
   const current = status ?? { state: 'idle' as const };
   const downloading = current.state === 'downloading';

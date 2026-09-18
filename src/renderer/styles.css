@@ -2486,12 +2486,6 @@ kbd {
   align-items: center;
   gap: 8px;
 }
-/* Lower-left fallback while the workspace navigation is hidden. */
-.floating-update-floating {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-}
 .floating-update-button {
   width: 42px;
   height: 42px;
@@ -2512,6 +2506,18 @@ kbd {
   box-shadow: none;
 }
 .floating-update-nav .floating-update-percent {
+  display: none;
+}
+.floating-update-topbar {
+  flex: none;
+}
+.floating-update-topbar .floating-update-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.floating-update-topbar .floating-update-percent {
   display: none;
 }
 .floating-update-available .floating-update-button,

@@ -121,7 +121,9 @@ describe('AppShell navigation', () => {
 
     useAppStore.setState({ navigationOpen: false });
     rerender(shell);
-    expect(screen.getByTestId('update-indicator')).toHaveClass('floating-update-floating');
+    const updateIndicator = screen.getByTestId('update-indicator');
+    expect(updateIndicator).toHaveClass('floating-update-topbar');
+    expect(updateIndicator.closest('.topbar')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Download update' })).toBeVisible();
   });
 

@@ -61,6 +61,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         id: 'updates',
         title: 'Updates stay within reach',
         description: 'One compact control shows when a check, download, restart, or retry is available.',
+        imageSrc: new URL('../renderer/assets/whats-new-updates.png', import.meta.url).href,
         action: { kind: 'settings', category: 'Updates & about' },
       },
       {
@@ -82,6 +83,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         id: 'updates',
         title: 'Updates stay within reach',
         description: 'One compact control shows when a check, download, restart, or retry is available.',
+        imageSrc: new URL('../renderer/assets/whats-new-updates.png', import.meta.url).href,
         action: { kind: 'settings', category: 'Updates & about' },
       },
       {
