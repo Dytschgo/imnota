@@ -19,6 +19,7 @@ export class UpdateController {
   private status: UpdateStatus;
   private candidate: ReleaseCandidate | null = null;
   private pending: Promise<void> | null = null;
+  private pendingIsBackground = false;
   private switching = false;
   private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
   private launchingTerminal = false;
@@ -56,10 +57,18 @@ export class UpdateController {
   /**
    * Manual checks report progress and failures. Background checks (startup,
    * hourly) stay silent: they never flash a "checking" state over an already
-   * discovered update and an offline failure keeps the previous status.
+   * discovered update and a discovery failure keeps the previous status. A
+   * failed native preparation must invalidate the previous candidate because
+   * electron-updater may already be configured for the new manifest.
    */
   check(options: { background?: boolean } = {}): Promise<void> {
-    if (this.pending) return this.pending;
+    if (this.pending) {
+      if (!options.background && this.pendingIsBackground) {
+        this.pendingIsBackground = false;
+        this.send({ state: 'checking' });
+      }
+      return this.pending;
+    }
     if (this.switching || ['downloading', 'downloaded'].includes(this.status.state)) return Promise.resolve();
     if (!this.ops.enabled) {
       if (!options.background)
@@ -67,12 +76,16 @@ export class UpdateController {
       return Promise.resolve();
     }
     const previous = { status: this.getStatus(), candidate: this.candidate, terminal: this.terminalUpdate };
+    let nativePreparationStarted = false;
     this.candidate = null;
     this.terminalUpdate = null;
+    this.pendingIsBackground = options.background === true;
     if (!options.background) this.send({ state: 'checking' });
-    this.pending = this.performCheck()
+    this.pending = this.performCheck(() => {
+      nativePreparationStarted = true;
+    })
       .catch(() => {
-        if (options.background) {
+        if (this.pendingIsBackground && !nativePreparationStarted) {
           this.candidate = previous.candidate;
           this.terminalUpdate = previous.terminal;
           this.status = previous.status;
@@ -87,10 +100,11 @@ export class UpdateController {
       })
       .finally(() => {
         this.pending = null;
+        this.pendingIsBackground = false;
       });
     return this.pending;
   }
-  private async performCheck() {
+  private async performCheck(onNativePreparationStart: () => void) {
     const candidate = await this.ops.discover(this.channel);
     if (!candidate) {
       this.send({ state: 'not-available', message: `No ${this.channel} build is available yet.` });
@@ -117,9 +131,10 @@ export class UpdateController {
       });
       return;
     }
-    if (!this.ops.manual) await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
-    if (this.ops.manual && this.ops.prepareTerminal)
-      this.terminalUpdate = await this.ops.prepareTerminal(candidate);
+    if (!this.ops.manual) {
+      onNativePreparationStart();
+      await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
+    }
     this.candidate = candidate;
     this.send({
       state: 'available',
@@ -139,9 +154,25 @@ export class UpdateController {
       this.send({ ...this.status, percent: Math.max(0, Math.min(percent, 100)) });
   }
   async download() {
-    if (!this.candidate || this.switching || this.pending) throw new Error('Check for an update first.');
+    if (this.switching) throw new Error('Check for an update first.');
+    if (this.pending) await this.check();
+    if (!this.candidate) throw new Error('No update is available to download.');
     if (this.status.manualDownload) {
-      if (this.terminalUpdate && this.status.state === 'available') {
+      if (!this.terminalUpdate && this.ops.prepareTerminal && this.status.state === 'available') {
+        try {
+          this.terminalUpdate = await this.ops.prepareTerminal(this.candidate);
+          this.send({ ...this.status, terminalCommand: this.terminalUpdate.command });
+        } catch {
+          this.candidate = null;
+          this.send({
+            state: 'error',
+            message:
+              'The download could not be prepared. Check for updates to retry. Your projects are unchanged.',
+          });
+          return;
+        }
+      }
+      if (this.terminalUpdate) {
         if (this.launchingTerminal) return;
         this.launchingTerminal = true;
         try {

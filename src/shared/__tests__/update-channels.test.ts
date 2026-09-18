@@ -296,18 +296,29 @@ it('uses exact manual Mac release links and never prepares or downloads a native
   expect(ops.prepare).not.toHaveBeenCalled();
   expect(ops.download).not.toHaveBeenCalled();
 });
-it('runs the prepared terminal updater for a Mac upgrade without opening GitHub', async () => {
+it('prepares the terminal updater only when a Mac upgrade is downloaded', async () => {
   const { ops, candidate } = controller(true);
   const run = vi.fn(async () => {});
   const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run }));
   const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
   await instance.check();
-  expect(prepareTerminal).toHaveBeenCalledWith(candidate);
-  expect(instance.getStatus().terminalCommand).toBe('/bin/bash local-update.command');
+  expect(prepareTerminal).not.toHaveBeenCalled();
+  expect(instance.getStatus().terminalCommand).toBeUndefined();
   await instance.download();
+  expect(prepareTerminal).toHaveBeenCalledWith(candidate);
   expect(run).toHaveBeenCalledOnce();
   expect(ops.open).not.toHaveBeenCalled();
   expect(ops.prepare).not.toHaveBeenCalled();
+});
+it('does not create a terminal updater while a background check discovers an update', async () => {
+  const { ops } = controller(true);
+  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run: vi.fn() }));
+  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
+
+  await instance.check({ background: true });
+
+  expect(instance.getStatus().state).toBe('available');
+  expect(prepareTerminal).not.toHaveBeenCalled();
 });
 it('does not prepare a terminal command for a downgrade', async () => {
   const { ops } = controller(true);
@@ -370,7 +381,7 @@ it('retries after check failure and invalidates failed downloads', async () => {
   await instance.download();
   expect(instance.getStatus().state).toBe('error');
   await expect(instance.install()).rejects.toThrow();
-  await expect(instance.download()).rejects.toThrow(/Check/);
+  await expect(instance.download()).rejects.toThrow('No update is available');
 });
 it('keeps background checks silent while offline and does not flash a checking state', async () => {
   const { instance, ops } = controller();
@@ -394,6 +405,58 @@ it('reports a newer background discovery without an intermediate checking state'
   await instance.check({ background: true });
   expect(states).toEqual(['available']);
   expect(instance.getStatus().version).toBe('0.4.0');
+});
+it('invalidates a cached candidate when background native preparation fails', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  expect(instance.getStatus().state).toBe('available');
+  ops.prepare.mockRejectedValueOnce(new Error('manifest changed'));
+
+  await instance.check({ background: true });
+
+  expect(instance.getStatus()).toMatchObject({ state: 'error' });
+  await expect(instance.download()).rejects.toThrow('No update is available');
+  expect(ops.download).not.toHaveBeenCalled();
+});
+it('turns a joined background check into a manual check and reports its failure', async () => {
+  const { instance, ops } = controller();
+  let reject!: (reason?: unknown) => void;
+  ops.discover.mockImplementationOnce(
+    () =>
+      new Promise((_, rejectDiscover) => {
+        reject = rejectDiscover;
+      }),
+  );
+  const background = instance.check({ background: true });
+  const manual = instance.check();
+  expect(manual).toBe(background);
+  expect(instance.getStatus().state).toBe('checking');
+
+  reject(new Error('offline'));
+  await manual;
+
+  expect(instance.getStatus().state).toBe('error');
+  expect(ops.emit).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'error' }));
+});
+it('waits for a background refresh before downloading the current candidate', async () => {
+  const { instance, ops, candidate } = controller();
+  let resolve!: (value: typeof candidate) => void;
+  ops.discover.mockImplementationOnce(
+    () =>
+      new Promise((resolveDiscover) => {
+        resolve = resolveDiscover;
+      }),
+  );
+  const refresh = instance.check({ background: true });
+  const download = instance.download();
+  expect(ops.download).not.toHaveBeenCalled();
+
+  resolve(candidate);
+  await refresh;
+  await download;
+
+  expect(ops.download).toHaveBeenCalledOnce();
+  expect(instance.getStatus().state).toBe('downloaded');
 });
 it('sets native channel before resetting downgrades and rejects a mismatched manifest', async () => {
   const { candidate } = controller();
