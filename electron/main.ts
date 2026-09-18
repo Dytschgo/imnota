@@ -142,7 +142,11 @@ import {
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
-import { captureDisplayOptions, selectedCaptureDisplay } from './capture-display-selection.js';
+import {
+  captureDisplayOptions,
+  captureDisplayWithStableGeometry,
+  selectedCaptureDisplay,
+} from './capture-display-selection.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -1693,8 +1697,20 @@ function registerIpc(): void {
       if (wasVisible) mainWindow?.hide();
       let captured: CapturedDisplayImage;
       try {
-        captured = await captureService().captureDisplay(selectedDisplay);
+        const stableCapture = await captureDisplayWithStableGeometry(
+          selectedDisplay,
+          (display) => captureService().captureDisplay(display),
+          () => screen.getAllDisplays(),
+        );
+        if (!stableCapture)
+          throw new NativeWorkflowError(
+            'capture-sources-unavailable',
+            'The selected display changed while the capture was being prepared. Choose an available display and try again.',
+            true,
+          );
+        captured = stableCapture;
       } catch (error) {
+        if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
             throw new NativeWorkflowError(

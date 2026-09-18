@@ -51,3 +51,29 @@ export function selectedCaptureDisplay(
   if (selectedDisplayId === undefined) return null;
   return displays.find((display) => display.id === selectedDisplayId) ?? null;
 }
+
+function sameCaptureGeometry(left: CaptureDisplay, right: CaptureDisplay): boolean {
+  return (
+    left.id === right.id &&
+    left.scaleFactor === right.scaleFactor &&
+    left.bounds.x === right.bounds.x &&
+    left.bounds.y === right.bounds.y &&
+    left.bounds.width === right.bounds.width &&
+    left.bounds.height === right.bounds.height
+  );
+}
+
+/**
+ * Capture the selected display, then verify its identity and DIP-to-pixel
+ * geometry immediately before the caller creates an overlay from the saved
+ * snapshot. A display removal, move, resize, or DPI change fails closed.
+ */
+export async function captureDisplayWithStableGeometry<T>(
+  selectedDisplay: CaptureDisplay,
+  capture: (display: CaptureDisplay) => Promise<T>,
+  currentDisplays: () => readonly CaptureDisplay[],
+): Promise<T | null> {
+  const result = await capture(selectedDisplay);
+  const current = currentDisplays().find((display) => display.id === selectedDisplay.id);
+  return current && sameCaptureGeometry(selectedDisplay, current) ? result : null;
+}

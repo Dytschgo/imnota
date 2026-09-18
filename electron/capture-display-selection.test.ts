@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CaptureDisplay } from '../src/shared/capture.js';
-import { captureDisplayOptions, selectedCaptureDisplay } from './capture-display-selection.js';
+import {
+  captureDisplayOptions,
+  captureDisplayWithStableGeometry,
+  selectedCaptureDisplay,
+} from './capture-display-selection.js';
 
 const primary: CaptureDisplay = {
   id: 1,
@@ -42,5 +46,37 @@ describe('capture display selection', () => {
     expect(selectedCaptureDisplay([primary, secondary], undefined)).toBeNull();
     expect(selectedCaptureDisplay([primary, secondary], 2)).toBe(secondary);
     expect(selectedCaptureDisplay([primary, secondary], 999)).toBeNull();
+  });
+
+  it.each([
+    ['is removed', []],
+    ['moves', [{ ...primary, bounds: { ...primary.bounds, x: -3440 } }]],
+    ['changes scale', [{ ...primary, scaleFactor: 1.5 }]],
+  ] as const)('rejects a captured display that %s while capture sources resolve', async (_label, changed) => {
+    let resolveCapture!: (value: string) => void;
+    const pendingCapture = new Promise<string>((resolve) => {
+      resolveCapture = resolve;
+    });
+    let displays: readonly CaptureDisplay[] = [primary];
+    const currentDisplays = vi.fn(() => displays);
+    const result = captureDisplayWithStableGeometry(primary, () => pendingCapture, currentDisplays);
+
+    expect(currentDisplays).not.toHaveBeenCalled();
+    displays = changed;
+    resolveCapture('pixels');
+
+    await expect(result).resolves.toBeNull();
+    expect(currentDisplays).toHaveBeenCalledOnce();
+  });
+
+  it('returns the capture only when display identity, bounds, and scale remain unchanged', async () => {
+    const captured = { pixels: Buffer.from('screen') };
+    await expect(
+      captureDisplayWithStableGeometry(
+        primary,
+        async () => captured,
+        () => [{ ...primary, bounds: { ...primary.bounds } }],
+      ),
+    ).resolves.toBe(captured);
   });
 });
