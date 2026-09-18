@@ -8,7 +8,8 @@ Use this file as the living result table. Do not mark a cell as working from an 
 
 - Combined copy prepares Markdown and a prompt PNG together from the latest saved state.
 - The receiving app decides which representation to paste.
-- Imnota reports what it prepared, never that another app accepted it.
+- Imnota reads the clipboard back after the combined write and reports which formats the operating system kept (text, HTML, image). When one is missing, the bundle card names it and points at the separate copy action.
+- Imnota reports what the clipboard holds, never that another app accepted it.
 - Fallbacks: Copy Markdown only, Copy image only, Open generated files, Copy file paths, Open export folder.
 
 ## How to run a check
