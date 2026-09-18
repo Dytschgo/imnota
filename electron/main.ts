@@ -147,6 +147,7 @@ import {
   captureDisplayWithStableGeometry,
   selectedCaptureDisplay,
 } from './capture-display-selection.js';
+import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -830,10 +831,14 @@ function captureService(): CaptureService {
 }
 
 async function smokeDesktopCaptureCapability(): Promise<{
-  displayId: number;
-  displayDip: { width: number; height: number };
-  sourcePixels: { width: number; height: number };
-  cropPixels: { width: number; height: number };
+  displays: Array<{
+    displayId: number;
+    bounds: CaptureRectangle;
+    scaleFactor: number;
+    sourcePixels: { width: number; height: number };
+    cropDip: CaptureRectangle;
+    cropPixels: { width: number; height: number };
+  }>;
 }> {
   if (
     process.env.IMNOTA_SMOKE !== '1' ||
@@ -843,33 +848,18 @@ async function smokeDesktopCaptureCapability(): Promise<{
     throw new Error(
       'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
     );
-  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The smoke test window is unavailable.');
-  const windowBounds = mainWindow.getBounds();
-  const display = screen.getDisplayMatching(windowBounds);
-  const left = Math.max(windowBounds.x, display.bounds.x);
-  const top = Math.max(windowBounds.y, display.bounds.y);
-  const right = Math.min(windowBounds.x + windowBounds.width, display.bounds.x + display.bounds.width);
-  const bottom = Math.min(windowBounds.y + windowBounds.height, display.bounds.y + display.bounds.height);
-  if (right - left < 2 || bottom - top < 2)
-    throw new Error('The smoke window does not intersect its display.');
-  const selection: CaptureRectangle = {
-    x: left - display.bounds.x + 1,
-    y: top - display.bounds.y + 1,
-    width: Math.min(240, right - left - 1),
-    height: Math.min(160, bottom - top - 1),
-  };
   const service = captureService();
-  const source = await service.captureDisplay(display);
-  const crop = service.crop(source, selection);
-  const cropImage = nativeImage.createFromBuffer(crop);
-  if (cropImage.isEmpty()) throw new Error('The in-memory capture crop could not be decoded.');
-  // Source and crop buffers are intentionally neither persisted nor returned.
-  return {
-    displayId: display.id,
-    displayDip: { width: display.bounds.width, height: display.bounds.height },
-    sourcePixels: source.imageSize,
-    cropPixels: cropImage.getSize(),
-  };
+  return probeCaptureDisplays(screen.getAllDisplays(), {
+    capture: (display) =>
+      captureDisplayWithStableGeometry(
+        display,
+        (target) => service.captureDisplay(target),
+        () => screen.getAllDisplays(),
+      ),
+    crop: (source, selection) => service.crop(source, selection),
+    // Source and crop buffers are intentionally neither persisted nor returned.
+    decodeCrop: (png) => nativeImage.createFromBuffer(png),
+  });
 }
 
 function settleCaptureOverlay(selection: CaptureRectangle | null): void {
@@ -2776,7 +2766,7 @@ app.whenReady().then(async () => {
           captureCapability: capability,
           assertions: [
             ...((result as { assertions?: string[] }).assertions ?? []),
-            'real desktopCapturer dimensions and in-memory crop of the smoke window',
+            'exact desktopCapturer source and in-memory crop dimensions for every real display',
           ],
         };
       }
