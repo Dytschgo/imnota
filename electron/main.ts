@@ -41,7 +41,11 @@ import {
   preferenceSettingsUpdateSchema,
   resolvePreferenceSettings,
 } from '../src/shared/preference-settings.js';
-import type { PreferenceSettingsUpdate, ProjectWatchEvent } from '../src/shared/workflow-bridge.js';
+import type {
+  ClipboardFormatsReport,
+  PreferenceSettingsUpdate,
+  ProjectWatchEvent,
+} from '../src/shared/workflow-bridge.js';
 import {
   DEFAULT_EXPORT_PREFERENCES,
   emptyProject,
@@ -772,10 +776,13 @@ async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
   await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
-async function copyContextToClipboard(markdown: string, imageDataUrl: string): Promise<void> {
+async function copyContextToClipboard(
+  markdown: string,
+  imageDataUrl: string,
+): Promise<ClipboardFormatsReport> {
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
-  await nativeClipboard.writeContext(markdown, html, image);
+  return nativeClipboard.writeContext(markdown, html, image);
 }
 
 function captureService(): CaptureService {
@@ -1853,7 +1860,7 @@ function registerIpc(): void {
           .strict(),
       ])
       .parse(args);
-    await promptBundleWorkflow!.copy(input.sessionId, input.bundleNumber, input.target);
+    return promptBundleWorkflow!.copy(input.sessionId, input.bundleNumber, input.target);
   });
   handleWorkflow('workflow:prompt-export:open', async (_event, ...args) => {
     const [input] = z
@@ -2494,9 +2501,9 @@ function registerIpc(): void {
   handle('system:copy-image', async (_event, dataUrl: string) => {
     await copyImageToClipboard(dataUrl);
   });
-  handle('system:copy-context', async (_event, input) => {
-    await copyContextToClipboard(input.markdown, input.imageDataUrl);
-  });
+  handle('system:copy-context', (_event, input) =>
+    copyContextToClipboard(input.markdown, input.imageDataUrl),
+  );
   handle('recovery:save', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     await atomicWrite(

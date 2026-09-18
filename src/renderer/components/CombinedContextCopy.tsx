@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { prepareClipboardImage, type AnnotatedClipboardImage } from '../clipboard-image';
+import { describeCombinedCopyMessage } from '../export/clipboard-delivery';
 import { Button } from './ui';
 
 // Reuse the existing compact sharing controls; the compatibility warning stays
@@ -26,10 +27,8 @@ export function CombinedContextCopy({
     setMessage('');
     try {
       const imageDataUrl = await prepareClipboardImage(images);
-      await window.imnota.copyContext({ markdown, imageDataUrl });
-      setMessage(
-        'Text and image are on the clipboard. Check that both appear after pasting; some apps accept only one.',
-      );
+      const placed = await window.imnota.copyContext({ markdown, imageDataUrl });
+      setMessage(describeCombinedCopyMessage(placed));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Combined copy failed. Use the separate copy actions below.',

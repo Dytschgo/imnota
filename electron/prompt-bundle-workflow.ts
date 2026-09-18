@@ -3,7 +3,9 @@ import path from 'node:path';
 import type {
   PromptExportBundleContent,
   PromptExportBundleGrant,
+  ClipboardFormatsReport,
   PromptExportBundleManifest,
+  PromptExportCopyResult,
   PromptExportCopyTarget,
   PromptExportFinalized,
   PromptExportOpenTarget,
@@ -35,7 +37,10 @@ export interface AuthorizedPromptCollection {
 
 export interface PromptBundleWorkflowDependencies {
   authorize(projectPath: string, collectionId: string): Promise<AuthorizedPromptCollection>;
-  copyContext(markdown: string, imageDataUrl: string): Promise<void> | void;
+  copyContext(
+    markdown: string,
+    imageDataUrl: string,
+  ): Promise<ClipboardFormatsReport> | ClipboardFormatsReport;
   copyText(markdown: string): Promise<void> | void;
   copyImage(imageDataUrl: string): Promise<void> | void;
   openPath(targetPath: string): Promise<void>;
@@ -188,7 +193,11 @@ export class PromptBundleWorkflow {
     };
   }
 
-  async copy(sessionId: string, bundleNumber: number, target: PromptExportCopyTarget): Promise<void> {
+  async copy(
+    sessionId: string,
+    bundleNumber: number,
+    target: PromptExportCopyTarget,
+  ): Promise<PromptExportCopyResult> {
     const bundle = this.bundleGrant(sessionId, bundleNumber);
     const grant = this.finalGrant(sessionId);
     if (target === 'paths') {
@@ -200,24 +209,25 @@ export class PromptBundleWorkflow {
       }
       // This copies plain paths, not operating-system file attachments.
       await this.dependencies.copyText(paths.join('\n'));
-      return;
+      return { target };
     }
     if (target === 'markdown') {
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
-      return;
+      return { target };
     }
     if (!bundle.pngFilename) {
       if (target === 'image')
         throw new NativeWorkflowError('bundle-not-found', 'This text-only prompt has no image to copy.');
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
-      return;
+      return { target: 'markdown' };
     }
     const imageDataUrl = await this.readPng(grant, bundle);
     if (target === 'image') {
       await this.dependencies.copyImage(imageDataUrl);
-      return;
+      return { target };
     }
-    await this.dependencies.copyContext(await this.readMarkdown(grant, bundle), imageDataUrl);
+    const placed = await this.dependencies.copyContext(await this.readMarkdown(grant, bundle), imageDataUrl);
+    return { target, placed };
   }
 
   async open(sessionId: string, bundleNumber: number, target: PromptExportOpenTarget): Promise<void> {

@@ -26,6 +26,7 @@ import type {
 import type {
   PromptExportBundleContent,
   PromptExportBundleGrant,
+  PromptExportCopyResult,
   PromptExportCopyTarget,
   PromptExportFinalized,
   PromptExportSessionInfo,
@@ -33,6 +34,7 @@ import type {
   WorkflowResult,
 } from '../../shared/workflow-bridge';
 import { createBrowserTextMeasurer } from '../canvas/annotation-layout';
+import { describeCombinedDelivery } from './clipboard-delivery';
 import {
   assertAnnotatedImageRenderBounds,
   renderAnnotatedImageWithDimensions,
@@ -100,7 +102,7 @@ export interface PromptBundleControllerBridge {
     sessionId: string;
     bundleNumber: number;
     target: PromptExportCopyTarget;
-  }): Promise<WorkflowResult<void>>;
+  }): Promise<WorkflowResult<PromptExportCopyResult>>;
   openPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;
@@ -514,12 +516,17 @@ export class PromptBundleControllerEngine {
     });
   }
 
-  private deliveryCompleted(bundleNumber: number, outcome: PromptDeliveryOutcome, primaryCopy = false): void {
+  private deliveryCompleted(
+    bundleNumber: number,
+    outcome: PromptDeliveryOutcome,
+    primaryCopy = false,
+    warning?: string,
+  ): void {
     this.emit({
       error: undefined,
       cards: this.state.cards.map((card) =>
         card.bundleNumber === bundleNumber
-          ? { ...card, state: primaryCopy ? 'copied' : 'idle', outcome, error: undefined }
+          ? { ...card, state: primaryCopy ? 'copied' : 'idle', outcome, error: undefined, warning }
           : card,
       ),
       progress: { phase: 'complete', bundleNumber, totalBundles: this.state.cards.length },
@@ -1249,7 +1256,8 @@ export class PromptBundleControllerEngine {
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
-        this.deliveryCompleted(bundle.number, bundle.pictures.length ? 'combined' : 'markdown', true);
+        const delivery = describeCombinedDelivery(copy.value.placed, bundle.pictures.length > 0);
+        this.deliveryCompleted(bundle.number, delivery.outcome, true, delivery.warning);
       }
       this.emit({
         progress: { phase: 'complete', bundleNumber, totalBundles: prepared.plan.bundles.length },
@@ -1299,7 +1307,7 @@ export class PromptBundleControllerEngine {
       sessionId: string,
       bundleNumber: number,
       validate: () => Promise<void>,
-    ) => Promise<WorkflowResult<void>>,
+    ) => Promise<WorkflowResult<unknown>>,
     outcome: PromptDeliveryOutcome = 'files',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.activeRun) {
