@@ -121,6 +121,15 @@
       "devicePixelRatio": 1,
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
       "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "1280x800-onboarding-copy.png": {
+      "reviewedAt": "2026-09-19",
+      "sourceRevision": "985215bfd92ae47ac7bdbf55ce06d67f8e1cf96d",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35436813100",
+      "review": "Candidate, prior baseline and difference mask independently reviewed. The handoff step adds the native copy selector, explicit Rich copy action and all fallback actions; sample, Markdown preview and footer remain aligned at 1280x800. Windows packaged native verification passed. All other approved captures passed unchanged. Strict comparison tolerance is unchanged."
     }
   }
 }
