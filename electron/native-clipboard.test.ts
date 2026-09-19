@@ -169,7 +169,7 @@ describe('main-process clipboard completion', () => {
     mocks.clipboard.readText.mockResolvedValue('Markdown');
     mocks.clipboard.read.mockResolvedValue([
       clipboardItem({
-        'text/html': html,
+        'text/html': platformClipboardHtml(html),
         'image/png': new Blob([png], { type: 'image/png' }),
       }),
     ]);
