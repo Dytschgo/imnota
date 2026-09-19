@@ -1,6 +1,6 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
-import { readWindowsClipboardFiles } from './windows-clipboard.js';
+import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -398,7 +398,10 @@ async function exerciseOnboarding(
       text: 'Files were confirmed on the clipboard. Paste into the test app to see whether it accepts both attachments.',
       exact: true,
     });
-    const copiedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    const copiedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding Copy files',
+    );
     if (
       copiedFiles.length !== 2 ||
       path.resolve(copiedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
@@ -412,7 +415,10 @@ async function exerciseOnboarding(
       text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The test app may choose only one representation when you paste.',
       exact: true,
     });
-    const combinedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    const combinedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding Files + rich copy',
+    );
     if (
       combinedFiles.length !== 2 ||
       path.resolve(combinedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
@@ -432,7 +438,10 @@ async function exerciseOnboarding(
       return result.value.settings.nativeCopy.defaultFunction;
     })()`);
     if (restoredDefault !== 'files') throw new Error('Windows native copy default was not restored.');
-    const unchangedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    const unchangedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding copy-default preservation',
+    );
     if (
       unchangedFiles.length !== 2 ||
       path.resolve(unchangedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
@@ -1774,7 +1783,10 @@ async function assertPromptFileClipboard(
   context: string,
 ): Promise<void> {
   const expected = await promptBundlePaths(set, cardIndex);
-  const actual = readWindowsClipboardFiles(driver.browserWindow.getNativeWindowHandle());
+  const actual = await readWindowsClipboardFilesForSmoke(
+    driver.browserWindow.getNativeWindowHandle(),
+    context,
+  );
   if (actual.length !== 2) throw new Error(`${context} placed ${actual.length} files instead of exactly 2.`);
   const actualByName = new Map(actual.map((filePath) => [path.basename(filePath).toLowerCase(), filePath]));
   if (actualByName.size !== 2) throw new Error(`${context} placed duplicate Markdown/PNG clipboard paths.`);
@@ -1895,7 +1907,14 @@ async function exercisePromptWorkflow(
     await choosePromptCopyFunction(driver, copiedIndex, 'files');
     if (latestWindowsVariant === 'files-rich') {
       await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
-    } else if (readWindowsClipboardFiles(driver.browserWindow.getNativeWindowHandle()).length !== 0) {
+    } else if (
+      (
+        await readWindowsClipboardFilesForSmoke(
+          driver.browserWindow.getNativeWindowHandle(),
+          'Changing the prompt copy default',
+        )
+      ).length !== 0
+    ) {
       throw new Error('Changing the prompt copy default added files to a rich-only clipboard.');
     }
     latestRichClipboard = await assertPromptRichClipboard(
@@ -1930,7 +1949,14 @@ async function exercisePromptWorkflow(
   if (process.platform === 'win32') {
     if (latestWindowsVariant === 'files-rich') {
       await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Rejected prompt copy');
-    } else if (readWindowsClipboardFiles(driver.browserWindow.getNativeWindowHandle()).length !== 0) {
+    } else if (
+      (
+        await readWindowsClipboardFilesForSmoke(
+          driver.browserWindow.getNativeWindowHandle(),
+          'Rejected prompt copy',
+        )
+      ).length !== 0
+    ) {
       throw new Error('Rejected prompt copy added files to a rich-only clipboard.');
     }
   }
