@@ -368,6 +368,7 @@ export function CollectionRail({
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
+  const captureIsPrimary = capturePrimary && captureEnabled && Boolean(onCapture);
   const addItemOptions: Array<{
     id: string;
     label: string;
@@ -667,18 +668,16 @@ export function CollectionRail({
                 <div className="add-item-primary">
                   <Button
                     variant="primary"
-                    disabled={collection?.archived || (capturePrimary && (!onCapture || !captureEnabled))}
+                    disabled={collection?.archived}
                     data-testid="add-screenshot"
                     title={
                       collection?.archived
-                        ? 'Choose a current collection before capturing'
-                        : capturePrimary && !captureEnabled
-                          ? captureDisabledLabel
-                          : undefined
+                        ? 'Choose a current collection before adding screenshots'
+                        : undefined
                     }
-                    onClick={capturePrimary ? onCapture : onImport}
+                    onClick={captureIsPrimary ? onCapture : onImport}
                   >
-                    {capturePrimary ? (
+                    {captureIsPrimary ? (
                       <Camera size={15} aria-hidden="true" />
                     ) : (
                       <Upload size={15} aria-hidden="true" />

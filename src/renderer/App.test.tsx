@@ -1128,9 +1128,21 @@ describe('feedback controls', () => {
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
   });
 
-  it('shows why the capture control is disabled until experimental capture is enabled', async () => {
-    await renderEditingProject();
-    expect(screen.getByRole('button', { name: /screen capture/i })).toBeDisabled();
+  it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    await renderEditingProject({ startRegionCapture: startRegionCapture as never });
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const importClick = vi.fn();
+    fileInput.addEventListener('click', importClick);
+
+    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
+    expect(addScreenshot).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Capture screen region/ })).not.toBeInTheDocument();
+    fireEvent.click(addScreenshot);
+    expect(importClick).toHaveBeenCalledOnce();
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(startRegionCapture).not.toHaveBeenCalled();
   });
 
   it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {

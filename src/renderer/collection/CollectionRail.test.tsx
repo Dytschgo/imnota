@@ -309,27 +309,23 @@ describe('CollectionRail', () => {
     expect(onCapture).not.toHaveBeenCalled();
   });
 
-  it('keeps Windows capture disabled with an explanation while import remains available', () => {
+  it('falls back to an enabled import primary action when Windows capture is unavailable', () => {
     const onImport = vi.fn();
     render(
       <CollectionRail
         {...props({
           onImport,
-          onCapture: vi.fn(),
           capturePrimary: true,
           captureEnabled: false,
-          captureDisabledLabel: 'Enable capture in Settings',
         })}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Add screenshot' })).toHaveAttribute(
-      'title',
-      'Enable capture in Settings',
-    );
-    fireEvent.click(screen.getByTestId('add-item-trigger'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Import screenshot/ }));
+    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
+    expect(addScreenshot).toBeEnabled();
+    fireEvent.click(addScreenshot);
     expect(onImport).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(screen.queryByRole('menuitem', { name: /Take screenshot/ })).not.toBeInTheDocument();
   });
 
   it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
