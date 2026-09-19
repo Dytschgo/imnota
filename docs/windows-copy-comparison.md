@@ -29,15 +29,15 @@ After choosing a favorite, repeat that option with a disposable project called *
 
 Open **Copy Bundle**, then use the copy choices on the image bundle. The interactive guide offers the same choices on its copy step if you prefer a disposable sample.
 
-| Option                                   | What it puts on the clipboard                                       | What to compare                                                 |
-| ---------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Rich copy                                | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
-| Copy files                               | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
-| Files + rich copy                        | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
-| Copy Markdown only, then Copy image only | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
-| Copy file paths                          | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
+| Option                         | What it puts on the clipboard                                       | What to compare                                                 |
+| ------------------------------ | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Rich copy                      | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
+| Copy files                     | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
+| Files + rich copy              | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
+| Copy Markdown, then Copy image | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
+| Copy file paths                | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
 
-The main action remains Rich copy for this comparison nightly. No option is declared the best for your apps yet. For each option, use this same procedure:
+The guide labels the separate actions **Copy Markdown** and **Copy image**; export cards add **only** to those labels. The main action remains Rich copy for this comparison nightly. No option is declared the best for your apps yet. For each option, use this same procedure:
 
 1. Return to Imnota and select the variant. Wait for its result message.
 2. Record what Imnota says it placed on the clipboard. This confirms clipboard contents, not what the receiving app will accept.
@@ -86,6 +86,8 @@ Duplicate these rows for each copy option. **1** means frustrating or unusable; 
 - [ ] Ordinary copy options leave Explorer closed; it opens only when I choose a file-opening action.
 
 ## Check the other nightly changes
+
+If capture is disabled, enable **Settings → Shortcuts → Capture a screen region** first. Import remains available from the arrow beside **Add screenshot**.
 
 - [ ] Clicking **Add screenshot** starts selection on every display without asking primary/secondary.
 - [ ] Drag a region within each display and inspect the saved result.
