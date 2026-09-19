@@ -1,5 +1,62 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
+import path from 'node:path';
 import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
+
+let writeQueue: Promise<void> = Promise.resolve();
+
+export async function openWindowsFileHandoff(
+  filePaths: readonly string[],
+  selectFiles: (filePaths: readonly [string, string]) => Promise<boolean>,
+  platform = process.platform,
+): Promise<'opened' | 'failed' | undefined> {
+  if (platform !== 'win32' || !filePaths.length) return undefined;
+  if (
+    filePaths.length !== 2 ||
+    path.extname(filePaths[0]).toLowerCase() !== '.md' ||
+    path.extname(filePaths[1]).toLowerCase() !== '.png'
+  )
+    return 'failed';
+  const directories = new Set(filePaths.map((filePath) => path.dirname(path.resolve(filePath))));
+  if (directories.size !== 1) return 'failed';
+  try {
+    return (await selectFiles([filePaths[0], filePaths[1]])) ? 'opened' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
+export async function deliverClipboardWithFileHandoff(
+  writeClipboard: () => Promise<ClipboardFormatsReport>,
+  filePaths: readonly string[],
+  selectFiles: (filePaths: readonly [string, string]) => Promise<boolean>,
+  platform = process.platform,
+): Promise<ClipboardFormatsReport> {
+  let placed: ClipboardFormatsReport;
+  let writeError: unknown;
+  try {
+    placed = await writeClipboard();
+  } catch (error) {
+    placed = { text: false, html: false, image: false };
+    writeError = error;
+  }
+  const fileHandoff = await openWindowsFileHandoff(filePaths, selectFiles, platform);
+  if (writeError && !fileHandoff) throw writeError;
+  return fileHandoff ? { ...placed, fileHandoff } : placed;
+}
+
+async function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = writeQueue;
+  let release!: () => void;
+  writeQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
 
 async function readBlob(types: string[]): Promise<Blob | undefined> {
   const items = await clipboard.read();
@@ -14,6 +71,41 @@ async function readBlob(types: string[]): Promise<Blob | undefined> {
 
 function pngBlob(image: NativeImage): Blob {
   return new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' });
+}
+
+function sameImage(left: NativeImage, right: NativeImage): boolean {
+  if (left.isEmpty() || right.isEmpty()) return false;
+  const leftSize = left.getSize();
+  const rightSize = right.getSize();
+  return (
+    leftSize.width === rightSize.width &&
+    leftSize.height === rightSize.height &&
+    left.toBitmap().equals(right.toBitmap())
+  );
+}
+
+/** Chromium adds this metadata when HTML crosses the macOS pasteboard boundary. */
+export function platformClipboardHtml(html: string, platform = process.platform): string {
+  return platform === 'darwin' ? `<meta charset='utf-8'>${html}` : html;
+}
+
+async function verifiedContext(
+  text: string,
+  html: string,
+  image: NativeImage,
+): Promise<ClipboardFormatsReport> {
+  const [textResult, htmlResult, imageResult] = await Promise.allSettled([
+    clipboard.readText(),
+    readBlob(['text/html']).then((blob) => blob?.text()),
+    readBlob(['image/png', 'image/jpeg']).then(async (blob) =>
+      blob ? nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer())) : nativeImage.createEmpty(),
+    ),
+  ]);
+  return {
+    text: textResult.status === 'fulfilled' && textResult.value === text,
+    html: htmlResult.status === 'fulfilled' && htmlResult.value === platformClipboardHtml(html),
+    image: imageResult.status === 'fulfilled' && sameImage(imageResult.value, image),
+  };
 }
 
 /** Main-process clipboard boundary; callers wait for native reads and writes. */
@@ -32,26 +124,27 @@ export const nativeClipboard = {
       : nativeImage.createEmpty();
   },
   async writeText(text: string): Promise<void> {
-    await clipboard.writeText(text);
+    await serializeWrite(() => clipboard.writeText(text));
   },
   async writeImage(image: NativeImage): Promise<void> {
-    await clipboard.write([new ClipboardItem({ 'image/png': pngBlob(image) })]);
+    await serializeWrite(() => clipboard.write([new ClipboardItem({ 'image/png': pngBlob(image) })]));
   },
   /**
-   * Writes all three formats in one native operation, then reads the clipboard
+   * Writes all requested formats in one native operation, then reads the clipboard
    * back so callers can report what the OS actually holds. Windows in
    * particular may keep only some formats; a read-back failure reports every
    * format as unverified (false) rather than claiming success.
    */
   async writeContext(text: string, html: string, image: NativeImage): Promise<ClipboardFormatsReport> {
-    await clipboard.write([
-      new ClipboardItem({ 'text/plain': text, 'text/html': html, 'image/png': pngBlob(image) }),
-    ]);
-    try {
-      const types = new Set((await clipboard.read()).flatMap((item) => item.types));
-      return { text: types.has('text/plain'), html: types.has('text/html'), image: types.has('image/png') };
-    } catch {
-      return { text: false, html: false, image: false };
-    }
+    return serializeWrite(async () => {
+      await clipboard.write([
+        new ClipboardItem({
+          'text/plain': text,
+          'text/html': html,
+          'image/png': pngBlob(image),
+        }),
+      ]);
+      return verifiedContext(text, html, image);
+    });
   },
 };

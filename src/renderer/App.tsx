@@ -1920,9 +1920,20 @@ export default function App() {
       />
       {showOnboarding && (
         <OnboardingDemo
-          onCopyBundle={async ({ markdown, imageDataUrl }) => {
-            await window.imnota.copyContext({ markdown, imageDataUrl });
-          }}
+          onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>
+            window.imnota.prepareOnboardingHandoff({
+              markdown,
+              imageDataUrl,
+              markdownFilename,
+              pngFilename: filename,
+            })
+          }
+          onCopyHandoff={(grant, action) =>
+            window.imnota.copyOnboardingHandoff({ sessionId: grant.sessionId, action })
+          }
+          onOpenHandoff={(grant, target) =>
+            window.imnota.openOnboardingHandoff({ sessionId: grant.sessionId, target })
+          }
           onMarkCompleted={preferences.saveOnboarding}
           onCreateFirstProject={async () => {
             if (!useAppStore.getState().settings.workspacePath && !(await chooseWorkspace()))
