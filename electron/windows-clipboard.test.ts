@@ -17,6 +17,7 @@ import {
   writeWindowsClipboard,
   WindowsClipboardBusyError,
   WindowsClipboardChangedError,
+  WindowsClipboardOpenError,
   type WindowsClipboardApi,
 } from './windows-clipboard.js';
 
@@ -223,6 +224,46 @@ describe('Windows clipboard payloads', () => {
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/1 busy checks over 3ms/));
   });
 
+  it('keeps default diagnostics off the console after transient contention', async () => {
+    const native = nativeMock();
+    native.openClipboard.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    let lastError = 5;
+    native.api.getLastError = () => lastError;
+    native.api.setLastError = (code) => void (lastError = code);
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, {
+        yieldControl: async () => undefined,
+      });
+      expect(consoleInfo).not.toHaveBeenCalled();
+    } finally {
+      consoleInfo.mockRestore();
+    }
+  });
+
+  it('ignores an injected diagnostic failure after a successful transaction and releases the lock', async () => {
+    const native = nativeMock();
+    native.openClipboard.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    let lastError = 5;
+    native.api.getLastError = () => lastError;
+    native.api.setLastError = (code) => void (lastError = code);
+    const log = vi.fn(() => {
+      throw new Error('stdout closed');
+    });
+    await expect(
+      writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, {
+        yieldControl: async () => undefined,
+        log,
+      }),
+    ).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalledOnce();
+    expect(native.openClipboard).toHaveBeenCalledTimes(2);
+    expect(native.emptyClipboard).toHaveBeenCalledOnce();
+    expect(native.setClipboardData).toHaveBeenCalledOnce();
+    expect(native.closeClipboard).toHaveBeenCalledOnce();
+    expect(native.clipboard.has(15)).toBe(true);
+  });
+
   it('aborts without mutation or allocation leaks when the clipboard changes while waiting', async () => {
     const prior = windowsUnicodeTextBuffer('newer clipboard');
     const native = nativeMock([[13, prior]]);
@@ -236,7 +277,12 @@ describe('Windows clipboard payloads', () => {
         timeoutMs: 100,
         yieldControl,
       }),
-    ).rejects.toBeInstanceOf(WindowsClipboardChangedError);
+    ).rejects.toMatchObject({
+      name: 'WindowsClipboardChangedError',
+      initialSequence: 1,
+      currentSequence: 2,
+      busyChecks: 1,
+    } satisfies Partial<WindowsClipboardChangedError>);
     expect(native.openClipboard).toHaveBeenCalledOnce();
     expect(native.emptyClipboard).not.toHaveBeenCalled();
     expect(native.closeClipboard).not.toHaveBeenCalled();
@@ -252,7 +298,11 @@ describe('Windows clipboard payloads', () => {
     const yieldControl = vi.fn(async () => undefined);
     await expect(
       writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, { yieldControl }),
-    ).rejects.toThrow('Windows could not access the clipboard. Try copying again.');
+    ).rejects.toMatchObject({
+      name: 'WindowsClipboardOpenError',
+      message: 'Windows could not access the clipboard. Try copying again.',
+      nativeCode: 1_400,
+    } satisfies Partial<WindowsClipboardOpenError>);
     expect(native.openClipboard).toHaveBeenCalledOnce();
     expect(yieldControl).not.toHaveBeenCalled();
     expect(native.emptyClipboard).not.toHaveBeenCalled();
