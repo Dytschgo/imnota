@@ -99,6 +99,7 @@ describe('AppShell navigation', () => {
           <FloatingUpdateControl
             status={{ state: 'available', version: '0.3.0', channel: 'nightly' }}
             placement={placement}
+            onCheck={vi.fn()}
             onDownload={onDownload}
             onInstall={vi.fn()}
             onRetry={vi.fn()}
@@ -120,7 +121,9 @@ describe('AppShell navigation', () => {
 
     useAppStore.setState({ navigationOpen: false });
     rerender(shell);
-    expect(screen.getByTestId('update-indicator')).toHaveClass('floating-update-floating');
+    const updateIndicator = screen.getByTestId('update-indicator');
+    expect(updateIndicator).toHaveClass('floating-update-topbar');
+    expect(updateIndicator.closest('.topbar')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Download update' })).toBeVisible();
   });
 

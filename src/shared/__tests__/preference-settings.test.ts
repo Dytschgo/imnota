@@ -50,6 +50,7 @@ describe('profile-aware preference settings', () => {
     expect(shouldShowOnboarding(result.settings.onboarding, result.profile)).toBe(true);
     expect(result.settings.capture.experimentalRegionCapture).toBe(false);
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
+    expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
   });
 
   it('keeps older saved preferences compatible while adding capture opt-in', () => {
@@ -64,6 +65,9 @@ describe('profile-aware preference settings', () => {
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });
+    expect(
+      mergePreferenceSettings(current, { updates: { whatsNewAcknowledgedVersion: '0.2.8' } }).updates,
+    ).toEqual({ whatsNewAcknowledgedVersion: '0.2.8' });
   });
 
   it('migrates the legacy theme without keeping a duplicate authority', () => {

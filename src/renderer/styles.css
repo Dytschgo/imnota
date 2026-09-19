@@ -2298,6 +2298,93 @@ button.icon-button.new-collection-button svg {
 .update-settings .update-progress {
   width: 100%;
 }
+.whats-new-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.whats-new-heading,
+.whats-new-actions,
+.whats-new-card > .btn {
+  display: flex;
+  align-items: center;
+}
+.whats-new-heading {
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+}
+.whats-new-heading h2,
+.whats-new-heading p,
+.whats-new-summary,
+.whats-new-card p,
+.whats-new-preview {
+  margin: 0;
+}
+.whats-new-heading p,
+.whats-new-summary,
+.whats-new-card p {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.whats-new-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.whats-new-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.whats-new-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.whats-new-card img {
+  width: 100%;
+  max-height: 150px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  object-fit: contain;
+}
+.whats-new-card > .btn {
+  margin-top: auto;
+}
+.whats-new-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.whats-new-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--imnota-accent-hover);
+  font-size: 12px;
+}
+.whats-new-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 22px 22px;
+}
+.modal:has(.whats-new-dialog) {
+  width: min(100%, 1000px);
+}
+.whats-new-preview {
+  color: var(--imnota-accent-hover);
+  font-size: 12px;
+  font-weight: 650;
+}
 .terminal-update-command {
   width: 100%;
   color: var(--ink-2);
@@ -2402,12 +2489,6 @@ kbd {
   align-items: center;
   gap: 8px;
 }
-/* Lower-left fallback while the workspace navigation is hidden. */
-.floating-update-floating {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-}
 .floating-update-button {
   width: 42px;
   height: 42px;
@@ -2428,6 +2509,18 @@ kbd {
   box-shadow: none;
 }
 .floating-update-nav .floating-update-percent {
+  display: none;
+}
+.floating-update-topbar {
+  flex: none;
+}
+.floating-update-topbar .floating-update-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.floating-update-topbar .floating-update-percent {
   display: none;
 }
 .floating-update-available .floating-update-button,

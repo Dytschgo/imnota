@@ -13,6 +13,9 @@ import { backupPreferencesSchema } from './backups.js';
 const shortcutValueSchema = z.string().max(100).nullable();
 const capturePreferencesSchema = z.object({ experimentalRegionCapture: z.boolean() }).strict();
 const workbenchPreferencesSchema = z.object({ screenshotFirstAdd: z.boolean() }).strict();
+const updatePreferencesSchema = z
+  .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
+  .strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -66,6 +69,7 @@ export const preferenceSettingsSchema = z
       .object({ completed: z.boolean(), completedVersion: z.number().int().nonnegative() })
       .strict(),
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
+    updates: updatePreferencesSchema.default({}),
   })
   .strict();
 
@@ -94,6 +98,7 @@ export const preferenceSettingsUpdateSchema = z
     capture: capturePreferencesSchema.partial().strict().optional(),
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
     workbench: workbenchPreferencesSchema.partial().strict().optional(),
+    updates: updatePreferencesSchema.partial().strict().optional(),
   })
   .strict();
 
@@ -105,6 +110,7 @@ function cloneDefaults(): PreferenceSettings {
     capture: { ...DEFAULT_PREFERENCE_SETTINGS.capture },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
+    updates: { ...DEFAULT_PREFERENCE_SETTINGS.updates },
   };
 }
 
@@ -182,6 +188,7 @@ export function mergePreferenceSettings(
     capture: { ...current.capture, ...update.capture },
     onboarding: { ...current.onboarding, ...update.onboarding },
     workbench: { ...current.workbench, ...update.workbench },
+    updates: { ...current.updates, ...update.updates },
   });
 }
 

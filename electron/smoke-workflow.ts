@@ -9,6 +9,7 @@ import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/prefer
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
+import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
@@ -391,6 +392,35 @@ async function exerciseOnboarding(
   for (const label of ['Open files', 'Open export folder'])
     await driver.waitFor({ text: label, exact: true });
   return true;
+}
+
+async function exerciseWhatsNew(
+  driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
+  version: string,
+  artifactDirectory: string | undefined,
+  artifacts: SmokeCapture[],
+): Promise<void> {
+  if (!findWhatsNewRelease(version)) return;
+  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png'));
+  await driver.click({ text: 'Later', exact: true });
+  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
+  await driver.click({ text: 'Updates & about', exact: true });
+  await driver.click({ text: 'Replay what’s new', exact: true });
+  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
+  // The middle card is the guided handoff. Its action must close this dialog before opening onboarding.
+  await driver.evaluate(
+    `Array.from(document.querySelectorAll('[data-testid="whats-new-dialog"] .whats-new-card button'))[1]?.click()`,
+  );
+  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
+  await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
+  await clickAny(driver, [{ selector: '.imnota-onboarding-dismiss' }, { text: 'Skip guide', exact: true }]);
+  await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' }, { absent: true });
+  driver.setWindow(await host.reopenWindow());
+  await driver.waitFor({ selector: '.workspace' });
+  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
 }
 
 async function importImages(
@@ -1847,6 +1877,9 @@ export async function runSmokeWorkflow(
   await exerciseOnboarding(driver, artifactDirectory, artifacts);
   assertions.push('onboarding exact Markdown/HTML/PNG handoff and independent clipboard fallbacks');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
+  await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
+  if (findWhatsNewRelease(options.version))
+    assertions.push('eligible nightly What’s new, replay, Later and guided handoff');
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: 'button[aria-label="Rename"]' });

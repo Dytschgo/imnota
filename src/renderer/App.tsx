@@ -52,6 +52,8 @@ import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from 
 import './app/project-management.css';
 import { ContentSearchResults } from './search/ContentSearchResults';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
+import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
+import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
 import { CaptureDisplayDialog } from './capture/CaptureDisplayDialog';
 
 export { CollectionControls } from './collection/CollectionRail';
@@ -98,6 +100,7 @@ export default function App() {
     null,
   );
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [snapshotNotice, setSnapshotNotice] = useState<SnapshotNotice | null>(null);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
@@ -114,6 +117,7 @@ export default function App() {
   const metadataTimer = useRef<number | null>(null);
   const allowClose = useRef(false);
   const copiedAnnotation = useRef<Annotation | null>(null);
+  const dismissedWhatsNewVersion = useRef<string | null>(null);
   const navigationIdentity = useRef(0);
   const [searchTarget, setSearchTarget] = useState<{
     result: ContentSearchResult;
@@ -301,6 +305,43 @@ export default function App() {
     )
       setShowOnboarding(true);
   }, [preferences.result]);
+
+  const whatsNewRelease = findWhatsNewRelease(updateStatus?.currentVersion);
+  const onboardingPending =
+    preferences.result &&
+    shouldShowOnboarding(preferences.result.settings.onboarding, preferences.result.profile);
+  useEffect(() => {
+    if (
+      dialog ||
+      captureDisplayChoices ||
+      snapshotNotice ||
+      searchDialogOpen ||
+      onboardingPending ||
+      showOnboarding ||
+      !preferences.result ||
+      !whatsNewRelease
+    )
+      return;
+    if (
+      shouldShowWhatsNew(
+        updateStatus?.currentVersion,
+        preferences.result.settings.updates.whatsNewAcknowledgedVersion,
+        whatsNewRelease,
+      ) &&
+      dismissedWhatsNewVersion.current !== updateStatus?.currentVersion
+    )
+      setShowWhatsNew(true);
+  }, [
+    captureDisplayChoices,
+    dialog,
+    onboardingPending,
+    preferences.result,
+    searchDialogOpen,
+    showOnboarding,
+    snapshotNotice,
+    updateStatus?.currentVersion,
+    whatsNewRelease,
+  ]);
 
   useEffect(() => {
     document.documentElement.style.fontSize = `${store.settings.interfaceScale * 100}%`;
@@ -1348,6 +1389,26 @@ export default function App() {
       setError('The update could not be downloaded.');
     }
   }
+  function acknowledgeWhatsNew() {
+    setShowWhatsNew(false);
+    const version = updateStatus?.currentVersion;
+    if (!version) return;
+    dismissedWhatsNewVersion.current = version;
+    void preferences
+      .saveUpdates({ ...preferences.settings.updates, whatsNewAcknowledgedVersion: version })
+      // Closing this optional guidance must not block the app. A failed save is retried on the next launch.
+      .catch(() => undefined);
+  }
+  function handleWhatsNewAction(action: WhatsNewAction) {
+    acknowledgeWhatsNew();
+    if (!action) return;
+    if (action.kind === 'onboarding') {
+      setShowOnboarding(true);
+      return;
+    }
+    setSettingsCategory(action.category);
+    void navigate('settings');
+  }
   async function toggleFavourite() {
     if (!store.snapshot) return;
     queueProjectSave({
@@ -1544,6 +1605,9 @@ export default function App() {
             status={updateStatus}
             placement={placement}
             onDownload={downloadUpdate}
+            onCheck={() =>
+              window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
+            }
             onRetry={() =>
               window.imnota.checkForUpdates().catch(() => setError('Could not check for updates. Try again.'))
             }
@@ -1693,6 +1757,9 @@ export default function App() {
             onCaptureChange={preferences.saveCapture}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
+            updateStatus={updateStatus}
+            onReplayWhatsNew={() => setShowWhatsNew(true)}
+            onWhatsNewAction={handleWhatsNewAction}
             onInstall={async () => {
               checkpointSession();
               await installUpdate();
@@ -1942,6 +2009,14 @@ export default function App() {
             setDialog('new-project');
           }}
           onDismiss={() => setShowOnboarding(false)}
+        />
+      )}
+      {!showOnboarding && showWhatsNew && whatsNewRelease && (
+        <WhatsNewDialog
+          release={whatsNewRelease}
+          onClose={acknowledgeWhatsNew}
+          onLater={acknowledgeWhatsNew}
+          onAction={handleWhatsNewAction}
         />
       )}
     </>

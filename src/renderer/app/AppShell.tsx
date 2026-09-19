@@ -24,8 +24,8 @@ export interface AppShellProps {
   onDropFiles?(files: FileList): void | Promise<void>;
   onSelectProject?(projectPath: string): void | Promise<void>;
   navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites', string>>;
-  /** Rendered beside About while navigation is open; otherwise shown lower-left. */
-  renderUpdateControl?(placement: 'nav' | 'floating'): ReactNode;
+  /** Rendered beside About while navigation is open; otherwise in the top bar. */
+  renderUpdateControl?(placement: 'nav' | 'topbar'): ReactNode;
 }
 
 export function AppShell({
@@ -96,7 +96,6 @@ export function AppShell({
         onSelectProject={onSelectProject}
         updateControl={store.navigationOpen ? renderUpdateControl?.('nav') : undefined}
       />
-      {!store.navigationOpen && renderUpdateControl?.('floating')}
       <main className="main-shell">
         <header className="topbar">
           {!store.navigationOpen && (
@@ -108,6 +107,7 @@ export function AppShell({
               <PanelLeft size={16} aria-hidden="true" />
             </IconButton>
           )}
+          {!store.navigationOpen && renderUpdateControl?.('topbar')}
           <div className="topbar-navigation" aria-label="Navigation history">
             <IconButton label="Back" disabled={!canGoBack} onClick={() => void onBack?.()}>
               <ArrowLeft size={16} aria-hidden="true" />

@@ -1280,10 +1280,15 @@ describe('feedback controls', () => {
     expect(startRegionCapture).not.toHaveBeenCalled();
   });
 
-  it('opens the same Windows display chooser from the capture shortcut', async () => {
+  it('opens the Windows chooser from the shortcut and defers release guidance until cancellation', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn();
+    let emitUpdateStatus: Parameters<ImnotaBridge['onUpdateStatus']>[0] | undefined;
     await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdateStatus = handler;
+        return () => {};
+      },
       getPreferenceSettings: async () => ({
         ok: true,
         value: {
@@ -1319,7 +1324,10 @@ describe('feedback controls', () => {
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole('dialog', { name: 'Choose a display' })).toBeInTheDocument();
     expect(startRegionCapture).not.toHaveBeenCalled();
+    act(() => emitUpdateStatus?.({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }));
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
   });
 
   it('rechecks the project target after display choice before starting capture', async () => {
@@ -2175,5 +2183,54 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Interface scale' }), { target: { value: '1.1' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('This preference could not be saved');
+  });
+
+  it('shows eligible release guidance once and leaves Later available when acknowledgement persistence fails', async () => {
+    const preferences = {
+      ...DEFAULT_PREFERENCE_SETTINGS,
+      updates: { whatsNewAcknowledgedVersion: undefined },
+    };
+    const savePreferences = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'io-failure' as const, message: 'disk unavailable', retryable: true },
+    }));
+    renderApp({
+      getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }),
+      getPreferenceSettings: async () => ({
+        ok: true as const,
+        value: {
+          settings: preferences,
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      setPreferenceSettings: savePreferences,
+    });
+
+    expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(savePreferences).toHaveBeenCalledWith({ updates: { whatsNewAcknowledgedVersion: '0.2.8' } }),
+    );
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+  });
+
+  it('does not reopen acknowledged guidance on a repeat launch', async () => {
+    renderApp({
+      getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }),
+      getPreferenceSettings: async () => ({
+        ok: true as const,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            updates: { whatsNewAcknowledgedVersion: '0.2.8' },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    await screen.findByTestId('app-shell');
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
   });
 });

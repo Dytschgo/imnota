@@ -13,6 +13,9 @@ import { parseProjectFile } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { BackupService, backupReservedProjectDirectory } from './backup-service.js';
 
+// Multiple durable publications can exceed five seconds on a busy Windows disk.
+const DURABLE_FILESYSTEM_TIMEOUT = 15_000;
+
 let temporaryRoot = '';
 let workspace = '';
 let backupParent = '';
@@ -410,24 +413,28 @@ describe('BackupService', () => {
     expect((await backups.listSnapshots()).snapshots).toHaveLength(1);
   });
 
-  it('applies count and age retention while leaving invalid snapshots untouched', async () => {
-    const fixture = await writeProject();
-    preferences = { ...preferences, retentionCount: 2, retentionAgeDays: 3650 };
-    const backups = service();
-    const first = await backups.createSnapshot(fixture.projectPath, 'manual');
-    clock = new Date('2026-09-14T12:00:00.000Z');
-    await backups.createSnapshot(fixture.projectPath, 'manual');
-    clock = new Date('2026-09-15T12:00:00.000Z');
-    await backups.createSnapshot(fixture.projectPath, 'manual');
-    expect((await backups.listSnapshots()).snapshots).toHaveLength(2);
-    await expect(backups.inspectSnapshot(first.snapshotId)).rejects.toThrow('not found');
+  it(
+    'applies count and age retention while leaving invalid snapshots untouched',
+    async () => {
+      const fixture = await writeProject();
+      preferences = { ...preferences, retentionCount: 2, retentionAgeDays: 3650 };
+      const backups = service();
+      const first = await backups.createSnapshot(fixture.projectPath, 'manual');
+      clock = new Date('2026-09-14T12:00:00.000Z');
+      await backups.createSnapshot(fixture.projectPath, 'manual');
+      clock = new Date('2026-09-15T12:00:00.000Z');
+      await backups.createSnapshot(fixture.projectPath, 'manual');
+      expect((await backups.listSnapshots()).snapshots).toHaveLength(2);
+      await expect(backups.inspectSnapshot(first.snapshotId)).rejects.toThrow('not found');
 
-    preferences = { ...preferences, retentionCount: 100, retentionAgeDays: 7 };
-    const old = (await backups.listSnapshots()).snapshots.at(-1)!;
-    clock = new Date('2026-10-15T12:00:00.000Z');
-    await backups.createSnapshot(fixture.projectPath, 'manual');
-    await expect(backups.inspectSnapshot(old.snapshotId)).rejects.toThrow('not found');
-  }, 15_000); // Several durable publications can exceed five seconds on a busy Windows disk.
+      preferences = { ...preferences, retentionCount: 100, retentionAgeDays: 7 };
+      const old = (await backups.listSnapshots()).snapshots.at(-1)!;
+      clock = new Date('2026-10-15T12:00:00.000Z');
+      await backups.createSnapshot(fixture.projectPath, 'manual');
+      await expect(backups.inspectSnapshot(old.snapshotId)).rejects.toThrow('not found');
+    },
+    DURABLE_FILESYSTEM_TIMEOUT,
+  );
 
   it('keeps an unregistered copied snapshot readable but never removes it through retention', async () => {
     const fixture = await writeProject();
@@ -594,7 +601,7 @@ describe('BackupService', () => {
       expect(latest.warnings).toBeUndefined();
       expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
     },
-    15_000,
+    DURABLE_FILESYSTEM_TIMEOUT,
   );
 
   it.each(['ledger update', 'journal cleanup'] as const)(
@@ -648,6 +655,7 @@ describe('BackupService', () => {
       expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
       await expect(fs.stat(pending.record)).rejects.toMatchObject({ code: 'ENOENT' });
     },
+    DURABLE_FILESYSTEM_TIMEOUT,
   );
 
   it('leaves invalid snapshots and unjournaled quarantine or unknown folders untouched', async () => {

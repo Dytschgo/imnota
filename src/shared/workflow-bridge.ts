@@ -42,6 +42,7 @@ export interface PreferenceSettingsUpdate {
   capture?: Partial<PreferenceSettings['capture']>;
   onboarding?: Partial<PreferenceSettings['onboarding']>;
   workbench?: Partial<PreferenceSettings['workbench']>;
+  updates?: Partial<PreferenceSettings['updates']>;
 }
 
 export interface NativePerformanceProfile {
