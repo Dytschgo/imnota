@@ -47,6 +47,7 @@ export interface PromptBundleActionRequest {
 export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
+  fileClipboardAvailable?: boolean;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
   onPrepareFreshFiles(request: PromptBundleActionRequest): void | Promise<void>;
@@ -80,6 +81,7 @@ function pictureLabel(numbers: readonly number[]): string {
 export function PromptBundleCard({
   bundle,
   disabled = false,
+  fileClipboardAvailable = false,
   onCopyFresh,
   onCopyVariant,
   onPrepareFreshFiles,
@@ -226,36 +228,46 @@ export function PromptBundleCard({
         </button>
         <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
           {bundle.delivery === 'clipboard' ? (
-            <div className="prompt-bundle-variants" aria-label="Windows copy comparison">
+            <div
+              className={`prompt-bundle-variants${fileClipboardAvailable ? '' : ' is-rich-only'}`}
+              role="group"
+              aria-label="Copy format"
+            >
               <Button
                 data-testid={`copy-bundle-${bundle.bundleNumber}`}
                 className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
                 variant="primary"
+                aria-label="Rich copy"
                 busy={busy}
                 disabled={disabled}
                 title="Markdown text, HTML, and PNG formats"
                 onClick={() => void onCopyFresh(request)}
               >
                 {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                Rich copy
+                <span>Rich copy</span>
+                <small>Text + image</small>
               </Button>
-              {bundle.pictureNumbers.length > 0 && (
+              {fileClipboardAvailable && bundle.pictureNumbers.length > 0 && (
                 <>
                   <Button
                     variant="soft"
+                    aria-label="Copy files"
                     disabled={disabled || !onCopyVariant}
                     title="Markdown and PNG as file attachments"
                     onClick={() => void onCopyVariant?.(request, 'files')}
                   >
-                    Copy files
+                    <span>Copy files</span>
+                    <small>MD + PNG files</small>
                   </Button>
                   <Button
                     variant="soft"
+                    aria-label="Files + rich copy"
                     disabled={disabled || !onCopyVariant}
                     title="File attachments plus Markdown, HTML, and PNG formats"
                     onClick={() => void onCopyVariant?.(request, 'files-rich')}
                   >
-                    Files + rich copy
+                    <span>Files + rich copy</span>
+                    <small>Both</small>
                   </Button>
                 </>
               )}

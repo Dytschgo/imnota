@@ -44,6 +44,7 @@ export interface OnboardingBundle {
 }
 
 export interface OnboardingDemoProps {
+  fileClipboardAvailable?: boolean;
   onMarkCompleted: (
     preferences: OnboardingPreferences,
     reason: OnboardingCompletionReason,
@@ -67,6 +68,7 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
 ];
 
 export function OnboardingDemo({
+  fileClipboardAvailable = false,
   onMarkCompleted,
   onCreateFirstProject,
   onDismiss,
@@ -397,34 +399,49 @@ export function OnboardingDemo({
                   description, and text notes. Clipboard access is optional in this practice guide.
                 </p>
                 <pre>{bundle.markdown}</pre>
-                <div className="imnota-copy-variants" aria-label="Windows copy comparison">
+                <div
+                  className={`imnota-copy-variants${fileClipboardAvailable ? '' : ' is-rich-only'}`}
+                  role="group"
+                  aria-label="Copy format"
+                >
                   <button
                     type="button"
                     className="imnota-onboarding-primary"
+                    aria-label="Rich copy"
                     title="Markdown text, HTML, and PNG formats"
                     onClick={() => void copyBundle('rich')}
                     disabled={busy}
                   >
-                    <Clipboard size={15} aria-hidden="true" /> Rich copy
+                    <Clipboard size={15} aria-hidden="true" />
+                    <span>Rich copy</span>
+                    <small>Text + image</small>
                   </button>
-                  <button
-                    type="button"
-                    className="imnota-onboarding-secondary"
-                    title="Markdown and PNG as file attachments"
-                    onClick={() => void copyBundle('files')}
-                    disabled={busy}
-                  >
-                    Copy files
-                  </button>
-                  <button
-                    type="button"
-                    className="imnota-onboarding-secondary"
-                    title="File attachments plus Markdown, HTML, and PNG formats"
-                    onClick={() => void copyBundle('files-rich')}
-                    disabled={busy}
-                  >
-                    Files + rich copy
-                  </button>
+                  {fileClipboardAvailable && (
+                    <>
+                      <button
+                        type="button"
+                        className="imnota-onboarding-secondary"
+                        aria-label="Copy files"
+                        title="Markdown and PNG as file attachments"
+                        onClick={() => void copyBundle('files')}
+                        disabled={busy}
+                      >
+                        <span>Copy files</span>
+                        <small>MD + PNG files</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="imnota-onboarding-secondary"
+                        aria-label="Files + rich copy"
+                        title="File attachments plus Markdown, HTML, and PNG formats"
+                        onClick={() => void copyBundle('files-rich')}
+                        disabled={busy}
+                      >
+                        <span>Files + rich copy</span>
+                        <small>Both</small>
+                      </button>
+                    </>
+                  )}
                 </div>
                 {copyStatus && (
                   <div className="imnota-copy-success" role="status">

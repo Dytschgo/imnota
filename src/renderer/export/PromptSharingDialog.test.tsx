@@ -5,6 +5,7 @@ import { PromptSharingDialog } from './PromptSharingDialog';
 afterEach(cleanup);
 
 const baseProps = {
+  fileClipboardAvailable: true,
   onClose: vi.fn(),
   onCopyFresh: vi.fn(),
   onPrepareFreshFiles: vi.fn(),

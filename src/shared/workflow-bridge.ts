@@ -52,6 +52,11 @@ export interface NativePerformanceProfile {
   reasons: readonly ('low-memory' | 'low-cpu-count' | 'unknown-platform')[];
 }
 
+export interface NativeCapabilities {
+  /** True only when the running desktop host can write native Windows file clipboard entries. */
+  windowsFileClipboard: boolean;
+}
+
 export interface PromptExportSessionInfo {
   sessionId: string;
   collectionId: string;
@@ -193,6 +198,7 @@ export interface WorkflowBridge {
   getPreferenceSettings(): Promise<WorkflowResult<PreferenceSettingsResult>>;
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
+  getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
     projectPath: string;

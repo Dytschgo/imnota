@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 
 const CF_BITMAP = 2;
 const CF_HDROP = 15;
@@ -10,8 +11,16 @@ const IMAGE_BITMAP = 0;
 const LR_CREATEDIBSECTION = 0x2000;
 const DROPFILES_BYTES = 20;
 const MAX_SNAPSHOT_FORMATS = 64;
-const MAX_SNAPSHOT_FORMAT_BYTES = 32 * 1024 * 1024;
-const MAX_SNAPSHOT_TOTAL_BYTES = 64 * 1024 * 1024;
+/**
+ * A two-display 6880x1440 BGRA surface is about 40 MB. Keep enough room for
+ * each representation and three common image representations while retaining
+ * a hard ceiling below the application's full 64 MP capture allocation.
+ */
+export const WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES = Math.min(
+  128 * 1024 * 1024,
+  MAX_CAPTURE_PIXELS * 4,
+);
+export const WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES = WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES * 3;
 const MAX_WINDOWS_PATH_CHARACTERS = 32_767;
 
 const STANDARD_GLOBAL_FORMATS = new Set([1, 4, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 17]);
@@ -95,6 +104,16 @@ function loadKoffi(): KoffiModule {
         : undefined;
   if (!packageName) throw new Error(`Windows file clipboard is unavailable on ${process.arch}.`);
   return createRequire(import.meta.url)(packageName) as KoffiModule;
+}
+
+export function windowsFileClipboardAvailable(platform = process.platform): boolean {
+  if (platform !== 'win32') return false;
+  try {
+    loadWindowsClipboardApi();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function loadWindowsClipboardApi(): WindowsClipboardApi {
@@ -300,10 +319,14 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
         if (api.getObject(source, bitmapInfo.length, bitmapInfo) !== bitmapInfo.length)
           throw new Error('The existing clipboard bitmap dimensions could not be read safely.');
         const bitmapBytes = Math.abs(bitmapInfo.readInt32LE(8)) * Math.abs(bitmapInfo.readInt32LE(12));
-        if (!Number.isSafeInteger(bitmapBytes) || bitmapBytes <= 0 || bitmapBytes > MAX_SNAPSHOT_FORMAT_BYTES)
+        if (
+          !Number.isSafeInteger(bitmapBytes) ||
+          bitmapBytes <= 0 ||
+          bitmapBytes > WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES
+        )
           throw new Error('The existing clipboard bitmap is too large to restore safely.');
         totalBytes += bitmapBytes;
-        if (totalBytes > MAX_SNAPSHOT_TOTAL_BYTES)
+        if (totalBytes > WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES)
           throw new Error('The existing clipboard is too large to restore safely.');
         const bitmap = api.copyImage(source, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
         if (!truthyHandle(bitmap)) throw new Error('The existing clipboard bitmap could not be captured.');
@@ -321,10 +344,10 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
             : `Clipboard format ${format} cannot be restored safely.`,
         );
       const bytes = api.globalSize(source);
-      if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > MAX_SNAPSHOT_FORMAT_BYTES)
+      if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES)
         throw new Error(`Clipboard format ${format} is too large to restore safely.`);
       totalBytes += bytes;
-      if (totalBytes > MAX_SNAPSHOT_TOTAL_BYTES)
+      if (totalBytes > WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES)
         throw new Error('The existing clipboard is too large to restore safely.');
       snapshot.push({ format, handle: cloneGlobal(api, source), kind: 'global' });
     }
