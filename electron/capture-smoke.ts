@@ -31,13 +31,15 @@ async function waitForPaint(driver: NativeUiDriver): Promise<void> {
 async function waitForCaptureOverlay(mainWindow: BrowserWindow): Promise<BrowserWindow> {
   const started = Date.now();
   do {
-    const overlay = BrowserWindow.getAllWindows().find(
-      (window) =>
-        window !== mainWindow &&
-        !window.isDestroyed() &&
-        window.webContents.getURL().includes('capture-overlay.html'),
-    );
-    if (overlay) return overlay;
+    const overlays = captureOverlayWindows(mainWindow);
+    const expected = process.platform === 'win32' ? screen.getAllDisplays().length : 1;
+    if (overlays.length === expected && overlays.every((window) => window.isVisible())) {
+      const display = screen.getDisplayMatching(mainWindow.getBounds());
+      return (
+        overlays.find((window) => screen.getDisplayMatching(window.getBounds()).id === display.id) ??
+        overlays[0]!
+      );
+    }
     await delay(50);
   } while (Date.now() - started < 15_000);
   throw new Error('Synthetic capture overlay did not open.');
@@ -50,6 +52,24 @@ async function waitForClosed(window: BrowserWindow, label: string): Promise<void
     await delay(50);
   } while (Date.now() - started < 15_000);
   throw new Error(`${label} remains active.`);
+}
+
+function captureOverlayWindows(mainWindow: BrowserWindow): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter(
+    (window) =>
+      window !== mainWindow &&
+      !window.isDestroyed() &&
+      window.webContents.getURL().includes('capture-overlay.html'),
+  );
+}
+
+async function waitForAllCaptureOverlaysClosed(mainWindow: BrowserWindow, label: string): Promise<void> {
+  const started = Date.now();
+  do {
+    if (captureOverlayWindows(mainWindow).length === 0) return;
+    await delay(50);
+  } while (Date.now() - started < 15_000);
+  throw new Error(`${label} left another display overlay active.`);
 }
 
 async function screenshotFiles(projectPath: string): Promise<string[]> {
@@ -150,14 +170,8 @@ async function startCapture(
 ): Promise<NativeUiDriver> {
   if (trigger === 'shortcut') await driver.press('5', ['control', 'shift']);
   else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
-  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    const display = screen.getDisplayMatching(driver.browserWindow.getBounds());
-    await driver.click({ selector: `[data-display-id="${display.id}"]` });
-  }
   const overlay = await waitForCaptureOverlay(driver.browserWindow);
   const overlayDriver = new NativeUiDriver(overlay);
-  await waitForPaint(overlayDriver);
   await overlayDriver.waitFor({ selector: '.capture-overlay' });
   const display = screen.getDisplayMatching(overlay.getBounds());
   await overlayDriver.evaluate(`new Promise((resolve, reject) => {
@@ -215,6 +229,7 @@ export async function exerciseRegionCapture(
   const cancelledWindow = overlay.browserWindow;
   await overlay.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(cancelledWindow, 'Cancelled capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Cancelled capture');
   await waitForPaint(driver);
   await driver.waitFor({ selector: '[data-testid="annotation-canvas"]' });
   const afterCancel = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length);
@@ -234,6 +249,7 @@ export async function exerciseRegionCapture(
   const savedOverlay = overlay.browserWindow;
   await overlay.click({ selector: '[data-action="save"]' });
   await waitForClosed(savedOverlay, 'Saved capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved capture');
   await waitForPaint(driver);
   await driver.waitFor({ selector: '[data-testid="annotation-canvas"]' });
   const afterSave = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 1);
