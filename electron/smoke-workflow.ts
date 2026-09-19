@@ -313,7 +313,7 @@ async function exerciseOnboarding(
     process.platform === 'win32'
       ? 'Markdown and image formats were confirmed on the clipboard. Imnota also opened the generated folder with the Markdown and PNG selected for attachment.'
       : 'Text and image are on the clipboard. Check that both appear after pasting; some apps accept only one.';
-  await driver.waitFor({ text: combinedStatus, exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: combinedStatus, exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
   const candidates = await Promise.all(
