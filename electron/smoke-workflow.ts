@@ -1,5 +1,5 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
-import { nativeClipboard } from './native-clipboard.js';
+import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -364,9 +364,9 @@ async function exerciseOnboarding(
   };
   if (
     (await nativeClipboard.readText()) !== markdown ||
-    (await nativeClipboard.readHTML()) !== clipboardContextHtml(markdown)
+    (await nativeClipboard.readHTML()) !== platformClipboardHtml(clipboardContextHtml(markdown))
   )
-    throw new Error('Onboarding combined copy did not preserve exact Markdown and HTML.');
+    throw new Error('Onboarding combined copy did not preserve exact Markdown and platform HTML.');
   await assertExactImage('Onboarding combined copy');
 
   await driver.click({ text: 'Copy Markdown', exact: true });

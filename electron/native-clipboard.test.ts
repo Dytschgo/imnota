@@ -6,6 +6,7 @@ import {
   deliverClipboardWithFileHandoff,
   nativeClipboard,
   openWindowsFileHandoff,
+  platformClipboardHtml,
 } from './native-clipboard.js';
 
 const mocks = vi.hoisted(() => ({
@@ -187,6 +188,13 @@ describe('main-process clipboard completion', () => {
       image: false,
     });
     expect(mocks.clipboard.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('recognizes only the exact HTML representation produced by each native platform', () => {
+    const html = '<pre>Markdown</pre>';
+    expect(platformClipboardHtml(html, 'darwin')).toBe(`<meta charset='utf-8'>${html}`);
+    expect(platformClipboardHtml(html, 'win32')).toBe(html);
+    expect(platformClipboardHtml(html, 'linux')).toBe(html);
   });
 
   it('serializes app-owned writes so a later fallback cannot overtake verification', async () => {

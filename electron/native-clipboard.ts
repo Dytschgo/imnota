@@ -84,6 +84,11 @@ function sameImage(left: NativeImage, right: NativeImage): boolean {
   );
 }
 
+/** Chromium adds this metadata when HTML crosses the macOS pasteboard boundary. */
+export function platformClipboardHtml(html: string, platform = process.platform): string {
+  return platform === 'darwin' ? `<meta charset='utf-8'>${html}` : html;
+}
+
 async function verifiedContext(
   text: string,
   html: string,
@@ -98,7 +103,7 @@ async function verifiedContext(
   ]);
   return {
     text: textResult.status === 'fulfilled' && textResult.value === text,
-    html: htmlResult.status === 'fulfilled' && htmlResult.value === html,
+    html: htmlResult.status === 'fulfilled' && htmlResult.value === platformClipboardHtml(html),
     image: imageResult.status === 'fulfilled' && sameImage(imageResult.value, image),
   };
 }
