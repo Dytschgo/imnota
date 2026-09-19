@@ -325,7 +325,7 @@ async function exerciseOnboarding(
           !previousHandoffDirectories.has(entry.name),
       )
       .map(async (entry) => {
-        const directory = path.join(handoffRoot, entry.name);
+        const directory = await fs.realpath(path.join(handoffRoot, entry.name));
         const stat = await fs.stat(directory);
         return { directory, modified: stat.mtimeMs };
       }),
