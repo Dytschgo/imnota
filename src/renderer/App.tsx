@@ -1421,6 +1421,10 @@ export default function App() {
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
+  const captureEnabled =
+    preferences.settings.capture.experimentalRegionCapture &&
+    platform !== 'linux' &&
+    Boolean(activeCaptureCollection && !activeCaptureCollection.archived);
   const captureDisabledLabel =
     platform === 'linux'
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
@@ -1460,7 +1464,9 @@ export default function App() {
         setSelectedAnnotationId(copy.id);
       } else void pasteImage();
     },
-    'capture.region': () => void captureRegion(),
+    'capture.region': () => {
+      if (captureEnabled) void captureRegion();
+    },
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {
         changeAnnotations(persistence.annotations.filter((item) => item.id !== selectedAnnotationId));
@@ -1816,13 +1822,9 @@ export default function App() {
             onRedo={redoAnnotations}
             onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
             onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
-            onCapture={() => void captureRegion()}
+            onCapture={captureEnabled ? () => void captureRegion() : undefined}
             capturePrimary={platform === 'windows'}
-            captureEnabled={
-              preferences.settings.capture.experimentalRegionCapture &&
-              platform !== 'linux' &&
-              Boolean(activeCaptureCollection && !activeCaptureCollection.archived)
-            }
+            captureEnabled={captureEnabled}
             captureShortcut={
               resolvedShortcuts['capture.region'] ? shortcutLabel('capture.region') : undefined
             }
