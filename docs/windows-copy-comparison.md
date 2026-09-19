@@ -13,15 +13,17 @@ Use this sheet to choose the Windows copy behavior that feels best in your apps.
 
 ## Prepare one small bundle
 
-1. Create a disposable Imnota project called **Copy comparison**.
-2. Capture a harmless screen, add a visible rectangle or arrow, and write this explanation:
+1. Open **Settings → Updates & about → Replay guide**. Choose **Use sample screenshot**, then **Add guided note**. This prepares a local sample without adding files to your workspace.
+2. Add this marker to the sample explanation, then choose **Continue to copy**:
 
    > COPY-CHECK-01 — Keep the purple button. Move the marked label below it. This sentence and the annotated image belong together.
 
-3. Use one screenshot and one output bundle for the first round. Reuse it for every variant so you can compare the results fairly.
+3. Keep the guide open on its copy step and reuse that same sample for every variant. You can leave the guide without creating a project.
 4. Open a blank note, scratch file, or new unsent chat in the receiving app. Use a test vault/folder for file imports.
 
 Keep chat messages as drafts. You do not need to send anything to compare the pasted text, image preview, or attachments.
+
+After choosing a favorite, repeat that option with a disposable project called **Copy comparison**, one harmless screenshot, an annotation, and the same explanation. This checks the normal **Copy Bundle** flow as well as the guide.
 
 ## Try each copy variant
 
