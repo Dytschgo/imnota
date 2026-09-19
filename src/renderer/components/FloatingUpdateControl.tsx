@@ -60,7 +60,6 @@ export function FloatingUpdateControl({
   };
   const openPopover = () => {
     cancelClose();
-    setPopoverStyle(undefined);
     setOpen(true);
   };
   const close = (returnFocus = false) => {

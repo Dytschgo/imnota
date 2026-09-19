@@ -51,9 +51,13 @@ it('keeps release notes in a reachable hover panel and closes it with Escape', (
 
   const download = screen.getByRole('button', { name: 'Download update' });
   expect(screen.queryByRole('dialog', { name: 'Update status' })).not.toBeInTheDocument();
+  fireEvent.pointerEnter(screen.getByTestId('update-indicator'));
+  const initialPanel = screen.getByRole('dialog', { name: 'Update status' });
+  expect(initialPanel).toHaveStyle({ visibility: 'visible' });
   fireEvent.focus(download);
-  expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent('What’s changed');
-  expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent('Keeps the panel readable');
+  expect(initialPanel).toHaveStyle({ visibility: 'visible' });
+  expect(initialPanel).toHaveTextContent('What’s changed');
+  expect(initialPanel).toHaveTextContent('Keeps the panel readable');
   expect(screen.getByRole('link', { name: /View release details/ })).toHaveAttribute(
     'href',
     'https://example.com/release',
