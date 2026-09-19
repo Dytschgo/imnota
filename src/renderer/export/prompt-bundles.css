@@ -180,11 +180,23 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
 }
+.prompt-bundle-variants.is-rich-only {
+  grid-template-columns: minmax(0, 1fr);
+}
 .prompt-bundle-variants .btn {
   min-width: 0;
   padding-inline: 7px;
   font-size: 10px;
   line-height: 1.2;
+  flex-wrap: wrap;
+  gap: 1px 4px;
+}
+
+.prompt-bundle-variants .btn small {
+  flex-basis: 100%;
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.8;
 }
 .prompt-bundle-primary .prompt-bundle-options {
   margin-top: 0;

@@ -40,6 +40,7 @@ describe('OnboardingDemo', () => {
     const onDismiss = vi.fn();
     render(
       <OnboardingDemo
+        fileClipboardAvailable
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={vi.fn()}
         onDismiss={onDismiss}
@@ -67,6 +68,7 @@ describe('OnboardingDemo', () => {
     }));
     render(
       <OnboardingDemo
+        fileClipboardAvailable
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={onCreateFirstProject}
         onPrepareHandoff={onPrepareHandoff}
@@ -109,6 +111,7 @@ describe('OnboardingDemo', () => {
     });
     render(
       <OnboardingDemo
+        fileClipboardAvailable
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={onCreateFirstProject}
         onPrepareHandoff={onPrepareHandoff}
@@ -142,6 +145,7 @@ describe('OnboardingDemo', () => {
     const onOpenHandoff = vi.fn(async () => {});
     render(
       <OnboardingDemo
+        fileClipboardAvailable
         onMarkCompleted={vi.fn()}
         onCreateFirstProject={vi.fn()}
         onPrepareHandoff={vi.fn(async () => grant)}
@@ -162,5 +166,24 @@ describe('OnboardingDemo', () => {
       expect(screen.getByRole('button', { name })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Open files' }));
     await waitFor(() => expect(onOpenHandoff).toHaveBeenCalledWith(grant, 'files'));
+  });
+
+  it('keeps onboarding rich copy available when native file clipboard support is absent', async () => {
+    render(
+      <OnboardingDemo
+        onMarkCompleted={vi.fn()}
+        onCreateFirstProject={vi.fn()}
+        onPrepareHandoff={vi.fn(async () => ({
+          sessionId: '00000000-0000-4000-8000-000000000001',
+          filenames: ['component-search.md', 'component-search.png'] as const,
+        }))}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    expect(await screen.findByRole('button', { name: 'Rich copy' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Copy files' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Files + rich copy' })).not.toBeInTheDocument();
   });
 });

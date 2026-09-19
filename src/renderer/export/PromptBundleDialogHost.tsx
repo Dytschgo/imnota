@@ -46,9 +46,11 @@ export interface PromptBundleUiController {
 export function PromptBundleDialogHost({
   controller,
   onError,
+  fileClipboardAvailable = false,
 }: {
   controller: PromptBundleUiController;
   onError(message: string): void;
+  fileClipboardAvailable?: boolean;
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
   const run = async (action: Promise<PromptActionResult>) => {
@@ -61,6 +63,7 @@ export function PromptBundleDialogHost({
       <PromptSharingDialog
         hidden={Boolean(controller.preview || hostedArtifacts)}
         bundles={controller.cards}
+        fileClipboardAvailable={fileClipboardAvailable}
         progress={controller.progress}
         error={controller.error}
         cleanupPending={controller.cleanupPending}

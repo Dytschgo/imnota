@@ -20,6 +20,7 @@ it('disables preview while another prompt operation is running', () => {
   render(
     <PromptBundleCard
       bundle={model()}
+      fileClipboardAvailable
       disabled
       onCopyFresh={vi.fn()}
       onPrepareFreshFiles={vi.fn()}
@@ -68,6 +69,7 @@ it('exposes both Windows file variants beside rich copy with stable IDs', () => 
   render(
     <PromptBundleCard
       bundle={model()}
+      fileClipboardAvailable
       onCopyFresh={vi.fn()}
       onCopyVariant={onCopyVariant}
       onPrepareFreshFiles={vi.fn()}
@@ -85,6 +87,16 @@ it('exposes both Windows file variants beside rich copy with stable IDs', () => 
     { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
     'files-rich',
   );
+  expect(screen.getByRole('group', { name: 'Copy format' })).toHaveTextContent(
+    'Rich copyText + imageCopy filesMD + PNG filesFiles + rich copyBoth',
+  );
+});
+
+it('keeps rich copy available without showing unsupported file clipboard variants', () => {
+  render(<PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />);
+  expect(screen.getByRole('button', { name: 'Rich copy' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Copy files' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Files + rich copy' })).not.toBeInTheDocument();
 });
 
 it('offers independent fallbacks before artifacts exist and an honest primary action for oversized prompts', () => {

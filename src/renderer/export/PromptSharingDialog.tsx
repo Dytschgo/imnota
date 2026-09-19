@@ -11,6 +11,7 @@ import './prompt-bundles.css';
 
 export interface PromptSharingDialogProps {
   hidden?: boolean;
+  fileClipboardAvailable?: boolean;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
   error?: { message: string };
@@ -51,6 +52,7 @@ function progressLabel(progress: PromptBundleProgress): string {
 export function PromptSharingDialog({
   bundles,
   hidden = false,
+  fileClipboardAvailable = false,
   progress,
   error,
   cleanupPending = false,
@@ -129,6 +131,7 @@ export function PromptSharingDialog({
                 key={`${bundle.planId}:${bundle.bundleNumber}`}
                 bundle={bundle}
                 disabled={busy}
+                fileClipboardAvailable={fileClipboardAvailable}
                 onCopyFresh={onCopyFresh}
                 onCopyVariant={onCopyVariant}
                 onPrepareFreshFiles={onPrepareFreshFiles}
@@ -145,9 +148,11 @@ export function PromptSharingDialog({
           <details className="prompt-sharing-info">
             <summary>Copying help</summary>
             <p>
-              The three Windows comparison options place different formats on the clipboard. The receiving app
-              decides which formats it accepts. File paths remain a separate plain-text fallback, and files
-              open only when you choose an Open action.
+              {fileClipboardAvailable
+                ? 'The three Windows comparison options place different formats on the clipboard. The receiving app decides which formats it accepts. '
+                : 'Rich copy places text and image formats on the clipboard. '}
+              File paths remain a separate plain-text fallback, and files open only when you choose an Open
+              action.
             </p>
           </details>
           <div>

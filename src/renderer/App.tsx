@@ -1977,7 +1977,11 @@ export default function App() {
           onCancel={() => settleCaptureDisplayChoice(null)}
         />
       )}
-      <PromptBundleDialogHost controller={promptBundles} onError={setError} />
+      <PromptBundleDialogHost
+        controller={promptBundles}
+        onError={setError}
+        fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+      />
       <SearchDialog
         open={searchDialogOpen}
         scope={searchScope}
@@ -1987,6 +1991,7 @@ export default function App() {
       />
       {showOnboarding && (
         <OnboardingDemo
+          fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
           onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>
             window.imnota.prepareOnboardingHandoff({
               markdown,

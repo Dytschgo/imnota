@@ -100,6 +100,10 @@ describe('feedback controls', () => {
           reasons: [],
         },
       }),
+      getNativeCapabilities: async () => ({
+        ok: true,
+        value: { windowsFileClipboard: true },
+      }),
       listCaptureDisplays: async () => ({
         ok: true,
         value: [

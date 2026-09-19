@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   loadWindowsClipboardApi,
   readWindowsClipboardFiles,
+  WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES,
+  WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES,
+  windowsFileClipboardAvailable,
   windowsDibV5Buffer,
   windowsDropFilesBuffer,
   windowsHtmlBuffer,
@@ -12,6 +15,11 @@ import {
   writeWindowsClipboard,
   type WindowsClipboardApi,
 } from './windows-clipboard.js';
+
+it('reports file clipboard variants unavailable outside Windows', () => {
+  expect(windowsFileClipboardAvailable('darwin')).toBe(false);
+  expect(windowsFileClipboardAvailable('linux')).toBe(false);
+});
 
 interface MockNative {
   api: WindowsClipboardApi;
@@ -101,6 +109,14 @@ const pair = [
 ] as const;
 
 describe('Windows clipboard payloads', () => {
+  it('keeps three uncompressed dual-3440x1440 image representations within the bounded budget', () => {
+    const dualDisplayRgbaBytes = 6880 * 1440 * 4;
+    expect(dualDisplayRgbaBytes).toBeLessThanOrEqual(WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES);
+    expect(dualDisplayRgbaBytes * 3).toBeLessThanOrEqual(WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES);
+    expect(WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES).toBe(128 * 1024 * 1024);
+    expect(WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES).toBe(384 * 1024 * 1024);
+  });
+
   it('encodes the real HWND value rather than the Buffer address', () => {
     expect(windowsOwnerHandleValue(hwnd(0x12345678n))).toBe(0x12345678n);
     expect(() => windowsOwnerHandleValue(Buffer.alloc(8))).toThrow(/live native window/i);
@@ -173,6 +189,7 @@ describe('Windows clipboard payloads', () => {
 });
 
 it.runIf(process.platform === 'win32')('loads and invokes the bundled Koffi Win32 memory surface', () => {
+  expect(windowsFileClipboardAvailable()).toBe(true);
   const api = loadWindowsClipboardApi();
   const handle = api.globalAlloc(0x42, 32);
   expect(handle).toBeTruthy();

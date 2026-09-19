@@ -113,6 +113,7 @@ import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
+import { windowsFileClipboardAvailable } from './windows-clipboard.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
@@ -1669,6 +1670,10 @@ function registerIpc(): void {
   handleWorkflow('workflow:performance:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
+  });
+  handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    return { windowsFileClipboard: windowsFileClipboardAvailable() };
   });
   handleWorkflow('workflow:capture:displays', (_event, ...args) => {
     z.tuple([]).parse(args);

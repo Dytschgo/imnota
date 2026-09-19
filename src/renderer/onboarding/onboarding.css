@@ -435,6 +435,21 @@
   gap: 7px;
 }
 
+.imnota-copy-variants.is-rich-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.imnota-copy-variants button {
+  flex-wrap: wrap;
+}
+
+.imnota-copy-variants button small {
+  flex-basis: 100%;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
 .imnota-copy-variants .imnota-onboarding-secondary {
   margin-top: 0;
 }
