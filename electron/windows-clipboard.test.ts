@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   loadWindowsClipboardApi,
   readWindowsClipboardFiles,
+  readWindowsClipboardFilesWhenAvailable,
   WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES,
   WINDOWS_CLIPBOARD_SNAPSHOT_MAX_TOTAL_BYTES,
   windowsFileClipboardAvailable,
@@ -12,7 +13,10 @@ import {
   windowsHtmlBuffer,
   windowsOwnerHandleValue,
   windowsUnicodeTextBuffer,
+  withWindowsClipboardLock,
   writeWindowsClipboard,
+  WindowsClipboardBusyError,
+  WindowsClipboardChangedError,
   type WindowsClipboardApi,
 } from './windows-clipboard.js';
 
@@ -27,7 +31,9 @@ interface MockNative {
   memory: Map<number, Buffer>;
   emptyClipboard: ReturnType<typeof vi.fn>;
   openClipboard: ReturnType<typeof vi.fn>;
+  closeClipboard: ReturnType<typeof vi.fn>;
   setClipboardData: ReturnType<typeof vi.fn>;
+  clipboardSequence: number;
   failSetFormat?: number;
   failAllocationAt?: number;
 }
@@ -42,8 +48,9 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
     memory.set(handle, Buffer.from(bytes));
     clipboard.set(format, handle);
   }
-  const state = {} as MockNative;
+  const state = { clipboardSequence: 1 } as MockNative;
   const openClipboard = vi.fn(() => true);
+  const closeClipboard = vi.fn(() => true);
   const emptyClipboard = vi.fn(() => {
     clipboard.clear();
     return true;
@@ -55,8 +62,9 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
   });
   const api: WindowsClipboardApi = {
     openClipboard,
-    closeClipboard: vi.fn(() => true),
+    closeClipboard,
     emptyClipboard,
+    getClipboardSequenceNumber: () => state.clipboardSequence,
     enumClipboardFormats: (previous) => {
       const formats = [...clipboard.keys()].sort((left, right) => left - right);
       return formats.find((format) => format > previous) ?? 0;
@@ -93,7 +101,15 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
     deleteObject: () => true,
     dragQueryFile: () => 0,
   };
-  Object.assign(state, { api, clipboard, memory, emptyClipboard, openClipboard, setClipboardData });
+  Object.assign(state, {
+    api,
+    clipboard,
+    memory,
+    emptyClipboard,
+    openClipboard,
+    closeClipboard,
+    setClipboardData,
+  });
   return state;
 }
 
@@ -134,26 +150,91 @@ describe('Windows clipboard payloads', () => {
     expect(windowsDibV5Buffer(Buffer.alloc(8), 2, 1)).toHaveLength(132);
   });
 
-  it('leaves the prior clipboard untouched when preparation or OpenClipboard fails', () => {
+  it('leaves the prior clipboard untouched when preparation or OpenClipboard fails', async () => {
     const prior = windowsUnicodeTextBuffer('prior');
     const preparation = nativeMock([[13, prior]]);
     preparation.failAllocationAt = 1;
-    expect(() => writeWindowsClipboard(hwnd(), { filePaths: pair }, preparation.api)).toThrow(/GlobalAlloc/i);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, preparation.api)).rejects.toThrow(
+      /GlobalAlloc/i,
+    );
     expect(preparation.openClipboard).not.toHaveBeenCalled();
     expect(preparation.memory.get(preparation.clipboard.get(13)!)).toEqual(prior);
 
     const locked = nativeMock([[13, prior]]);
     locked.openClipboard.mockReturnValue(false);
-    expect(() => writeWindowsClipboard(hwnd(), { filePaths: pair }, locked.api)).toThrow(/busy/i);
+    locked.api.getLastError = () => 5;
+    const lockedWrite = writeWindowsClipboard(hwnd(), { filePaths: pair }, locked.api, {
+      timeoutMs: 0,
+    });
+    await expect(lockedWrite).rejects.toBeInstanceOf(WindowsClipboardBusyError);
     expect(locked.emptyClipboard).not.toHaveBeenCalled();
     expect(locked.memory.get(locked.clipboard.get(13)!)).toEqual(prior);
+    expect(locked.memory.size).toBe(1);
+    expect(locked.closeClipboard).not.toHaveBeenCalled();
   });
 
-  it('restores the exact supported prior clipboard after a partial multi-format failure', () => {
+  it('waits for acquisition before mutating and runs the write transaction once', async () => {
+    const native = nativeMock();
+    native.openClipboard.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    let lastError = 5;
+    native.api.getLastError = () => lastError;
+    native.api.setLastError = (code) => void (lastError = code);
+    const yieldControl = vi.fn(async () => undefined);
+    const log = vi.fn();
+    const now = vi.fn().mockReturnValueOnce(100).mockReturnValueOnce(101).mockReturnValue(103);
+    await writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, {
+      timeoutMs: 100,
+      yieldControl,
+      log,
+      now,
+    });
+    expect(native.openClipboard).toHaveBeenCalledTimes(2);
+    expect(native.emptyClipboard).toHaveBeenCalledOnce();
+    expect(native.setClipboardData).toHaveBeenCalledOnce();
+    expect(native.closeClipboard).toHaveBeenCalledOnce();
+    expect(yieldControl).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/1 busy checks over 3ms/));
+  });
+
+  it('aborts without mutation or allocation leaks when the clipboard changes while waiting', async () => {
+    const prior = windowsUnicodeTextBuffer('newer clipboard');
+    const native = nativeMock([[13, prior]]);
+    native.openClipboard.mockReturnValue(false);
+    const yieldControl = vi.fn(async () => {
+      native.clipboardSequence += 1;
+    });
+    await expect(
+      writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, {
+        timeoutMs: 100,
+        yieldControl,
+      }),
+    ).rejects.toBeInstanceOf(WindowsClipboardChangedError);
+    expect(native.openClipboard).toHaveBeenCalledOnce();
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.closeClipboard).not.toHaveBeenCalled();
+    expect(native.clipboard.get(13)).toBeDefined();
+    expect(native.memory.get(native.clipboard.get(13)!)).toEqual(prior);
+    expect(native.memory.size).toBe(1);
+  });
+
+  it('does not retry a non-busy transaction failure and always releases lock ownership', async () => {
+    const native = nativeMock();
+    const failure = new Error('Clipboard snapshot is unsupported.');
+    const transaction = vi.fn(() => {
+      throw failure;
+    });
+    await expect(withWindowsClipboardLock(hwnd(), transaction, {}, native.api)).rejects.toBe(failure);
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(native.openClipboard).toHaveBeenCalledOnce();
+    expect(native.closeClipboard).toHaveBeenCalledOnce();
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+  });
+
+  it('restores the exact supported prior clipboard after a partial multi-format failure', async () => {
     const prior = windowsUnicodeTextBuffer('prior clipboard');
     const native = nativeMock([[13, prior]]);
     native.failSetFormat = 0xc001;
-    expect(() =>
+    await expect(
       writeWindowsClipboard(
         hwnd(),
         {
@@ -165,15 +246,17 @@ describe('Windows clipboard payloads', () => {
         },
         native.api,
       ),
-    ).toThrow(/rejected clipboard format/i);
+    ).rejects.toThrow(/rejected clipboard format/i);
     expect([...native.clipboard.keys()]).toEqual([13]);
     expect(native.memory.get(native.clipboard.get(13)!)).toEqual(prior);
     expect(native.emptyClipboard).toHaveBeenCalledTimes(2);
+    expect(native.openClipboard).toHaveBeenCalledOnce();
+    expect(native.closeClipboard).toHaveBeenCalledOnce();
   });
 
-  it('fails closed on a prior handle format that cannot be restored safely', () => {
+  it('fails closed on a prior handle format that cannot be restored safely', async () => {
     const native = nativeMock([[3, Buffer.from('metafile handle')]]);
-    expect(() => writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).toThrow(
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
       /cannot be restored safely/i,
     );
     expect(native.emptyClipboard).not.toHaveBeenCalled();
@@ -186,11 +269,30 @@ describe('Windows clipboard payloads', () => {
     expect(readWindowsClipboardFiles(hwnd(), native.api)).toEqual([]);
     expect(native.api.dragQueryFile).toHaveBeenCalledTimes(1);
   });
+
+  it('bounds product file readback acquisition without rewriting content', async () => {
+    const native = nativeMock();
+    native.openClipboard.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    native.api.getLastError = () => 5;
+    const yieldControl = vi.fn(async () => void (native.clipboardSequence += 1));
+    await expect(
+      readWindowsClipboardFilesWhenAvailable(
+        hwnd(),
+        { timeoutMs: 100, yieldControl, log: vi.fn() },
+        native.api,
+      ),
+    ).resolves.toEqual([]);
+    expect(native.openClipboard).toHaveBeenCalledTimes(2);
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.setClipboardData).not.toHaveBeenCalled();
+    expect(native.closeClipboard).toHaveBeenCalledOnce();
+  });
 });
 
 it.runIf(process.platform === 'win32')('loads and invokes the bundled Koffi Win32 memory surface', () => {
   expect(windowsFileClipboardAvailable()).toBe(true);
   const api = loadWindowsClipboardApi();
+  expect(api.getClipboardSequenceNumber()).toBeGreaterThanOrEqual(0);
   const handle = api.globalAlloc(0x42, 32);
   expect(handle).toBeTruthy();
   const pointer = api.globalLock(handle);

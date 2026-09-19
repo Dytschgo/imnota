@@ -51,6 +51,7 @@ export interface WindowsClipboardApi {
   openClipboard(owner: bigint | number): boolean;
   closeClipboard(): boolean;
   emptyClipboard(): boolean;
+  getClipboardSequenceNumber(): number;
   enumClipboardFormats(previous: number): number;
   getClipboardData(format: number): NativeHandle;
   setClipboardData(format: number, handle: NativeHandle): NativeHandle;
@@ -77,6 +78,32 @@ export interface WindowsClipboardPayload {
   html?: string;
   png?: Buffer;
   dibV5?: Buffer;
+}
+
+export class WindowsClipboardBusyError extends Error {
+  constructor(
+    message: string,
+    readonly nativeCode: number,
+  ) {
+    super(message);
+    this.name = 'WindowsClipboardBusyError';
+  }
+}
+
+export class WindowsClipboardChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WindowsClipboardChangedError';
+  }
+}
+
+export interface WindowsClipboardLockOptions {
+  timeoutMs?: number;
+  requireStableSequence?: boolean;
+  context?: string;
+  now?: () => number;
+  yieldControl?: () => Promise<void>;
+  log?: (message: string) => void;
 }
 
 interface ClipboardMemory {
@@ -129,6 +156,7 @@ export function loadWindowsClipboardApi(): WindowsClipboardApi {
   const OpenClipboard = fn(user32, 'OpenClipboard', 'bool', ['uintptr_t']);
   const CloseClipboard = fn(user32, 'CloseClipboard', 'bool', []);
   const EmptyClipboard = fn(user32, 'EmptyClipboard', 'bool', []);
+  const GetClipboardSequenceNumber = fn(user32, 'GetClipboardSequenceNumber', 'uint32_t', []);
   const EnumClipboardFormats = fn(user32, 'EnumClipboardFormats', 'uint32_t', ['uint32_t']);
   const GetClipboardData = fn(user32, 'GetClipboardData', 'void *', ['uint32_t']);
   const SetClipboardData = fn(user32, 'SetClipboardData', 'void *', ['uint32_t', 'void *']);
@@ -156,6 +184,7 @@ export function loadWindowsClipboardApi(): WindowsClipboardApi {
     openClipboard: (owner) => Boolean(OpenClipboard(owner)),
     closeClipboard: () => Boolean(CloseClipboard()),
     emptyClipboard: () => Boolean(EmptyClipboard()),
+    getClipboardSequenceNumber: () => numberResult(GetClipboardSequenceNumber()),
     enumClipboardFormats: (previous) => numberResult(EnumClipboardFormats(previous)),
     getClipboardData: (format) => GetClipboardData(format),
     setClipboardData: (format, handle) => SetClipboardData(format, handle),
@@ -381,12 +410,63 @@ export function windowsOwnerHandleValue(owner: Buffer): bigint | number {
   return owner.length === 8 ? owner.readBigUInt64LE() : owner.readUInt32LE();
 }
 
-export function writeWindowsClipboard(
+/** Acquires one clipboard lock, then runs the transaction exactly once. */
+export async function withWindowsClipboardLock<T>(
+  owner: Buffer,
+  transaction: (api: WindowsClipboardApi) => T,
+  options: WindowsClipboardLockOptions = {},
+  api = loadWindowsClipboardApi(),
+): Promise<T> {
+  const ownerValue = windowsOwnerHandleValue(owner);
+  const timeoutMs = options.timeoutMs ?? 2_000;
+  const requireStableSequence = options.requireStableSequence ?? false;
+  const context = options.context ?? 'Windows clipboard';
+  const now = options.now ?? Date.now;
+  const yieldControl = options.yieldControl ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const log = options.log ?? console.info;
+  const started = now();
+  const initialSequence = api.getClipboardSequenceNumber();
+  let busyChecks = 0;
+  while (true) {
+    if (busyChecks > 0 && requireStableSequence && api.getClipboardSequenceNumber() !== initialSequence)
+      throw new WindowsClipboardChangedError(
+        `${context} was cancelled because the clipboard changed while waiting for access.`,
+      );
+    if (api.openClipboard(ownerValue)) {
+      let result: T;
+      try {
+        if (busyChecks > 0 && requireStableSequence && api.getClipboardSequenceNumber() !== initialSequence)
+          throw new WindowsClipboardChangedError(
+            `${context} was cancelled because the clipboard changed while waiting for access.`,
+          );
+        result = transaction(api);
+      } finally {
+        api.closeClipboard();
+      }
+      if (busyChecks)
+        log(
+          `${context} acquired the Windows clipboard after ${busyChecks} busy checks over ${now() - started}ms.`,
+        );
+      return result;
+    }
+    const nativeCode = api.getLastError();
+    busyChecks += 1;
+    const elapsed = now() - started;
+    if (elapsed >= timeoutMs)
+      throw new WindowsClipboardBusyError(
+        `${context} remained busy after ${busyChecks} availability checks over ${elapsed}ms (${nativeCode}).`,
+        nativeCode,
+      );
+    await yieldControl();
+  }
+}
+
+export async function writeWindowsClipboard(
   owner: Buffer,
   payload: WindowsClipboardPayload,
   api = loadWindowsClipboardApi(),
-): void {
-  const ownerValue = windowsOwnerHandleValue(owner);
+  lockOptions: WindowsClipboardLockOptions = {},
+): Promise<void> {
   const formats: Array<{ format: number; bytes: Buffer }> = [
     { format: CF_HDROP, bytes: windowsDropFilesBuffer(payload.filePaths) },
   ];
@@ -422,58 +502,82 @@ export function writeWindowsClipboard(
     throw error;
   }
   let snapshot: ClipboardMemory[] = [];
-  let opened = false;
   try {
-    if (!api.openClipboard(ownerValue)) throw new Error(`Windows clipboard is busy (${api.getLastError()}).`);
-    opened = true;
-    snapshot = captureClipboard(api);
-    if (!api.emptyClipboard())
-      throw new Error(`Windows clipboard could not be cleared (${api.getLastError()}).`);
-    for (let index = 0; index < candidates.length; index++) {
-      const candidate = candidates[index];
-      if (!truthyHandle(api.setClipboardData(candidate.format, candidate.handle))) {
-        const failure = new Error(
-          `Windows rejected clipboard format ${candidate.format} (${api.getLastError()}).`,
-        );
-        try {
-          restoreClipboard(api, snapshot);
-        } catch (restoreError) {
-          throw new AggregateError(
-            [failure, restoreError],
-            'The clipboard write failed and recovery was incomplete.',
-          );
+    await withWindowsClipboardLock(
+      owner,
+      (lockedApi) => {
+        snapshot = captureClipboard(lockedApi);
+        if (!lockedApi.emptyClipboard())
+          throw new Error(`Windows clipboard could not be cleared (${lockedApi.getLastError()}).`);
+        for (let index = 0; index < candidates.length; index++) {
+          const candidate = candidates[index];
+          if (!truthyHandle(lockedApi.setClipboardData(candidate.format, candidate.handle))) {
+            const failure = new Error(
+              `Windows rejected clipboard format ${candidate.format} (${lockedApi.getLastError()}).`,
+            );
+            try {
+              restoreClipboard(lockedApi, snapshot);
+            } catch (restoreError) {
+              throw new AggregateError(
+                [failure, restoreError],
+                'The clipboard write failed and recovery was incomplete.',
+              );
+            }
+            throw failure;
+          }
+          candidate.handle = null;
         }
-        throw failure;
-      }
-      candidate.handle = null;
-    }
+      },
+      {
+        ...lockOptions,
+        context: lockOptions.context ?? 'Windows clipboard write',
+        requireStableSequence: true,
+      },
+      api,
+    );
   } finally {
-    if (opened) api.closeClipboard();
     releaseAll(api, candidates);
     releaseAll(api, snapshot);
   }
+}
+
+function readWindowsClipboardFilesLocked(api: WindowsClipboardApi): string[] {
+  if (!api.isClipboardFormatAvailable(CF_HDROP)) return [];
+  const drop = api.getClipboardData(CF_HDROP);
+  if (!truthyHandle(drop)) return [];
+  const count = api.dragQueryFile(drop, 0xffffffff, null, 0);
+  if (count !== 2) return [];
+  const files: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const length = api.dragQueryFile(drop, index, null, 0);
+    if (length <= 0 || length > MAX_WINDOWS_PATH_CHARACTERS) return [];
+    const output = Buffer.alloc((length + 1) * 2);
+    const copied = api.dragQueryFile(drop, index, output, length + 1);
+    if (copied !== length) return [];
+    files.push(output.subarray(0, length * 2).toString('utf16le'));
+  }
+  return files;
 }
 
 export function readWindowsClipboardFiles(owner: Buffer, api = loadWindowsClipboardApi()): string[] {
   const ownerValue = windowsOwnerHandleValue(owner);
   if (!api.openClipboard(ownerValue)) throw new Error(`Windows clipboard is busy (${api.getLastError()}).`);
   try {
-    if (!api.isClipboardFormatAvailable(CF_HDROP)) return [];
-    const drop = api.getClipboardData(CF_HDROP);
-    if (!truthyHandle(drop)) return [];
-    const count = api.dragQueryFile(drop, 0xffffffff, null, 0);
-    if (count !== 2) return [];
-    const files: string[] = [];
-    for (let index = 0; index < count; index++) {
-      const length = api.dragQueryFile(drop, index, null, 0);
-      if (length <= 0 || length > MAX_WINDOWS_PATH_CHARACTERS) return [];
-      const output = Buffer.alloc((length + 1) * 2);
-      const copied = api.dragQueryFile(drop, index, output, length + 1);
-      if (copied !== length) return [];
-      files.push(output.subarray(0, length * 2).toString('utf16le'));
-    }
-    return files;
+    return readWindowsClipboardFilesLocked(api);
   } finally {
     api.closeClipboard();
   }
+}
+
+export async function readWindowsClipboardFilesWhenAvailable(
+  owner: Buffer,
+  options: WindowsClipboardLockOptions = {},
+  api = loadWindowsClipboardApi(),
+): Promise<string[]> {
+  return withWindowsClipboardLock(
+    owner,
+    readWindowsClipboardFilesLocked,
+    { ...options, context: options.context ?? 'Windows clipboard readback' },
+    api,
+  );
 }
