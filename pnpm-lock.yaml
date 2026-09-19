@@ -124,6 +124,13 @@ importers:
       wait-on:
         specifier: ^8.0.1
         version: 8.0.5(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
+    optionalDependencies:
+      '@koromix/koffi-win32-arm64':
+        specifier: 3.3.0
+        version: 3.3.0
+      '@koromix/koffi-win32-x64':
+        specifier: 3.3.0
+        version: 3.3.0
 
 packages:
   '@adobe/css-tools@4.5.0':
@@ -945,6 +952,22 @@ packages:
       {
         integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==,
       }
+
+  '@koromix/koffi-win32-arm64@3.3.0':
+    resolution:
+      {
+        integrity: sha512-fD41LgKBx5i1YlJDuds4tRHAaG5vV55tvagzJwKFDR/5BDeaFvH9QFMUMDoNl2LkmVyeug0dIElHr/oxejh3IA==,
+      }
+    cpu: [arm64]
+    os: [win32]
+
+  '@koromix/koffi-win32-x64@3.3.0':
+    resolution:
+      {
+        integrity: sha512-D+ORp73rTmvGVfq01+4uBmgVZqrPqU9N9xCZCfexaCDlVk0WQsaqid1dGsi6eScJuHt4Cp8s1i5/4CsecxFTKQ==,
+      }
+    cpu: [x64]
+    os: [win32]
 
   '@malept/cross-spawn-promise@2.0.0':
     resolution:
@@ -6840,6 +6863,12 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@koromix/koffi-win32-arm64@3.3.0':
+    optional: true
+
+  '@koromix/koffi-win32-x64@3.3.0':
+    optional: true
 
   '@malept/cross-spawn-promise@2.0.0':
     dependencies:

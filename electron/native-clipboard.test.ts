@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NativeImage } from 'electron';
-import { nativeClipboard } from './native-clipboard.js';
+import path from 'node:path';
+import {
+  deliverClipboardWithFileHandoff,
+  nativeClipboard,
+  openWindowsFileHandoff,
+} from './native-clipboard.js';
 
 const mocks = vi.hoisted(() => ({
   clipboard: { readText: vi.fn(), read: vi.fn(), writeText: vi.fn(), write: vi.fn() },
@@ -13,16 +18,109 @@ vi.mock('electron', () => ({
     constructor(public data: Record<string, Blob | string>) {}
   },
 }));
-beforeEach(() => vi.resetAllMocks());
 const png = Buffer.from('synthetic PNG bytes');
-const image = { isEmpty: () => false, toPNG: () => png } as NativeImage;
+const bitmap = Buffer.from('synthetic bitmap');
+const image = {
+  isEmpty: () => false,
+  toPNG: () => png,
+  getSize: () => ({ width: 2, height: 2 }),
+  toBitmap: () => bitmap,
+} as NativeImage;
 const emptyImage = { isEmpty: () => true } as NativeImage;
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.clipboard.readText.mockResolvedValue('');
+  mocks.clipboard.read.mockResolvedValue([]);
+  mocks.nativeImage.createEmpty.mockReturnValue(emptyImage);
+});
 
 function item(type: string, blob: Blob) {
   return { types: [type], getType: vi.fn().mockResolvedValue(blob) };
 }
 
+function clipboardItem(data: Record<string, string | Blob>) {
+  return {
+    types: Object.keys(data),
+    getType: vi.fn(async (type: string) => {
+      const value = data[type];
+      return typeof value === 'string' ? new Blob([value], { type }) : value;
+    }),
+  };
+}
+
 describe('main-process clipboard completion', () => {
+  it('opens a verified Windows Markdown/PNG pair folder as the immediate file handoff', async () => {
+    const selectFiles = vi.fn(async () => true);
+    const directory = path.resolve('handoff');
+    await expect(
+      openWindowsFileHandoff(
+        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
+        selectFiles,
+        'win32',
+      ),
+    ).resolves.toBe('opened');
+    expect(selectFiles).toHaveBeenCalledWith([
+      path.join(directory, 'bundle.md'),
+      path.join(directory, 'bundle.png'),
+    ]);
+    selectFiles.mockResolvedValueOnce(false);
+    await expect(
+      openWindowsFileHandoff(
+        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
+        selectFiles,
+        'win32',
+      ),
+    ).resolves.toBe('failed');
+    selectFiles.mockRejectedValueOnce(new Error('Shell unavailable'));
+    await expect(
+      openWindowsFileHandoff(
+        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
+        selectFiles,
+        'win32',
+      ),
+    ).resolves.toBe('failed');
+  });
+
+  it('does not open a folder off Windows or for an invalid pair', async () => {
+    const selectFiles = vi.fn(async () => true);
+    await expect(
+      openWindowsFileHandoff(['bundle.md', 'bundle.png'], selectFiles, 'linux'),
+    ).resolves.toBeUndefined();
+    await expect(openWindowsFileHandoff(['bundle.md'], selectFiles, 'win32')).resolves.toBe('failed');
+    await expect(
+      openWindowsFileHandoff(['one.md', path.join('other', 'two.png')], selectFiles, 'win32'),
+    ).resolves.toBe('failed');
+    expect(selectFiles).not.toHaveBeenCalled();
+  });
+
+  it('still selects the generated pair when the Windows clipboard write rejects', async () => {
+    const writeClipboard = vi.fn().mockRejectedValue(new Error('Clipboard locked'));
+    const selectFiles = vi.fn().mockResolvedValue(true);
+    await expect(
+      deliverClipboardWithFileHandoff(
+        writeClipboard,
+        [path.join(path.resolve('handoff'), 'bundle.md'), path.join(path.resolve('handoff'), 'bundle.png')],
+        selectFiles,
+        'win32',
+      ),
+    ).resolves.toEqual({
+      text: false,
+      html: false,
+      image: false,
+      fileHandoff: 'opened',
+    });
+    expect(writeClipboard).toHaveBeenCalledOnce();
+    expect(selectFiles).toHaveBeenCalledOnce();
+  });
+
+  it('propagates a clipboard failure when there is no Windows file handoff', async () => {
+    const writeClipboard = vi.fn().mockRejectedValue(new Error('Clipboard locked'));
+    await expect(deliverClipboardWithFileHandoff(writeClipboard, [], vi.fn(), 'win32')).rejects.toThrow(
+      'Clipboard locked',
+    );
+  });
+
   it.each([
     ['text', () => nativeClipboard.writeText('Markdown'), mocks.clipboard.writeText],
     ['image', () => nativeClipboard.writeImage(image), mocks.clipboard.write],
@@ -65,29 +163,43 @@ describe('main-process clipboard completion', () => {
     expect(mocks.clipboard.writeText).not.toHaveBeenCalled();
   });
 
-  it('reports the formats the clipboard actually holds after a combined write', async () => {
-    mocks.clipboard.read.mockResolvedValueOnce([
-      { types: ['text/plain', 'text/html', 'image/png'], getType: vi.fn() },
+  it('reports only exact clipboard content after a combined write', async () => {
+    const html = '<p>Markdown</p>';
+    mocks.clipboard.readText.mockResolvedValue('Markdown');
+    mocks.clipboard.read.mockResolvedValue([
+      clipboardItem({
+        'text/html': html,
+        'image/png': new Blob([png], { type: 'image/png' }),
+      }),
     ]);
-    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+    mocks.nativeImage.createFromBuffer.mockReturnValue(image);
+    await expect(nativeClipboard.writeContext('Markdown', html, image)).resolves.toEqual({
       text: true,
       html: true,
       image: true,
     });
-    // Windows can drop formats from a multi-format write; report the gap, not the request.
-    mocks.clipboard.read.mockResolvedValueOnce([{ types: ['text/plain', 'text/html'], getType: vi.fn() }]);
-    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
-      text: true,
-      html: true,
-      image: false,
-    });
-    mocks.clipboard.read.mockRejectedValueOnce(new Error('Clipboard busy'));
-    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+
+    mocks.clipboard.readText.mockResolvedValue('changed');
+    mocks.clipboard.read.mockResolvedValue([]);
+    await expect(nativeClipboard.writeContext('Markdown', html, image)).resolves.toEqual({
       text: false,
       html: false,
       image: false,
     });
-    expect(mocks.clipboard.write).toHaveBeenCalledTimes(3);
+    expect(mocks.clipboard.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes app-owned writes so a later fallback cannot overtake verification', async () => {
+    let finish!: () => void;
+    mocks.clipboard.write.mockReturnValueOnce(new Promise<void>((resolve) => (finish = resolve)));
+    const context = nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image);
+    const fallback = nativeClipboard.writeText('fallback');
+    await Promise.resolve();
+    expect(mocks.clipboard.writeText).not.toHaveBeenCalled();
+    finish();
+    await context;
+    await fallback;
+    expect(mocks.clipboard.writeText).toHaveBeenCalledWith('fallback');
   });
 
   it('writes an image without retaining stale text formats', async () => {

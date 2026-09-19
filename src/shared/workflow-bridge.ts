@@ -145,6 +145,16 @@ export interface ClipboardFormatsReport {
   text: boolean;
   html: boolean;
   image: boolean;
+  /** Windows fallback state after opening the generated Markdown/PNG pair. */
+  fileHandoff?: 'opened' | 'failed';
+}
+
+export type OnboardingHandoffAction = 'context' | 'markdown' | 'image' | 'paths';
+export type OnboardingHandoffOpenTarget = 'files' | 'folder';
+
+export interface OnboardingHandoffGrant {
+  sessionId: string;
+  filenames: readonly [string, string];
 }
 
 export interface PromptExportCopyResult {

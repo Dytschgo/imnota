@@ -1,5 +1,6 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
+import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -9,6 +10,7 @@ import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
@@ -290,6 +292,16 @@ async function exerciseOnboarding(
   ]);
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-annotate.png'));
+  const handoffRoot = onboardingHandoffRoot({
+    temporaryDirectory: app.getPath('temp'),
+    userDataDirectory: app.getPath('userData'),
+  });
+  const previousHandoffDirectories = new Set(
+    await fs.readdir(handoffRoot).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }),
+  );
   await clickAny(driver, [
     { selector: '[data-testid="onboarding-continue"]' },
     { text: 'Continue to copy', exact: true },
@@ -298,7 +310,87 @@ async function exerciseOnboarding(
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
   await driver.click({ text: 'Copy PNG + Markdown', exact: true });
-  await driver.waitFor({ text: 'PNG and Markdown copied together' });
+  const combinedStatus =
+    process.platform === 'win32'
+      ? 'Markdown and image formats were confirmed on the clipboard. Imnota also opened the generated folder with the Markdown and PNG selected for attachment.'
+      : 'Text and image are on the clipboard. Check that both appear after pasting; some apps accept only one.';
+  await driver.waitFor({ selector: '[role="status"]', text: combinedStatus, exact: true });
+
+  const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
+  const candidates = await Promise.all(
+    directories
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          entry.name.startsWith('handoff-') &&
+          !previousHandoffDirectories.has(entry.name),
+      )
+      .map(async (entry) => {
+        const directory = path.join(handoffRoot, entry.name);
+        const stat = await fs.stat(directory);
+        return { directory, modified: stat.mtimeMs };
+      }),
+  );
+  const current = candidates.sort((left, right) => right.modified - left.modified)[0];
+  if (!current) throw new Error('Onboarding did not materialize a native handoff directory.');
+  const markdownPath = path.join(current.directory, 'component-search.md');
+  const pngPath = path.join(current.directory, 'component-search.png');
+  const [markdownStat, pngStat, markdown, png] = await Promise.all([
+    fs.lstat(markdownPath),
+    fs.lstat(pngPath),
+    fs.readFile(markdownPath, 'utf8'),
+    fs.readFile(pngPath),
+  ]);
+  if (
+    !markdownStat.isFile() ||
+    markdownStat.isSymbolicLink() ||
+    !pngStat.isFile() ||
+    pngStat.isSymbolicLink() ||
+    !markdown.includes('![Annotated component search](./component-search.png)')
+  )
+    throw new Error('Onboarding did not produce the exact regular Markdown/PNG handoff pair.');
+  const expectedImage = nativeImage.createFromBuffer(png);
+  const assertExactImage = async (context: string) => {
+    const actualImage = await nativeClipboard.readImage();
+    const expectedSize = expectedImage.getSize();
+    const actualSize = actualImage.getSize();
+    if (
+      expectedImage.isEmpty() ||
+      actualImage.isEmpty() ||
+      expectedSize.width !== actualSize.width ||
+      expectedSize.height !== actualSize.height ||
+      !expectedImage.toBitmap().equals(actualImage.toBitmap())
+    )
+      throw new Error(`${context} changed the exact onboarding PNG pixels.`);
+  };
+  if (
+    (await nativeClipboard.readText()) !== markdown ||
+    (await nativeClipboard.readHTML()) !== clipboardContextHtml(markdown)
+  )
+    throw new Error('Onboarding combined copy did not preserve exact Markdown and HTML.');
+  await assertExactImage('Onboarding combined copy');
+
+  await driver.click({ text: 'Copy Markdown', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied.', exact: true });
+  if ((await nativeClipboard.readText()) !== markdown || !(await nativeClipboard.readImage()).isEmpty())
+    throw new Error('Onboarding Markdown fallback did not replace the clipboard with exact Markdown.');
+
+  await driver.click({ text: 'Copy image', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Image copied.', exact: true });
+  if (await nativeClipboard.readText())
+    throw new Error('Onboarding image fallback retained stale clipboard text.');
+  await assertExactImage('Onboarding image fallback');
+
+  await driver.click({ text: 'Copy file paths', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'File paths copied.', exact: true });
+  if (
+    (await nativeClipboard.readText()) !== [markdownPath, pngPath].join('\n') ||
+    !(await nativeClipboard.readImage()).isEmpty()
+  )
+    throw new Error('Onboarding path fallback did not place only the exact generated paths.');
+
+  for (const label of ['Open files', 'Open export folder'])
+    await driver.waitFor({ text: label, exact: true });
   return true;
 }
 
@@ -1783,7 +1875,7 @@ export async function runSmokeWorkflow(
   assertions.push('updater bridge and offline smoke state');
 
   await exerciseOnboarding(driver, artifactDirectory, artifacts);
-  assertions.push('onboarding sample and native clipboard action');
+  assertions.push('onboarding exact Markdown/HTML/PNG handoff and independent clipboard fallbacks');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
   if (findWhatsNewRelease(options.version))

@@ -55,12 +55,22 @@ describe('OnboardingDemo', () => {
   it('walks through a real annotation bundle before project creation', async () => {
     const onMarkCompleted = vi.fn(async () => {});
     const onCreateFirstProject = vi.fn(async () => {});
-    const onCopyBundle = vi.fn(async () => {});
+    const onPrepareHandoff = vi.fn(async () => ({
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      filenames: ['component-search.md', 'component-search.png'] as const,
+    }));
+    const onCopyHandoff = vi.fn(async () => ({
+      text: true,
+      html: true,
+      image: true,
+      fileHandoff: 'opened' as const,
+    }));
     render(
       <OnboardingDemo
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={onCreateFirstProject}
-        onCopyBundle={onCopyBundle}
+        onPrepareHandoff={onPrepareHandoff}
+        onCopyHandoff={onCopyHandoff}
       />,
     );
 
@@ -69,16 +79,20 @@ describe('OnboardingDemo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
     await screen.findByRole('button', { name: 'Copy PNG + Markdown' });
     fireEvent.click(screen.getByRole('button', { name: 'Copy PNG + Markdown' }));
-    await screen.findByText('PNG and Markdown copied together');
+    await screen.findByText(/Markdown and image formats were confirmed.*selected for attachment/);
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
     await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
-    expect(onCopyBundle).toHaveBeenCalledWith(
+    expect(onPrepareHandoff).toHaveBeenCalledWith(
       expect.objectContaining({
         filename: 'component-search.png',
         markdownFilename: 'component-search.md',
         markdown: expect.stringContaining('Picture 1 / Note 1'),
       }),
+    );
+    expect(onCopyHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: '00000000-0000-4000-8000-000000000001' }),
+      'context',
     );
     expect(onMarkCompleted).toHaveBeenLastCalledWith({ completed: true, completedVersion: 1 }, 'finished');
   });
@@ -86,14 +100,19 @@ describe('OnboardingDemo', () => {
   it('allows project creation when combined clipboard access is unavailable', async () => {
     const onMarkCompleted = vi.fn(async () => {});
     const onCreateFirstProject = vi.fn(async () => {});
-    const onCopyBundle = vi.fn(async () => {
+    const onPrepareHandoff = vi.fn(async () => ({
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      filenames: ['component-search.md', 'component-search.png'] as const,
+    }));
+    const onCopyHandoff = vi.fn(async () => {
       throw new Error('Clipboard unavailable');
     });
     render(
       <OnboardingDemo
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={onCreateFirstProject}
-        onCopyBundle={onCopyBundle}
+        onPrepareHandoff={onPrepareHandoff}
+        onCopyHandoff={onCopyHandoff}
       />,
     );
 
@@ -107,5 +126,43 @@ describe('OnboardingDemo', () => {
 
     await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
     expect(onMarkCompleted).toHaveBeenCalledWith({ completed: true, completedVersion: 1 }, 'finished');
+  });
+
+  it('reports the verified file handoff and exposes every explicit fallback', async () => {
+    const grant = {
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      filenames: ['component-search.md', 'component-search.png'] as const,
+    };
+    const onCopyHandoff = vi.fn(async () => ({
+      text: false,
+      html: false,
+      image: false,
+      fileHandoff: 'opened' as const,
+    }));
+    const onOpenHandoff = vi.fn(async () => {});
+    render(
+      <OnboardingDemo
+        onMarkCompleted={vi.fn()}
+        onCreateFirstProject={vi.fn()}
+        onPrepareHandoff={vi.fn(async () => grant)}
+        onCopyHandoff={onCopyHandoff}
+        onOpenHandoff={onOpenHandoff}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown explanation' }), {
+      target: { value: 'Keep filters visible while reviewing results.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy PNG + Markdown' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'No clipboard format was confirmed. Imnota also opened the generated folder',
+    );
+    for (const name of ['Copy Markdown', 'Copy image', 'Open files', 'Copy file paths', 'Open export folder'])
+      expect(screen.getByRole('button', { name })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open files' }));
+    await waitFor(() => expect(onOpenHandoff).toHaveBeenCalledWith(grant, 'files'));
   });
 });

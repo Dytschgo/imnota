@@ -215,7 +215,7 @@ export function createGuidedAnnotations(existingCount = 0): Annotation[] {
   ];
 }
 
-export function buildSamplePromptMarkdown(annotations: Annotation[]): string {
+export function buildSamplePromptMarkdown(annotations: Annotation[], explanation = ''): string {
   const notes = annotations.filter(
     (annotation): annotation is Annotation & { text: string } =>
       (annotation.kind === 'text' || annotation.kind === 'callout') && Boolean(annotation.text?.trim()),
@@ -227,9 +227,11 @@ export function buildSamplePromptMarkdown(annotations: Annotation[]): string {
 
 ## Picture 1 — component-search.png
 
+![Annotated component search](./component-search.png)
+
 Priority for agent: Medium
 
-Keep the component search easy to use while someone reviews several results.${noteMarkdown}`;
+${explanation.trim() || 'Keep the component search easy to use while someone reviews several results.'}${noteMarkdown}`;
 }
 
 /** Wraps the annotated screenshot in the labelled, white prompt-PNG structure used by export. */

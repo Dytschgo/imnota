@@ -85,7 +85,7 @@ interface FakeBridgeOptions {
   revisionForLoad?: (screenshotId: string, callNumber: number) => string;
   failContextCopy?: boolean;
   /** Clipboard read-back for combined copies; defaults to every format present. */
-  placed?: { text: boolean; html: boolean; image: boolean };
+  placed?: { text: boolean; html: boolean; image: boolean; fileHandoff?: 'opened' | 'failed' };
   failFinish?: boolean;
 }
 
