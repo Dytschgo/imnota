@@ -17,7 +17,6 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { CaptureDisplayOption } from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -54,7 +53,6 @@ import { ContentSearchResults } from './search/ContentSearchResults';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
 import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
-import { CaptureDisplayDialog } from './capture/CaptureDisplayDialog';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -125,17 +123,6 @@ export default function App() {
     query: string;
   } | null>(null);
   const captureBusyRef = useRef(false);
-  const captureDisplayResolver = useRef<((displayId: number | null) => void) | null>(null);
-  const [captureDisplayChoices, setCaptureDisplayChoices] = useState<readonly CaptureDisplayOption[] | null>(
-    null,
-  );
-  useEffect(
-    () => () => {
-      captureDisplayResolver.current?.(null);
-      captureDisplayResolver.current = null;
-    },
-    [],
-  );
 
   const activeShot = store.activeScreenshot();
   const adoptSnapshot = useCallback((snapshot: ProjectSnapshot, selectScreenshotId?: string) => {
@@ -313,7 +300,6 @@ export default function App() {
   useEffect(() => {
     if (
       dialog ||
-      captureDisplayChoices ||
       snapshotNotice ||
       searchDialogOpen ||
       onboardingPending ||
@@ -332,7 +318,6 @@ export default function App() {
     )
       setShowWhatsNew(true);
   }, [
-    captureDisplayChoices,
     dialog,
     onboardingPending,
     preferences.result,
@@ -802,22 +787,6 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The clipboard does not contain an image.');
     }
   }
-  function settleCaptureDisplayChoice(displayId: number | null) {
-    const resolve = captureDisplayResolver.current;
-    captureDisplayResolver.current = null;
-    setCaptureDisplayChoices(null);
-    resolve?.(displayId);
-  }
-  async function chooseCaptureDisplay(): Promise<number | null | undefined> {
-    if (platform !== 'windows') return undefined;
-    const displays = workflowValue(await window.imnota.listCaptureDisplays());
-    if (displays.length === 0) throw new Error('Windows did not report an available display to capture.');
-    if (displays.length === 1) return displays[0]!.id;
-    return new Promise<number | null>((resolve) => {
-      captureDisplayResolver.current = resolve;
-      setCaptureDisplayChoices(displays);
-    });
-  }
   async function captureRegion() {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
@@ -841,23 +810,6 @@ export default function App() {
         collectionId: collection.id,
         navigationIdentity: navigationIdentity.current,
       };
-      const displayId = await chooseCaptureDisplay();
-      if (displayId === null) return;
-      const afterChoice = useAppStore.getState();
-      const chosenSnapshot = afterChoice.snapshot;
-      const chosenCollection = chosenSnapshot?.project.collections.find(
-        (item) => item.id === target.collectionId,
-      );
-      if (
-        navigationIdentity.current !== target.navigationIdentity ||
-        !chosenSnapshot ||
-        chosenSnapshot.projectPath !== target.projectPath ||
-        chosenSnapshot.project.id !== target.projectId ||
-        afterChoice.activeCollectionId !== target.collectionId ||
-        !chosenCollection ||
-        chosenCollection.archived
-      )
-        return;
       nativeMutationToken = await beginCurrentProjectMutation();
       if (nativeMutationToken === null) return;
       const afterFlush = useAppStore.getState();
@@ -882,7 +834,6 @@ export default function App() {
         await window.imnota.startRegionCapture({
           projectPath: target.projectPath,
           collectionId: target.collectionId,
-          displayId,
         }),
       );
       const accepted = await persistence.acceptMutationSnapshot(
@@ -1470,6 +1421,10 @@ export default function App() {
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
+  const captureEnabled =
+    preferences.settings.capture.experimentalRegionCapture &&
+    platform !== 'linux' &&
+    Boolean(activeCaptureCollection && !activeCaptureCollection.archived);
   const captureDisabledLabel =
     platform === 'linux'
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
@@ -1509,7 +1464,9 @@ export default function App() {
         setSelectedAnnotationId(copy.id);
       } else void pasteImage();
     },
-    'capture.region': () => void captureRegion(),
+    'capture.region': () => {
+      if (captureEnabled) void captureRegion();
+    },
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {
         changeAnnotations(persistence.annotations.filter((item) => item.id !== selectedAnnotationId));
@@ -1863,14 +1820,9 @@ export default function App() {
             onRedo={redoAnnotations}
             onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
             onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
-            onCapture={
-              preferences.settings.capture.experimentalRegionCapture ? () => void captureRegion() : undefined
-            }
-            captureEnabled={
-              preferences.settings.capture.experimentalRegionCapture &&
-              platform !== 'linux' &&
-              Boolean(activeCaptureCollection && !activeCaptureCollection.archived)
-            }
+            onCapture={captureEnabled ? () => void captureRegion() : undefined}
+            capturePrimary={platform === 'windows'}
+            captureEnabled={captureEnabled}
             captureShortcut={
               resolvedShortcuts['capture.region'] ? shortcutLabel('capture.region') : undefined
             }
@@ -1969,13 +1921,6 @@ export default function App() {
             </Button>
           </div>
         </Modal>
-      )}
-      {captureDisplayChoices && (
-        <CaptureDisplayDialog
-          displays={captureDisplayChoices}
-          onSelect={(displayId) => settleCaptureDisplayChoice(displayId)}
-          onCancel={() => settleCaptureDisplayChoice(null)}
-        />
       )}
       <PromptBundleDialogHost controller={promptBundles} onError={setError} />
       <SearchDialog

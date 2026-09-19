@@ -1,19 +1,45 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import type { CaptureRectangle } from '../shared/capture';
 
-function pointer(target: HTMLElement, type: string, x: number, y: number) {
+function pointer(
+  target: HTMLElement,
+  type: string,
+  x: number,
+  y: number,
+  options: { button?: number; buttons?: number } = {},
+) {
   const event = new Event(type, { bubbles: true });
-  Object.assign(event, { clientX: x, clientY: y, pointerId: 1 });
+  Object.assign(event, { clientX: x, clientY: y, pointerId: 1, ...options });
   target.dispatchEvent(event);
 }
 
-async function setup() {
+async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, height: 600 }) {
+  let payloadHandler:
+    | ((payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void)
+    | undefined;
+  let selectionHandler:
+    | ((state: {
+        selection: CaptureRectangle | null;
+        complete: boolean;
+        actionsDisplayId: number | null;
+      }) => void)
+    | undefined;
+  window.imnotaCapture.onPayload = vi.fn((handler) => {
+    payloadHandler = handler;
+    return () => {};
+  });
+  window.imnotaCapture.onSelection = vi.fn((handler) => {
+    selectionHandler = handler;
+    return () => {};
+  });
   await import('./main');
   const surface = document.querySelector<HTMLElement>('.capture-overlay')!;
   surface.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600 }) as DOMRect;
   surface.setPointerCapture = vi.fn();
   surface.hasPointerCapture = () => true;
   surface.releasePointerCapture = vi.fn();
-  return surface;
+  payloadHandler!({ displayId, displayBounds, imageDataUrl: 'data:image/png;base64,cG5n' });
+  return { surface, selectionHandler: selectionHandler! };
 }
 
 beforeEach(() => {
@@ -21,45 +47,77 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>';
   window.imnotaCapture = {
     ready: vi.fn(async () => {}),
+    pointer: vi.fn(),
     save: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     onPayload: vi.fn(() => () => {}),
+    onSelection: vi.fn(() => () => {}),
   };
 });
 
-it('keeps the completed selection while moving to and clicking Save', async () => {
-  const surface = await setup();
-  pointer(surface, 'pointerdown', 20, 30);
-  pointer(surface, 'pointermove', 220, 180);
-  pointer(surface, 'pointerup', 220, 180);
-  pointer(surface, 'pointermove', 710, 580);
-  const button = document.querySelector<HTMLButtonElement>('[data-action=save]')!;
-  pointer(button, 'pointerdown', 710, 580);
-  pointer(button, 'pointerup', 710, 580);
-  expect(document.querySelector<HTMLElement>('.capture-actions')!.hidden).toBe(false);
-  button.click();
-  expect(window.imnotaCapture.save).toHaveBeenCalledExactlyOnceWith({
-    x: 20,
-    y: 30,
-    width: 200,
-    height: 150,
+it('reports uncapped pointer-capture coordinates for a cross-monitor reverse drag', async () => {
+  const { surface } = await setup();
+  pointer(surface, 'pointerdown', 500, 300);
+  pointer(surface, 'pointermove', -240, -80);
+  pointer(surface, 'pointerup', -240, -80);
+  expect(window.imnotaCapture.pointer).toHaveBeenNthCalledWith(1, {
+    phase: 'begin',
+    point: { x: 500, y: 300 },
   });
-  button.click();
-  expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
+  expect(window.imnotaCapture.pointer).toHaveBeenNthCalledWith(2, {
+    phase: 'move',
+    point: { x: -240, y: -80 },
+  });
+  expect(window.imnotaCapture.pointer).toHaveBeenNthCalledWith(3, {
+    phase: 'end',
+    point: { x: -240, y: -80 },
+  });
 });
 
-it('hides selection and actions on retake until a new drag completes', async () => {
-  const surface = await setup();
-  pointer(surface, 'pointerdown', 20, 30);
-  pointer(surface, 'pointerup', 220, 180);
+it('continues a pressed drag routed in from another display overlay', async () => {
+  const { surface } = await setup(2, { x: 0, y: 0, width: 800, height: 600 });
+  pointer(surface, 'pointermove', 40, 50, { buttons: 1 });
+  pointer(surface, 'pointerup', 60, 70, { button: 0 });
+  expect(window.imnotaCapture.pointer).toHaveBeenNthCalledWith(1, {
+    phase: 'move',
+    point: { x: 40, y: 50 },
+  });
+  expect(window.imnotaCapture.pointer).toHaveBeenNthCalledWith(2, {
+    phase: 'end',
+    point: { x: 60, y: 70 },
+  });
+});
+
+it('draws only this display intersection and saves the coordinated selection once', async () => {
+  const { selectionHandler } = await setup(2, { x: 0, y: 0, width: 800, height: 600 });
+  selectionHandler({
+    selection: { x: -200, y: -100, width: 500, height: 250 },
+    complete: true,
+    actionsDisplayId: 2,
+  });
+  const selection = document.querySelector<HTMLElement>('.capture-selection')!;
+  expect(selection.style.cssText).toContain('left: 0px');
+  expect(selection.style.cssText).toContain('width: 300px');
+  expect(document.querySelector<HTMLElement>('.capture-actions')!.hidden).toBe(false);
+  const button = document.querySelector<HTMLButtonElement>('[data-action=save]')!;
+  button.click();
+  button.click();
+  expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
+  expect(window.imnotaCapture.save).toHaveBeenCalledWith();
+});
+
+it('retake clears every overlay through the coordinator and cancellation remains global', async () => {
+  const { selectionHandler } = await setup();
+  selectionHandler({
+    selection: { x: 20, y: 30, width: 200, height: 150 },
+    complete: true,
+    actionsDisplayId: 2,
+  });
   document.querySelector<HTMLButtonElement>('[data-action=retake]')!.click();
+  expect(window.imnotaCapture.pointer).toHaveBeenCalledWith({ phase: 'reset' });
+  selectionHandler({ selection: null, complete: false, actionsDisplayId: null });
   expect(document.querySelector<HTMLElement>('.capture-selection')!.hidden).toBe(true);
   expect(document.querySelector<HTMLElement>('.capture-actions')!.hidden).toBe(true);
-  pointer(surface, 'pointermove', 400, 300);
-  document.querySelector<HTMLButtonElement>('[data-action=save]')!.click();
-  expect(window.imnotaCapture.save).not.toHaveBeenCalled();
-  pointer(surface, 'pointerdown', 300, 200);
-  pointer(surface, 'pointerup', 250, 160);
-  document.querySelector<HTMLButtonElement>('[data-action=save]')!.click();
-  expect(window.imnotaCapture.save).toHaveBeenCalledWith({ x: 250, y: 160, width: 50, height: 40 });
+  document.querySelector<HTMLButtonElement>('[data-action=cancel]')!.click();
+  expect(window.imnotaCapture.cancel).toHaveBeenCalledTimes(1);
 });

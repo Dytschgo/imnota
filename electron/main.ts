@@ -138,11 +138,14 @@ import {
   restoreBackupInputSchema,
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureRectangle } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
 import { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
   CaptureOverlaySession,
+  CaptureSelectionCoordinator,
+  capturePointerGlobalPoint,
+  closeCaptureOverlayWindows,
   createOverlayReadinessGuard,
   isCaptureOverlaySender,
   type CaptureOverlayFailure,
@@ -150,13 +153,14 @@ import {
 } from './capture-overlay-session.js';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
 import {
-  captureDisplayOptions,
+  captureDisplaysHaveStableGeometry,
+  captureDisplaysWithStableGeometry,
   captureDisplayWithStableGeometry,
-  selectedCaptureDisplay,
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
+import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
 // Smoke never reads or writes the installed application's profile or caches.
@@ -192,10 +196,16 @@ let settings: WorkspaceSettings = {
 };
 let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
 let captureOverlay: {
-  window: BrowserWindow;
+  overlays: Array<{
+    window: BrowserWindow;
+    capture: CapturedDisplayImage;
+    ready: boolean;
+  }>;
   session: CaptureOverlaySession;
+  selection: CaptureSelectionCoordinator;
   readiness: ReturnType<typeof createOverlayReadinessGuard>;
-  displayBounds: Electron.Rectangle;
+  displays: CaptureDisplay[];
+  disposeDisplayListeners: () => void;
 } | null = null;
 const captureAdmissionGate = new CaptureAdmissionGate();
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
@@ -828,18 +838,23 @@ function captureService(): CaptureService {
         // source. The disposable smoke profile synthesizes these pixels.
         const width = options.thumbnailSize.width;
         const height = options.thumbnailSize.height;
-        const thumbnail = nativeImage.createFromBitmap(Buffer.alloc(width * height * 4, 0x5a), {
-          width,
-          height,
-        });
-        return screen.getAllDisplays().map((display) => ({
-          display_id: String(display.id),
-          thumbnail,
-        }));
+        return screen
+          .getAllDisplays()
+          .sort((left, right) => left.id - right.id)
+          .map((display, displayIndex) => {
+            const color = syntheticCaptureColor(displayIndex);
+            const bitmap = Buffer.alloc(width * height * 4);
+            bitmap.fill(Buffer.from([color.blue, color.green, color.red, color.alpha]));
+            return {
+              display_id: String(display.id),
+              thumbnail: nativeImage.createFromBitmap(bitmap, { width, height }),
+            };
+          });
       }
       return desktopCapturer.getSources(options);
     },
     createImage: (png) => nativeImage.createFromBuffer(png),
+    createBitmapImage: (bitmap, size) => nativeImage.createFromBitmap(bitmap, size),
   });
 }
 
@@ -880,7 +895,8 @@ function settleCaptureOverlay(selection: CaptureRectangle | null): void {
   if (!active || !active.session.settle(selection)) return;
   captureOverlay = null;
   active.readiness.dispose();
-  if (!active.window.isDestroyed()) active.window.close();
+  active.disposeDisplayListeners();
+  closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
 }
 
 function failCaptureOverlay(reason: CaptureOverlayFailure = 'not-ready'): void {
@@ -888,59 +904,123 @@ function failCaptureOverlay(reason: CaptureOverlayFailure = 'not-ready'): void {
   if (!active || !active.session.fail(reason)) return;
   captureOverlay = null;
   active.readiness.dispose();
-  if (!active.window.isDestroyed()) active.window.close();
+  active.disposeDisplayListeners();
+  closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
 }
 
-async function chooseCaptureRegion(capture: CapturedDisplayImage): Promise<CaptureOverlayOutcome> {
+function broadcastCaptureSelection(): void {
+  const active = captureOverlay;
+  if (!active) return;
+  const state = active.selection.current();
+  for (const overlay of active.overlays)
+    if (!overlay.window.isDestroyed()) overlay.window.webContents.send('capture-overlay:selection', state);
+}
+
+function captureOverlayIds(): number[] | undefined {
+  return captureOverlay?.overlays.map(({ window }) => window.webContents.id);
+}
+
+function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverlay>): boolean {
+  const current = screen.getAllDisplays();
+  const relevant =
+    process.platform === 'win32'
+      ? current
+      : current.filter((display) => active.displays.some((captured) => captured.id === display.id));
+  return captureDisplaysHaveStableGeometry(active.displays, relevant);
+}
+
+async function chooseCaptureRegion(
+  captures: readonly CapturedDisplayImage[],
+): Promise<CaptureOverlayOutcome> {
   if (captureOverlay) throw new Error('A screen capture is already in progress.');
-  const displayBounds = capture.display.bounds;
-  // Windows places a window constructed with `fullscreen: true` on the primary
-  // display regardless of `x`/`y`; the overlay then covered the wrong display.
-  const placement = captureOverlayWindowOptions(displayBounds, process.platform);
-  const overlay = new BrowserWindow({
-    ...placement,
-    useContentSize: true,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    hasShadow: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-  overlay.setAlwaysOnTop(true, 'screen-saver');
-  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  if (!placement.fullscreen) overlay.setBounds(displayBounds);
-  overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  overlay.webContents.on('will-navigate', (event) => event.preventDefault());
+  if (!captures.length) throw new Error('No display capture is available.');
+  const displays = captures.map(({ display }) => display);
   const session = new CaptureOverlaySession();
   const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
-  captureOverlay = { window: overlay, session, readiness, displayBounds };
-  overlay.once('closed', () => failCaptureOverlay());
-  overlay.once('unresponsive', () => failCaptureOverlay());
-  overlay.webContents.once('render-process-gone', () => failCaptureOverlay());
-  overlay.webContents.once('did-fail-load', () => failCaptureOverlay());
-  overlay.webContents.once('did-finish-load', () => {
-    if (captureOverlay?.window !== overlay || overlay.isDestroyed()) return;
-    overlay.webContents.send('capture-overlay:payload', {
-      imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
-    });
-  });
+  const selection = new CaptureSelectionCoordinator(displays);
+  const overlays: Array<{ window: BrowserWindow; capture: CapturedDisplayImage; ready: boolean }> = [];
+  try {
+    for (const capture of captures) {
+      const displayBounds = capture.display.bounds;
+      // Windows fullscreen windows ignore explicit coordinates and jump to the
+      // primary display. Exact frameless bounds keep one overlay on each screen.
+      const placement = captureOverlayWindowOptions(displayBounds, process.platform);
+      const window = new BrowserWindow({
+        ...placement,
+        useContentSize: true,
+        show: false,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        movable: false,
+        minimizable: false,
+        maximizable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        hasShadow: false,
+        backgroundColor: '#00000000',
+        webPreferences: {
+          preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          webSecurity: true,
+        },
+      });
+      window.setAlwaysOnTop(true, 'screen-saver');
+      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      if (!placement.fullscreen) window.setBounds(displayBounds);
+      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      window.webContents.on('will-navigate', (event) => event.preventDefault());
+      window.once('closed', () => failCaptureOverlay());
+      window.once('unresponsive', () => failCaptureOverlay());
+      window.webContents.once('render-process-gone', () => failCaptureOverlay());
+      window.webContents.once('did-fail-load', () => failCaptureOverlay());
+      window.webContents.once('did-finish-load', () => {
+        const active = captureOverlay;
+        if (!active?.overlays.some((candidate) => candidate.window === window) || window.isDestroyed())
+          return;
+        window.webContents.send('capture-overlay:payload', {
+          displayId: capture.display.id,
+          displayBounds,
+          imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
+        });
+      });
+      overlays.push({ window, capture, ready: false });
+    }
+  } catch {
+    readiness.dispose();
+    closeCaptureOverlayWindows(overlays.map(({ window }) => window));
+    throw new CaptureServiceError(
+      'sources-unavailable',
+      'The screen selection windows could not be created.',
+    );
+  }
+  const failForDisplayChange = () => failCaptureOverlay('display-changed');
+  screen.on('display-added', failForDisplayChange);
+  screen.on('display-removed', failForDisplayChange);
+  screen.on('display-metrics-changed', failForDisplayChange);
+  captureOverlay = {
+    overlays,
+    session,
+    selection,
+    readiness,
+    displays,
+    disposeDisplayListeners: () => {
+      screen.off('display-added', failForDisplayChange);
+      screen.off('display-removed', failForDisplayChange);
+      screen.off('display-metrics-changed', failForDisplayChange);
+    },
+  };
   try {
     const devUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devUrl) await overlay.loadURL(new URL('capture-overlay.html', `${devUrl}/`).toString());
-    else await overlay.loadFile(path.join(__dirname, '../../dist/capture-overlay.html'));
+    await Promise.all(
+      overlays.map(({ window }) =>
+        devUrl
+          ? window.loadURL(new URL('capture-overlay.html', `${devUrl}/`).toString())
+          : window.loadFile(path.join(__dirname, '../../dist/capture-overlay.html')),
+      ),
+    );
   } catch {
     failCaptureOverlay();
     throw new CaptureServiceError('sources-unavailable', 'The screen selection window could not be opened.');
@@ -1089,14 +1169,6 @@ function registerIpc(): void {
     .regex(/^[a-zA-Z0-9_-]+$/)
     .max(200);
   const workflowBundleNumber = z.number().int().min(1).max(999);
-  const captureRectangle = z
-    .object({
-      x: z.number().finite(),
-      y: z.number().finite(),
-      width: z.number().finite().positive(),
-      height: z.number().finite().positive(),
-    })
-    .strict();
   const workflowManifest = z
     .array(
       z
@@ -1303,7 +1375,7 @@ function registerIpc(): void {
   ipcMain.handle('capture-overlay:ready', (event) => {
     if (
       !isCaptureOverlaySender(
-        captureOverlay?.window.webContents.id,
+        captureOverlayIds(),
         event.sender.id,
         event.senderFrame === event.sender.mainFrame,
       )
@@ -1311,42 +1383,88 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay;
     if (!active) throw new Error('Capture overlay is no longer available.');
+    const source = active.overlays.find(({ window }) => window.webContents.id === event.sender.id);
+    if (!source) throw new Error('Capture overlay is no longer available.');
+    if (source.ready) return;
+    source.ready = true;
+    if (!active.overlays.every((overlay) => overlay.ready)) return;
     if (!active.readiness.ready()) throw new Error('Capture overlay readiness has expired.');
-    active.window.show();
-    // Showing can re-snap a non-fullscreen window to the work area or another
-    // display. Re-assert the bounds once, then refuse a misplaced overlay so
-    // its selection is never mapped onto pixels from a different display.
-    if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
-      active.window.setBounds(active.displayBounds);
-      if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
-        failCaptureOverlay('misplaced');
-        return;
+    if (!captureOverlayGeometryIsStable(active)) {
+      failCaptureOverlay('display-changed');
+      return;
+    }
+    // Showing can re-snap a window to the work area or another display. Reassert
+    // every bound, then refuse the whole group if even one overlay is misplaced.
+    for (const overlay of active.overlays) {
+      overlay.window.show();
+      const expected = overlay.capture.display.bounds;
+      if (!overlayCoversDisplay(overlay.window.getContentBounds(), expected)) {
+        overlay.window.setBounds(expected);
+        if (!overlayCoversDisplay(overlay.window.getContentBounds(), expected)) {
+          failCaptureOverlay('misplaced');
+          return;
+        }
       }
     }
-    active.window.focus();
+    const pointerDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const focused = active.overlays.find(({ capture }) => capture.display.id === pointerDisplay.id);
+    (focused ?? active.overlays[0])?.window.focus();
   });
-  ipcMain.handle('capture-overlay:save', (event, raw) => {
+  ipcMain.on('capture-overlay:pointer', (event, raw) => {
     if (
       !isCaptureOverlaySender(
-        captureOverlay?.window.webContents.id,
+        captureOverlayIds(),
         event.sender.id,
         event.senderFrame === event.sender.mainFrame,
       )
     )
       throw new Error('Untrusted capture overlay sender.');
-    const active = captureOverlay!;
-    // Window managers can constrain an overlay to the work area. Never map a
-    // stretched preview's coordinates onto a differently sized source display.
-    if (!overlayCoversDisplay(active.window.getContentBounds(), active.displayBounds)) {
-      failCaptureOverlay('misplaced');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    const overlay = active.overlays.find(({ window }) => window.webContents.id === event.sender.id);
+    if (!overlay) throw new Error('Capture overlay is no longer available.');
+    const update = z
+      .object({
+        phase: z.enum(['begin', 'move', 'end', 'reset']),
+        point: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(),
+      })
+      .strict()
+      .parse(raw);
+    const globalPoint = update.point
+      ? capturePointerGlobalPoint(overlay.capture.display, update.point, () => screen.getCursorScreenPoint())
+      : undefined;
+    active.selection.update(overlay.capture.display.id, update.phase, update.point, globalPoint);
+    broadcastCaptureSelection();
+  });
+  ipcMain.handle('capture-overlay:save', (event) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    if (!captureOverlayGeometryIsStable(active)) {
+      failCaptureOverlay('display-changed');
       return;
     }
-    settleCaptureOverlay(captureRectangle.parse(raw));
+    for (const overlay of active.overlays) {
+      if (!overlayCoversDisplay(overlay.window.getContentBounds(), overlay.capture.display.bounds)) {
+        failCaptureOverlay('misplaced');
+        return;
+      }
+    }
+    const state = active.selection.current();
+    if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
+    settleCaptureOverlay(state.selection);
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
     if (
       !isCaptureOverlaySender(
-        captureOverlay?.window.webContents.id,
+        captureOverlayIds(),
         event.sender.id,
         event.senderFrame === event.sender.mainFrame,
       )
@@ -1661,27 +1779,6 @@ function registerIpc(): void {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
   });
-  handleWorkflow('workflow:capture:displays', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
-    if (process.platform !== 'win32')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Display selection is only available for Windows capture.',
-      );
-    const displays = captureDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
-    if (displays.length === 0)
-      throw new NativeWorkflowError(
-        'capture-sources-unavailable',
-        'Windows did not report an available display to capture. Use Import or Paste instead.',
-        true,
-      );
-    return displays;
-  });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z
       .tuple([
@@ -1689,7 +1786,6 @@ function registerIpc(): void {
           .object({
             projectPath: pathInput,
             collectionId: filenameSchema,
-            displayId: z.number().int().optional(),
           })
           .strict(),
       ])
@@ -1727,16 +1823,14 @@ function registerIpc(): void {
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
     assertLiveCaptureAdmission(event, admission);
-    const selectedDisplay =
+    const selectedDisplays =
       process.platform === 'win32'
-        ? selectedCaptureDisplay(screen.getAllDisplays(), input.displayId)
-        : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    if (!selectedDisplay)
+        ? screen.getAllDisplays()
+        : [screen.getDisplayNearestPoint(screen.getCursorScreenPoint())];
+    if (selectedDisplays.length === 0)
       throw new NativeWorkflowError(
         'capture-sources-unavailable',
-        input.displayId === undefined
-          ? 'Choose a display before selecting a region.'
-          : 'The selected display is no longer available. Choose an available display and try again.',
+        'The operating system did not report an available display. Use Import or Paste instead.',
         true,
       );
     assertLiveCaptureAdmission(event, admission);
@@ -1746,17 +1840,25 @@ function registerIpc(): void {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
       if (wasVisible) mainWindow?.hide();
-      let captured: CapturedDisplayImage;
+      let captured: CapturedDisplayImage[];
+      const service = captureService();
       try {
-        const stableCapture = await captureDisplayWithStableGeometry(
-          selectedDisplay,
-          (display) => captureService().captureDisplay(display),
-          () => screen.getAllDisplays(),
-        );
+        const stableCapture =
+          process.platform === 'win32'
+            ? await captureDisplaysWithStableGeometry(
+                selectedDisplays,
+                (displays) => service.captureDisplays(displays),
+                () => screen.getAllDisplays(),
+              )
+            : await captureDisplayWithStableGeometry(
+                selectedDisplays[0]!,
+                (display) => service.captureDisplay(display),
+                () => screen.getAllDisplays(),
+              ).then((capture) => (capture ? [capture] : null));
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            'The selected display changed while the capture was being prepared. Choose an available display and try again.',
+            'The display layout changed while capture was being prepared. Try again after the displays settle.',
             true,
           );
         captured = stableCapture;
@@ -1804,14 +1906,16 @@ function registerIpc(): void {
         throw new NativeWorkflowError(
           'capture-failed',
           outcome.reason === 'misplaced'
-            ? 'The selection window could not cover the selected display. Choose the display again, or use Import or Paste instead.'
-            : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
+            ? 'A selection window could not cover its display. Use Import or Paste instead.'
+            : outcome.reason === 'display-changed'
+              ? 'The display layout changed during capture. Try again after the displays settle.'
+              : 'The screen selection windows stopped before they were ready. Use Import or Paste instead.',
           true,
         );
       const selection = outcome.selection;
       let png: Buffer;
       try {
-        png = captureService().crop(captured, selection);
+        png = service.compose(captured, selection);
       } catch (error) {
         if (error instanceof CaptureServiceError)
           throw new NativeWorkflowError(

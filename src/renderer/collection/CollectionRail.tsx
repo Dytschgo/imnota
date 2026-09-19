@@ -39,6 +39,8 @@ export interface CollectionRailProps {
   screenshotFirstAdd?: boolean;
   /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
   onCapture?(): void;
+  /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
+  capturePrimary?: boolean;
   captureEnabled?: boolean;
   captureDisabledLabel?: string;
 }
@@ -351,6 +353,7 @@ export function CollectionRail({
   onDeleteProject,
   screenshotFirstAdd = true,
   onCapture,
+  capturePrimary = false,
   captureEnabled = false,
   captureDisabledLabel,
 }: CollectionRailProps) {
@@ -365,6 +368,7 @@ export function CollectionRail({
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
   const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
+  const captureIsPrimary = capturePrimary && captureEnabled && Boolean(onCapture);
   const addItemOptions: Array<{
     id: string;
     label: string;
@@ -375,7 +379,7 @@ export function CollectionRail({
   }> = [
     {
       id: 'screenshot',
-      label: 'Screenshot',
+      label: 'Import screenshot',
       description: 'Import an image into this collection',
       icon: Upload,
       run: onImport,
@@ -386,7 +390,7 @@ export function CollectionRail({
             id: 'capture',
             label: 'Take screenshot',
             description: captureEnabled
-              ? 'Choose a display, then capture a region'
+              ? 'Capture a region across the available displays'
               : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
             icon: Camera,
             run: onCapture,
@@ -666,9 +670,18 @@ export function CollectionRail({
                     variant="primary"
                     disabled={collection?.archived}
                     data-testid="add-screenshot"
-                    onClick={onImport}
+                    title={
+                      collection?.archived
+                        ? 'Choose a current collection before adding screenshots'
+                        : undefined
+                    }
+                    onClick={captureIsPrimary ? onCapture : onImport}
                   >
-                    <Upload size={15} aria-hidden="true" />
+                    {captureIsPrimary ? (
+                      <Camera size={15} aria-hidden="true" />
+                    ) : (
+                      <Upload size={15} aria-hidden="true" />
+                    )}
                     Add screenshot
                   </Button>
                   <Button

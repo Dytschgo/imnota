@@ -12,12 +12,6 @@ export interface CaptureDisplay {
   scaleFactor: number;
 }
 
-/** Non-pixel display metadata shown before a Windows region capture begins. */
-export interface CaptureDisplayOption extends CaptureDisplay {
-  primary: boolean;
-  position: string;
-}
-
 export const MAX_CAPTURE_DIMENSION = 16_384;
 /** 8K fits; prohibit decoded images that would require excessive native memory. */
 export const MAX_CAPTURE_PIXELS = 64_000_000;

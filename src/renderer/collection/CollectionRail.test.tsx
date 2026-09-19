@@ -277,12 +277,55 @@ describe('CollectionRail', () => {
 
   it('makes Add screenshot the primary action and can restore the combined Add item button', () => {
     const onImport = vi.fn();
-    const { rerender } = render(<CollectionRail {...props({ onImport, onAddContent: vi.fn() })} />);
+    const onCapture = vi.fn();
+    const { rerender } = render(
+      <CollectionRail
+        {...props({
+          onImport,
+          onCapture,
+          capturePrimary: true,
+          captureEnabled: true,
+          onAddContent: vi.fn(),
+        })}
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Add screenshot' }));
+    expect(onCapture).toHaveBeenCalledOnce();
+    expect(onImport).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Import screenshot/ }));
     expect(onImport).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Add item' })).toBeNull();
     rerender(<CollectionRail {...props({ onImport, onAddContent: vi.fn(), screenshotFirstAdd: false })} />);
     expect(screen.getByRole('button', { name: 'Add item' })).toBeVisible();
+  });
+
+  it('keeps import as the primary screenshot action outside Windows', () => {
+    const onImport = vi.fn();
+    const onCapture = vi.fn();
+    render(<CollectionRail {...props({ onImport, onCapture, captureEnabled: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add screenshot' }));
+    expect(onImport).toHaveBeenCalledOnce();
+    expect(onCapture).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an enabled import primary action when Windows capture is unavailable', () => {
+    const onImport = vi.fn();
+    render(
+      <CollectionRail
+        {...props({
+          onImport,
+          capturePrimary: true,
+          captureEnabled: false,
+        })}
+      />,
+    );
+    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
+    expect(addScreenshot).toBeEnabled();
+    fireEvent.click(addScreenshot);
+    expect(onImport).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(screen.queryByRole('menuitem', { name: /Take screenshot/ })).not.toBeInTheDocument();
   });
 
   it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
@@ -292,7 +335,7 @@ describe('CollectionRail', () => {
     );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     const capture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
-    expect(capture).toHaveTextContent('Choose a display');
+    expect(capture).toHaveTextContent('across the available displays');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();

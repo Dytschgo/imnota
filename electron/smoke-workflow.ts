@@ -2162,9 +2162,15 @@ export async function runSmokeWorkflow(
   if (!captureSmoke.skipped) {
     artifacts.push(...captureSmoke.artifacts);
     const captureTriggers =
-      process.platform === 'win32' ? 'toolbar and native Ctrl+Shift+5 chooser/overlay' : 'toolbar overlay';
+      process.platform === 'win32'
+        ? 'toolbar and native Ctrl+Shift+5 all-display overlay'
+        : 'toolbar overlay';
     assertions.push(
-      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
+      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result${
+        captureSmoke.crossDisplayVerified
+          ? '; cross-display overlay IPC composes distinct display colors at the expected PNG dimensions'
+          : ''
+      }`,
     );
   }
 
