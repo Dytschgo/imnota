@@ -41,4 +41,15 @@ describe('what’s new releases', () => {
     expect(shouldShowWhatsNew('0.2.9', '0.2.8', release)).toBe(true);
     expect(shouldShowWhatsNew('0.2.8', 'not-a-version', release)).toBe(true);
   });
+
+  it('keeps the published nightly content until the comparison nightly is installed', () => {
+    expect(findWhatsNewRelease('0.2.8-nightly.20260919.35412472439')?.features[0]?.id).toBe('updates');
+    const next = findWhatsNewRelease('0.2.8-nightly.20260919.35412472440');
+    expect(next?.features.map((feature) => feature.id)).toEqual([
+      'update-hover',
+      'copy-variants',
+      'capture-all-displays',
+    ]);
+    expect(findWhatsNewRelease('0.2.8')?.features[0]?.id).toBe('updates');
+  });
 });

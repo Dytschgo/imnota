@@ -82,6 +82,37 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
     ],
   },
   {
+    afterVersion: '0.2.8-nightly.20260919.35412472439',
+    channel: 'nightly',
+    title: 'Try the Windows copy options',
+    summary:
+      'Compare clipboard formats in your apps, capture across screens, and read update notes on hover.',
+    preview: true,
+    features: [
+      {
+        id: 'update-hover',
+        title: 'Read before downloading',
+        description:
+          'Hover over an available update to read and scroll its changes. The same button downloads, shows progress, and restarts.',
+        action: { kind: 'settings', category: 'Updates & about' },
+      },
+      {
+        id: 'copy-variants',
+        title: 'Choose what to copy',
+        description:
+          'Compare rich copy, two files, or files plus rich content. Explorer stays closed unless you choose Open files.',
+        action: { kind: 'onboarding' },
+      },
+      {
+        id: 'capture-all-displays',
+        title: 'Select across your screens',
+        description:
+          'Start capture on all Windows displays at once, then drag a region within one screen or across their boundary.',
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
+    ],
+  },
+  {
     afterVersion: '0.2.7',
     channel: 'stable',
     title: 'What’s new',
