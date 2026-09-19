@@ -200,6 +200,7 @@ describe('Windows clipboard payloads', () => {
     const prior = windowsUnicodeTextBuffer('newer clipboard');
     const native = nativeMock([[13, prior]]);
     native.openClipboard.mockReturnValue(false);
+    native.api.getLastError = () => 5;
     const yieldControl = vi.fn(async () => {
       native.clipboardSequence += 1;
     });
@@ -215,6 +216,21 @@ describe('Windows clipboard payloads', () => {
     expect(native.clipboard.get(13)).toBeDefined();
     expect(native.memory.get(native.clipboard.get(13)!)).toEqual(prior);
     expect(native.memory.size).toBe(1);
+  });
+
+  it('does not retry a non-busy OpenClipboard failure and releases candidate allocations', async () => {
+    const native = nativeMock();
+    native.openClipboard.mockReturnValue(false);
+    native.api.getLastError = () => 1_400;
+    const yieldControl = vi.fn(async () => undefined);
+    await expect(
+      writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, { yieldControl }),
+    ).rejects.toThrow(/could not be opened \(1400\)/i);
+    expect(native.openClipboard).toHaveBeenCalledOnce();
+    expect(yieldControl).not.toHaveBeenCalled();
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.closeClipboard).not.toHaveBeenCalled();
+    expect(native.memory.size).toBe(0);
   });
 
   it('does not retry a non-busy transaction failure and always releases lock ownership', async () => {
