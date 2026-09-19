@@ -91,6 +91,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       {
         id: 'update-hover',
         title: 'Read before downloading',
+        imageSrc: new URL('../renderer/assets/whats-new-hover-notes.png', import.meta.url).href,
         description:
           'Hover over an available update to read and scroll its changes. The same button downloads, shows progress, and restarts.',
         action: { kind: 'settings', category: 'Updates & about' },
@@ -98,6 +99,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       {
         id: 'copy-variants',
         title: 'Choose what to copy',
+        imageSrc: new URL('../renderer/assets/whats-new-copy-preference.png', import.meta.url).href,
         description:
           'Copy files by default, or save another format from the copy dropdown or Settings. Explorer stays closed unless you choose Open files.',
         action: { kind: 'onboarding' },
