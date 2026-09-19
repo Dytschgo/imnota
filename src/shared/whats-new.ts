@@ -84,9 +84,8 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
   {
     afterVersion: '0.2.8-nightly.20260919.35412472439',
     channel: 'nightly',
-    title: 'Try the Windows copy options',
-    summary:
-      'Compare clipboard formats in your apps, capture across screens, and read update notes on hover.',
+    title: 'Choose your Windows copy format',
+    summary: 'Save your preferred copy format, capture across screens, and read update notes on hover.',
     preview: true,
     features: [
       {
@@ -100,7 +99,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         id: 'copy-variants',
         title: 'Choose what to copy',
         description:
-          'Compare rich copy, two files, or files plus rich content. Explorer stays closed unless you choose Open files.',
+          'Copy files by default, or save another format from the copy dropdown or Settings. Explorer stays closed unless you choose Open files.',
         action: { kind: 'onboarding' },
       },
       {
