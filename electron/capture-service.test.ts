@@ -12,6 +12,81 @@ function image(size: { width: number; height: number }, png = Buffer.from('sourc
 }
 
 describe('CaptureService', () => {
+  it('captures two 3440x1440 displays without overlapping native source sets', async () => {
+    const displays = [
+      { id: 1, bounds: { x: 0, y: 0, width: 3440, height: 1440 }, scaleFactor: 1 },
+      { id: 2, bounds: { x: -3440, y: 0, width: 3440, height: 1440 }, scaleFactor: 1 },
+    ];
+    let activeRequests = 0;
+    let peakRequests = 0;
+    const getSources = vi.fn(async (options: { thumbnailSize: { width: number; height: number } }) => {
+      activeRequests += 1;
+      peakRequests = Math.max(peakRequests, activeRequests);
+      await Promise.resolve();
+      activeRequests -= 1;
+      return displays.map((display) => ({
+        display_id: String(display.id),
+        thumbnail: image(options.thumbnailSize),
+      }));
+    });
+    const service = new CaptureService({
+      physicalDisplaySize: (display) => ({
+        width: display.bounds.width,
+        height: display.bounds.height,
+      }),
+      getSources,
+      createImage: () => image({ width: 1, height: 1 }),
+      createBitmapImage: () => image({ width: 1, height: 1 }),
+    });
+
+    await expect(service.captureDisplays(displays)).resolves.toHaveLength(2);
+    expect(getSources).toHaveBeenCalledTimes(2);
+    expect(peakRequests).toBe(1);
+  });
+
+  it('rejects excessive retained display pixels before requesting native sources', async () => {
+    const getSources = vi.fn(async () => []);
+    const service = new CaptureService({
+      physicalDisplaySize: () => ({ width: 5000, height: 5000 }),
+      getSources,
+      createImage: () => image({ width: 1, height: 1 }),
+      createBitmapImage: () => image({ width: 1, height: 1 }),
+    });
+    const displays = [1, 2, 3].map((id) => ({
+      id,
+      bounds: { x: 0, y: 0, width: 5000, height: 5000 },
+      scaleFactor: 1,
+    }));
+
+    await expect(service.captureDisplays(displays)).rejects.toMatchObject({
+      kind: 'sources-unavailable',
+      message: expect.stringContaining('retained capture memory'),
+    } satisfies Partial<CaptureServiceError>);
+    expect(getSources).not.toHaveBeenCalled();
+  });
+
+  it('rejects an excessive all-screen thumbnail batch before requesting native sources', async () => {
+    const getSources = vi.fn(async () => []);
+    const service = new CaptureService({
+      physicalDisplaySize: (display) =>
+        display.id === 1 ? { width: 8000, height: 4000 } : { width: 1000, height: 1000 },
+      getSources,
+      createImage: () => image({ width: 1, height: 1 }),
+      createBitmapImage: () => image({ width: 1, height: 1 }),
+    });
+    const displays = [1, 2, 3, 4].map((id) => ({
+      id,
+      bounds: { x: 0, y: 0, width: 1000, height: 1000 },
+      scaleFactor: 1,
+    }));
+
+    await expect(service.captureDisplays(displays)).rejects.toMatchObject({
+      kind: 'sources-unavailable',
+      message: expect.stringContaining('native thumbnail memory'),
+    } satisfies Partial<CaptureServiceError>);
+    expect(getSources).not.toHaveBeenCalled();
+  });
+
   it('requests and requires an explicit full-resolution physical thumbnail', async () => {
     const source = image({ width: 2000, height: 1000 });
     const cropped = image({ width: 2000, height: 1000 });

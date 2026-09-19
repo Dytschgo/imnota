@@ -1856,7 +1856,7 @@ function registerIpc(): void {
           process.platform === 'win32'
             ? await captureDisplaysWithStableGeometry(
                 selectedDisplays,
-                (display) => service.captureDisplay(display),
+                (displays) => service.captureDisplays(displays),
                 () => screen.getAllDisplays(),
               )
             : await captureDisplayWithStableGeometry(
