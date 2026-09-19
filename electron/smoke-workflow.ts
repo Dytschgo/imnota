@@ -433,8 +433,18 @@ async function exerciseOnboarding(
     })()`);
     if (restoredDefault !== 'files') throw new Error('Windows native copy default was not restored.');
     const unchangedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
-    if (unchangedFiles.length !== 2)
-      throw new Error('Choosing a native copy default unexpectedly replaced the clipboard.');
+    if (
+      unchangedFiles.length !== 2 ||
+      path.resolve(unchangedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(unchangedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Choosing a native copy default changed the exact onboarding file list.');
+    if (
+      (await nativeClipboard.readText()) !== markdown ||
+      (await nativeClipboard.readHTML()) !== platformClipboardHtml(clipboardContextHtml(markdown))
+    )
+      throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
+    await assertExactImage('Choosing a native copy default');
   }
 
   await driver.click({ text: 'Copy Markdown', exact: true });
@@ -1879,7 +1889,15 @@ async function exercisePromptWorkflow(
   if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
   if (!latestRichClipboard)
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
-  if (process.platform === 'win32') await choosePromptCopyFunction(driver, copiedIndex, 'files');
+  if (process.platform === 'win32') {
+    await choosePromptCopyFunction(driver, copiedIndex, 'files');
+    await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
+    latestRichClipboard = await assertPromptRichClipboard(
+      latestSet,
+      copiedIndex,
+      'Changing the prompt copy default',
+    );
+  }
   const text = latestRichClipboard.text;
   const image = await nativeClipboard.readImage();
   if (
@@ -1903,10 +1921,10 @@ async function exercisePromptWorkflow(
     `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'rich' })`,
     ['session-not-found'],
   );
-  if (
-    (await nativeClipboard.readText()) !== text ||
-    !(await nativeClipboard.readImage()).toPNG().equals(clipboardPng)
-  )
+  if (process.platform === 'win32')
+    await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Rejected prompt copy');
+  const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
+  if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
   return {
     bundleCount: cards.length,
