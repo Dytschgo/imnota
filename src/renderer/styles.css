@@ -2484,19 +2484,12 @@ kbd {
 
 .floating-update {
   position: relative;
-  z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .floating-update-button {
-  width: 42px;
-  height: 42px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  background: var(--surface-3);
-  color: var(--ink);
-  box-shadow: var(--shadow);
+  flex: none;
 }
 /* Beside About: same footprint as a navigation item, no floating shadow. */
 .floating-update-nav {
@@ -2525,11 +2518,9 @@ kbd {
 }
 .floating-update-available .floating-update-button,
 .floating-update-downloaded .floating-update-button {
-  border-color: var(--imnota-accent);
   color: var(--imnota-accent-hover);
 }
 .floating-update-error .floating-update-button {
-  border-color: var(--danger);
   color: var(--danger);
 }
 .floating-update-percent,
@@ -2539,11 +2530,12 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 .floating-update-popover {
-  position: absolute;
-  left: 0;
-  bottom: 52px;
-  display: none;
-  width: min(360px, calc(100vw - 40px));
+  position: fixed;
+  z-index: 30;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -2551,10 +2543,6 @@ kbd {
   color: var(--ink-2);
   box-shadow: var(--shadow);
   font-size: 12px;
-}
-.floating-update:hover .floating-update-popover,
-.floating-update:focus-within .floating-update-popover {
-  display: block;
 }
 .floating-update-popover > strong {
   display: block;

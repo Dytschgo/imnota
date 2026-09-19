@@ -7,7 +7,6 @@ const bridge: ImnotaBridge = {
   setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
   getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),
   getNativeCapabilities: () => ipcRenderer.invoke('workflow:capabilities:get'),
-  listCaptureDisplays: () => ipcRenderer.invoke('workflow:capture:displays'),
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
   startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
   writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),

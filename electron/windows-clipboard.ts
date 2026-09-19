@@ -10,6 +10,7 @@ const GMEM_MOVEABLE_ZEROINIT = 0x42;
 const IMAGE_BITMAP = 0;
 const LR_CREATEDIBSECTION = 0x2000;
 const DROPFILES_BYTES = 20;
+const ERROR_ACCESS_DENIED = 5;
 const MAX_SNAPSHOT_FORMATS = 64;
 /**
  * A two-display 6880x1440 BGRA surface is about 40 MB. Keep enough room for
@@ -450,6 +451,8 @@ export async function withWindowsClipboardLock<T>(
       return result;
     }
     const nativeCode = api.getLastError();
+    if (nativeCode !== ERROR_ACCESS_DENIED)
+      throw new Error(`${context} could not be opened (${nativeCode}).`);
     busyChecks += 1;
     const elapsed = now() - started;
     if (elapsed >= timeoutMs)
