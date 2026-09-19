@@ -4,7 +4,10 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import { DEFAULT_APPEARANCE, DEFAULT_PREFERENCE_SETTINGS, type PreferenceSettings } from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
+import { SettingsView } from './SettingsView';
 import { mergePreferenceSettings } from '../../shared/preference-settings';
+
+vi.mock('../components/UpdateControl', () => ({ UpdateControl: () => null }));
 
 afterEach(cleanup);
 
@@ -141,5 +144,42 @@ describe('preference controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Replay guide' }));
     expect(onReplay).toHaveBeenCalledOnce();
     expect(screen.getByText('Completed with guide version 1')).toBeInTheDocument();
+  });
+
+  it('shows the Windows native copy default and emits a persisted-function change', async () => {
+    const onNativeCopyChange = vi.fn(async () => {});
+    render(
+      <SettingsView
+        activeCategory="Sharing"
+        preferences={DEFAULT_PREFERENCE_SETTINGS}
+        nativeCopyAvailable
+        onNativeCopyChange={onNativeCopyChange}
+      />,
+    );
+    const select = screen.getByRole('combobox', { name: 'Native copy functions' });
+    expect(select).toHaveValue('files');
+    fireEvent.change(select, { target: { value: 'files-rich' } });
+    await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'files-rich' }));
+  });
+
+  it('hides native copy functions when the host capability is unavailable', () => {
+    render(<SettingsView activeCategory="Sharing" preferences={DEFAULT_PREFERENCE_SETTINGS} />);
+    expect(screen.queryByRole('combobox', { name: 'Native copy functions' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the saved native copy choice when a settings update is rejected', async () => {
+    const onNativeCopyChange = vi.fn(async () => Promise.reject(new Error('disk full')));
+    render(
+      <SettingsView
+        activeCategory="Sharing"
+        preferences={DEFAULT_PREFERENCE_SETTINGS}
+        nativeCopyAvailable
+        onNativeCopyChange={onNativeCopyChange}
+      />,
+    );
+    const select = screen.getByRole('combobox', { name: 'Native copy functions' });
+    fireEvent.change(select, { target: { value: 'rich' } });
+    await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'rich' }));
+    expect(select).toHaveValue('files');
   });
 });

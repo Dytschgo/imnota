@@ -13,8 +13,7 @@ import {
   systemPreferences,
 } from 'electron';
 import os from 'node:os';
-import { deliverClipboardWithFileHandoff, nativeClipboard } from './native-clipboard.js';
-import { selectWindowsFilePair } from './windows-file-handoff.js';
+import { nativeClipboard } from './native-clipboard.js';
 import {
   onboardingHandoffRoot,
   OnboardingHandoffWorkflow,
@@ -52,6 +51,7 @@ import type {
   ClipboardFormatsReport,
   PreferenceSettingsUpdate,
   ProjectWatchEvent,
+  WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
 import {
   DEFAULT_EXPORT_PREFERENCES,
@@ -113,6 +113,7 @@ import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
+import { windowsFileClipboardAvailable } from './windows-clipboard.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
@@ -802,17 +803,26 @@ async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
   await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
-async function copyContextToClipboard(
+function clipboardOwnerHandle(): Buffer {
+  const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  if (!owner || owner.isDestroyed())
+    throw new Error('A live Imnota window is required for clipboard access.');
+  return owner.getNativeWindowHandle();
+}
+
+async function copyBundleToClipboard(
   markdown: string,
   imageDataUrl: string,
   filePaths: readonly string[] = [],
+  variant: WindowsCopyVariantId = 'rich',
 ): Promise<ClipboardFormatsReport> {
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
-  return deliverClipboardWithFileHandoff(
-    () => nativeClipboard.writeContext(markdown, html, image),
+  if (variant === 'rich') return nativeClipboard.writeContext(markdown, html, image);
+  return nativeClipboard.writeWindowsFiles(
+    clipboardOwnerHandle(),
     filePaths,
-    selectWindowsFilePair,
+    variant === 'files-rich' ? { text: markdown, html, image } : undefined,
   );
 }
 
@@ -1351,7 +1361,7 @@ function registerIpc(): void {
       z
         .object({
           sessionId: z.uuid(),
-          action: z.enum(['context', 'markdown', 'image', 'paths']),
+          action: z.enum(['rich', 'files', 'files-rich', 'markdown', 'image', 'paths']),
         })
         .strict(),
     ]),
@@ -1619,8 +1629,8 @@ function registerIpc(): void {
           collectionName: collection.name,
         };
       },
-      copyContext: (markdown, imageDataUrl, filePaths) =>
-        copyContextToClipboard(markdown, imageDataUrl, filePaths),
+      copyContext: (markdown, imageDataUrl, filePaths, variant) =>
+        copyBundleToClipboard(markdown, imageDataUrl, filePaths, variant),
       prepareFileHandoff: async (markdown, imageDataUrl, sourcePaths) => {
         if (process.platform !== 'win32') return sourcePaths;
         const grant = await promptFileHandoffs.prepare({
@@ -1642,8 +1652,8 @@ function registerIpc(): void {
   );
   onboardingHandoffWorkflow = new OnboardingHandoffWorkflow({
     root: onboardingHandoffRoot(handoffPaths),
-    copyContext: (markdown, imageDataUrl, filePaths) =>
-      copyContextToClipboard(markdown, imageDataUrl, filePaths),
+    copyContext: (markdown, imageDataUrl, filePaths, variant) =>
+      copyBundleToClipboard(markdown, imageDataUrl, filePaths, variant),
     copyText: copyTextToClipboard,
     copyImage: copyImageToClipboard,
     openPath: async (targetPath) => {
@@ -1778,6 +1788,10 @@ function registerIpc(): void {
   handleWorkflow('workflow:performance:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return nativePerformanceProfile();
+  });
+  handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    return { windowsFileClipboard: windowsFileClipboardAvailable() };
   });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z
@@ -2070,7 +2084,7 @@ function registerIpc(): void {
           .object({
             sessionId: workflowSessionId,
             bundleNumber: workflowBundleNumber,
-            target: z.enum(['context', 'markdown', 'image', 'paths']),
+            target: z.enum(['rich', 'files', 'files-rich', 'markdown', 'image', 'paths']),
           })
           .strict(),
       ])
@@ -2716,9 +2730,7 @@ function registerIpc(): void {
   handle('system:copy-image', async (_event, dataUrl: string) => {
     await copyImageToClipboard(dataUrl);
   });
-  handle('system:copy-context', (_event, input) =>
-    copyContextToClipboard(input.markdown, input.imageDataUrl),
-  );
+  handle('system:copy-context', (_event, input) => copyBundleToClipboard(input.markdown, input.imageDataUrl));
   handle('onboarding:prepare-handoff', async (_event, input) => {
     clipboardImage(input.imageDataUrl);
     return onboardingHandoffWorkflow!.prepare(input);

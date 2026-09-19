@@ -20,9 +20,10 @@ import type {
   OnboardingHandoffAction,
   OnboardingHandoffGrant,
   OnboardingHandoffOpenTarget,
+  WindowsCopyVariantId,
 } from '../../shared/workflow-bridge';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
-import { describeCombinedCopyMessage } from '../export/clipboard-delivery';
+import { describeCopyMessage } from '../export/clipboard-delivery';
 import { renderAnnotatedImage } from '../export-image';
 import { completedOnboarding, ONBOARDING_VERSION, type OnboardingPreferences } from '../settings/preferences';
 import {
@@ -43,6 +44,9 @@ export interface OnboardingBundle {
 }
 
 export interface OnboardingDemoProps {
+  fileClipboardAvailable?: boolean;
+  defaultCopyVariant?: WindowsCopyVariantId;
+  onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
   onMarkCompleted: (
     preferences: OnboardingPreferences,
     reason: OnboardingCompletionReason,
@@ -66,6 +70,9 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
 ];
 
 export function OnboardingDemo({
+  fileClipboardAvailable = false,
+  defaultCopyVariant = 'files',
+  onDefaultCopyVariantChange,
   onMarkCompleted,
   onCreateFirstProject,
   onDismiss,
@@ -101,6 +108,12 @@ export function OnboardingDemo({
     () => buildSamplePromptMarkdown(annotations, explanation),
     [annotations, explanation],
   );
+  const primaryCopyVariant = fileClipboardAvailable ? defaultCopyVariant : 'rich';
+  const copyVariantLabels: Record<WindowsCopyVariantId, { label: string; detail: string }> = {
+    files: { label: 'Copy files', detail: 'MD + PNG files' },
+    'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
+    rich: { label: 'Rich copy', detail: 'Text + image' },
+  };
 
   const dismiss = async () => {
     if (busy) return;
@@ -187,15 +200,15 @@ export function OnboardingDemo({
     }
   };
 
-  const copyBundle = async () => {
+  const copyBundle = async (variant: WindowsCopyVariantId) => {
     if (!bundle || busy) return;
     setBusy(true);
     setError('');
     try {
       if (!handoff || !onCopyHandoff) throw new Error('The native handoff is unavailable.');
-      const placed = await onCopyHandoff(handoff, 'context');
-      if (placed) setCopyStatus(describeCombinedCopyMessage(placed));
-      else setCopyStatus('The combined copy was not confirmed. Use a fallback below.');
+      const placed = await onCopyHandoff(handoff, variant);
+      if (placed) setCopyStatus(describeCopyMessage(variant, placed));
+      else setCopyStatus('The clipboard result was not confirmed. Try another option below.');
     } catch {
       setError(
         'The clipboard is unavailable right now. Try copying again, or continue to create your project.',
@@ -396,15 +409,48 @@ export function OnboardingDemo({
                   description, and text notes. Clipboard access is optional in this practice guide.
                 </p>
                 <pre>{bundle.markdown}</pre>
-                <button
-                  type="button"
-                  className="imnota-onboarding-primary"
-                  onClick={() => void copyBundle()}
-                  disabled={busy}
+                <div
+                  className={`imnota-copy-variants${fileClipboardAvailable ? '' : ' is-rich-only'}`}
+                  role="group"
+                  aria-label="Copy format"
                 >
-                  <Clipboard size={15} aria-hidden="true" />
-                  {busy ? 'Preparing…' : 'Copy PNG + Markdown'}
-                </button>
+                  <button
+                    type="button"
+                    className="imnota-onboarding-primary"
+                    aria-label={copyVariantLabels[primaryCopyVariant].label}
+                    title={copyVariantLabels[primaryCopyVariant].detail}
+                    onClick={() => void copyBundle(primaryCopyVariant)}
+                    disabled={busy}
+                  >
+                    <Clipboard size={15} aria-hidden="true" />
+                    <span>{copyVariantLabels[primaryCopyVariant].label}</span>
+                    <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
+                  </button>
+                  {fileClipboardAvailable && (
+                    <label className="imnota-copy-function-select">
+                      <span>Native copy function</span>
+                      <select
+                        aria-label="Native copy function"
+                        value={defaultCopyVariant}
+                        disabled={busy || !onDefaultCopyVariantChange}
+                        onChange={async (event) => {
+                          setError('');
+                          try {
+                            await onDefaultCopyVariantChange?.(event.target.value as WindowsCopyVariantId);
+                          } catch {
+                            setError(
+                              'The primary copy action could not be saved. Your previous choice is still active.',
+                            );
+                          }
+                        }}
+                      >
+                        <option value="files">Copy files</option>
+                        <option value="files-rich">Files + rich copy</option>
+                        <option value="rich">Rich copy</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
                 {copyStatus && (
                   <div className="imnota-copy-success" role="status">
                     <Check size={15} aria-hidden="true" />

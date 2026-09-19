@@ -1,5 +1,6 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
+import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -14,6 +15,7 @@ import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
   NativeUiDriver,
   createSmokeCheckpoint,
@@ -268,6 +270,7 @@ async function createProjectThroughUi(
 
 async function exerciseOnboarding(
   driver: NativeUiDriver,
+  window: BrowserWindow,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<boolean> {
@@ -306,14 +309,31 @@ async function exerciseOnboarding(
     { selector: '[data-testid="onboarding-continue"]' },
     { text: 'Continue to copy', exact: true },
   ]);
-  await driver.waitFor({ text: 'Copy PNG + Markdown', exact: true });
+  const chooseNativeCopyFunction = async (value: 'files' | 'files-rich' | 'rich', label: string) => {
+    await driver.evaluate(`(() => {
+      const select = document.querySelector('select[aria-label="Native copy function"]');
+      if (!(select instanceof HTMLSelectElement)) throw new Error('Native copy function selector is missing.');
+      select.value = ${JSON.stringify(value)};
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await driver.waitFor({ text: label, exact: true });
+  };
+  if (process.platform === 'win32') {
+    await driver.waitFor({ text: 'Copy files', exact: true });
+    const nativeDefault = await driver.evaluate<string>(`(async () => {
+      const result = await window.imnota.getPreferenceSettings();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value.settings.nativeCopy.defaultFunction;
+    })()`);
+    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    await chooseNativeCopyFunction('rich', 'Rich copy');
+  }
+  await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
-  await driver.click({ text: 'Copy PNG + Markdown', exact: true });
-  const combinedStatus =
-    process.platform === 'win32'
-      ? 'Markdown and image formats were confirmed on the clipboard. Imnota also opened the generated folder with the Markdown and PNG selected for attachment.'
-      : 'Text and image are on the clipboard. Check that both appear after pasting; some apps accept only one.';
+  await driver.click({ text: 'Rich copy', exact: true });
+  const combinedStatus = 'Markdown and image are on the clipboard. The test app may paste only one format.';
   await driver.waitFor({ selector: '[role="status"]', text: combinedStatus, exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
@@ -369,6 +389,72 @@ async function exerciseOnboarding(
   )
     throw new Error('Onboarding combined copy did not preserve exact Markdown and platform HTML.');
   await assertExactImage('Onboarding combined copy');
+
+  if (process.platform === 'win32') {
+    await chooseNativeCopyFunction('files', 'Copy files');
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({
+      selector: '[role="status"]',
+      text: 'Files were confirmed on the clipboard. Paste into the test app to see whether it accepts both attachments.',
+      exact: true,
+    });
+    const copiedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding Copy files',
+    );
+    if (
+      copiedFiles.length !== 2 ||
+      path.resolve(copiedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(copiedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
+    await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
+    await driver.click({ text: 'Files + rich copy', exact: true });
+    await driver.waitFor({
+      selector: '[role="status"]',
+      text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The test app may choose only one representation when you paste.',
+      exact: true,
+    });
+    const combinedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding Files + rich copy',
+    );
+    if (
+      combinedFiles.length !== 2 ||
+      path.resolve(combinedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(combinedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Onboarding Files + rich copy did not preserve the exact file list.');
+    if (
+      (await nativeClipboard.readText()) !== markdown ||
+      (await nativeClipboard.readHTML()) !== platformClipboardHtml(clipboardContextHtml(markdown))
+    )
+      throw new Error('Onboarding Files + rich copy did not preserve exact Markdown and HTML.');
+    await assertExactImage('Onboarding Files + rich copy');
+    await chooseNativeCopyFunction('files', 'Copy files');
+    const restoredDefault = await driver.evaluate<string>(`(async () => {
+      const result = await window.imnota.getPreferenceSettings();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value.settings.nativeCopy.defaultFunction;
+    })()`);
+    if (restoredDefault !== 'files') throw new Error('Windows native copy default was not restored.');
+    const unchangedFiles = await readWindowsClipboardFilesForSmoke(
+      window.getNativeWindowHandle(),
+      'Onboarding copy-default preservation',
+    );
+    if (
+      unchangedFiles.length !== 2 ||
+      path.resolve(unchangedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(unchangedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Choosing a native copy default changed the exact onboarding file list.');
+    if (
+      (await nativeClipboard.readText()) !== markdown ||
+      (await nativeClipboard.readHTML()) !== platformClipboardHtml(clipboardContextHtml(markdown))
+    )
+      throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
+    await assertExactImage('Choosing a native copy default');
+  }
 
   await driver.click({ text: 'Copy Markdown', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied.', exact: true });
@@ -1387,7 +1473,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
       text: [...card.querySelectorAll('dt, dd')].map((entry) => entry.textContent?.trim() ?? '').join(' '),
-      copyLabel: buttons.find((button) => /^Copy Bundle$/i.test(button.textContent ?? ''))?.textContent?.trim()
+      copyLabel: buttons.find((button) => button.matches('[data-testid^="copy-bundle-"]'))?.textContent?.trim()
     };
   }))()`);
 }
@@ -1403,6 +1489,78 @@ async function promptActionPoint(driver: NativeUiDriver, cardIndex: number): Pro
     const bounds = button.getBoundingClientRect();
     return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
   })()`);
+}
+
+const promptCopyLabels: Record<WindowsCopyVariantId, string> = {
+  files: 'Copy files',
+  'files-rich': 'Files + rich copy',
+  rich: 'Rich copy',
+};
+
+async function selectedPromptCopyFunction(
+  driver: NativeUiDriver,
+  cardIndex: number,
+): Promise<{ label: string; preference: string }> {
+  return driver.evaluate(`(async () => {
+    const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
+    const button = card?.querySelector('button[data-testid^="copy-bundle-"]');
+    const result = await window.imnota.getPreferenceSettings();
+    if (!result.ok) throw new Error(result.error.message);
+    return {
+      label: button?.getAttribute('aria-label') ?? '',
+      preference: result.value.settings.nativeCopy.defaultFunction,
+    };
+  })()`);
+}
+
+async function choosePromptCopyFunction(
+  driver: NativeUiDriver,
+  cardIndex: number,
+  variant: WindowsCopyVariantId,
+): Promise<void> {
+  const label = promptCopyLabels[variant];
+  const current = await selectedPromptCopyFunction(driver, cardIndex);
+  if (current.label !== label || current.preference !== variant) {
+    const optionsPoint = await driver.evaluate<SmokePoint>(`(() => {
+      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
+      const button = card?.querySelector('button[aria-label="Copy options"]');
+      if (!button || button.disabled) throw new Error('Prompt copy options are unavailable.');
+      button.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const bounds = button.getBoundingClientRect();
+      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+    })()`);
+    await driver.clickPoint(optionsPoint);
+    const optionPoint = await driver.evaluate<SmokePoint>(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
+        const menuId = card?.querySelector('button[aria-label="Copy options"]')?.getAttribute('aria-controls');
+        const menu = menuId ? document.getElementById(menuId) : null;
+        const item = [...(menu?.querySelectorAll('[role="menuitem"]') ?? [])]
+          .find(candidate => candidate.getAttribute('aria-label') === ${JSON.stringify(label)});
+        const bounds = item?.getBoundingClientRect();
+        if (item && !item.disabled && bounds && bounds.width > 0 && bounds.height > 0)
+          return resolve({ x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) });
+        if (Date.now() - started > 5000) return reject(new Error('Prompt copy function option was not ready.'));
+        setTimeout(check, 25);
+      };
+      check();
+    })`);
+    await driver.clickPoint(optionPoint);
+  }
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = async () => {
+      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
+      const label = card?.querySelector('button[data-testid^="copy-bundle-"]')?.getAttribute('aria-label');
+      const result = await window.imnota.getPreferenceSettings();
+      if (label === ${JSON.stringify(label)} && result.ok && result.value.settings.nativeCopy.defaultFunction === ${JSON.stringify(variant)})
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Prompt copy function was not persisted.'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
 }
 
 async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number): Promise<void> {
@@ -1606,6 +1764,66 @@ interface PromptWorkflowOptions {
   expectedExcludedPicture?: number;
   freshActions: number;
   requireSplit: boolean;
+  verifyWindowsCopyVariants?: boolean;
+}
+
+async function promptBundlePaths(set: PromptSet, cardIndex: number): Promise<[string, string]> {
+  const suffix = String(cardIndex + 1).padStart(2, '0');
+  const files = await fs.readdir(set.directory);
+  const markdown = files.find((name) => name.endsWith(` - ${suffix}.md`));
+  const png = files.find((name) => name.endsWith(` - ${suffix}.png`));
+  if (!markdown || !png) throw new Error(`Prompt Bundle ${cardIndex + 1} lost its Markdown/PNG pair.`);
+  return [path.join(set.directory, markdown), path.join(set.directory, png)];
+}
+
+async function assertPromptFileClipboard(
+  driver: NativeUiDriver,
+  set: PromptSet,
+  cardIndex: number,
+  context: string,
+): Promise<void> {
+  const expected = await promptBundlePaths(set, cardIndex);
+  const actual = await readWindowsClipboardFilesForSmoke(
+    driver.browserWindow.getNativeWindowHandle(),
+    context,
+  );
+  if (actual.length !== 2) throw new Error(`${context} placed ${actual.length} files instead of exactly 2.`);
+  const actualByName = new Map(actual.map((filePath) => [path.basename(filePath).toLowerCase(), filePath]));
+  if (actualByName.size !== 2) throw new Error(`${context} placed duplicate Markdown/PNG clipboard paths.`);
+  for (const expectedPath of expected) {
+    const actualPath = actualByName.get(path.basename(expectedPath).toLowerCase());
+    if (!actualPath) throw new Error(`${context} changed the generated Markdown/PNG filenames.`);
+    const [expectedBytes, actualBytes] = await Promise.all([
+      fs.readFile(expectedPath),
+      fs.readFile(actualPath),
+    ]);
+    if (!actualBytes.equals(expectedBytes))
+      throw new Error(`${context} changed the staged ${path.extname(expectedPath)} file bytes.`);
+  }
+}
+
+async function assertPromptRichClipboard(
+  set: PromptSet,
+  cardIndex: number,
+  context: string,
+): Promise<{ text: string; png: Buffer }> {
+  const [markdownPath, pngPath] = await promptBundlePaths(set, cardIndex);
+  const [expectedMarkdown, expectedPng] = await Promise.all([
+    fs.readFile(markdownPath, 'utf8'),
+    fs.readFile(pngPath),
+  ]);
+  const expectedImage = nativeImage.createFromBuffer(expectedPng);
+  const [text, html, image] = await Promise.all([
+    nativeClipboard.readText(),
+    nativeClipboard.readHTML(),
+    nativeClipboard.readImage(),
+  ]);
+  if (text !== expectedMarkdown) throw new Error(`${context} changed the exact prompt Markdown.`);
+  if (html !== platformClipboardHtml(clipboardContextHtml(expectedMarkdown)))
+    throw new Error(`${context} changed the exact platform HTML.`);
+  if (expectedImage.isEmpty() || image.isEmpty() || !image.toBitmap().equals(expectedImage.toBitmap()))
+    throw new Error(`${context} changed the exact prompt PNG pixels.`);
+  return { text, png: image.toPNG() };
 }
 
 async function exercisePromptWorkflow(
@@ -1640,8 +1858,26 @@ async function exercisePromptWorkflow(
   const copiedIndex = cards.findIndex((card) => card.copyLabel);
   if (copiedIndex < 0)
     throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
+  const windowsVariants: WindowsCopyVariantId[] =
+    process.platform === 'win32' && options.verifyWindowsCopyVariants
+      ? ['files', 'rich', 'files-rich']
+      : process.platform === 'win32'
+        ? Array.from({ length: options.freshActions }, () => 'rich' as const)
+        : [];
+  if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
+    const defaultFunction = await selectedPromptCopyFunction(driver, copiedIndex);
+    if (defaultFunction.label !== 'Copy files' || defaultFunction.preference !== 'files')
+      throw new Error('Production prompt copy did not start with the persisted Copy files default.');
+  }
+  const actionCount = Math.max(options.freshActions, windowsVariants.length);
   let latestSet: PromptSet | undefined;
-  for (let action = 0; action < options.freshActions; action += 1) {
+  let latestRichClipboard: { text: string; png: Buffer } | undefined;
+  let latestWindowsVariant: WindowsCopyVariantId | undefined;
+  for (let action = 0; action < actionCount; action += 1) {
+    const variant = windowsVariants[action] ?? 'rich';
+    if (process.platform === 'win32') latestWindowsVariant = variant;
+    if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
+      await choosePromptCopyFunction(driver, copiedIndex, variant);
     await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
     // A stress collection renders every native-resolution bundle twice (preflight and publication).
     // Keep a bounded deadline proportional to work, rather than the small-fixture UI timeout.
@@ -1655,13 +1891,40 @@ async function exercisePromptWorkflow(
     await waitForPromptGrants(driver, cards.length);
     await promptSets(host, projectPath);
     await verifyPromptSet(projectPath, latestSet, cards.length);
+    if (process.platform === 'win32' && (variant === 'files' || variant === 'files-rich'))
+      await assertPromptFileClipboard(driver, latestSet, copiedIndex, `Prompt ${promptCopyLabels[variant]}`);
+    if (process.platform !== 'win32' || variant === 'rich' || variant === 'files-rich')
+      latestRichClipboard = await assertPromptRichClipboard(
+        latestSet,
+        copiedIndex,
+        `Prompt ${promptCopyLabels[variant]}`,
+      );
   }
   if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
-  const text = await nativeClipboard.readText();
-  const html = await nativeClipboard.readHTML();
+  if (!latestRichClipboard)
+    throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
+  if (process.platform === 'win32') {
+    await choosePromptCopyFunction(driver, copiedIndex, 'files');
+    if (latestWindowsVariant === 'files-rich') {
+      await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
+    } else if (
+      (
+        await readWindowsClipboardFilesForSmoke(
+          driver.browserWindow.getNativeWindowHandle(),
+          'Changing the prompt copy default',
+        )
+      ).length !== 0
+    ) {
+      throw new Error('Changing the prompt copy default added files to a rich-only clipboard.');
+    }
+    latestRichClipboard = await assertPromptRichClipboard(
+      latestSet,
+      copiedIndex,
+      'Changing the prompt copy default',
+    );
+  }
+  const text = latestRichClipboard.text;
   const image = await nativeClipboard.readImage();
-  if (!text.includes('Picture ') || !html || image.isEmpty())
-    throw new Error('Prompt copy did not place Markdown, HTML, and PNG on the native clipboard.');
   if (
     options.expectedExcludedPicture !== undefined &&
     !text.includes(`Picture ${options.expectedExcludedPicture} was intentionally excluded`)
@@ -1677,16 +1940,28 @@ async function exercisePromptWorkflow(
     throw new Error(
       `Clipboard prompt changed native bundle dimensions: ${clipboardSize.width}x${clipboardSize.height}.`,
     );
-  const clipboardPng = image.toPNG();
+  const clipboardPng = latestRichClipboard.png;
   await assertWorkflowFailure(
     driver,
-    `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'context' })`,
+    `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'rich' })`,
     ['session-not-found'],
   );
-  if (
-    (await nativeClipboard.readText()) !== text ||
-    !(await nativeClipboard.readImage()).toPNG().equals(clipboardPng)
-  )
+  if (process.platform === 'win32') {
+    if (latestWindowsVariant === 'files-rich') {
+      await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Rejected prompt copy');
+    } else if (
+      (
+        await readWindowsClipboardFilesForSmoke(
+          driver.browserWindow.getNativeWindowHandle(),
+          'Rejected prompt copy',
+        )
+      ).length !== 0
+    ) {
+      throw new Error('Rejected prompt copy added files to a rich-only clipboard.');
+    }
+  }
+  const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
+  if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
   return {
     bundleCount: cards.length,
@@ -1874,8 +2149,8 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
-  await exerciseOnboarding(driver, artifactDirectory, artifacts);
-  assertions.push('onboarding exact Markdown/HTML/PNG handoff and independent clipboard fallbacks');
+  await exerciseOnboarding(driver, activeWindow, artifactDirectory, artifacts);
+  assertions.push('onboarding copy variants and independent clipboard fallbacks');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
   if (findWhatsNewRelease(options.version))
@@ -1959,6 +2234,7 @@ export async function runSmokeWorkflow(
     expectedExcludedPicture: excludedPicture,
     freshActions: 2,
     requireSplit: true,
+    verifyWindowsCopyVariants: true,
   });
   const promptMemory = await memoryMegabytes(driver.browserWindow);
   timings.push({
@@ -1970,7 +2246,7 @@ export async function runSmokeWorkflow(
     ...promptMemory,
   });
   assertions.push(
-    'two fresh collection prompt actions, complete PNG/Markdown grants, split layout, and text/HTML/PNG clipboard',
+    'fresh collection prompt actions, complete PNG/Markdown grants, split layout, and exact Windows files/rich clipboard variants',
   );
   await closePromptDialog(driver);
 

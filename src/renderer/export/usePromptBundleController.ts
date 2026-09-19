@@ -9,6 +9,7 @@ import {
   type PromptBundleControllerError,
   type SavedPromptExportContext,
 } from './prompt-export-controller-core';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 
 export interface UsePromptBundleControllerOptions {
   /** Must flush UI edits and return the CAS-confirmed latest saved snapshot. */
@@ -32,6 +33,10 @@ export interface PromptBundleController {
   close(): void;
   clearPreview(): void;
   copyFresh(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
+  copyVariant(
+    selection: PromptBundleSelection,
+    variant: WindowsCopyVariantId,
+  ): Promise<PromptBundleControllerActionResult>;
   prepareFreshFiles(selection?: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   copyMarkdown(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
   copyImage(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult>;
@@ -83,6 +88,8 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
       close: () => engine.close(),
       clearPreview: () => engine.clearPreview(),
       copyFresh: (selection: PromptBundleSelection) => engine.copyFresh(selection),
+      copyVariant: (selection: PromptBundleSelection, variant: WindowsCopyVariantId) =>
+        engine.copyVariant(selection, variant),
       prepareFreshFiles: (selection?: PromptBundleSelection) => engine.prepareFreshFiles(selection),
       copyMarkdown: (selection: PromptBundleSelection) => engine.copyMarkdown(selection),
       copyImage: (selection: PromptBundleSelection) => engine.copyImage(selection),

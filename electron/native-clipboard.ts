@@ -1,47 +1,25 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
 import path from 'node:path';
 import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
+import {
+  readWindowsClipboardFilesWhenAvailable,
+  windowsDibV5Buffer,
+  writeWindowsClipboard,
+} from './windows-clipboard.js';
 
 let writeQueue: Promise<void> = Promise.resolve();
 
-export async function openWindowsFileHandoff(
-  filePaths: readonly string[],
-  selectFiles: (filePaths: readonly [string, string]) => Promise<boolean>,
-  platform = process.platform,
-): Promise<'opened' | 'failed' | undefined> {
-  if (platform !== 'win32' || !filePaths.length) return undefined;
+function windowsFilePair(filePaths: readonly string[]): readonly [string, string] {
   if (
     filePaths.length !== 2 ||
     path.extname(filePaths[0]).toLowerCase() !== '.md' ||
     path.extname(filePaths[1]).toLowerCase() !== '.png'
   )
-    return 'failed';
+    throw new Error('Windows file copy requires one Markdown file and one PNG file.');
   const directories = new Set(filePaths.map((filePath) => path.dirname(path.resolve(filePath))));
-  if (directories.size !== 1) return 'failed';
-  try {
-    return (await selectFiles([filePaths[0], filePaths[1]])) ? 'opened' : 'failed';
-  } catch {
-    return 'failed';
-  }
-}
-
-export async function deliverClipboardWithFileHandoff(
-  writeClipboard: () => Promise<ClipboardFormatsReport>,
-  filePaths: readonly string[],
-  selectFiles: (filePaths: readonly [string, string]) => Promise<boolean>,
-  platform = process.platform,
-): Promise<ClipboardFormatsReport> {
-  let placed: ClipboardFormatsReport;
-  let writeError: unknown;
-  try {
-    placed = await writeClipboard();
-  } catch (error) {
-    placed = { text: false, html: false, image: false };
-    writeError = error;
-  }
-  const fileHandoff = await openWindowsFileHandoff(filePaths, selectFiles, platform);
-  if (writeError && !fileHandoff) throw writeError;
-  return fileHandoff ? { ...placed, fileHandoff } : placed;
+  if (directories.size !== 1)
+    throw new Error('Windows file copy requires the generated pair to share one directory.');
+  return [path.resolve(filePaths[0]), path.resolve(filePaths[1])];
 }
 
 async function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
@@ -105,6 +83,7 @@ async function verifiedContext(
     text: textResult.status === 'fulfilled' && textResult.value === text,
     html: htmlResult.status === 'fulfilled' && htmlResult.value === platformClipboardHtml(html),
     image: imageResult.status === 'fulfilled' && sameImage(imageResult.value, image),
+    files: false,
   };
 }
 
@@ -145,6 +124,45 @@ export const nativeClipboard = {
         }),
       ]);
       return verifiedContext(text, html, image);
+    });
+  },
+  async writeWindowsFiles(
+    owner: Buffer,
+    filePaths: readonly string[],
+    context?: { text: string; html: string; image: NativeImage },
+  ): Promise<ClipboardFormatsReport> {
+    if (process.platform !== 'win32')
+      throw new Error('The file clipboard comparison is available only on Windows.');
+    const pair = windowsFilePair(filePaths);
+    return serializeWrite(async () => {
+      await writeWindowsClipboard(owner, {
+        filePaths: pair,
+        ...(context
+          ? {
+              markdown: context.text,
+              html: context.html,
+              png: context.image.toPNG(),
+              dibV5: windowsDibV5Buffer(
+                context.image.toBitmap(),
+                context.image.getSize().width,
+                context.image.getSize().height,
+              ),
+            }
+          : {}),
+      });
+      const files = await (async () => {
+        try {
+          return await readWindowsClipboardFilesWhenAvailable(owner);
+        } catch {
+          return [];
+        }
+      })();
+      const filesMatch =
+        files.length === pair.length &&
+        files.every((file, index) => path.resolve(file).toLowerCase() === pair[index].toLowerCase());
+      if (!context) return { text: false, html: false, image: false, files: filesMatch };
+      const verified = await verifiedContext(context.text, context.html, context.image);
+      return { ...verified, files: filesMatch };
     });
   },
 };

@@ -1,5 +1,6 @@
 import { AlertTriangle, CloudUpload, FolderOpen, Square } from 'lucide-react';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import { Button, Modal } from '../components/ui';
 import {
   PromptBundleCard,
@@ -10,13 +11,21 @@ import './prompt-bundles.css';
 
 export interface PromptSharingDialogProps {
   hidden?: boolean;
+  fileClipboardAvailable?: boolean;
+  defaultCopyVariant?: WindowsCopyVariantId;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
   error?: { message: string };
+  preferenceError?: string;
   cleanupPending?: boolean;
   noContentMessage?: string;
   onClose(): void;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
+  onSelectCopyVariant?(
+    request: PromptBundleActionRequest,
+    variant: WindowsCopyVariantId,
+  ): void | Promise<void>;
   onPrepareFreshFiles(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
@@ -49,12 +58,17 @@ function progressLabel(progress: PromptBundleProgress): string {
 export function PromptSharingDialog({
   bundles,
   hidden = false,
+  fileClipboardAvailable = false,
+  defaultCopyVariant = 'files',
   progress,
   error,
+  preferenceError,
   cleanupPending = false,
   noContentMessage,
   onClose,
   onCopyFresh,
+  onCopyVariant,
+  onSelectCopyVariant,
   onPrepareFreshFiles,
   onCopyMarkdown,
   onCopyImage,
@@ -106,6 +120,12 @@ export function PromptSharingDialog({
             )}
           </div>
         )}
+        {preferenceError && (
+          <div className="prompt-sharing-error" role="alert">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{preferenceError}</span>
+          </div>
+        )}
         {!bundles.length && busy ? (
           <p className="prompt-sharing-empty">Reading the saved collection and preparing prompt cards…</p>
         ) : !bundles.length ? (
@@ -126,7 +146,11 @@ export function PromptSharingDialog({
                 key={`${bundle.planId}:${bundle.bundleNumber}`}
                 bundle={bundle}
                 disabled={busy}
+                fileClipboardAvailable={fileClipboardAvailable}
+                defaultCopyVariant={defaultCopyVariant}
                 onCopyFresh={onCopyFresh}
+                onCopyVariant={onCopyVariant}
+                onSelectCopyVariant={onSelectCopyVariant}
                 onPrepareFreshFiles={onPrepareFreshFiles}
                 onCopyMarkdown={onCopyMarkdown}
                 onCopyImage={onCopyImage}
@@ -141,8 +165,11 @@ export function PromptSharingDialog({
           <details className="prompt-sharing-info">
             <summary>Copying help</summary>
             <p>
-              Copy Bundle includes image and Markdown. Check the receiving app after pasting. If one is
-              missing, copy it separately or prepare fresh files; file paths are copied as text.
+              {fileClipboardAvailable
+                ? 'The native copy menu changes the primary copy action. The receiving app decides which clipboard formats it accepts. '
+                : 'Rich copy places text and image formats on the clipboard. '}
+              File paths remain a separate plain-text fallback, and files open only when you choose an Open
+              action.
             </p>
           </details>
           <div>

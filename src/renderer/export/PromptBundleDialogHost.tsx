@@ -6,6 +6,7 @@ import { HostedShareDialog } from './HostedShareDialog';
 import { useState } from 'react';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 
 interface PromptActionError {
   message: string;
@@ -23,6 +24,10 @@ export interface PromptBundleUiController {
   preview?: { bundleNumber: number; dataUrl: string; width: number; height: number };
   close(): void;
   copyFresh(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
+  copyVariant(
+    selection: PromptBundleActionRequest,
+    variant: WindowsCopyVariantId,
+  ): Promise<PromptActionResult>;
   prepareFreshFiles(selection?: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyMarkdown(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyImage(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
@@ -41,11 +46,18 @@ export interface PromptBundleUiController {
 export function PromptBundleDialogHost({
   controller,
   onError,
+  fileClipboardAvailable = false,
+  defaultCopyVariant = 'files',
+  onDefaultCopyVariantChange,
 }: {
   controller: PromptBundleUiController;
   onError(message: string): void;
+  fileClipboardAvailable?: boolean;
+  defaultCopyVariant?: WindowsCopyVariantId;
+  onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
+  const [preferenceError, setPreferenceError] = useState<string>();
   const run = async (action: Promise<PromptActionResult>) => {
     const result = await action;
     if (!result.ok) onError(result.error.message);
@@ -56,12 +68,29 @@ export function PromptBundleDialogHost({
       <PromptSharingDialog
         hidden={Boolean(controller.preview || hostedArtifacts)}
         bundles={controller.cards}
+        fileClipboardAvailable={fileClipboardAvailable}
+        defaultCopyVariant={defaultCopyVariant}
         progress={controller.progress}
         error={controller.error}
+        preferenceError={preferenceError}
         cleanupPending={controller.cleanupPending}
         noContentMessage={controller.noContentMessage}
-        onClose={controller.close}
+        onClose={() => {
+          setPreferenceError(undefined);
+          controller.close();
+        }}
         onCopyFresh={(selection) => run(controller.copyFresh(selection))}
+        onCopyVariant={(selection, variant) => run(controller.copyVariant(selection, variant))}
+        onSelectCopyVariant={async (_selection, variant) => {
+          setPreferenceError(undefined);
+          try {
+            await onDefaultCopyVariantChange?.(variant);
+          } catch {
+            setPreferenceError(
+              'The primary copy action could not be saved. Your previous choice is still active.',
+            );
+          }
+        }}
         onPrepareFreshFiles={(selection) => run(controller.prepareFreshFiles(selection))}
         onCopyMarkdown={(selection) => run(controller.copyMarkdown(selection))}
         onCopyImage={(selection) => run(controller.copyImage(selection))}

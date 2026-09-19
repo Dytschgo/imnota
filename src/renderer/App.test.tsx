@@ -100,6 +100,10 @@ describe('feedback controls', () => {
           reasons: [],
         },
       }),
+      getNativeCapabilities: async () => ({
+        ok: true,
+        value: { windowsFileClipboard: true },
+      }),
       startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
         ok: true,
         value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },

@@ -6,6 +6,33 @@ import JSZip from 'jszip';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 
+async function chooseWindowsPromptCopyFunction(
+  driver: NativeUiDriver,
+  variant: 'files' | 'rich',
+): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const label = variant === 'files' ? 'Copy files' : 'Rich copy';
+  const selected = await driver.evaluate<string>(
+    `document.querySelector('[data-testid="copy-bundle-1"]')?.getAttribute('aria-label') ?? ''`,
+  );
+  if (selected !== label) {
+    await driver.click({ selector: '[data-testid="prompt-bundle-card"] button[aria-label="Copy options"]' });
+    await driver.click({ selector: `[role="menuitem"][aria-label="${label}"]` });
+  }
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = async () => {
+      const primary = document.querySelector('[data-testid="copy-bundle-1"]')?.getAttribute('aria-label');
+      const result = await window.imnota.getPreferenceSettings();
+      if (primary === ${JSON.stringify(label)} && result.ok && result.value.settings.nativeCopy.defaultFunction === ${JSON.stringify(variant)})
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Mixed-content copy function was not persisted.'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+}
+
 /** Exercises the real preload, local files, editor input and autosave in disposable fixtures. */
 export async function exerciseMixedContent(
   driver: NativeUiDriver,
@@ -33,7 +60,7 @@ export async function exerciseMixedContent(
   await driver.waitFor(
     {
       selector:
-        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]:not(:disabled)',
+        '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"][aria-label="Rich copy"]:not(:disabled)',
     },
     { timeoutMs: 30_000 },
   );
@@ -225,6 +252,7 @@ export async function exerciseMixedContent(
     },
     { timeoutMs: 30_000 },
   );
+  await chooseWindowsPromptCopyFunction(driver, 'rich');
   await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
   await driver.waitFor(
     {
@@ -242,6 +270,7 @@ export async function exerciseMixedContent(
     throw new Error('Mixed prompt copy must combine the written explanation and rendered drawing.');
   if (mixedMarkdown.indexOf('# System overview') > mixedMarkdown.indexOf('Drawing 1'))
     throw new Error('Mixed prompt Markdown changed the collection order.');
+  await chooseWindowsPromptCopyFunction(driver, 'files');
   const packagePath = await driver.evaluate<string>(`(async () => {
     const result = await window.imnota.exportPackage({projectPath:${JSON.stringify(projectPath)},collectionId:${JSON.stringify(drawing.collectionId)},markdown:${JSON.stringify(mixedMarkdown)},annotatedImages:[],includeOriginal:true,includeAnnotations:true});
     return result.zipPath;

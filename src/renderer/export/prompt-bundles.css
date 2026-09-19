@@ -5,6 +5,10 @@
   padding: 16px;
 }
 
+.modal:has(.prompt-sharing-dialog) {
+  width: min(100%, 760px);
+}
+
 .prompt-bundle-list {
   display: flex;
   flex-direction: column;
@@ -167,17 +171,33 @@
 
 .prompt-bundle-primary {
   display: flex;
+  gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
 
-.prompt-bundle-primary .btn {
-  width: 100%;
-}
-.prompt-bundle-primary > .btn {
+.prompt-bundle-variants {
+  display: grid;
+  min-width: 0;
   flex: 1;
-  border-radius: 6px 0 0 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+}
+.prompt-bundle-variants .btn {
+  min-width: 0;
+  padding-inline: 7px;
+  font-size: 10px;
+  line-height: 1.2;
+  flex-wrap: wrap;
+  gap: 1px 4px;
+}
+
+.prompt-bundle-variants .btn small {
+  flex-basis: 100%;
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.8;
 }
 .prompt-bundle-primary .prompt-bundle-options {
   margin-top: 0;
@@ -186,10 +206,7 @@
   height: 100%;
   width: 36px;
   padding: 7px;
-  border-radius: 0 6px 6px 0;
-  border-left: 1px solid color-mix(in srgb, var(--success) 50%, #000);
-  background: var(--success);
-  color: #102419;
+  border-radius: 6px;
 }
 .prompt-bundle-details {
   margin-top: 8px;
@@ -217,8 +234,6 @@
   box-shadow: none;
 }
 .prompt-bundle-primary.is-copied .prompt-bundle-options > .btn {
-  background: var(--surface-3);
-  color: var(--ink-2);
   border-left-color: var(--line);
 }
 
@@ -258,6 +273,48 @@
   font: inherit;
   font-size: 11px;
   text-align: left;
+}
+
+.prompt-bundle-options-menu button > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-bundle-options-menu button small {
+  color: var(--ink-4);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.prompt-bundle-options-menu button[aria-current='true'] {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+.prompt-bundle-options-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 7px 5px;
+  color: var(--ink-2);
+  font-size: 10px;
+}
+
+.prompt-bundle-options-heading small {
+  color: var(--ink-4);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.prompt-bundle-options-separator {
+  height: 1px;
+  margin: 4px;
+  background: var(--line);
 }
 
 .prompt-bundle-options-menu button:hover:not(:disabled),

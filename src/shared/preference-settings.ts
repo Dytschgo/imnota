@@ -13,6 +13,9 @@ import { backupPreferencesSchema } from './backups.js';
 const shortcutValueSchema = z.string().max(100).nullable();
 const capturePreferencesSchema = z.object({ experimentalRegionCapture: z.boolean() }).strict();
 const workbenchPreferencesSchema = z.object({ screenshotFirstAdd: z.boolean() }).strict();
+const nativeCopyPreferencesSchema = z
+  .object({ defaultFunction: z.enum(['files', 'files-rich', 'rich']) })
+  .strict();
 const updatePreferencesSchema = z
   .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
   .strict();
@@ -69,6 +72,7 @@ export const preferenceSettingsSchema = z
       .object({ completed: z.boolean(), completedVersion: z.number().int().nonnegative() })
       .strict(),
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
+    nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     updates: updatePreferencesSchema.default({}),
   })
   .strict();
@@ -98,6 +102,7 @@ export const preferenceSettingsUpdateSchema = z
     capture: capturePreferencesSchema.partial().strict().optional(),
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
     workbench: workbenchPreferencesSchema.partial().strict().optional(),
+    nativeCopy: nativeCopyPreferencesSchema.partial().strict().optional(),
     updates: updatePreferencesSchema.partial().strict().optional(),
   })
   .strict();
@@ -110,6 +115,7 @@ function cloneDefaults(): PreferenceSettings {
     capture: { ...DEFAULT_PREFERENCE_SETTINGS.capture },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
+    nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },
     updates: { ...DEFAULT_PREFERENCE_SETTINGS.updates },
   };
 }
@@ -124,6 +130,10 @@ function record(value: unknown): Record<string, unknown> {
 function normalizePersistedPreferences(value: unknown): Record<string, unknown> {
   const preferences = record(value);
   const appearance = record(preferences.appearance);
+  const nativeCopy = record(preferences.nativeCopy);
+  const persistedNativeCopyFunction = z
+    .enum(['files', 'files-rich', 'rich'])
+    .safeParse(nativeCopy.defaultFunction);
   const sanitized = Object.fromEntries(
     ['backgroundImage', 'lightBackgroundImage', 'darkBackgroundImage'].map((key) => [
       key,
@@ -132,7 +142,13 @@ function normalizePersistedPreferences(value: unknown): Record<string, unknown> 
         : appearance[key],
     ]),
   );
-  return { ...preferences, appearance: { ...appearance, ...sanitized } };
+  return {
+    ...preferences,
+    appearance: { ...appearance, ...sanitized },
+    nativeCopy: {
+      defaultFunction: persistedNativeCopyFunction.success ? persistedNativeCopyFunction.data : 'files',
+    },
+  };
 }
 
 /** Resolve profile provenance before any caller persists defaults. */
@@ -188,6 +204,7 @@ export function mergePreferenceSettings(
     capture: { ...current.capture, ...update.capture },
     onboarding: { ...current.onboarding, ...update.onboarding },
     workbench: { ...current.workbench, ...update.workbench },
+    nativeCopy: { ...current.nativeCopy, ...update.nativeCopy },
     updates: { ...current.updates, ...update.updates },
   });
 }

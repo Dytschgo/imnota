@@ -10,7 +10,11 @@ import {
   type WorkbenchPreferences,
 } from '../../shared/preferences';
 import type { BackupPreferences } from '../../shared/backups';
-import type { NativePerformanceProfile, PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
+import type {
+  NativeCapabilities,
+  NativePerformanceProfile,
+  PreferenceSettingsUpdate,
+} from '../../shared/workflow-bridge';
 import { getRendererBridge, workflowMessage, workflowValue } from './workflow';
 
 const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
@@ -19,11 +23,13 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reducedEffectsRecommended: false,
   reasons: [],
 };
+const UNKNOWN_CAPABILITIES: NativeCapabilities = { windowsFileClipboard: false };
 
 export interface PreferenceController {
   result: PreferenceSettingsResult | null;
   settings: PreferenceSettings;
   performance: NativePerformanceProfile;
+  capabilities: NativeCapabilities;
   loading: boolean;
   saving: boolean;
   error: string;
@@ -34,6 +40,7 @@ export interface PreferenceController {
   saveCapture(value: CapturePreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
   saveWorkbench(value: WorkbenchPreferences): Promise<void>;
+  saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
   clearError(): void;
 }
@@ -41,6 +48,7 @@ export interface PreferenceController {
 export function usePreferences(): PreferenceController {
   const [result, setResult] = useState<PreferenceSettingsResult | null>(null);
   const [performance, setPerformance] = useState(UNKNOWN_PERFORMANCE);
+  const [capabilities, setCapabilities] = useState(UNKNOWN_CAPABILITIES);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -51,11 +59,16 @@ export function usePreferences(): PreferenceController {
     void Promise.all([
       Promise.resolve().then(() => bridge.getPreferenceSettings()),
       Promise.resolve().then(() => bridge.getNativePerformanceProfile()),
+      Promise.resolve()
+        .then(() => bridge.getNativeCapabilities())
+        .then(workflowValue)
+        .catch(() => UNKNOWN_CAPABILITIES),
     ])
-      .then(([settingsResult, performanceResult]) => {
+      .then(([settingsResult, performanceResult, capabilitiesResult]) => {
         if (!active) return;
         setResult(workflowValue(settingsResult));
         setPerformance(workflowValue(performanceResult));
+        setCapabilities(capabilitiesResult);
       })
       .catch((reason) => {
         if (active)
@@ -90,6 +103,7 @@ export function usePreferences(): PreferenceController {
     result,
     settings: result?.settings ?? DEFAULT_PREFERENCE_SETTINGS,
     performance,
+    capabilities,
     loading,
     saving,
     error,
@@ -111,6 +125,9 @@ export function usePreferences(): PreferenceController {
     },
     saveWorkbench: async (workbench) => {
       await save({ workbench });
+    },
+    saveNativeCopy: async (nativeCopy) => {
+      await save({ nativeCopy });
     },
     saveUpdates: async (updates) => {
       await save({ updates });
