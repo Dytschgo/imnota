@@ -135,6 +135,8 @@ describe('workspace content search', () => {
     );
   });
 
+  // This fixture intentionally creates and scans 501 directories. Windows CI cold disk and
+  // antivirus contention can exceed Vitest's 5-second default without indicating a search hang.
   it('does not let non-project folders consume the project cap and reports every applied limit', async () => {
     const root = await workspace();
     await Promise.all(Array.from({ length: 501 }, (_, index) => fs.mkdir(path.join(root, `aaa-${index}`))));
@@ -154,7 +156,7 @@ describe('workspace content search', () => {
     expect((await documents.search({ workspacePath: root, query: 'Project' })).warnings.join(' ')).toMatch(
       /index limit/,
     );
-  });
+  }, 30_000);
 
   it('filters favourites before limiting results and reports result truncation', async () => {
     const root = await workspace();
