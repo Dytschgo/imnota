@@ -1294,6 +1294,37 @@ describe('feedback controls', () => {
     );
   });
 
+  it('starts capture from the empty canvas Add screenshot action', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    renderApp({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => useAppStore.getState().setProject(snapshot));
+
+    fireEvent.click(await screen.findByTestId('empty-add-screenshot'));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+      }),
+    );
+  });
+
   it('rechecks the initiating target after a delayed flush before starting capture', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     let resolveSave!: (value: unknown) => void;
