@@ -28,8 +28,6 @@ export interface DesktopCaptureSource {
 }
 
 export interface CaptureServiceDependencies {
-  getCursorScreenPoint(): { x: number; y: number };
-  getDisplayNearestPoint(point: { x: number; y: number }): CaptureDisplay;
   physicalDisplaySize(display: CaptureDisplay): { width: number; height: number };
   getSources(options: {
     types: ['screen'];
@@ -40,12 +38,6 @@ export interface CaptureServiceDependencies {
 
 export class CaptureService {
   constructor(private readonly dependencies: CaptureServiceDependencies) {}
-
-  async captureCursorDisplay(): Promise<CapturedDisplayImage> {
-    return this.captureDisplay(
-      this.dependencies.getDisplayNearestPoint(this.dependencies.getCursorScreenPoint()),
-    );
-  }
 
   async captureDisplay(display: CaptureDisplay): Promise<CapturedDisplayImage> {
     const requested = this.dependencies.physicalDisplaySize(display);

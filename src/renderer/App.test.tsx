@@ -100,6 +100,18 @@ describe('feedback controls', () => {
           reasons: [],
         },
       }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: true,
+            position: 'Primary display',
+          },
+        ],
+      }),
       startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
         ok: true,
         value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },
@@ -1159,6 +1171,12 @@ describe('feedback controls', () => {
     fireEvent.click(capture);
     fireEvent.click(capture);
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
+    expect(startRegionCapture).toHaveBeenCalledWith({
+      projectPath: '/workspace/project',
+      collectionId: '001-collection',
+      displayId: 1,
+    });
     await act(async () =>
       resolveCapture({
         ok: false,
@@ -1166,6 +1184,196 @@ describe('feedback controls', () => {
       }),
     );
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
+  });
+
+  it('chooses an exact Windows display before toolbar capture', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 3440, height: 1440 },
+            scaleFactor: 1,
+            primary: true,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: -3440, y: 0, width: 3440, height: 1440 },
+            scaleFactor: 1.5,
+            primary: false,
+            position: 'Left of primary',
+          },
+        ],
+      }),
+      startRegionCapture,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture Left of primary/ }));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 2,
+      }),
+    );
+  });
+
+  it('cancels the Windows display chooser without starting capture', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: true,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: false,
+            position: 'Left of primary',
+          },
+        ],
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument(),
+    );
+    expect(startRegionCapture).not.toHaveBeenCalled();
+  });
+
+  it('opens the Windows chooser from the shortcut and defers release guidance until cancellation', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    let emitUpdateStatus: Parameters<ImnotaBridge['onUpdateStatus']>[0] | undefined;
+    await renderEditingProject({
+      onUpdateStatus: (handler) => {
+        emitUpdateStatus = handler;
+        return () => {};
+      },
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: true,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: 1920, y: -1080, width: 1920, height: 1080 },
+            scaleFactor: 1.25,
+            primary: false,
+            position: 'Above and right',
+          },
+        ],
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Choose a display' })).toBeInTheDocument();
+    expect(startRegionCapture).not.toHaveBeenCalled();
+    act(() => emitUpdateStatus?.({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }));
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
+  });
+
+  it('rechecks the project target after display choice before starting capture', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: true,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: 1920, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            primary: false,
+            position: 'Right of primary',
+          },
+        ],
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    await screen.findByRole('dialog', { name: 'Choose a display' });
+    act(() => useAppStore.getState().set({ activeCollectionId: 'changed-during-choice' }));
+    fireEvent.click(screen.getByRole('button', { name: /Capture Right of primary/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument(),
+    );
+    expect(startRegionCapture).not.toHaveBeenCalled();
   });
 
   it('rechecks the initiating target after a delayed flush before starting capture', async () => {

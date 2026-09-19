@@ -2069,8 +2069,10 @@ export async function runSmokeWorkflow(
   const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
   if (!captureSmoke.skipped) {
     artifacts.push(...captureSmoke.artifacts);
+    const captureTriggers =
+      process.platform === 'win32' ? 'toolbar and native Ctrl+Shift+5 chooser/overlay' : 'toolbar overlay';
     assertions.push(
-      'synthetic-only region capture overlay select/retake/cancel leaves no files; save selects, annotates, and exports the result',
+      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
     );
   }
 

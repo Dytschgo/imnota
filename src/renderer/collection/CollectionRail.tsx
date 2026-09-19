@@ -386,7 +386,7 @@ export function CollectionRail({
             id: 'capture',
             label: 'Take screenshot',
             description: captureEnabled
-              ? 'Capture a region of the display under the pointer'
+              ? 'Choose a display, then capture a region'
               : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
             icon: Camera,
             run: onCapture,
