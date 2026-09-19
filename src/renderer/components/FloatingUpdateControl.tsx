@@ -190,6 +190,19 @@ export function FloatingUpdateControl({
               if (!isWithinControl(event.relatedTarget)) close();
             }}
             onKeyDown={(event) => {
+              if (event.key === 'Tab') {
+                const panel = popoverRef.current;
+                const link = panel?.querySelector('a');
+                if (event.shiftKey) {
+                  event.preventDefault();
+                  if (event.target === panel) close(true);
+                  else panel?.focus();
+                } else if (!link || event.target === link) {
+                  // Restore the trigger's place in the document before the browser
+                  // performs its normal forward Tab navigation out of the portal.
+                  close(true);
+                }
+              }
               if (event.key === 'Escape') {
                 event.preventDefault();
                 close(true);
