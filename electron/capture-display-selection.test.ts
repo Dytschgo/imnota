@@ -37,15 +37,16 @@ describe('capture display geometry', () => {
     const secondPending = new Promise<void>((resolve) => {
       finishSecond = resolve;
     });
-    const capture = vi.fn(async (display: CaptureDisplay) => {
-      if (display.id === secondary.id) await secondPending;
-      return `capture-${display.id}`;
+    const capture = vi.fn(async (displays: readonly CaptureDisplay[]) => {
+      await secondPending;
+      return displays.map((display) => `capture-${display.id}`);
     });
     const result = captureDisplaysWithStableGeometry([primary, secondary], capture, () => current);
     current = [primary, { ...secondary, bounds: { ...secondary.bounds, y: -100 } }];
     finishSecond();
     await expect(result).resolves.toBeNull();
-    expect(capture.mock.calls.map(([display]) => display.id)).toEqual([1, 2]);
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture.mock.calls[0]![0].map((display) => display.id)).toEqual([1, 2]);
   });
 
   it('keeps the single-display helper fail closed', async () => {

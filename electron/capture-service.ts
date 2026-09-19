@@ -49,6 +49,19 @@ interface CaptureCompositePlan {
   parts: CaptureCompositePart[];
 }
 
+interface CaptureDisplayPreparation {
+  display: CaptureDisplay;
+  requested: { width: number; height: number };
+}
+
+// Preparation retains one encoded full-display capture per monitor. A single
+// desktopCapturer request may also materialize one native thumbnail per
+// monitor. Bound both pixel totals to the same conservative ceiling as a final
+// capture and run requests sequentially, limiting preparation to at most two
+// separately bounded 64M-pixel pools rather than an unbounded N² burst.
+const MAX_RETAINED_CAPTURE_PIXELS = MAX_CAPTURE_PIXELS;
+const MAX_THUMBNAIL_BATCH_PIXELS = MAX_CAPTURE_PIXELS;
+
 function intersection(left: CaptureRectangle, right: CaptureRectangle): CaptureRectangle | null {
   const x = Math.max(left.x, right.x);
   const y = Math.max(left.y, right.y);
@@ -116,19 +129,63 @@ export function captureCompositePlan(
 export class CaptureService {
   constructor(private readonly dependencies: CaptureServiceDependencies) {}
 
-  async captureDisplay(display: CaptureDisplay): Promise<CapturedDisplayImage> {
-    const requested = this.dependencies.physicalDisplaySize(display);
-    if (
-      requested.width < 1 ||
-      requested.height < 1 ||
-      requested.width > MAX_CAPTURE_DIMENSION ||
-      requested.height > MAX_CAPTURE_DIMENSION ||
-      requested.width * requested.height > MAX_CAPTURE_PIXELS
-    )
+  private prepareDisplays(displays: readonly CaptureDisplay[]): CaptureDisplayPreparation[] {
+    const prepared = displays.map((display) => ({
+      display,
+      requested: this.dependencies.physicalDisplaySize(display),
+    }));
+    let retainedPixels = 0;
+    let maximumRequestedPixels = 0;
+    for (const { requested } of prepared) {
+      const pixels = requested.width * requested.height;
+      if (
+        !Number.isSafeInteger(requested.width) ||
+        !Number.isSafeInteger(requested.height) ||
+        requested.width < 1 ||
+        requested.height < 1 ||
+        requested.width > MAX_CAPTURE_DIMENSION ||
+        requested.height > MAX_CAPTURE_DIMENSION ||
+        !Number.isSafeInteger(pixels) ||
+        pixels > MAX_CAPTURE_PIXELS
+      )
+        throw new CaptureServiceError(
+          'sources-unavailable',
+          'A connected display has unsupported dimensions.',
+        );
+      retainedPixels += pixels;
+      maximumRequestedPixels = Math.max(maximumRequestedPixels, pixels);
+    }
+    if (!Number.isSafeInteger(retainedPixels) || retainedPixels > MAX_RETAINED_CAPTURE_PIXELS)
       throw new CaptureServiceError(
         'sources-unavailable',
-        'The selected display has unsupported dimensions.',
+        'The connected displays require too much retained capture memory.',
       );
+    if (prepared.length > Math.floor(MAX_THUMBNAIL_BATCH_PIXELS / maximumRequestedPixels))
+      throw new CaptureServiceError(
+        'sources-unavailable',
+        'The connected displays require too much native thumbnail memory.',
+      );
+    return prepared;
+  }
+
+  async captureDisplays(displays: readonly CaptureDisplay[]): Promise<CapturedDisplayImage[]> {
+    const prepared = this.prepareDisplays(displays);
+    const captures: CapturedDisplayImage[] = [];
+    // desktopCapturer returns all screen sources for each request. Finish and
+    // release each native source set before requesting the next display.
+    for (const target of prepared) captures.push(await this.capturePreparedDisplay(target));
+    return captures;
+  }
+
+  async captureDisplay(display: CaptureDisplay): Promise<CapturedDisplayImage> {
+    const [capture] = await this.captureDisplays([display]);
+    return capture!;
+  }
+
+  private async capturePreparedDisplay({
+    display,
+    requested,
+  }: CaptureDisplayPreparation): Promise<CapturedDisplayImage> {
     // Never use desktopCapturer's 150x150 default. Electron does not promise
     // this exact size, so imageSize below remains the crop authority.
     let sources: DesktopCaptureSource[];

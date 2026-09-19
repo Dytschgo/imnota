@@ -26,16 +26,17 @@ export function captureDisplaysHaveStableGeometry(
 }
 
 /**
- * Capture every snapshotted display, then verify the complete desktop geometry.
- * A display add/remove, move, resize, or DPI change fails closed.
+ * Capture the complete snapshotted display set through one bounded preparation
+ * operation, then verify its geometry. A display add/remove, move, resize, or
+ * DPI change fails closed.
  */
 export async function captureDisplaysWithStableGeometry<T>(
   displays: readonly CaptureDisplay[],
-  capture: (display: CaptureDisplay) => Promise<T>,
+  capture: (displays: readonly CaptureDisplay[]) => Promise<T[]>,
   currentDisplays: () => readonly CaptureDisplay[],
 ): Promise<T[] | null> {
   if (!displays.length) return null;
-  const captures = await Promise.all(displays.map((display) => capture(display)));
+  const captures = await capture(displays);
   return captureDisplaysHaveStableGeometry(displays, currentDisplays()) ? captures : null;
 }
 
