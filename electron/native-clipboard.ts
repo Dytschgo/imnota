@@ -1,7 +1,11 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
 import path from 'node:path';
 import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
-import { readWindowsClipboardFiles, windowsDibV5Buffer, writeWindowsClipboard } from './windows-clipboard.js';
+import {
+  readWindowsClipboardFilesWhenAvailable,
+  windowsDibV5Buffer,
+  writeWindowsClipboard,
+} from './windows-clipboard.js';
 
 let writeQueue: Promise<void> = Promise.resolve();
 
@@ -131,7 +135,7 @@ export const nativeClipboard = {
       throw new Error('The file clipboard comparison is available only on Windows.');
     const pair = windowsFilePair(filePaths);
     return serializeWrite(async () => {
-      writeWindowsClipboard(owner, {
+      await writeWindowsClipboard(owner, {
         filePaths: pair,
         ...(context
           ? {
@@ -146,9 +150,9 @@ export const nativeClipboard = {
             }
           : {}),
       });
-      const files = (() => {
+      const files = await (async () => {
         try {
-          return readWindowsClipboardFiles(owner);
+          return await readWindowsClipboardFilesWhenAvailable(owner);
         } catch {
           return [];
         }
