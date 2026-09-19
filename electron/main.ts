@@ -15,7 +15,12 @@ import {
 import os from 'node:os';
 import { deliverClipboardWithFileHandoff, nativeClipboard } from './native-clipboard.js';
 import { selectWindowsFilePair } from './windows-file-handoff.js';
-import { onboardingHandoffRoot, OnboardingHandoffWorkflow } from './onboarding-handoff.js';
+import {
+  onboardingHandoffRoot,
+  OnboardingHandoffWorkflow,
+  promptHandoffRoot,
+  TemporaryFileHandoffStore,
+} from './onboarding-handoff.js';
 import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -1478,6 +1483,11 @@ function registerIpc(): void {
         throw new Error('Drawing PNG could not be decoded at its declared dimensions.');
     },
   });
+  const handoffPaths = {
+    temporaryDirectory: app.getPath('temp'),
+    userDataDirectory: app.getPath('userData'),
+  };
+  const promptFileHandoffs = new TemporaryFileHandoffStore(promptHandoffRoot(handoffPaths));
   promptBundleWorkflow = new PromptBundleWorkflow(
     {
       authorize: async (projectPath, collectionId) => {
@@ -1493,6 +1503,16 @@ function registerIpc(): void {
       },
       copyContext: (markdown, imageDataUrl, filePaths) =>
         copyContextToClipboard(markdown, imageDataUrl, filePaths),
+      prepareFileHandoff: async (markdown, imageDataUrl, sourcePaths) => {
+        if (process.platform !== 'win32') return sourcePaths;
+        const grant = await promptFileHandoffs.prepare({
+          markdown,
+          imageDataUrl,
+          markdownFilename: path.basename(sourcePaths[0]),
+          pngFilename: path.basename(sourcePaths[1]),
+        });
+        return [grant.markdownPath, grant.pngPath];
+      },
       copyText: (markdown) => copyTextToClipboard(markdown),
       copyImage: (imageDataUrl) => copyImageToClipboard(imageDataUrl),
       openPath: async (targetPath) => {
@@ -1503,10 +1523,7 @@ function registerIpc(): void {
     new PromptBundleStore({ validateDecodedPng: validateDecodedPromptPng }),
   );
   onboardingHandoffWorkflow = new OnboardingHandoffWorkflow({
-    root: onboardingHandoffRoot({
-      temporaryDirectory: app.getPath('temp'),
-      userDataDirectory: app.getPath('userData'),
-    }),
+    root: onboardingHandoffRoot(handoffPaths),
     copyContext: (markdown, imageDataUrl, filePaths) =>
       copyContextToClipboard(markdown, imageDataUrl, filePaths),
     copyText: copyTextToClipboard,

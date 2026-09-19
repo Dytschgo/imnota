@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { onboardingHandoffRoot, OnboardingHandoffWorkflow } from './onboarding-handoff.js';
+import { onboardingHandoffRoot, OnboardingHandoffWorkflow, promptHandoffRoot } from './onboarding-handoff.js';
 
 const roots: string[] = [];
 
@@ -45,6 +45,10 @@ describe('onboarding handoff grants', () => {
     expect(onboardingHandoffRoot(paths, true)).toBe(
       path.join(paths.userDataDirectory, 'onboarding-handoffs'),
     );
+    expect(promptHandoffRoot(paths, false)).toBe(
+      path.join(paths.temporaryDirectory, 'imnota-prompt-handoffs'),
+    );
+    expect(promptHandoffRoot(paths, true)).toBe(path.join(paths.userDataDirectory, 'prompt-handoffs'));
   });
 
   it('canonicalizes an operating-system temp alias before writing the handoff', async () => {

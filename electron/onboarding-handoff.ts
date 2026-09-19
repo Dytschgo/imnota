@@ -22,6 +22,15 @@ export function onboardingHandoffRoot(
     : path.join(paths.temporaryDirectory, 'imnota-onboarding-handoffs');
 }
 
+export function promptHandoffRoot(
+  paths: { temporaryDirectory: string; userDataDirectory: string },
+  smoke = process.env.IMNOTA_SMOKE === '1',
+): string {
+  return smoke
+    ? path.join(paths.userDataDirectory, 'prompt-handoffs')
+    : path.join(paths.temporaryDirectory, 'imnota-prompt-handoffs');
+}
+
 export interface OnboardingHandoffDependencies {
   root: string;
   copyContext(
@@ -34,7 +43,7 @@ export interface OnboardingHandoffDependencies {
   openPath(targetPath: string): Promise<void>;
 }
 
-interface HandoffGrant extends OnboardingHandoffGrant {
+export interface TemporaryFileHandoffGrant extends OnboardingHandoffGrant {
   directory: string;
   markdownPath: string;
   pngPath: string;
@@ -42,18 +51,28 @@ interface HandoffGrant extends OnboardingHandoffGrant {
   imageDataUrl: string;
 }
 
-export class OnboardingHandoffWorkflow {
-  private readonly grants = new Map<string, HandoffGrant>();
+export class TemporaryFileHandoffStore {
+  private readonly grants = new Map<string, TemporaryFileHandoffGrant>();
   private preparedRoot: Promise<string> | undefined;
 
-  constructor(private readonly dependencies: OnboardingHandoffDependencies) {}
+  constructor(private readonly root: string) {}
 
   async prepare(input: {
     markdown: string;
     imageDataUrl: string;
     markdownFilename: string;
     pngFilename: string;
-  }): Promise<OnboardingHandoffGrant> {
+  }): Promise<TemporaryFileHandoffGrant> {
+    if (
+      path.basename(input.markdownFilename) !== input.markdownFilename ||
+      path.extname(input.markdownFilename).toLowerCase() !== '.md' ||
+      path.basename(input.pngFilename) !== input.pngFilename ||
+      path.extname(input.pngFilename).toLowerCase() !== '.png'
+    )
+      throw new NativeWorkflowError(
+        'invalid-input',
+        'Temporary handoff filenames must be Markdown and PNG leaf names.',
+      );
     const root = await this.ensureRoot();
     for (const grant of [...this.grants.values()].reverse()) {
       if (
@@ -64,7 +83,7 @@ export class OnboardingHandoffWorkflow {
       ) {
         try {
           await this.validGrant(grant.sessionId);
-          return { sessionId: grant.sessionId, filenames: grant.filenames };
+          return grant;
         } catch {
           this.grants.delete(grant.sessionId);
         }
@@ -78,7 +97,7 @@ export class OnboardingHandoffWorkflow {
       await atomicWrite(markdownPath, input.markdown);
       await atomicWrite(pngPath, png);
       const sessionId = randomUUID();
-      const grant: HandoffGrant = {
+      const grant: TemporaryFileHandoffGrant = {
         sessionId,
         directory,
         markdownPath,
@@ -95,7 +114,7 @@ export class OnboardingHandoffWorkflow {
         if (!oldest) break;
         this.grants.delete(oldest);
       }
-      return { sessionId, filenames: grant.filenames };
+      return grant;
     } catch (error) {
       await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
       throw error;
@@ -104,16 +123,16 @@ export class OnboardingHandoffWorkflow {
 
   private ensureRoot(): Promise<string> {
     this.preparedRoot ??= (async () => {
-      const requestedParent = path.dirname(this.dependencies.root);
+      const requestedParent = path.dirname(this.root);
       await fs.mkdir(requestedParent, { recursive: true });
       const canonicalParent = await fs.realpath(requestedParent);
-      const root = path.join(canonicalParent, path.basename(this.dependencies.root));
+      const root = path.join(canonicalParent, path.basename(this.root));
       await fs.mkdir(root, { recursive: true });
       const rootStat = await fs.lstat(root);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
         throw new NativeWorkflowError(
           'io-failure',
-          'The onboarding handoff root must be a regular directory.',
+          'The temporary file handoff root must be a regular directory.',
         );
       const cutoff = Date.now() - RETIRED_HANDOFF_RETENTION_MS;
       const entries = await fs.readdir(root, { withFileTypes: true });
@@ -132,8 +151,48 @@ export class OnboardingHandoffWorkflow {
     return this.preparedRoot;
   }
 
+  async validGrant(sessionId: string): Promise<TemporaryFileHandoffGrant> {
+    const grant = this.grants.get(sessionId);
+    if (!grant)
+      throw new NativeWorkflowError(
+        'session-not-found',
+        'The temporary file handoff is no longer available.',
+      );
+    for (const target of [grant.markdownPath, grant.pngPath]) {
+      const stat = await fs.lstat(target).catch(() => undefined);
+      if (!stat?.isFile() || stat.isSymbolicLink())
+        throw new NativeWorkflowError('io-failure', 'A generated temporary handoff file is unavailable.');
+    }
+    const [markdown, png] = await Promise.all([
+      fs.readFile(grant.markdownPath, 'utf8'),
+      fs.readFile(grant.pngPath),
+    ]);
+    const expectedPng = Buffer.from(grant.imageDataUrl.slice('data:image/png;base64,'.length), 'base64');
+    if (markdown !== grant.markdown || !png.equals(expectedPng))
+      throw new NativeWorkflowError('io-failure', 'A generated temporary handoff file changed unexpectedly.');
+    return grant;
+  }
+}
+
+export class OnboardingHandoffWorkflow {
+  private readonly store: TemporaryFileHandoffStore;
+
+  constructor(private readonly dependencies: OnboardingHandoffDependencies) {
+    this.store = new TemporaryFileHandoffStore(dependencies.root);
+  }
+
+  async prepare(input: {
+    markdown: string;
+    imageDataUrl: string;
+    markdownFilename: string;
+    pngFilename: string;
+  }): Promise<OnboardingHandoffGrant> {
+    const grant = await this.store.prepare(input);
+    return { sessionId: grant.sessionId, filenames: grant.filenames };
+  }
+
   async copy(sessionId: string, action: OnboardingHandoffAction): Promise<ClipboardFormatsReport | void> {
-    const grant = await this.validGrant(sessionId);
+    const grant = await this.store.validGrant(sessionId);
     if (action === 'markdown') return this.dependencies.copyText(grant.markdown);
     if (action === 'image') return this.dependencies.copyImage(grant.imageDataUrl);
     if (action === 'paths') return this.dependencies.copyText([grant.markdownPath, grant.pngPath].join('\n'));
@@ -144,31 +203,9 @@ export class OnboardingHandoffWorkflow {
   }
 
   async open(sessionId: string, target: OnboardingHandoffOpenTarget): Promise<void> {
-    const grant = await this.validGrant(sessionId);
+    const grant = await this.store.validGrant(sessionId);
     if (target === 'folder') return this.dependencies.openPath(grant.directory);
     await this.dependencies.openPath(grant.markdownPath);
     await this.dependencies.openPath(grant.pngPath);
-  }
-
-  private async validGrant(sessionId: string): Promise<HandoffGrant> {
-    const grant = this.grants.get(sessionId);
-    if (!grant)
-      throw new NativeWorkflowError('session-not-found', 'The onboarding handoff is no longer available.');
-    for (const target of [grant.markdownPath, grant.pngPath]) {
-      const stat = await fs.lstat(target).catch(() => undefined);
-      if (!stat?.isFile() || stat.isSymbolicLink())
-        throw new NativeWorkflowError('io-failure', 'A generated onboarding handoff file is unavailable.');
-    }
-    const [markdown, png] = await Promise.all([
-      fs.readFile(grant.markdownPath, 'utf8'),
-      fs.readFile(grant.pngPath),
-    ]);
-    const expectedPng = Buffer.from(grant.imageDataUrl.slice('data:image/png;base64,'.length), 'base64');
-    if (markdown !== grant.markdown || !png.equals(expectedPng))
-      throw new NativeWorkflowError(
-        'io-failure',
-        'A generated onboarding handoff file changed unexpectedly.',
-      );
-    return grant;
   }
 }

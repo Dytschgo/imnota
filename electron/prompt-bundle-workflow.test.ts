@@ -9,6 +9,7 @@ import {
   PromptBundleStore,
 } from './prompt-bundle-store.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { TemporaryFileHandoffStore } from './onboarding-handoff.js';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -26,12 +27,31 @@ async function fixture() {
   temporary.push(projectPath);
   const collectionId = '001-collection';
   await fs.mkdir(path.join(projectPath, 'collections', collectionId), { recursive: true });
-  const copyContext = vi.fn(async () => ({
-    text: true,
-    html: true,
-    image: true,
-    fileHandoff: 'opened' as const,
-  }));
+  const handoffRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-prompt-handoff-')));
+  temporary.push(handoffRoot);
+  const handoffs = new TemporaryFileHandoffStore(handoffRoot);
+  const prepareFileHandoff = vi.fn(
+    async (markdown: string, imageDataUrl: string, sourcePaths: readonly [string, string]) => {
+      const grant = await handoffs.prepare({
+        markdown,
+        imageDataUrl,
+        markdownFilename: path.basename(sourcePaths[0]),
+        pngFilename: path.basename(sourcePaths[1]),
+      });
+      return [grant.markdownPath, grant.pngPath] as const;
+    },
+  );
+  const copyContext = vi.fn(async (markdown: string, imageDataUrl: string, filePaths: readonly string[]) => {
+    void markdown;
+    void imageDataUrl;
+    void filePaths;
+    return {
+      text: true,
+      html: true,
+      image: true,
+      fileHandoff: 'opened' as const,
+    };
+  });
   const copyText = vi.fn();
   const copyImage = vi.fn();
   const openPath = vi.fn();
@@ -43,6 +63,7 @@ async function fixture() {
         return { projectPath, collectionId, collectionName: 'Collection' };
       },
       copyContext,
+      prepareFileHandoff,
       copyText,
       copyImage,
       openPath,
@@ -53,7 +74,17 @@ async function fixture() {
       validateDecodedPng: () => undefined,
     }),
   );
-  return { workflow, projectPath, collectionId, copyContext, copyText, copyImage, openPath };
+  return {
+    workflow,
+    projectPath,
+    collectionId,
+    handoffRoot,
+    copyContext,
+    prepareFileHandoff,
+    copyText,
+    copyImage,
+    openPath,
+  };
 }
 
 describe('main-owned prompt bundle grants', () => {
@@ -90,6 +121,38 @@ describe('main-owned prompt bundle grants', () => {
     await expect(workflow.copy(session.sessionId, 1, 'context')).rejects.toThrow();
     expect(copyText).not.toHaveBeenCalled();
     expect(copyImage).not.toHaveBeenCalled();
+    expect(copyContext).not.toHaveBeenCalled();
+  });
+
+  it('stages the exact pair outside the project before changing the clipboard', async () => {
+    const { workflow, projectPath, collectionId, handoffRoot, copyContext } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    const markdown = '# Context\n\n![Drawing](./Collection - 260907-120000 - 01.png)\n';
+    await workflow.write(session.sessionId, 1, pngDataUrl(), markdown);
+    await workflow.finish(session.sessionId);
+
+    await workflow.copy(session.sessionId, 1, 'context');
+
+    const filePaths = copyContext.mock.calls[0][2];
+    expect(path.dirname(filePaths[0])).toBe(path.dirname(filePaths[1]));
+    expect(path.resolve(filePaths[0]).startsWith(`${path.resolve(handoffRoot)}${path.sep}`)).toBe(true);
+    expect(path.resolve(filePaths[0]).startsWith(`${path.resolve(projectPath)}${path.sep}`)).toBe(false);
+    await expect(fs.readFile(filePaths[0], 'utf8')).resolves.toBe(markdown);
+    await expect(fs.readFile(filePaths[1])).resolves.toEqual(
+      Buffer.from(pngDataUrl().slice('data:image/png;base64,'.length), 'base64'),
+    );
+  });
+
+  it('leaves the clipboard untouched when temporary pair staging fails', async () => {
+    const { workflow, projectPath, collectionId, prepareFileHandoff, copyContext } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Context\n');
+    await workflow.finish(session.sessionId);
+    prepareFileHandoff.mockRejectedValueOnce(new Error('temporary storage unavailable'));
+
+    await expect(workflow.copy(session.sessionId, 1, 'context')).rejects.toThrow(
+      /temporary storage unavailable/,
+    );
     expect(copyContext).not.toHaveBeenCalled();
   });
   it('derives collection identity, publishes a pair, and grants only session/bundle access', async () => {
@@ -187,6 +250,11 @@ describe('main-owned prompt bundle grants', () => {
       {
         authorize: async () => ({ projectPath, collectionId, collectionName: 'Collection' }),
         copyContext: () => ({ text: true, html: true, image: true, fileHandoff: 'opened' }),
+        prepareFileHandoff: async (markdown, imageDataUrl, sourcePaths) => {
+          void markdown;
+          void imageDataUrl;
+          return sourcePaths;
+        },
         copyText: () => undefined,
         copyImage: () => undefined,
         openPath: async () => undefined,

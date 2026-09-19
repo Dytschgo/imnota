@@ -42,6 +42,11 @@ export interface PromptBundleWorkflowDependencies {
     imageDataUrl: string,
     filePaths: readonly string[],
   ): Promise<ClipboardFormatsReport> | ClipboardFormatsReport;
+  prepareFileHandoff(
+    markdown: string,
+    imageDataUrl: string,
+    sourcePaths: readonly [string, string],
+  ): Promise<readonly [string, string]>;
   copyText(markdown: string): Promise<void> | void;
   copyImage(imageDataUrl: string): Promise<void> | void;
   openPath(targetPath: string): Promise<void>;
@@ -227,10 +232,12 @@ export class PromptBundleWorkflow {
       await this.dependencies.copyImage(imageDataUrl);
       return { target };
     }
-    const placed = await this.dependencies.copyContext(await this.readMarkdown(grant, bundle), imageDataUrl, [
+    const markdown = await this.readMarkdown(grant, bundle);
+    const filePaths = await this.dependencies.prepareFileHandoff(markdown, imageDataUrl, [
       bundle.markdownPath,
       bundle.pngPath,
     ]);
+    const placed = await this.dependencies.copyContext(markdown, imageDataUrl, filePaths);
     return { target, placed };
   }
 
