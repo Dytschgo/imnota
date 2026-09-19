@@ -1700,6 +1700,8 @@ export default function App() {
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
             onWorkbenchChange={preferences.saveWorkbench}
+            nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
+            onNativeCopyChange={preferences.saveNativeCopy}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -1981,6 +1983,8 @@ export default function App() {
         controller={promptBundles}
         onError={setError}
         fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+        defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
+        onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
       />
       <SearchDialog
         open={searchDialogOpen}
@@ -1992,6 +1996,8 @@ export default function App() {
       {showOnboarding && (
         <OnboardingDemo
           fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+          defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
+          onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
           onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>
             window.imnota.prepareOnboardingHandoff({
               markdown,

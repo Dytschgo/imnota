@@ -45,6 +45,8 @@ export interface OnboardingBundle {
 
 export interface OnboardingDemoProps {
   fileClipboardAvailable?: boolean;
+  defaultCopyVariant?: WindowsCopyVariantId;
+  onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
   onMarkCompleted: (
     preferences: OnboardingPreferences,
     reason: OnboardingCompletionReason,
@@ -69,6 +71,8 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
 
 export function OnboardingDemo({
   fileClipboardAvailable = false,
+  defaultCopyVariant = 'files',
+  onDefaultCopyVariantChange,
   onMarkCompleted,
   onCreateFirstProject,
   onDismiss,
@@ -104,6 +108,12 @@ export function OnboardingDemo({
     () => buildSamplePromptMarkdown(annotations, explanation),
     [annotations, explanation],
   );
+  const primaryCopyVariant = fileClipboardAvailable ? defaultCopyVariant : 'rich';
+  const copyVariantLabels: Record<WindowsCopyVariantId, { label: string; detail: string }> = {
+    files: { label: 'Copy files', detail: 'MD + PNG files' },
+    'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
+    rich: { label: 'Rich copy', detail: 'Text + image' },
+  };
 
   const dismiss = async () => {
     if (busy) return;
@@ -407,40 +417,38 @@ export function OnboardingDemo({
                   <button
                     type="button"
                     className="imnota-onboarding-primary"
-                    aria-label="Rich copy"
-                    title="Markdown text, HTML, and PNG formats"
-                    onClick={() => void copyBundle('rich')}
+                    aria-label={copyVariantLabels[primaryCopyVariant].label}
+                    title={copyVariantLabels[primaryCopyVariant].detail}
+                    onClick={() => void copyBundle(primaryCopyVariant)}
                     disabled={busy}
                   >
                     <Clipboard size={15} aria-hidden="true" />
-                    <span>Rich copy</span>
-                    <small>Text + image</small>
+                    <span>{copyVariantLabels[primaryCopyVariant].label}</span>
+                    <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
                   </button>
                   {fileClipboardAvailable && (
-                    <>
-                      <button
-                        type="button"
-                        className="imnota-onboarding-secondary"
-                        aria-label="Copy files"
-                        title="Markdown and PNG as file attachments"
-                        onClick={() => void copyBundle('files')}
-                        disabled={busy}
+                    <label className="imnota-copy-function-select">
+                      <span>Native copy function</span>
+                      <select
+                        aria-label="Native copy function"
+                        value={defaultCopyVariant}
+                        disabled={busy || !onDefaultCopyVariantChange}
+                        onChange={async (event) => {
+                          setError('');
+                          try {
+                            await onDefaultCopyVariantChange?.(event.target.value as WindowsCopyVariantId);
+                          } catch {
+                            setError(
+                              'The primary copy action could not be saved. Your previous choice is still active.',
+                            );
+                          }
+                        }}
                       >
-                        <span>Copy files</span>
-                        <small>MD + PNG files</small>
-                      </button>
-                      <button
-                        type="button"
-                        className="imnota-onboarding-secondary"
-                        aria-label="Files + rich copy"
-                        title="File attachments plus Markdown, HTML, and PNG formats"
-                        onClick={() => void copyBundle('files-rich')}
-                        disabled={busy}
-                      >
-                        <span>Files + rich copy</span>
-                        <small>Both</small>
-                      </button>
-                    </>
+                        <option value="files">Copy files</option>
+                        <option value="files-rich">Files + rich copy</option>
+                        <option value="rich">Rich copy</option>
+                      </select>
+                    </label>
                   )}
                 </div>
                 {copyStatus && (
