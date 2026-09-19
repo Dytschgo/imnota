@@ -1860,8 +1860,10 @@ async function exercisePromptWorkflow(
   const actionCount = Math.max(options.freshActions, windowsVariants.length);
   let latestSet: PromptSet | undefined;
   let latestRichClipboard: { text: string; png: Buffer } | undefined;
+  let latestWindowsVariant: WindowsCopyVariantId | undefined;
   for (let action = 0; action < actionCount; action += 1) {
     const variant = windowsVariants[action] ?? 'rich';
+    if (process.platform === 'win32') latestWindowsVariant = variant;
     if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
       await choosePromptCopyFunction(driver, copiedIndex, variant);
     await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
@@ -1891,7 +1893,11 @@ async function exercisePromptWorkflow(
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
   if (process.platform === 'win32') {
     await choosePromptCopyFunction(driver, copiedIndex, 'files');
-    await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
+    if (latestWindowsVariant === 'files-rich') {
+      await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
+    } else if (readWindowsClipboardFiles(driver.browserWindow.getNativeWindowHandle()).length !== 0) {
+      throw new Error('Changing the prompt copy default added files to a rich-only clipboard.');
+    }
     latestRichClipboard = await assertPromptRichClipboard(
       latestSet,
       copiedIndex,
@@ -1921,8 +1927,13 @@ async function exercisePromptWorkflow(
     `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'rich' })`,
     ['session-not-found'],
   );
-  if (process.platform === 'win32')
-    await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Rejected prompt copy');
+  if (process.platform === 'win32') {
+    if (latestWindowsVariant === 'files-rich') {
+      await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Rejected prompt copy');
+    } else if (readWindowsClipboardFiles(driver.browserWindow.getNativeWindowHandle()).length !== 0) {
+      throw new Error('Rejected prompt copy added files to a rich-only clipboard.');
+    }
+  }
   const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
