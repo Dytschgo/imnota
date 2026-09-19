@@ -56,6 +56,7 @@ export interface WorkspaceProps {
   onFit(): void;
   onActualSize(): void;
   onCapture?(): void;
+  capturePrimary?: boolean;
   captureEnabled?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
@@ -187,6 +188,7 @@ export function Workspace(props: WorkspaceProps) {
         onAddContent={props.onAddContent}
         screenshotFirstAdd={props.screenshotFirstAdd}
         onCapture={props.onCapture}
+        capturePrimary={props.capturePrimary}
         captureEnabled={props.captureEnabled}
         captureDisabledLabel={props.captureDisabledLabel}
         onDeleteItem={props.onDeleteItem}

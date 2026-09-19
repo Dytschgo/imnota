@@ -3,12 +3,36 @@ import type { CaptureRectangle } from '../src/shared/capture.js';
 
 contextBridge.exposeInMainWorld('imnotaCapture', {
   ready: () => ipcRenderer.invoke('capture-overlay:ready'),
-  save: (selection: CaptureRectangle) => ipcRenderer.invoke('capture-overlay:save', selection),
+  pointer: (update: { phase: 'begin' | 'move' | 'end' | 'reset'; point?: { x: number; y: number } }) =>
+    ipcRenderer.send('capture-overlay:pointer', update),
+  save: () => ipcRenderer.invoke('capture-overlay:save'),
   cancel: () => ipcRenderer.invoke('capture-overlay:cancel'),
-  onPayload: (handler: (payload: { imageDataUrl: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: { imageDataUrl: string }) =>
-      handler(payload);
+  onPayload: (
+    handler: (payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void,
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string },
+    ) => handler(payload);
     ipcRenderer.on('capture-overlay:payload', listener);
     return () => ipcRenderer.removeListener('capture-overlay:payload', listener);
+  },
+  onSelection: (
+    handler: (state: {
+      selection: CaptureRectangle | null;
+      complete: boolean;
+      actionsDisplayId: number | null;
+    }) => void,
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: {
+        selection: CaptureRectangle | null;
+        complete: boolean;
+        actionsDisplayId: number | null;
+      },
+    ) => handler(state);
+    ipcRenderer.on('capture-overlay:selection', listener);
+    return () => ipcRenderer.removeListener('capture-overlay:selection', listener);
   },
 });
