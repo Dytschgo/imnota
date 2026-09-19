@@ -1,13 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NativeImage } from 'electron';
-import path from 'node:path';
-import {
-  deliverClipboardWithFileHandoff,
-  nativeClipboard,
-  openWindowsFileHandoff,
-  platformClipboardHtml,
-} from './native-clipboard.js';
+import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 
 const mocks = vi.hoisted(() => ({
   clipboard: { readText: vi.fn(), read: vi.fn(), writeText: vi.fn(), write: vi.fn() },
@@ -51,77 +45,6 @@ function clipboardItem(data: Record<string, string | Blob>) {
 }
 
 describe('main-process clipboard completion', () => {
-  it('opens a verified Windows Markdown/PNG pair folder as the immediate file handoff', async () => {
-    const selectFiles = vi.fn(async () => true);
-    const directory = path.resolve('handoff');
-    await expect(
-      openWindowsFileHandoff(
-        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
-        selectFiles,
-        'win32',
-      ),
-    ).resolves.toBe('opened');
-    expect(selectFiles).toHaveBeenCalledWith([
-      path.join(directory, 'bundle.md'),
-      path.join(directory, 'bundle.png'),
-    ]);
-    selectFiles.mockResolvedValueOnce(false);
-    await expect(
-      openWindowsFileHandoff(
-        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
-        selectFiles,
-        'win32',
-      ),
-    ).resolves.toBe('failed');
-    selectFiles.mockRejectedValueOnce(new Error('Shell unavailable'));
-    await expect(
-      openWindowsFileHandoff(
-        [path.join(directory, 'bundle.md'), path.join(directory, 'bundle.png')],
-        selectFiles,
-        'win32',
-      ),
-    ).resolves.toBe('failed');
-  });
-
-  it('does not open a folder off Windows or for an invalid pair', async () => {
-    const selectFiles = vi.fn(async () => true);
-    await expect(
-      openWindowsFileHandoff(['bundle.md', 'bundle.png'], selectFiles, 'linux'),
-    ).resolves.toBeUndefined();
-    await expect(openWindowsFileHandoff(['bundle.md'], selectFiles, 'win32')).resolves.toBe('failed');
-    await expect(
-      openWindowsFileHandoff(['one.md', path.join('other', 'two.png')], selectFiles, 'win32'),
-    ).resolves.toBe('failed');
-    expect(selectFiles).not.toHaveBeenCalled();
-  });
-
-  it('still selects the generated pair when the Windows clipboard write rejects', async () => {
-    const writeClipboard = vi.fn().mockRejectedValue(new Error('Clipboard locked'));
-    const selectFiles = vi.fn().mockResolvedValue(true);
-    await expect(
-      deliverClipboardWithFileHandoff(
-        writeClipboard,
-        [path.join(path.resolve('handoff'), 'bundle.md'), path.join(path.resolve('handoff'), 'bundle.png')],
-        selectFiles,
-        'win32',
-      ),
-    ).resolves.toEqual({
-      text: false,
-      html: false,
-      image: false,
-      fileHandoff: 'opened',
-    });
-    expect(writeClipboard).toHaveBeenCalledOnce();
-    expect(selectFiles).toHaveBeenCalledOnce();
-  });
-
-  it('propagates a clipboard failure when there is no Windows file handoff', async () => {
-    const writeClipboard = vi.fn().mockRejectedValue(new Error('Clipboard locked'));
-    await expect(deliverClipboardWithFileHandoff(writeClipboard, [], vi.fn(), 'win32')).rejects.toThrow(
-      'Clipboard locked',
-    );
-  });
-
   it.each([
     ['text', () => nativeClipboard.writeText('Markdown'), mocks.clipboard.writeText],
     ['image', () => nativeClipboard.writeImage(image), mocks.clipboard.write],
@@ -178,6 +101,7 @@ describe('main-process clipboard completion', () => {
       text: true,
       html: true,
       image: true,
+      files: false,
     });
 
     mocks.clipboard.readText.mockResolvedValue('changed');
@@ -186,6 +110,7 @@ describe('main-process clipboard completion', () => {
       text: false,
       html: false,
       image: false,
+      files: false,
     });
     expect(mocks.clipboard.write).toHaveBeenCalledTimes(2);
   });

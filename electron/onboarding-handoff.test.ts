@@ -21,7 +21,7 @@ async function fixture() {
     void markdown;
     void imageDataUrl;
     void filePaths;
-    return { text: true, html: true, image: false, fileHandoff: 'opened' as const };
+    return { text: true, html: true, image: false, files: true };
   });
   const copyText = vi.fn(async () => {});
   const copyImage = vi.fn(async () => {});
@@ -62,7 +62,7 @@ describe('onboarding handoff grants', () => {
       void markdown;
       void image;
       void filePaths;
-      return { text: true, html: true, image: true };
+      return { text: true, html: true, image: true, files: true };
     });
     const workflow = new OnboardingHandoffWorkflow({
       root: path.join(aliasedParent, 'handoffs'),
@@ -77,7 +77,7 @@ describe('onboarding handoff grants', () => {
       markdownFilename: 'component-search.md',
       pngFilename: 'component-search.png',
     });
-    await workflow.copy(grant.sessionId, 'context');
+    await workflow.copy(grant.sessionId, 'files-rich');
     const canonicalParent = await fs.realpath(realParent);
     expect(copyContext.mock.calls[0][2]).toEqual([
       expect.stringMatching(
@@ -116,16 +116,17 @@ describe('onboarding handoff grants', () => {
 
   it('materializes a matching Markdown/PNG pair and uses it for the production combined copy', async () => {
     const { workflow, grant, copyContext } = await fixture();
-    await expect(workflow.copy(grant.sessionId, 'context')).resolves.toEqual({
+    await expect(workflow.copy(grant.sessionId, 'files-rich')).resolves.toEqual({
       text: true,
       html: true,
       image: false,
-      fileHandoff: 'opened',
+      files: true,
     });
     expect(copyContext).toHaveBeenCalledWith(
       '# Handoff\n\n![Sample](./component-search.png)\n',
       imageDataUrl,
       [expect.stringMatching(/component-search\.md$/), expect.stringMatching(/component-search\.png$/)],
+      'files-rich',
     );
     const [markdownPath, pngPath] = copyContext.mock.calls[0][2];
     await expect(fs.readFile(markdownPath, 'utf8')).resolves.toContain('./component-search.png');
@@ -154,7 +155,7 @@ describe('onboarding handoff grants', () => {
     const { root, workflow, grant, copyContext, copyText, copyImage } = await fixture();
     const directory = path.join(root, (await fs.readdir(root))[0]);
     await fs.unlink(path.join(directory, 'component-search.png'));
-    await expect(workflow.copy(grant.sessionId, 'context')).rejects.toThrow(/unavailable/);
+    await expect(workflow.copy(grant.sessionId, 'files-rich')).rejects.toThrow(/unavailable/);
     expect(copyContext).not.toHaveBeenCalled();
     expect(copyText).not.toHaveBeenCalled();
     expect(copyImage).not.toHaveBeenCalled();
@@ -164,7 +165,7 @@ describe('onboarding handoff grants', () => {
     const { root, workflow, grant, copyContext, copyText, copyImage } = await fixture();
     const directory = path.join(root, (await fs.readdir(root))[0]);
     await fs.writeFile(path.join(directory, 'component-search.md'), '# Replaced\n');
-    await expect(workflow.copy(grant.sessionId, 'context')).rejects.toThrow(/changed unexpectedly/);
+    await expect(workflow.copy(grant.sessionId, 'files-rich')).rejects.toThrow(/changed unexpectedly/);
     expect(copyContext).not.toHaveBeenCalled();
     expect(copyText).not.toHaveBeenCalled();
     expect(copyImage).not.toHaveBeenCalled();

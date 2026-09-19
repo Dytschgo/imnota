@@ -2,6 +2,7 @@ import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpe
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import './prompt-bundles.css';
 
 export type PromptBundleCardState =
@@ -47,6 +48,7 @@ export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
   onPrepareFreshFiles(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
@@ -79,6 +81,7 @@ export function PromptBundleCard({
   bundle,
   disabled = false,
   onCopyFresh,
+  onCopyVariant,
   onPrepareFreshFiles,
   onCopyMarkdown,
   onCopyImage,
@@ -223,18 +226,40 @@ export function PromptBundleCard({
         </button>
         <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
           {bundle.delivery === 'clipboard' ? (
-            <Button
-              data-testid={`copy-bundle-${bundle.bundleNumber}`}
-              className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
-              variant="primary"
-              busy={busy}
-              disabled={disabled}
-              title={copied ? 'Copy the latest bundle again' : undefined}
-              onClick={() => void onCopyFresh(request)}
-            >
-              {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
-              {copied ? 'Copied' : 'Copy Bundle'}
-            </Button>
+            <div className="prompt-bundle-variants" aria-label="Windows copy comparison">
+              <Button
+                data-testid={`copy-bundle-${bundle.bundleNumber}`}
+                className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
+                variant="primary"
+                busy={busy}
+                disabled={disabled}
+                title="Markdown text, HTML, and PNG formats"
+                onClick={() => void onCopyFresh(request)}
+              >
+                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                Rich copy
+              </Button>
+              {bundle.pictureNumbers.length > 0 && (
+                <>
+                  <Button
+                    variant="soft"
+                    disabled={disabled || !onCopyVariant}
+                    title="Markdown and PNG as file attachments"
+                    onClick={() => void onCopyVariant?.(request, 'files')}
+                  >
+                    Copy files
+                  </Button>
+                  <Button
+                    variant="soft"
+                    disabled={disabled || !onCopyVariant}
+                    title="File attachments plus Markdown, HTML, and PNG formats"
+                    onClick={() => void onCopyVariant?.(request, 'files-rich')}
+                  >
+                    Files + rich copy
+                  </Button>
+                </>
+              )}
+            </div>
           ) : (
             <Button
               className="prompt-bundle-copy"

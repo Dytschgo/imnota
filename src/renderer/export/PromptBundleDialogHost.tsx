@@ -6,6 +6,7 @@ import { HostedShareDialog } from './HostedShareDialog';
 import { useState } from 'react';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 
 interface PromptActionError {
   message: string;
@@ -23,6 +24,10 @@ export interface PromptBundleUiController {
   preview?: { bundleNumber: number; dataUrl: string; width: number; height: number };
   close(): void;
   copyFresh(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
+  copyVariant(
+    selection: PromptBundleActionRequest,
+    variant: WindowsCopyVariantId,
+  ): Promise<PromptActionResult>;
   prepareFreshFiles(selection?: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyMarkdown(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   copyImage(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
@@ -62,6 +67,7 @@ export function PromptBundleDialogHost({
         noContentMessage={controller.noContentMessage}
         onClose={controller.close}
         onCopyFresh={(selection) => run(controller.copyFresh(selection))}
+        onCopyVariant={(selection, variant) => run(controller.copyVariant(selection, variant))}
         onPrepareFreshFiles={(selection) => run(controller.prepareFreshFiles(selection))}
         onCopyMarkdown={(selection) => run(controller.copyMarkdown(selection))}
         onCopyImage={(selection) => run(controller.copyImage(selection))}

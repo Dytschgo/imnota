@@ -6,6 +6,7 @@ import type {
   OnboardingHandoffAction,
   OnboardingHandoffGrant,
   OnboardingHandoffOpenTarget,
+  WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
 import { atomicWrite } from './files.js';
 import { NativeWorkflowError } from './workflow-errors.js';
@@ -37,6 +38,7 @@ export interface OnboardingHandoffDependencies {
     markdown: string,
     imageDataUrl: string,
     filePaths: readonly string[],
+    variant: WindowsCopyVariantId,
   ): Promise<ClipboardFormatsReport>;
   copyText(markdown: string): Promise<void>;
   copyImage(imageDataUrl: string): Promise<void>;
@@ -196,10 +198,12 @@ export class OnboardingHandoffWorkflow {
     if (action === 'markdown') return this.dependencies.copyText(grant.markdown);
     if (action === 'image') return this.dependencies.copyImage(grant.imageDataUrl);
     if (action === 'paths') return this.dependencies.copyText([grant.markdownPath, grant.pngPath].join('\n'));
-    return this.dependencies.copyContext(grant.markdown, grant.imageDataUrl, [
-      grant.markdownPath,
-      grant.pngPath,
-    ]);
+    return this.dependencies.copyContext(
+      grant.markdown,
+      grant.imageDataUrl,
+      action === 'rich' ? [] : [grant.markdownPath, grant.pngPath],
+      action,
+    );
   }
 
   async open(sessionId: string, target: OnboardingHandoffOpenTarget): Promise<void> {

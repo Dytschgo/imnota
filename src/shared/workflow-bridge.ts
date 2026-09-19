@@ -133,7 +133,11 @@ export interface PromptExportSourceAsset {
   source: string;
 }
 
-export type PromptExportCopyTarget = 'context' | 'markdown' | 'image' | 'paths';
+/** Stable IDs used by the Windows nightly clipboard comparison. */
+export const WINDOWS_COPY_VARIANT_IDS = ['rich', 'files', 'files-rich'] as const;
+export type WindowsCopyVariantId = (typeof WINDOWS_COPY_VARIANT_IDS)[number];
+
+export type PromptExportCopyTarget = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
 
 /**
  * What the operating-system clipboard reports after a combined write. Read
@@ -145,11 +149,11 @@ export interface ClipboardFormatsReport {
   text: boolean;
   html: boolean;
   image: boolean;
-  /** Windows fallback state after opening the generated Markdown/PNG pair. */
-  fileHandoff?: 'opened' | 'failed';
+  /** Exact Markdown/PNG path list confirmed through native CF_HDROP read-back. */
+  files: boolean;
 }
 
-export type OnboardingHandoffAction = 'context' | 'markdown' | 'image' | 'paths';
+export type OnboardingHandoffAction = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
 export type OnboardingHandoffOpenTarget = 'files' | 'folder';
 
 export interface OnboardingHandoffGrant {

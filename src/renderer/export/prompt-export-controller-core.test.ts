@@ -85,7 +85,7 @@ interface FakeBridgeOptions {
   revisionForLoad?: (screenshotId: string, callNumber: number) => string;
   failContextCopy?: boolean;
   /** Clipboard read-back for combined copies; defaults to every format present. */
-  placed?: { text: boolean; html: boolean; image: boolean; fileHandoff?: 'opened' | 'failed' };
+  placed?: { text: boolean; html: boolean; image: boolean; files: boolean };
   failFinish?: boolean;
 }
 
@@ -228,7 +228,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
     },
     async copyPromptExportBundle(input) {
       copies.push(structuredClone(input));
-      if (options.failContextCopy && input.target === 'context')
+      if (options.failContextCopy && input.target === 'rich')
         return {
           ok: false,
           error: {
@@ -240,8 +240,8 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
       return ok({
         target: input.target,
         placed:
-          input.target === 'context'
-            ? (options.placed ?? { text: true, html: true, image: true })
+          input.target === 'rich' || input.target === 'files' || input.target === 'files-rich'
+            ? (options.placed ?? { text: true, html: true, image: true, files: false })
             : undefined,
       });
     },
@@ -414,7 +414,7 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown).toContain('Latest saved title');
     expect(native.writes[0].markdown).not.toContain('Picture title 1');
     expect(native.writes[0].markdown).toContain('Export set: Checkout review - 260907-184205-1');
-    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'context' }]);
+    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'rich' }]);
   });
 
   test('rejects a changed content revision before reserving a native session', async () => {
@@ -604,7 +604,7 @@ describe('prompt export controller orchestration', () => {
   });
 
   test('reports a partial Windows clipboard write and points at the separate fallback', async () => {
-    const native = fakeBridge({ placed: { text: true, html: true, image: false } });
+    const native = fakeBridge({ placed: { text: true, html: true, image: false, files: false } });
     const renderer = fakeRendering();
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     const copy = await controller.copyFresh(1);
@@ -634,7 +634,7 @@ describe('prompt export controller orchestration', () => {
     });
     expect(markdown).toEqual({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
     expect(native.copies).toEqual([
-      { sessionId: 'session-1', bundleNumber: 1, target: 'context' },
+      { sessionId: 'session-1', bundleNumber: 1, target: 'rich' },
       { sessionId: 'session-1', bundleNumber: 1, target: 'markdown' },
     ]);
     expect(card.state).toBe('error');
@@ -971,7 +971,7 @@ describe('prompt export controller orchestration', () => {
       markdown: expect.stringContaining('Text body for text-1.'),
     });
     expect(renderer.stats.renderCount).toBe(0);
-    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'context' }]);
+    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'rich' }]);
     expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'markdown' });
     expect((await controller.openFiles(1)).ok).toBe(true);
     expect(native.opens).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'markdown' }]);

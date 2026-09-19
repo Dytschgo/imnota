@@ -1,72 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { describeCombinedCopyMessage, describeCombinedDelivery } from './clipboard-delivery';
+import { describeCopyDelivery, describeCopyMessage } from './clipboard-delivery';
 
-describe('combined clipboard delivery reporting', () => {
-  it('claims a combined copy only when the clipboard confirmed text and image', () => {
-    expect(describeCombinedDelivery({ text: true, html: true, image: true }, true)).toEqual({
-      outcome: 'combined',
-    });
-    expect(describeCombinedDelivery(undefined, true)).toMatchObject({
-      outcome: 'files',
-      warning: expect.stringContaining('could not be confirmed'),
-    });
-    expect(describeCombinedDelivery({ text: true, html: true, image: true }, false)).toEqual({
-      outcome: 'markdown',
-    });
-  });
-
-  it('names the missing format and its separate fallback', () => {
-    expect(describeCombinedDelivery({ text: true, html: true, image: false }, true)).toMatchObject({
-      outcome: 'markdown',
-      warning: expect.stringContaining('Copy image'),
-    });
-    expect(describeCombinedDelivery({ text: false, html: false, image: true }, true)).toMatchObject({
-      outcome: 'image',
-      warning: expect.stringContaining('Copy Markdown'),
-    });
-    expect(describeCombinedDelivery({ text: false, html: false, image: false }, true)).toMatchObject({
-      outcome: 'files',
-      warning: expect.stringContaining('separately'),
-    });
-  });
-
-  it('describes the compact combined copy without overclaiming', () => {
-    expect(describeCombinedCopyMessage({ text: true, html: true, image: true })).toMatch(
-      /some apps accept only one/,
+describe('clipboard variant reporting', () => {
+  it('reports rich formats without claiming receiver behavior', () => {
+    expect(describeCopyDelivery('rich', { text: true, html: true, image: true, files: false }, true)).toEqual(
+      { outcome: 'combined' },
     );
-    expect(describeCombinedCopyMessage({ text: true, html: false, image: false })).toMatch(/Only the text/);
-    expect(describeCombinedCopyMessage({ text: false, html: false, image: true })).toMatch(/Only the image/);
-    expect(describeCombinedCopyMessage({ text: false, html: false, image: false })).toMatch(
-      /could not confirm/,
+    expect(describeCopyMessage('rich', { text: true, html: true, image: true, files: false })).toMatch(
+      /may paste only one format/i,
     );
   });
 
-  it('reports the opened generated-pair folder as the practical one-click fallback', () => {
+  it('reports exact file-list readback separately from plain paths', () => {
     expect(
-      describeCombinedDelivery({ text: true, html: true, image: true, fileHandoff: 'opened' }, true),
+      describeCopyDelivery('files', { text: false, html: false, image: false, files: true }, true),
     ).toMatchObject({
       outcome: 'files',
-      warning: expect.stringContaining('Markdown and image formats were confirmed'),
+      warning: expect.stringMatching(/receiving app.*decides/i),
     });
     expect(
-      describeCombinedCopyMessage({ text: true, html: true, image: true, fileHandoff: 'opened' }),
-    ).toMatch(/Markdown and image formats were confirmed.*selected for attachment/i);
-    expect(
-      describeCombinedDelivery({ text: true, html: true, image: true, fileHandoff: 'failed' }, true),
-    ).toMatchObject({
+      describeCopyDelivery('files', { text: false, html: false, image: false, files: false }, true),
+    ).toMatchObject({ outcome: 'files', warning: expect.stringContaining('Copy file paths') });
+  });
+
+  it('lists every confirmed files-rich representation without promising a combined paste', () => {
+    const placed = { text: true, html: true, image: true, files: true };
+    expect(describeCopyDelivery('files-rich', placed, true)).toMatchObject({
       outcome: 'files',
-      warning: expect.stringContaining('could not be opened'),
+      warning: expect.stringMatching(/files, Markdown, HTML and image.*chooses/i),
     });
+    expect(describeCopyMessage('files-rich', placed)).toMatch(/may choose only one representation/i);
+  });
+
+  it('points partial rich copies at exact separate fallbacks', () => {
     expect(
-      describeCombinedCopyMessage({
-        text: false,
-        html: false,
-        image: false,
-        fileHandoff: 'opened',
-      }),
-    ).toMatch(/No clipboard format was confirmed.*selected for attachment/i);
+      describeCopyDelivery('rich', { text: true, html: true, image: false, files: false }, true),
+    ).toMatchObject({ outcome: 'markdown', warning: expect.stringContaining('Copy image only') });
     expect(
-      describeCombinedDelivery({ text: true, html: true, image: false, fileHandoff: 'failed' }, true).warning,
-    ).toMatch(/Only Markdown was confirmed.*could not be opened and selected/i);
+      describeCopyDelivery('rich', { text: false, html: false, image: true, files: false }, true),
+    ).toMatchObject({ outcome: 'image', warning: expect.stringContaining('Copy Markdown only') });
   });
 });

@@ -49,7 +49,7 @@ async function fixture() {
       text: true,
       html: true,
       image: true,
-      fileHandoff: 'opened' as const,
+      files: true,
     };
   });
   const copyText = vi.fn();
@@ -118,7 +118,7 @@ describe('main-owned prompt bundle grants', () => {
         final.bundles[0].markdownFilename,
       ),
     );
-    await expect(workflow.copy(session.sessionId, 1, 'context')).rejects.toThrow();
+    await expect(workflow.copy(session.sessionId, 1, 'files-rich')).rejects.toThrow();
     expect(copyText).not.toHaveBeenCalled();
     expect(copyImage).not.toHaveBeenCalled();
     expect(copyContext).not.toHaveBeenCalled();
@@ -131,7 +131,7 @@ describe('main-owned prompt bundle grants', () => {
     await workflow.write(session.sessionId, 1, pngDataUrl(), markdown);
     await workflow.finish(session.sessionId);
 
-    await workflow.copy(session.sessionId, 1, 'context');
+    await workflow.copy(session.sessionId, 1, 'files-rich');
 
     const filePaths = copyContext.mock.calls[0][2];
     expect(path.dirname(filePaths[0])).toBe(path.dirname(filePaths[1]));
@@ -150,7 +150,7 @@ describe('main-owned prompt bundle grants', () => {
     await workflow.finish(session.sessionId);
     prepareFileHandoff.mockRejectedValueOnce(new Error('temporary storage unavailable'));
 
-    await expect(workflow.copy(session.sessionId, 1, 'context')).rejects.toThrow(
+    await expect(workflow.copy(session.sessionId, 1, 'files-rich')).rejects.toThrow(
       /temporary storage unavailable/,
     );
     expect(copyContext).not.toHaveBeenCalled();
@@ -171,19 +171,21 @@ describe('main-owned prompt bundle grants', () => {
     const content = await workflow.read(session.sessionId, 1);
     expect(content.markdown).toBe('# Prompt\n');
     expect(content.imageDataUrl).toBe(pngDataUrl());
-    await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
-      target: 'context',
-      placed: { text: true, html: true, image: true, fileHandoff: 'opened' },
+    await expect(workflow.copy(session.sessionId, 1, 'files-rich')).resolves.toEqual({
+      target: 'files-rich',
+      placed: { text: true, html: true, image: true, files: true },
     });
-    expect(copyContext).toHaveBeenCalledWith('# Prompt\n', pngDataUrl(), [
-      expect.stringMatching(/ - 01\.md$/),
-      expect.stringMatching(/ - 01\.png$/),
-    ]);
+    expect(copyContext).toHaveBeenCalledWith(
+      '# Prompt\n',
+      pngDataUrl(),
+      [expect.stringMatching(/ - 01\.md$/), expect.stringMatching(/ - 01\.png$/)],
+      'files-rich',
+    );
     // The workflow reports what the clipboard holds, never what was requested.
-    copyContext.mockResolvedValueOnce({ text: true, html: true, image: false, fileHandoff: 'opened' });
-    await expect(workflow.copy(session.sessionId, 1, 'context')).resolves.toEqual({
-      target: 'context',
-      placed: { text: true, html: true, image: false, fileHandoff: 'opened' },
+    copyContext.mockResolvedValueOnce({ text: true, html: true, image: false, files: true });
+    await expect(workflow.copy(session.sessionId, 1, 'files-rich')).resolves.toEqual({
+      target: 'files-rich',
+      placed: { text: true, html: true, image: false, files: true },
     });
     await workflow.open(session.sessionId, 1, 'png');
     expect(openPath).toHaveBeenCalledWith(expect.stringMatching(/ - 01\.png$/));
@@ -230,7 +232,7 @@ describe('main-owned prompt bundle grants', () => {
     await workflow.write(session.sessionId, 1, undefined, '# Text prompt\n');
     const finalized = await workflow.finish(session.sessionId);
     expect(finalized.bundles[0].pngFilename).toBe('');
-    await workflow.copy(session.sessionId, 1, 'context');
+    await workflow.copy(session.sessionId, 1, 'rich');
     expect(copyText).toHaveBeenCalledWith('# Text prompt\n');
     expect(copyContext).not.toHaveBeenCalled();
     await expect(workflow.copy(session.sessionId, 1, 'image')).rejects.toThrow(/no image/);
@@ -249,7 +251,7 @@ describe('main-owned prompt bundle grants', () => {
     const workflow = new PromptBundleWorkflow(
       {
         authorize: async () => ({ projectPath, collectionId, collectionName: 'Collection' }),
-        copyContext: () => ({ text: true, html: true, image: true, fileHandoff: 'opened' }),
+        copyContext: () => ({ text: true, html: true, image: true, files: true }),
         prepareFileHandoff: async (markdown, imageDataUrl, sourcePaths) => {
           void markdown;
           void imageDataUrl;
