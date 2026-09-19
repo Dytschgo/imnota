@@ -1,6 +1,6 @@
 # Windows copy comparison
 
-Use this sheet to choose the Windows copy behavior that feels best in your apps. There is no assumed winner: an app may prefer different clipboard formats in its editor, chat composer, or file list.
+Use this sheet to verify the Windows copy format that feels best in your apps. Copy files is the initial default; you can save another preference. An app may prefer different clipboard formats in its editor, chat composer, or file list.
 
 ## Record your setup
 
@@ -37,9 +37,9 @@ Open **Copy Bundle**, then use the copy choices on the image bundle. The interac
 | Copy Markdown, then Copy image | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
 | Copy file paths                | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
 
-The guide labels the separate actions **Copy Markdown** and **Copy image**; export cards add **only** to those labels. The main action remains Rich copy for this comparison nightly. No option is declared the best for your apps yet. For each option, use this same procedure:
+The guide labels the separate actions **Copy Markdown** and **Copy image**; export cards add **only** to those labels. The primary button uses your saved copy format, initially **Copy files** on Windows. Choose another format from its dropdown or the **Native copy functions** setting. Changing the selection saves your preference without copying anything. For each option, use this same procedure:
 
-1. Return to Imnota and select the variant. Wait for its result message.
+1. Return to Imnota, select the variant from the dropdown, then click the primary copy button. Wait for its result message.
 2. Record what Imnota says it placed on the clipboard. This confirms clipboard contents, not what the receiving app will accept.
 3. Focus the receiving app's intended input and press **Ctrl+V once**.
 4. Check for the complete `COPY-CHECK-01` sentence and the image with your annotation. If files arrive, check that both `.md` and `.png` are present and readable.
@@ -76,6 +76,13 @@ Use **both**, **text only**, **image only**, **two files**, **one file**, **path
 
 Duplicate these rows for each copy option. **1** means frustrating or unusable; **5** means it works as expected with little effort. A text file attachment and visible message text are different outcomes: record which one you prefer.
 
+## Check the saved preference
+
+- [ ] Selecting a different format changes the primary button without replacing the clipboard.
+- [ ] Settings and the guide/share-bundle selector show the same choice.
+- [ ] Restarting Imnota keeps the selected format.
+- [ ] Share bundles fits the window and the copy dropdown is usable without clipping.
+
 ## Check the fallbacks once
 
 - [ ] Copy Markdown: complete explanation arrives as text.
@@ -101,7 +108,7 @@ If capture is disabled, enable **Settings → Shortcuts → Capture a screen reg
 
 - Best option overall:
 - Best option for each app, if different:
-- Should the main Copy Bundle action use one default, or remember your last choice?
+- Does the saved copy preference work as expected?
 - Do you prefer visible Markdown text plus an image, or two file attachments?
 - Any confusing label, unexpected window, missing content, or duplicate:
 - Nightly version tested:
