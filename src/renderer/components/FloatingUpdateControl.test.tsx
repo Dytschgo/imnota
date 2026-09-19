@@ -132,3 +132,48 @@ it('maps actionable states to the direct update action', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Retry update check' }));
   expect(onRetry).toHaveBeenCalledOnce();
 });
+
+it.each([undefined, 'https://example.com/release'])(
+  'restores logical tab order around the portal (%s)',
+  (releaseUrl) => {
+    render(
+      <>
+        <button>Before update</button>
+        <FloatingUpdateControl
+          status={{ state: 'available', releaseUrl }}
+          onCheck={vi.fn()}
+          onDownload={vi.fn()}
+          onInstall={vi.fn()}
+          onRetry={vi.fn()}
+        />
+        <button>After update</button>
+      </>,
+    );
+    const trigger = screen.getByRole('button', { name: 'Download update' });
+    fireEvent.focus(trigger);
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+    let panel = screen.getByRole('dialog');
+    expect(panel).toHaveFocus();
+    expect(fireEvent.keyDown(panel, { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.pointerEnter(screen.getByTestId('update-indicator'));
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+    panel = screen.getByRole('dialog');
+    if (releaseUrl) {
+      const link = screen.getByRole('link');
+      link.focus();
+      fireEvent.keyDown(link, { key: 'Tab', shiftKey: true });
+      expect(panel).toHaveFocus();
+      link.focus();
+      expect(fireEvent.keyDown(link, { key: 'Tab' })).toBe(true);
+    } else {
+      expect(fireEvent.keyDown(panel, { key: 'Tab' })).toBe(true);
+    }
+    // Default browser Tab is intentionally not prevented. Native verification
+    // checks that it advances from this restored anchor to After update.
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  },
+);
