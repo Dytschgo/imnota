@@ -752,6 +752,7 @@ describe('BackupService', () => {
       if (change === 'occupied quarantine')
         expect(await fs.readFile(path.join(pending.quarantine, 'keep.txt'), 'utf8')).toBe('unowned');
     },
+    DURABLE_FILESYSTEM_TIMEOUT,
   );
 
   it('restores in place with a safety snapshot and preserves every original in a rollback folder', async () => {
