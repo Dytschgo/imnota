@@ -20,9 +20,10 @@ import type {
   OnboardingHandoffAction,
   OnboardingHandoffGrant,
   OnboardingHandoffOpenTarget,
+  WindowsCopyVariantId,
 } from '../../shared/workflow-bridge';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
-import { describeCombinedCopyMessage } from '../export/clipboard-delivery';
+import { describeCopyMessage } from '../export/clipboard-delivery';
 import { renderAnnotatedImage } from '../export-image';
 import { completedOnboarding, ONBOARDING_VERSION, type OnboardingPreferences } from '../settings/preferences';
 import {
@@ -187,15 +188,15 @@ export function OnboardingDemo({
     }
   };
 
-  const copyBundle = async () => {
+  const copyBundle = async (variant: WindowsCopyVariantId) => {
     if (!bundle || busy) return;
     setBusy(true);
     setError('');
     try {
       if (!handoff || !onCopyHandoff) throw new Error('The native handoff is unavailable.');
-      const placed = await onCopyHandoff(handoff, 'context');
-      if (placed) setCopyStatus(describeCombinedCopyMessage(placed));
-      else setCopyStatus('The combined copy was not confirmed. Use a fallback below.');
+      const placed = await onCopyHandoff(handoff, variant);
+      if (placed) setCopyStatus(describeCopyMessage(variant, placed));
+      else setCopyStatus('The clipboard result was not confirmed. Try another option below.');
     } catch {
       setError(
         'The clipboard is unavailable right now. Try copying again, or continue to create your project.',
@@ -396,15 +397,35 @@ export function OnboardingDemo({
                   description, and text notes. Clipboard access is optional in this practice guide.
                 </p>
                 <pre>{bundle.markdown}</pre>
-                <button
-                  type="button"
-                  className="imnota-onboarding-primary"
-                  onClick={() => void copyBundle()}
-                  disabled={busy}
-                >
-                  <Clipboard size={15} aria-hidden="true" />
-                  {busy ? 'Preparing…' : 'Copy PNG + Markdown'}
-                </button>
+                <div className="imnota-copy-variants" aria-label="Windows copy comparison">
+                  <button
+                    type="button"
+                    className="imnota-onboarding-primary"
+                    title="Markdown text, HTML, and PNG formats"
+                    onClick={() => void copyBundle('rich')}
+                    disabled={busy}
+                  >
+                    <Clipboard size={15} aria-hidden="true" /> Rich copy
+                  </button>
+                  <button
+                    type="button"
+                    className="imnota-onboarding-secondary"
+                    title="Markdown and PNG as file attachments"
+                    onClick={() => void copyBundle('files')}
+                    disabled={busy}
+                  >
+                    Copy files
+                  </button>
+                  <button
+                    type="button"
+                    className="imnota-onboarding-secondary"
+                    title="File attachments plus Markdown, HTML, and PNG formats"
+                    onClick={() => void copyBundle('files-rich')}
+                    disabled={busy}
+                  >
+                    Files + rich copy
+                  </button>
+                </div>
                 {copyStatus && (
                   <div className="imnota-copy-success" role="status">
                     <Check size={15} aria-hidden="true" />

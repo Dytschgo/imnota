@@ -39,7 +39,7 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
   expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
   fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();
-  expect(screen.getByRole('dialog')).toHaveTextContent(/Copy Bundle includes image and Markdown/i);
+  expect(screen.getByRole('dialog')).toHaveTextContent(/three Windows comparison options/i);
   expect(screen.getByRole('dialog')).not.toHaveTextContent(/receiver detected|attachment received/i);
 });
 

@@ -1,5 +1,6 @@
 import { AlertTriangle, CloudUpload, FolderOpen, Square } from 'lucide-react';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
+import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import { Button, Modal } from '../components/ui';
 import {
   PromptBundleCard,
@@ -17,6 +18,7 @@ export interface PromptSharingDialogProps {
   noContentMessage?: string;
   onClose(): void;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
   onPrepareFreshFiles(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
@@ -55,6 +57,7 @@ export function PromptSharingDialog({
   noContentMessage,
   onClose,
   onCopyFresh,
+  onCopyVariant,
   onPrepareFreshFiles,
   onCopyMarkdown,
   onCopyImage,
@@ -127,6 +130,7 @@ export function PromptSharingDialog({
                 bundle={bundle}
                 disabled={busy}
                 onCopyFresh={onCopyFresh}
+                onCopyVariant={onCopyVariant}
                 onPrepareFreshFiles={onPrepareFreshFiles}
                 onCopyMarkdown={onCopyMarkdown}
                 onCopyImage={onCopyImage}
@@ -141,8 +145,9 @@ export function PromptSharingDialog({
           <details className="prompt-sharing-info">
             <summary>Copying help</summary>
             <p>
-              Copy Bundle includes image and Markdown. Check the receiving app after pasting. If one is
-              missing, copy it separately or prepare fresh files; file paths are copied as text.
+              The three Windows comparison options place different formats on the clipboard. The receiving app
+              decides which formats it accepts. File paths remain a separate plain-text fallback, and files
+              open only when you choose an Open action.
             </p>
           </details>
           <div>

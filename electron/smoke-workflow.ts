@@ -1,5 +1,6 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
+import { readWindowsClipboardFiles } from './windows-clipboard.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -268,6 +269,7 @@ async function createProjectThroughUi(
 
 async function exerciseOnboarding(
   driver: NativeUiDriver,
+  window: BrowserWindow,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<boolean> {
@@ -306,14 +308,11 @@ async function exerciseOnboarding(
     { selector: '[data-testid="onboarding-continue"]' },
     { text: 'Continue to copy', exact: true },
   ]);
-  await driver.waitFor({ text: 'Copy PNG + Markdown', exact: true });
+  await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
-  await driver.click({ text: 'Copy PNG + Markdown', exact: true });
-  const combinedStatus =
-    process.platform === 'win32'
-      ? 'Markdown and image formats were confirmed on the clipboard. Imnota also opened the generated folder with the Markdown and PNG selected for attachment.'
-      : 'Text and image are on the clipboard. Check that both appear after pasting; some apps accept only one.';
+  await driver.click({ text: 'Rich copy', exact: true });
+  const combinedStatus = 'Markdown and image are on the clipboard. The test app may paste only one format.';
   await driver.waitFor({ selector: '[role="status"]', text: combinedStatus, exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
@@ -369,6 +368,41 @@ async function exerciseOnboarding(
   )
     throw new Error('Onboarding combined copy did not preserve exact Markdown and platform HTML.');
   await assertExactImage('Onboarding combined copy');
+
+  if (process.platform === 'win32') {
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({
+      selector: '[role="status"]',
+      text: 'Files were confirmed on the clipboard. Paste into the test app to see whether it accepts both attachments.',
+      exact: true,
+    });
+    const copiedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    if (
+      copiedFiles.length !== 2 ||
+      path.resolve(copiedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(copiedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
+    await driver.click({ text: 'Files + rich copy', exact: true });
+    await driver.waitFor({
+      selector: '[role="status"]',
+      text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The test app may choose only one representation when you paste.',
+      exact: true,
+    });
+    const combinedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    if (
+      combinedFiles.length !== 2 ||
+      path.resolve(combinedFiles[0]).toLowerCase() !== path.resolve(markdownPath).toLowerCase() ||
+      path.resolve(combinedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
+    )
+      throw new Error('Onboarding Files + rich copy did not preserve the exact file list.');
+    if (
+      (await nativeClipboard.readText()) !== markdown ||
+      (await nativeClipboard.readHTML()) !== platformClipboardHtml(clipboardContextHtml(markdown))
+    )
+      throw new Error('Onboarding Files + rich copy did not preserve exact Markdown and HTML.');
+    await assertExactImage('Onboarding Files + rich copy');
+  }
 
   await driver.click({ text: 'Copy Markdown', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied.', exact: true });
@@ -1387,7 +1421,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
       text: [...card.querySelectorAll('dt, dd')].map((entry) => entry.textContent?.trim() ?? '').join(' '),
-      copyLabel: buttons.find((button) => /^Copy Bundle$/i.test(button.textContent ?? ''))?.textContent?.trim()
+      copyLabel: buttons.find((button) => /^Rich copy$/i.test(button.textContent ?? ''))?.textContent?.trim()
     };
   }))()`);
 }
@@ -1680,7 +1714,7 @@ async function exercisePromptWorkflow(
   const clipboardPng = image.toPNG();
   await assertWorkflowFailure(
     driver,
-    `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'context' })`,
+    `workflow.copyPromptExportBundle({ sessionId: 'missing-smoke-session', bundleNumber: 1, target: 'rich' })`,
     ['session-not-found'],
   );
   if (
@@ -1874,8 +1908,8 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
-  await exerciseOnboarding(driver, artifactDirectory, artifacts);
-  assertions.push('onboarding exact Markdown/HTML/PNG handoff and independent clipboard fallbacks');
+  await exerciseOnboarding(driver, activeWindow, artifactDirectory, artifacts);
+  assertions.push('onboarding copy variants and independent clipboard fallbacks');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);
   await exerciseWhatsNew(driver, host, options.version, artifactDirectory, artifacts);
   if (findWhatsNewRelease(options.version))

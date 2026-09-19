@@ -10,6 +10,7 @@ import type {
   PromptExportFinalized,
   PromptExportOpenTarget,
   PromptExportSessionInfo,
+  WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
 import { assertNoLinks, isWithin } from './files.js';
 import {
@@ -41,6 +42,7 @@ export interface PromptBundleWorkflowDependencies {
     markdown: string,
     imageDataUrl: string,
     filePaths: readonly string[],
+    variant: WindowsCopyVariantId,
   ): Promise<ClipboardFormatsReport> | ClipboardFormatsReport;
   prepareFileHandoff(
     markdown: string,
@@ -224,6 +226,11 @@ export class PromptBundleWorkflow {
     if (!bundle.pngFilename) {
       if (target === 'image')
         throw new NativeWorkflowError('bundle-not-found', 'This text-only prompt has no image to copy.');
+      if (target === 'files' || target === 'files-rich')
+        throw new NativeWorkflowError(
+          'bundle-not-found',
+          'The Windows file comparison requires a bundle with a PNG.',
+        );
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
       return { target: 'markdown' };
     }
@@ -233,11 +240,14 @@ export class PromptBundleWorkflow {
       return { target };
     }
     const markdown = await this.readMarkdown(grant, bundle);
-    const filePaths = await this.dependencies.prepareFileHandoff(markdown, imageDataUrl, [
-      bundle.markdownPath,
-      bundle.pngPath,
-    ]);
-    const placed = await this.dependencies.copyContext(markdown, imageDataUrl, filePaths);
+    const filePaths =
+      target === 'rich'
+        ? []
+        : await this.dependencies.prepareFileHandoff(markdown, imageDataUrl, [
+            bundle.markdownPath,
+            bundle.pngPath,
+          ]);
+    const placed = await this.dependencies.copyContext(markdown, imageDataUrl, filePaths, target);
     return { target, placed };
   }
 

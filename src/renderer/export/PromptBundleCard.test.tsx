@@ -52,7 +52,7 @@ function model(overrides: Partial<PromptBundleCardModel> = {}): PromptBundleCard
 it('sends plan and artifact freshness identity with the primary action', () => {
   const onCopyFresh = vi.fn();
   render(<PromptBundleCard bundle={model()} onCopyFresh={onCopyFresh} onPrepareFreshFiles={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Copy Bundle' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
   expect(onCopyFresh).toHaveBeenCalledWith({
     planId: 'plan-current',
     artifactSessionId: 'session-current',
@@ -61,6 +61,30 @@ it('sends plan and artifact freshness identity with the primary action', () => {
   expect(screen.getByRole('heading', { name: 'Bundle 2' })).toBeInTheDocument();
   expect(screen.getByText('Pictures 3, 4')).toBeInTheDocument();
   expect(screen.getByText('2.0 MB estimated')).toBeInTheDocument();
+});
+
+it('exposes both Windows file variants beside rich copy with stable IDs', () => {
+  const onCopyVariant = vi.fn();
+  render(
+    <PromptBundleCard
+      bundle={model()}
+      onCopyFresh={vi.fn()}
+      onCopyVariant={onCopyVariant}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Files + rich copy' }));
+  expect(onCopyVariant).toHaveBeenNthCalledWith(
+    1,
+    { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
+    'files',
+  );
+  expect(onCopyVariant).toHaveBeenNthCalledWith(
+    2,
+    { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
+    'files-rich',
+  );
 });
 
 it('offers independent fallbacks before artifacts exist and an honest primary action for oversized prompts', () => {
@@ -180,7 +204,7 @@ it('shows a gray copied state while leaving Copy Bundle available again', () => 
     />,
   );
 
-  const button = screen.getByRole('button', { name: 'Copied' });
+  const button = screen.getByRole('button', { name: 'Rich copy' });
   expect(button).toHaveClass('is-copied');
   fireEvent.click(button);
   expect(onCopyFresh).toHaveBeenCalledOnce();

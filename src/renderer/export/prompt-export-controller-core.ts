@@ -32,9 +32,10 @@ import type {
   PromptExportSessionInfo,
   WorkflowError,
   WorkflowResult,
+  WindowsCopyVariantId,
 } from '../../shared/workflow-bridge';
 import { createBrowserTextMeasurer } from '../canvas/annotation-layout';
-import { describeCombinedDelivery } from './clipboard-delivery';
+import { describeCopyDelivery } from './clipboard-delivery';
 import {
   assertAnnotatedImageRenderBounds,
   renderAnnotatedImageWithDimensions,
@@ -1170,6 +1171,13 @@ export class PromptBundleControllerEngine {
     return this.fresh(selectionNumber(selection), true);
   }
 
+  async copyVariant(
+    selection: PromptBundleSelection,
+    variant: WindowsCopyVariantId,
+  ): Promise<PromptBundleControllerActionResult> {
+    return this.fresh(selectionNumber(selection), true, variant);
+  }
+
   async prepareFreshFiles(selection?: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
     return this.fresh(selectionNumber(selection), false);
   }
@@ -1206,7 +1214,7 @@ export class PromptBundleControllerEngine {
   private async fresh(
     requestedBundleNumber: number | undefined,
     copyAfterExport: boolean,
-    copyTarget: PromptExportCopyTarget = 'context',
+    copyTarget: WindowsCopyVariantId = 'rich',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.pendingCleanup) {
       const cleanup = await this.retryCleanup();
@@ -1256,7 +1264,7 @@ export class PromptBundleControllerEngine {
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
-        const delivery = describeCombinedDelivery(copy.value.placed, bundle.pictures.length > 0);
+        const delivery = describeCopyDelivery(copyTarget, copy.value.placed, bundle.pictures.length > 0);
         this.deliveryCompleted(bundle.number, delivery.outcome, true, delivery.warning);
       }
       this.emit({

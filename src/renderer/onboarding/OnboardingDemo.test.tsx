@@ -63,7 +63,7 @@ describe('OnboardingDemo', () => {
       text: true,
       html: true,
       image: true,
-      fileHandoff: 'opened' as const,
+      files: false,
     }));
     render(
       <OnboardingDemo
@@ -77,9 +77,9 @@ describe('OnboardingDemo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy PNG + Markdown' });
-    fireEvent.click(screen.getByRole('button', { name: 'Copy PNG + Markdown' }));
-    await screen.findByText(/Markdown and image formats were confirmed.*selected for attachment/);
+    await screen.findByRole('button', { name: 'Rich copy' });
+    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+    await screen.findByText(/Markdown and image are on the clipboard/);
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
     await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
@@ -92,7 +92,7 @@ describe('OnboardingDemo', () => {
     );
     expect(onCopyHandoff).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: '00000000-0000-4000-8000-000000000001' }),
-      'context',
+      'rich',
     );
     expect(onMarkCompleted).toHaveBeenLastCalledWith({ completed: true, completedVersion: 1 }, 'finished');
   });
@@ -119,8 +119,8 @@ describe('OnboardingDemo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy PNG + Markdown' });
-    fireEvent.click(screen.getByRole('button', { name: 'Copy PNG + Markdown' }));
+    await screen.findByRole('button', { name: 'Rich copy' });
+    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Try copying again, or continue');
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
@@ -137,7 +137,7 @@ describe('OnboardingDemo', () => {
       text: false,
       html: false,
       image: false,
-      fileHandoff: 'opened' as const,
+      files: true,
     }));
     const onOpenHandoff = vi.fn(async () => {});
     render(
@@ -156,10 +156,8 @@ describe('OnboardingDemo', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy PNG + Markdown' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'No clipboard format was confirmed. Imnota also opened the generated folder',
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy files' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/files were confirmed.*attachments/i);
     for (const name of ['Copy Markdown', 'Copy image', 'Open files', 'Copy file paths', 'Open export folder'])
       expect(screen.getByRole('button', { name })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Open files' }));

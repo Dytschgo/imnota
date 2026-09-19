@@ -429,6 +429,16 @@
   font-weight: 600;
 }
 
+.imnota-copy-variants {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.imnota-copy-variants .imnota-onboarding-secondary {
+  margin-top: 0;
+}
+
 .imnota-onboarding-fallbacks {
   display: flex;
   flex-wrap: wrap;
