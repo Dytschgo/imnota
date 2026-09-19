@@ -161,6 +161,7 @@ import {
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
+import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
 // Smoke never reads or writes the installed application's profile or caches.
@@ -847,14 +848,18 @@ function captureService(): CaptureService {
         // source. The disposable smoke profile synthesizes these pixels.
         const width = options.thumbnailSize.width;
         const height = options.thumbnailSize.height;
-        const thumbnail = nativeImage.createFromBitmap(Buffer.alloc(width * height * 4, 0x5a), {
-          width,
-          height,
-        });
-        return screen.getAllDisplays().map((display) => ({
-          display_id: String(display.id),
-          thumbnail,
-        }));
+        return screen
+          .getAllDisplays()
+          .sort((left, right) => left.id - right.id)
+          .map((display, displayIndex) => {
+            const color = syntheticCaptureColor(displayIndex);
+            const bitmap = Buffer.alloc(width * height * 4);
+            bitmap.fill(Buffer.from([color.blue, color.green, color.red, color.alpha]));
+            return {
+              display_id: String(display.id),
+              thumbnail: nativeImage.createFromBitmap(bitmap, { width, height }),
+            };
+          });
       }
       return desktopCapturer.getSources(options);
     },
