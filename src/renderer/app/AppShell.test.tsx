@@ -114,8 +114,11 @@ describe('AppShell navigation', () => {
     const download = screen.getByRole('button', { name: 'Download update' });
     expect(about.parentElement).toBe(screen.getByTestId('update-indicator').parentElement);
     expect(about.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('status')).toHaveTextContent('Update 0.3.0 · nightly');
-    expect(screen.getByRole('status')).toHaveTextContent('Nothing downloads until you choose to.');
+    fireEvent.focus(download);
+    expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent('Update 0.3.0 · nightly');
+    expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent(
+      'Nothing downloads until you choose to.',
+    );
     fireEvent.click(download);
     expect(onDownload).toHaveBeenCalledOnce();
 

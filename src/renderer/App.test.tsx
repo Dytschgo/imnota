@@ -803,8 +803,12 @@ describe('feedback controls', () => {
       }),
       downloadUpdate,
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Run update in Terminal' }));
-    expect(screen.getByText(/Stable 0.3.0 is available. Nightly remains selected/)).toBeInTheDocument();
+    const update = await screen.findByRole('button', { name: 'Run update in Terminal' });
+    fireEvent.click(update);
+    fireEvent.focus(update);
+    expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent(
+      'Stable 0.3.0 is available. Nightly remains selected',
+    );
     await waitFor(() => expect(downloadUpdate).toHaveBeenCalledOnce());
   });
 
