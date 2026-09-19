@@ -1781,7 +1781,6 @@ function registerIpc(): void {
           .object({
             projectPath: pathInput,
             collectionId: filenameSchema,
-            displayId: z.number().int().optional(),
           })
           .strict(),
       ])

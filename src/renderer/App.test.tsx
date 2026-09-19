@@ -100,18 +100,6 @@ describe('feedback controls', () => {
           reasons: [],
         },
       }),
-      listCaptureDisplays: async () => ({
-        ok: true,
-        value: [
-          {
-            id: 1,
-            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: true,
-            position: 'Primary display',
-          },
-        ],
-      }),
       startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
         ok: true,
         value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },
@@ -1202,25 +1190,6 @@ describe('feedback controls', () => {
           profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
         },
       }),
-      listCaptureDisplays: async () => ({
-        ok: true,
-        value: [
-          {
-            id: 1,
-            bounds: { x: 0, y: 0, width: 3440, height: 1440 },
-            scaleFactor: 1,
-            primary: true,
-            position: 'Primary display',
-          },
-          {
-            id: 2,
-            bounds: { x: -3440, y: 0, width: 3440, height: 1440 },
-            scaleFactor: 1.5,
-            primary: false,
-            position: 'Left of primary',
-          },
-        ],
-      }),
       startRegionCapture,
     });
 
@@ -1251,25 +1220,6 @@ describe('feedback controls', () => {
           profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
         },
       }),
-      listCaptureDisplays: async () => ({
-        ok: true,
-        value: [
-          {
-            id: 1,
-            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: true,
-            position: 'Primary display',
-          },
-          {
-            id: 2,
-            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: false,
-            position: 'Left of primary',
-          },
-        ],
-      }),
       startRegionCapture: startRegionCapture as never,
     });
 
@@ -1295,25 +1245,6 @@ describe('feedback controls', () => {
           profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
         },
       }),
-      listCaptureDisplays: async () => ({
-        ok: true,
-        value: [
-          {
-            id: 1,
-            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: true,
-            position: 'Primary display',
-          },
-          {
-            id: 2,
-            bounds: { x: 1920, y: -1080, width: 1920, height: 1080 },
-            scaleFactor: 1.25,
-            primary: false,
-            position: 'Above and right',
-          },
-        ],
-      }),
       startRegionCapture: startRegionCapture as never,
     });
 
@@ -1338,25 +1269,6 @@ describe('feedback controls', () => {
           },
           profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
         },
-      }),
-      listCaptureDisplays: async () => ({
-        ok: true,
-        value: [
-          {
-            id: 1,
-            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: true,
-            position: 'Primary display',
-          },
-          {
-            id: 2,
-            bounds: { x: 1920, y: 0, width: 1920, height: 1080 },
-            scaleFactor: 1,
-            primary: false,
-            position: 'Right of primary',
-          },
-        ],
       }),
       startRegionCapture: startRegionCapture as never,
     });
