@@ -1,4 +1,4 @@
-import type { PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
+import type { NativeCopyFunction, PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
 import type { ProjectData, ProjectSnapshot } from './types.js';
 
 export type WorkflowErrorCode =
@@ -41,6 +41,7 @@ export interface PreferenceSettingsUpdate {
   capture?: Partial<PreferenceSettings['capture']>;
   onboarding?: Partial<PreferenceSettings['onboarding']>;
   workbench?: Partial<PreferenceSettings['workbench']>;
+  nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
   updates?: Partial<PreferenceSettings['updates']>;
 }
 
@@ -138,8 +139,8 @@ export interface PromptExportSourceAsset {
 }
 
 /** Stable IDs used by the Windows nightly clipboard comparison. */
-export const WINDOWS_COPY_VARIANT_IDS = ['rich', 'files', 'files-rich'] as const;
-export type WindowsCopyVariantId = (typeof WINDOWS_COPY_VARIANT_IDS)[number];
+export const WINDOWS_COPY_VARIANT_IDS = ['files', 'files-rich', 'rich'] as const;
+export type WindowsCopyVariantId = NativeCopyFunction;
 
 export type PromptExportCopyTarget = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
 

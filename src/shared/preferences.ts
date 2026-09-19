@@ -78,6 +78,12 @@ export interface UpdatePreferences {
   whatsNewAcknowledgedVersion?: string;
 }
 
+export type NativeCopyFunction = 'files' | 'files-rich' | 'rich';
+
+export interface NativeCopyPreferences {
+  defaultFunction: NativeCopyFunction;
+}
+
 export interface PreferenceSettings {
   appearance: AppearancePreferences;
   backups: BackupPreferences;
@@ -85,6 +91,7 @@ export interface PreferenceSettings {
   capture: CapturePreferences;
   onboarding: OnboardingPreferences;
   workbench: WorkbenchPreferences;
+  nativeCopy: NativeCopyPreferences;
   updates: UpdatePreferences;
 }
 
@@ -140,6 +147,7 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 };
 
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
+export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
@@ -148,6 +156,7 @@ export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   capture: { experimentalRegionCapture: false },
   onboarding: DEFAULT_ONBOARDING,
   workbench: DEFAULT_WORKBENCH,
+  nativeCopy: DEFAULT_NATIVE_COPY_PREFERENCES,
   updates: DEFAULT_UPDATE_PREFERENCES,
 };
 

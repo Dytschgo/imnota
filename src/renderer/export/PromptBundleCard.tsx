@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
@@ -48,8 +48,13 @@ export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
   fileClipboardAvailable?: boolean;
+  defaultCopyVariant?: WindowsCopyVariantId;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
+  onSelectCopyVariant?(
+    request: PromptBundleActionRequest,
+    variant: WindowsCopyVariantId,
+  ): void | Promise<void>;
   onPrepareFreshFiles(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyMarkdown?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
@@ -82,8 +87,10 @@ export function PromptBundleCard({
   bundle,
   disabled = false,
   fileClipboardAvailable = false,
+  defaultCopyVariant = 'files',
   onCopyFresh,
   onCopyVariant,
+  onSelectCopyVariant,
   onPrepareFreshFiles,
   onCopyMarkdown,
   onCopyImage,
@@ -100,6 +107,15 @@ export function PromptBundleCard({
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
   const copied = bundle.state === 'copied';
   const request = requestFor(bundle);
+  const supportsFileVariants = fileClipboardAvailable && bundle.pictureNumbers.length > 0;
+  const primaryVariant = supportsFileVariants ? defaultCopyVariant : 'rich';
+  const primaryCopy = () =>
+    primaryVariant === 'rich' ? onCopyFresh(request) : onCopyVariant?.(request, primaryVariant);
+  const variantLabels: Record<WindowsCopyVariantId, { label: string; detail: string }> = {
+    files: { label: 'Copy files', detail: 'MD + PNG files' },
+    'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
+    rich: { label: 'Rich copy', detail: 'Text + image' },
+  };
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
 
@@ -193,6 +209,24 @@ export function PromptBundleCard({
     setOptionsOpen(false);
     void action?.(request);
   };
+  const moveOptionFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'),
+    );
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowUp'
+            ? (current - 1 + items.length) % items.length
+            : (current + 1) % items.length;
+    items[next]?.focus();
+  };
   const toggleOptions = () => {
     if (optionsOpen) setOptionsOpen(false);
     else {
@@ -228,49 +262,21 @@ export function PromptBundleCard({
         </button>
         <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
           {bundle.delivery === 'clipboard' ? (
-            <div
-              className={`prompt-bundle-variants${fileClipboardAvailable ? '' : ' is-rich-only'}`}
-              role="group"
-              aria-label="Copy format"
-            >
+            <div className="prompt-bundle-variants" role="group" aria-label="Copy format">
               <Button
                 data-testid={`copy-bundle-${bundle.bundleNumber}`}
                 className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
                 variant="primary"
-                aria-label="Rich copy"
+                aria-label={variantLabels[primaryVariant].label}
                 busy={busy}
-                disabled={disabled}
-                title="Markdown text, HTML, and PNG formats"
-                onClick={() => void onCopyFresh(request)}
+                disabled={disabled || (primaryVariant !== 'rich' && !onCopyVariant)}
+                title={variantLabels[primaryVariant].detail}
+                onClick={() => void primaryCopy()}
               >
                 {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                <span>Rich copy</span>
-                <small>Text + image</small>
+                <span>{variantLabels[primaryVariant].label}</span>
+                <small>{variantLabels[primaryVariant].detail}</small>
               </Button>
-              {fileClipboardAvailable && bundle.pictureNumbers.length > 0 && (
-                <>
-                  <Button
-                    variant="soft"
-                    aria-label="Copy files"
-                    disabled={disabled || !onCopyVariant}
-                    title="Markdown and PNG as file attachments"
-                    onClick={() => void onCopyVariant?.(request, 'files')}
-                  >
-                    <span>Copy files</span>
-                    <small>MD + PNG files</small>
-                  </Button>
-                  <Button
-                    variant="soft"
-                    aria-label="Files + rich copy"
-                    disabled={disabled || !onCopyVariant}
-                    title="File attachments plus Markdown, HTML, and PNG formats"
-                    onClick={() => void onCopyVariant?.(request, 'files-rich')}
-                  >
-                    <span>Files + rich copy</span>
-                    <small>Both</small>
-                  </Button>
-                </>
-              )}
             </div>
           ) : (
             <Button
@@ -304,8 +310,40 @@ export function PromptBundleCard({
                   className="prompt-bundle-options-menu"
                   role="menu"
                   aria-label={`Bundle ${bundle.bundleNumber} options`}
+                  onKeyDown={moveOptionFocus}
                   style={menuPosition ? { left: menuPosition.left, top: menuPosition.top } : undefined}
                 >
+                  {supportsFileVariants && (
+                    <div className="prompt-bundle-options-heading">
+                      <strong>Default copy format</strong>
+                      <small>Changes the main button</small>
+                    </div>
+                  )}
+                  {supportsFileVariants &&
+                    (['files', 'files-rich', 'rich'] as const).map((variant) => (
+                      <button
+                        key={variant}
+                        type="button"
+                        role="menuitem"
+                        aria-label={variantLabels[variant].label}
+                        aria-current={primaryVariant === variant ? 'true' : undefined}
+                        disabled={!onSelectCopyVariant}
+                        onClick={() => runOption(() => onSelectCopyVariant?.(request, variant))}
+                      >
+                        {primaryVariant === variant ? (
+                          <Check size={14} aria-hidden="true" />
+                        ) : (
+                          <Copy size={14} aria-hidden="true" />
+                        )}
+                        <span>
+                          {variantLabels[variant].label}
+                          <small>{variantLabels[variant].detail}</small>
+                        </span>
+                      </button>
+                    ))}
+                  {supportsFileVariants && (
+                    <div className="prompt-bundle-options-separator" role="separator" />
+                  )}
                   <button
                     type="button"
                     role="menuitem"

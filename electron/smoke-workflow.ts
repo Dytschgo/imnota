@@ -308,6 +308,26 @@ async function exerciseOnboarding(
     { selector: '[data-testid="onboarding-continue"]' },
     { text: 'Continue to copy', exact: true },
   ]);
+  const chooseNativeCopyFunction = async (value: 'files' | 'files-rich' | 'rich', label: string) => {
+    await driver.evaluate(`(() => {
+      const select = document.querySelector('select[aria-label="Native copy function"]');
+      if (!(select instanceof HTMLSelectElement)) throw new Error('Native copy function selector is missing.');
+      select.value = ${JSON.stringify(value)};
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await driver.waitFor({ text: label, exact: true });
+  };
+  if (process.platform === 'win32') {
+    await driver.waitFor({ text: 'Copy files', exact: true });
+    const nativeDefault = await driver.evaluate<string>(`(async () => {
+      const result = await window.imnota.getPreferenceSettings();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value.settings.nativeCopy.defaultFunction;
+    })()`);
+    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    await chooseNativeCopyFunction('rich', 'Rich copy');
+  }
   await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
@@ -370,6 +390,7 @@ async function exerciseOnboarding(
   await assertExactImage('Onboarding combined copy');
 
   if (process.platform === 'win32') {
+    await chooseNativeCopyFunction('files', 'Copy files');
     await driver.click({ text: 'Copy files', exact: true });
     await driver.waitFor({
       selector: '[role="status"]',
@@ -383,6 +404,7 @@ async function exerciseOnboarding(
       path.resolve(copiedFiles[1]).toLowerCase() !== path.resolve(pngPath).toLowerCase()
     )
       throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
+    await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
     await driver.click({ text: 'Files + rich copy', exact: true });
     await driver.waitFor({
       selector: '[role="status"]',
@@ -402,6 +424,16 @@ async function exerciseOnboarding(
     )
       throw new Error('Onboarding Files + rich copy did not preserve exact Markdown and HTML.');
     await assertExactImage('Onboarding Files + rich copy');
+    await chooseNativeCopyFunction('files', 'Copy files');
+    const restoredDefault = await driver.evaluate<string>(`(async () => {
+      const result = await window.imnota.getPreferenceSettings();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value.settings.nativeCopy.defaultFunction;
+    })()`);
+    if (restoredDefault !== 'files') throw new Error('Windows native copy default was not restored.');
+    const unchangedFiles = readWindowsClipboardFiles(window.getNativeWindowHandle());
+    if (unchangedFiles.length !== 2)
+      throw new Error('Choosing a native copy default unexpectedly replaced the clipboard.');
   }
 
   await driver.click({ text: 'Copy Markdown', exact: true });
@@ -1421,7 +1453,7 @@ async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
     return {
       title: card.querySelector('h3')?.textContent?.trim() ?? '',
       text: [...card.querySelectorAll('dt, dd')].map((entry) => entry.textContent?.trim() ?? '').join(' '),
-      copyLabel: buttons.find((button) => /^Rich copy$/i.test(button.textContent ?? ''))?.textContent?.trim()
+      copyLabel: buttons.find((button) => button.matches('[data-testid^="copy-bundle-"]'))?.textContent?.trim()
     };
   }))()`);
 }

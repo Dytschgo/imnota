@@ -61,10 +61,10 @@ describe('OnboardingDemo', () => {
       filenames: ['component-search.md', 'component-search.png'] as const,
     }));
     const onCopyHandoff = vi.fn(async () => ({
-      text: true,
-      html: true,
-      image: true,
-      files: false,
+      text: false,
+      html: false,
+      image: false,
+      files: true,
     }));
     render(
       <OnboardingDemo
@@ -79,9 +79,9 @@ describe('OnboardingDemo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Rich copy' });
-    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
-    await screen.findByText(/Markdown and image are on the clipboard/);
+    await screen.findByRole('button', { name: 'Copy files' });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
+    await screen.findByText(/files were confirmed/i);
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
     await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
@@ -94,7 +94,7 @@ describe('OnboardingDemo', () => {
     );
     expect(onCopyHandoff).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: '00000000-0000-4000-8000-000000000001' }),
-      'rich',
+      'files',
     );
     expect(onMarkCompleted).toHaveBeenLastCalledWith({ completed: true, completedVersion: 1 }, 'finished');
   });
@@ -122,8 +122,8 @@ describe('OnboardingDemo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Rich copy' });
-    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+    await screen.findByRole('button', { name: 'Copy files' });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Try copying again, or continue');
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
@@ -185,5 +185,61 @@ describe('OnboardingDemo', () => {
     expect(await screen.findByRole('button', { name: 'Rich copy' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Copy files' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Files + rich copy' })).not.toBeInTheDocument();
+  });
+
+  it('saves a dropdown choice without copying until the primary action is clicked', async () => {
+    const onDefaultCopyVariantChange = vi.fn(async () => {});
+    const onCopyHandoff = vi.fn(async () => ({ text: true, html: true, image: true, files: true }));
+    const props = {
+      fileClipboardAvailable: true,
+      onMarkCompleted: vi.fn(),
+      onCreateFirstProject: vi.fn(),
+      onPrepareHandoff: vi.fn(async () => ({
+        sessionId: '00000000-0000-4000-8000-000000000001',
+        filenames: ['component-search.md', 'component-search.png'] as const,
+      })),
+      onCopyHandoff,
+      onDefaultCopyVariantChange,
+    };
+    const { rerender } = render(<OnboardingDemo {...props} defaultCopyVariant="files" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    await screen.findByRole('button', { name: 'Copy files' });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
+      target: { value: 'rich' },
+    });
+    await waitFor(() => expect(onDefaultCopyVariantChange).toHaveBeenCalledWith('rich'));
+    expect(onCopyHandoff).not.toHaveBeenCalled();
+
+    rerender(<OnboardingDemo {...props} defaultCopyVariant="rich" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+    await waitFor(() => expect(onCopyHandoff).toHaveBeenCalledWith(expect.anything(), 'rich'));
+  });
+
+  it('keeps the previous primary action when saving a dropdown choice fails', async () => {
+    render(
+      <OnboardingDemo
+        fileClipboardAvailable
+        defaultCopyVariant="files"
+        onDefaultCopyVariantChange={vi.fn(async () => Promise.reject(new Error('disk full')))}
+        onMarkCompleted={vi.fn()}
+        onCreateFirstProject={vi.fn()}
+        onPrepareHandoff={vi.fn(async () => ({
+          sessionId: '00000000-0000-4000-8000-000000000001',
+          filenames: ['component-search.md', 'component-search.png'] as const,
+        }))}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    await screen.findByRole('button', { name: 'Copy files' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
+      target: { value: 'rich' },
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
+    expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
   });
 });

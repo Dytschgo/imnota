@@ -40,6 +40,7 @@ export interface PreferenceController {
   saveCapture(value: CapturePreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
   saveWorkbench(value: WorkbenchPreferences): Promise<void>;
+  saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
   clearError(): void;
 }
@@ -124,6 +125,9 @@ export function usePreferences(): PreferenceController {
     },
     saveWorkbench: async (workbench) => {
       await save({ workbench });
+    },
+    saveNativeCopy: async (nativeCopy) => {
+      await save({ nativeCopy });
     },
     saveUpdates: async (updates) => {
       await save({ updates });

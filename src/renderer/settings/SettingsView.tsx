@@ -44,6 +44,8 @@ export interface SettingsViewProps {
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
   onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
+  nativeCopyAvailable?: boolean;
+  onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -75,6 +77,8 @@ export function SettingsView({
   onAppearanceChange,
   onShortcutChange = async () => undefined,
   onWorkbenchChange,
+  nativeCopyAvailable = false,
+  onNativeCopyChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -324,7 +328,39 @@ export function SettingsView({
             </div>
           </section>
         </div>
-        {group === 'Sharing' && <SharingSettings />}
+        {group === 'Sharing' && (
+          <>
+            {nativeCopyAvailable && (
+              <section className="settings-section" aria-labelledby="native-copy-title">
+                <h2 id="native-copy-title">Native copy functions</h2>
+                <label className="field">
+                  <span className="field-label">Primary copy action</span>
+                  <select
+                    aria-label="Native copy functions"
+                    value={preferences.nativeCopy.defaultFunction}
+                    disabled={savingPreferences || !onNativeCopyChange}
+                    onChange={(event) => {
+                      const defaultFunction = event.target
+                        .value as PreferenceSettings['nativeCopy']['defaultFunction'];
+                      void Promise.resolve()
+                        .then(() => onNativeCopyChange?.({ defaultFunction }))
+                        .catch(() => undefined);
+                    }}
+                  >
+                    <option value="files">Copy files — Markdown and PNG files</option>
+                    <option value="files-rich">Files + rich copy — files, text, and image</option>
+                    <option value="rich">Rich copy — text and image</option>
+                  </select>
+                  <small>
+                    Sets the main copy button throughout Imnota. The receiving app still chooses which
+                    clipboard formats it accepts.
+                  </small>
+                </label>
+              </section>
+            )}
+            <SharingSettings />
+          </>
+        )}
       </div>
     </section>
   );

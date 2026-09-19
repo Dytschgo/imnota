@@ -50,6 +50,7 @@ describe('profile-aware preference settings', () => {
     expect(shouldShowOnboarding(result.settings.onboarding, result.profile)).toBe(true);
     expect(result.settings.capture.experimentalRegionCapture).toBe(false);
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
+    expect(result.settings.nativeCopy.defaultFunction).toBe('files');
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
   });
 
@@ -62,12 +63,35 @@ describe('profile-aware preference settings', () => {
       true,
     );
     expect(withoutWorkbench.settings.workbench.screenshotFirstAdd).toBe(true);
+    const withoutNativeCopy = resolvePreferenceSettings(
+      { preferences: { ...current, nativeCopy: undefined } },
+      true,
+    );
+    expect(withoutNativeCopy.settings.nativeCopy.defaultFunction).toBe('files');
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });
     expect(
       mergePreferenceSettings(current, { updates: { whatsNewAcknowledgedVersion: '0.2.8' } }).updates,
     ).toEqual({ whatsNewAcknowledgedVersion: '0.2.8' });
+  });
+
+  it('defaults an unknown persisted native copy function without discarding unrelated preferences', () => {
+    const current = resolvePreferenceSettings(undefined, false).settings;
+    const restored = resolvePreferenceSettings(
+      {
+        preferences: {
+          ...current,
+          appearance: { ...current.appearance, mode: 'dark', accent: 'emerald' },
+          backups: { ...current.backups, retentionCount: 7 },
+          nativeCopy: { defaultFunction: 'future-native-format', futureField: true },
+        },
+      },
+      true,
+    );
+    expect(restored.settings.nativeCopy).toEqual({ defaultFunction: 'files' });
+    expect(restored.settings.appearance).toMatchObject({ mode: 'dark', accent: 'emerald' });
+    expect(restored.settings.backups.retentionCount).toBe(7);
   });
 
   it('migrates the legacy theme without keeping a duplicate authority', () => {
@@ -97,6 +121,14 @@ describe('profile-aware preference settings', () => {
     expect(() =>
       mergePreferenceSettings(current, {
         appearance: { accent: 'violet' as 'indigo' },
+      }),
+    ).toThrow();
+    expect(
+      mergePreferenceSettings(current, { nativeCopy: { defaultFunction: 'files-rich' } }).nativeCopy,
+    ).toEqual({ defaultFunction: 'files-rich' });
+    expect(() =>
+      mergePreferenceSettings(current, {
+        nativeCopy: { defaultFunction: 'paths' as 'files' },
       }),
     ).toThrow();
   });
