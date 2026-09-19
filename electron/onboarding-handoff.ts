@@ -44,7 +44,7 @@ interface HandoffGrant extends OnboardingHandoffGrant {
 
 export class OnboardingHandoffWorkflow {
   private readonly grants = new Map<string, HandoffGrant>();
-  private preparedRoot: Promise<void> | undefined;
+  private preparedRoot: Promise<string> | undefined;
 
   constructor(private readonly dependencies: OnboardingHandoffDependencies) {}
 
@@ -54,7 +54,7 @@ export class OnboardingHandoffWorkflow {
     markdownFilename: string;
     pngFilename: string;
   }): Promise<OnboardingHandoffGrant> {
-    await this.ensureRoot();
+    const root = await this.ensureRoot();
     for (const grant of [...this.grants.values()].reverse()) {
       if (
         grant.markdown === input.markdown &&
@@ -70,7 +70,7 @@ export class OnboardingHandoffWorkflow {
         }
       }
     }
-    const directory = await fs.mkdtemp(path.join(this.dependencies.root, 'handoff-'));
+    const directory = await fs.mkdtemp(path.join(root, 'handoff-'));
     const markdownPath = path.join(directory, input.markdownFilename);
     const pngPath = path.join(directory, input.pngFilename);
     try {
@@ -102,21 +102,32 @@ export class OnboardingHandoffWorkflow {
     }
   }
 
-  private ensureRoot(): Promise<void> {
+  private ensureRoot(): Promise<string> {
     this.preparedRoot ??= (async () => {
-      await fs.mkdir(this.dependencies.root, { recursive: true });
+      const requestedParent = path.dirname(this.dependencies.root);
+      await fs.mkdir(requestedParent, { recursive: true });
+      const canonicalParent = await fs.realpath(requestedParent);
+      const root = path.join(canonicalParent, path.basename(this.dependencies.root));
+      await fs.mkdir(root, { recursive: true });
+      const rootStat = await fs.lstat(root);
+      if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+        throw new NativeWorkflowError(
+          'io-failure',
+          'The onboarding handoff root must be a regular directory.',
+        );
       const cutoff = Date.now() - RETIRED_HANDOFF_RETENTION_MS;
-      const entries = await fs.readdir(this.dependencies.root, { withFileTypes: true });
+      const entries = await fs.readdir(root, { withFileTypes: true });
       await Promise.all(
         entries
           .filter((entry) => entry.isDirectory() && entry.name.startsWith('handoff-'))
           .map(async (entry) => {
-            const directory = path.join(this.dependencies.root, entry.name);
+            const directory = path.join(root, entry.name);
             const stat = await fs.lstat(directory).catch(() => undefined);
             if (!stat?.isDirectory() || stat.isSymbolicLink() || stat.mtimeMs >= cutoff) return;
             await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
           }),
       );
+      return root;
     })();
     return this.preparedRoot;
   }

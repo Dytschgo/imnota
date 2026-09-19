@@ -47,6 +47,69 @@ describe('onboarding handoff grants', () => {
     );
   });
 
+  it('canonicalizes an operating-system temp alias before writing the handoff', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-onboarding-alias-test-'));
+    roots.push(base);
+    const realParent = path.join(base, 'real');
+    const aliasedParent = path.join(base, 'alias');
+    await fs.mkdir(realParent);
+    await fs.symlink(realParent, aliasedParent, process.platform === 'win32' ? 'junction' : 'dir');
+    const copyContext = vi.fn(async (markdown: string, image: string, filePaths: readonly string[]) => {
+      void markdown;
+      void image;
+      void filePaths;
+      return { text: true, html: true, image: true };
+    });
+    const workflow = new OnboardingHandoffWorkflow({
+      root: path.join(aliasedParent, 'handoffs'),
+      copyContext,
+      copyText: vi.fn(),
+      copyImage: vi.fn(),
+      openPath: vi.fn(),
+    });
+    const grant = await workflow.prepare({
+      markdown: '# Alias\n',
+      imageDataUrl,
+      markdownFilename: 'component-search.md',
+      pngFilename: 'component-search.png',
+    });
+    await workflow.copy(grant.sessionId, 'context');
+    const canonicalParent = await fs.realpath(realParent);
+    expect(copyContext.mock.calls[0][2]).toEqual([
+      expect.stringMatching(
+        new RegExp(`^${canonicalParent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*component-search\\.md$`),
+      ),
+      expect.stringMatching(
+        new RegExp(`^${canonicalParent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*component-search\\.png$`),
+      ),
+    ]);
+  });
+
+  it('rejects a symlink at the app-owned handoff root leaf', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-onboarding-leaf-test-'));
+    roots.push(base);
+    const parent = path.join(base, 'parent');
+    const target = path.join(base, 'target');
+    await Promise.all([fs.mkdir(parent), fs.mkdir(target)]);
+    const root = path.join(parent, 'handoffs');
+    await fs.symlink(target, root, process.platform === 'win32' ? 'junction' : 'dir');
+    const workflow = new OnboardingHandoffWorkflow({
+      root,
+      copyContext: vi.fn(),
+      copyText: vi.fn(),
+      copyImage: vi.fn(),
+      openPath: vi.fn(),
+    });
+    await expect(
+      workflow.prepare({
+        markdown: '# Linked root\n',
+        imageDataUrl,
+        markdownFilename: 'component-search.md',
+        pngFilename: 'component-search.png',
+      }),
+    ).rejects.toThrow(/regular directory/);
+  });
+
   it('materializes a matching Markdown/PNG pair and uses it for the production combined copy', async () => {
     const { workflow, grant, copyContext } = await fixture();
     await expect(workflow.copy(grant.sessionId, 'context')).resolves.toEqual({
