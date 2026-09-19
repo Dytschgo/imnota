@@ -166,11 +166,38 @@ describe('Windows clipboard payloads', () => {
     const lockedWrite = writeWindowsClipboard(hwnd(), { filePaths: pair }, locked.api, {
       timeoutMs: 0,
     });
-    await expect(lockedWrite).rejects.toBeInstanceOf(WindowsClipboardBusyError);
+    await expect(lockedWrite).rejects.toMatchObject({
+      name: 'WindowsClipboardBusyError',
+      message: 'The clipboard is in use by another app. Try copying again.',
+      nativeCode: 5,
+      busyChecks: 1,
+      elapsedMs: expect.any(Number),
+    });
     expect(locked.emptyClipboard).not.toHaveBeenCalled();
     expect(locked.memory.get(locked.clipboard.get(13)!)).toEqual(prior);
     expect(locked.memory.size).toBe(1);
     expect(locked.closeClipboard).not.toHaveBeenCalled();
+  });
+
+  it('backs off default busy acquisition checks while preserving the two-second deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const native = nativeMock();
+      native.openClipboard.mockReturnValue(false);
+      native.api.getLastError = () => 5;
+      const transaction = vi.fn();
+      const log = vi.fn();
+      const locked = withWindowsClipboardLock(hwnd(), transaction, { log }, native.api);
+      const rejection = expect(locked).rejects.toBeInstanceOf(WindowsClipboardBusyError);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await rejection;
+      expect(native.openClipboard).toHaveBeenCalledTimes(201);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(native.closeClipboard).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/201 busy checks over 2000ms.*error 5/i));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('waits for acquisition before mutating and runs the write transaction once', async () => {
@@ -225,7 +252,7 @@ describe('Windows clipboard payloads', () => {
     const yieldControl = vi.fn(async () => undefined);
     await expect(
       writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api, { yieldControl }),
-    ).rejects.toThrow(/could not be opened \(1400\)/i);
+    ).rejects.toThrow('Windows could not access the clipboard. Try copying again.');
     expect(native.openClipboard).toHaveBeenCalledOnce();
     expect(yieldControl).not.toHaveBeenCalled();
     expect(native.emptyClipboard).not.toHaveBeenCalled();

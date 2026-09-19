@@ -85,6 +85,8 @@ export class WindowsClipboardBusyError extends Error {
   constructor(
     message: string,
     readonly nativeCode: number,
+    readonly busyChecks: number,
+    readonly elapsedMs: number,
   ) {
     super(message);
     this.name = 'WindowsClipboardBusyError';
@@ -423,23 +425,29 @@ export async function withWindowsClipboardLock<T>(
   const requireStableSequence = options.requireStableSequence ?? false;
   const context = options.context ?? 'Windows clipboard';
   const now = options.now ?? Date.now;
-  const yieldControl = options.yieldControl ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const yieldControl =
+    options.yieldControl ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
   const log = options.log ?? console.info;
   const started = now();
   const initialSequence = api.getClipboardSequenceNumber();
   let busyChecks = 0;
+  const ensureStableSequence = () => {
+    if (!busyChecks || !requireStableSequence) return;
+    const currentSequence = api.getClipboardSequenceNumber();
+    if (currentSequence === initialSequence) return;
+    log(
+      `${context} cancelled after ${busyChecks} busy checks because the clipboard sequence changed from ${initialSequence} to ${currentSequence}.`,
+    );
+    throw new WindowsClipboardChangedError(
+      'The clipboard changed while Imnota was waiting. Try copying again.',
+    );
+  };
   while (true) {
-    if (busyChecks > 0 && requireStableSequence && api.getClipboardSequenceNumber() !== initialSequence)
-      throw new WindowsClipboardChangedError(
-        `${context} was cancelled because the clipboard changed while waiting for access.`,
-      );
+    ensureStableSequence();
     if (api.openClipboard(ownerValue)) {
       let result: T;
       try {
-        if (busyChecks > 0 && requireStableSequence && api.getClipboardSequenceNumber() !== initialSequence)
-          throw new WindowsClipboardChangedError(
-            `${context} was cancelled because the clipboard changed while waiting for access.`,
-          );
+        ensureStableSequence();
         result = transaction(api);
       } finally {
         api.closeClipboard();
@@ -451,15 +459,23 @@ export async function withWindowsClipboardLock<T>(
       return result;
     }
     const nativeCode = api.getLastError();
-    if (nativeCode !== ERROR_ACCESS_DENIED)
-      throw new Error(`${context} could not be opened (${nativeCode}).`);
+    if (nativeCode !== ERROR_ACCESS_DENIED) {
+      log(`${context} could not be opened; OpenClipboard returned error ${nativeCode}.`);
+      throw new Error('Windows could not access the clipboard. Try copying again.');
+    }
     busyChecks += 1;
     const elapsed = now() - started;
-    if (elapsed >= timeoutMs)
-      throw new WindowsClipboardBusyError(
-        `${context} remained busy after ${busyChecks} availability checks over ${elapsed}ms (${nativeCode}).`,
-        nativeCode,
+    if (elapsed >= timeoutMs) {
+      log(
+        `${context} timed out after ${busyChecks} busy checks over ${elapsed}ms; OpenClipboard returned error ${nativeCode}.`,
       );
+      throw new WindowsClipboardBusyError(
+        'The clipboard is in use by another app. Try copying again.',
+        nativeCode,
+        busyChecks,
+        elapsed,
+      );
+    }
     await yieldControl();
   }
 }
