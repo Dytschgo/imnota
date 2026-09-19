@@ -1,4 +1,4 @@
-import { Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
+import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
@@ -86,6 +86,7 @@ export function Workspace(props: WorkspaceProps) {
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
+  const captureIsPrimary = props.capturePrimary && props.captureEnabled && Boolean(props.onCapture);
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
     : null;
@@ -281,10 +282,22 @@ export function Workspace(props: WorkspaceProps) {
             <EmptyState
               icon={<ImagePlus size={22} aria-hidden="true" />}
               title="Start with the evidence"
-              description="Import a screenshot, then add the context that makes the next prompt useful."
+              description={
+                captureIsPrimary
+                  ? 'Capture a screenshot, then add the context that makes the next prompt useful.'
+                  : 'Import a screenshot, then add the context that makes the next prompt useful.'
+              }
               action={
-                <Button variant="primary" onClick={props.onImport}>
-                  <Upload size={16} aria-hidden="true" />
+                <Button
+                  variant="primary"
+                  data-testid="empty-add-screenshot"
+                  onClick={captureIsPrimary ? props.onCapture : props.onImport}
+                >
+                  {captureIsPrimary ? (
+                    <Camera size={16} aria-hidden="true" />
+                  ) : (
+                    <Upload size={16} aria-hidden="true" />
+                  )}
                   Add screenshot
                 </Button>
               }
