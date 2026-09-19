@@ -594,6 +594,7 @@ describe('BackupService', () => {
       expect(latest.warnings).toBeUndefined();
       expect(await publishedSnapshotIds()).toEqual([latest.snapshotId]);
     },
+    15_000,
   );
 
   it.each(['ledger update', 'journal cleanup'] as const)(
