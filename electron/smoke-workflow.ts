@@ -370,18 +370,18 @@ async function exerciseOnboarding(
   await assertExactImage('Onboarding combined copy');
 
   await driver.click({ text: 'Copy Markdown', exact: true });
-  await driver.waitFor({ text: 'Markdown copied.', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied.', exact: true });
   if ((await nativeClipboard.readText()) !== markdown || !(await nativeClipboard.readImage()).isEmpty())
     throw new Error('Onboarding Markdown fallback did not replace the clipboard with exact Markdown.');
 
   await driver.click({ text: 'Copy image', exact: true });
-  await driver.waitFor({ text: 'Image copied.', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Image copied.', exact: true });
   if (await nativeClipboard.readText())
     throw new Error('Onboarding image fallback retained stale clipboard text.');
   await assertExactImage('Onboarding image fallback');
 
   await driver.click({ text: 'Copy file paths', exact: true });
-  await driver.waitFor({ text: 'File paths copied.', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'File paths copied.', exact: true });
   if (
     (await nativeClipboard.readText()) !== [markdownPath, pngPath].join('\n') ||
     !(await nativeClipboard.readImage()).isEmpty()

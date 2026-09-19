@@ -415,6 +415,7 @@ export function OnboardingDemo({
                   <div className="imnota-onboarding-fallbacks" aria-label="Bundle fallback actions">
                     <button
                       type="button"
+                      className="btn btn-soft"
                       onClick={() => void runFallback('Markdown copied.', 'markdown')}
                       disabled={busy}
                     >
@@ -422,6 +423,7 @@ export function OnboardingDemo({
                     </button>
                     <button
                       type="button"
+                      className="btn btn-soft"
                       onClick={() => void runFallback('Image copied.', 'image')}
                       disabled={busy}
                     >
@@ -429,6 +431,7 @@ export function OnboardingDemo({
                     </button>
                     <button
                       type="button"
+                      className="btn btn-soft"
                       onClick={() => void runFallback('Generated files opened.', 'files')}
                       disabled={busy}
                     >
@@ -436,6 +439,7 @@ export function OnboardingDemo({
                     </button>
                     <button
                       type="button"
+                      className="btn btn-soft"
                       onClick={() => void runFallback('File paths copied.', 'paths')}
                       disabled={busy}
                     >
@@ -443,6 +447,7 @@ export function OnboardingDemo({
                     </button>
                     <button
                       type="button"
+                      className="btn btn-soft"
                       onClick={() => void runFallback('Export folder opened.', 'folder')}
                       disabled={busy}
                     >
