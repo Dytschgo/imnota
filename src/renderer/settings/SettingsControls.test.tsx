@@ -182,4 +182,34 @@ describe('preference controls', () => {
     await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'rich' }));
     expect(select).toHaveValue('files');
   });
+
+  it('explains when the background capture shortcut could not be registered', () => {
+    render(
+      <SettingsView
+        activeCategory="Shortcuts"
+        preferences={{
+          ...DEFAULT_PREFERENCE_SETTINGS,
+          capture: { experimentalRegionCapture: true },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('capture-shortcut-summary')).toHaveTextContent(
+      'The background shortcut is not active',
+    );
+
+    cleanup();
+    render(
+      <SettingsView
+        activeCategory="Shortcuts"
+        preferences={{
+          ...DEFAULT_PREFERENCE_SETTINGS,
+          capture: { experimentalRegionCapture: true },
+        }}
+        globalCaptureShortcutRegistered
+      />,
+    );
+    expect(screen.getByTestId('capture-shortcut-summary')).toHaveTextContent(
+      'even when Imnota is in the background',
+    );
+  });
 });

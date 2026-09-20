@@ -4,7 +4,6 @@ import {
   captureDestinationChoices,
   currentCaptureDestination,
   lastUsedCurrentDestination,
-  resolveCaptureDestination,
 } from './capture-destination';
 
 const collection = {
@@ -91,12 +90,10 @@ describe('capture destination', () => {
       collectionId: '002-collection',
     });
     expect(
-      resolveCaptureDestination(
+      currentCaptureDestination(
         { ...snapshot, project: { ...snapshot.project, collections: [archived, other] } },
         'archived',
-        projects,
-        recents,
-      ),
+      ) ?? lastUsedCurrentDestination(projects, recents),
     ).toEqual({ projectPath: snapshot.projectPath, collectionId: '002-collection' });
     expect(
       captureDestinationChoices(projects, [], {

@@ -831,14 +831,16 @@ export default function App() {
     const displays = workflowValue(await window.imnota.listCaptureDisplays());
     if (displays.length === 0) throw new Error('Windows did not report an available display to capture.');
     if (displays.length === 1) return displays[0]!.id;
+    workflowValue(await window.imnota.raiseMainWindow());
     return new Promise<number | null>((resolve) => {
       captureDisplayResolver.current = resolve;
       setCaptureDisplayChoices(displays);
     });
   }
-  function chooseCaptureDestination(
+  async function chooseCaptureDestination(
     choices: readonly CaptureDestinationChoice[],
   ): Promise<CaptureDestination | null> {
+    workflowValue(await window.imnota.raiseMainWindow());
     return new Promise((resolve) => {
       captureDestinationResolver.current = resolve;
       setCaptureDestinationOptions(choices);
@@ -906,7 +908,6 @@ export default function App() {
       await finishCapturedScreenshot(committed.snapshot, committed.screenshotId, nativeMutationToken);
     } catch (reason) {
       await persistence.cancelNativeMutation(nativeMutationToken);
-      await window.imnota.discardBufferedCapture();
       throw reason;
     }
   }
@@ -914,7 +915,6 @@ export default function App() {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
-    let captureBuffered = false;
     try {
       if (detectShortcutPlatform() === 'linux') {
         setError('Screen capture is unavailable on Linux — use Import or Paste');
@@ -978,7 +978,6 @@ export default function App() {
           }),
         );
         if ('buffered' in result) {
-          captureBuffered = true;
           await persistence.cancelNativeMutation(nativeMutationToken);
           nativeMutationToken = null;
           await settleBufferedCapture();
@@ -995,14 +994,12 @@ export default function App() {
       }
       const result = workflowValue(await window.imnota.startRegionCapture({ displayId }));
       if (!('buffered' in result)) return;
-      captureBuffered = true;
       await settleBufferedCapture();
     } catch (reason) {
       if (nativeMutationToken !== null) {
         await persistence.cancelNativeMutation(nativeMutationToken);
         nativeMutationToken = null;
       }
-      if (captureBuffered) await window.imnota.discardBufferedCapture();
       if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'capture-cancelled') return;
       setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
     } finally {
@@ -1819,6 +1816,7 @@ export default function App() {
             onShortcutChange={preferences.saveShortcuts}
             onWorkbenchChange={preferences.saveWorkbench}
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
+            globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}

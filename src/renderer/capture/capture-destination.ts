@@ -29,18 +29,6 @@ export function lastUsedCurrentDestination(
   return { projectPath: recent.projectPath, collectionId: recent.id };
 }
 
-export function resolveCaptureDestination(
-  snapshot: ProjectSnapshot | null,
-  activeCollectionId: string,
-  projects: readonly ProjectListItem[],
-  recentCollections: readonly RecentCollection[],
-): CaptureDestination | null {
-  return (
-    currentCaptureDestination(snapshot, activeCollectionId) ??
-    lastUsedCurrentDestination(projects, recentCollections)
-  );
-}
-
 export function captureDestinationChoices(
   projects: readonly ProjectListItem[],
   recentCollections: readonly RecentCollection[],

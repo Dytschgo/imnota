@@ -162,7 +162,7 @@ import {
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
-import { CaptureGlobalShortcut, captureRegionBinding } from './capture-global-shortcut.js';
+import { CaptureGlobalShortcut, resolveCaptureGlobalShortcut } from './capture-global-shortcut.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -221,13 +221,24 @@ const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
 
 function syncCaptureGlobalShortcut(): void {
   captureGlobalShortcut.sync(
-    captureRegionBinding(preferenceSettingsResult.settings.shortcuts.bindings, process.platform),
+    resolveCaptureGlobalShortcut({
+      bindings: preferenceSettingsResult.settings.shortcuts.bindings,
+      processPlatform: process.platform,
+      experimentalEnabled: preferenceSettingsResult.settings.capture.experimentalRegionCapture,
+    }),
     () => {
       if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
       if (captureAdmissionGate.isOccupied()) return;
       mainWindow.webContents.send('workflow:capture:region-hotkey');
     },
   );
+}
+
+function raiseMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function assertLiveCaptureAdmission(event: IpcMainInvokeEvent, admission: CaptureAdmission): void {
@@ -1810,7 +1821,14 @@ function registerIpc(): void {
   });
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
-    return { windowsFileClipboard: windowsFileClipboardAvailable() };
+    return {
+      windowsFileClipboard: windowsFileClipboardAvailable(),
+      globalCaptureShortcutRegistered: captureGlobalShortcut.registeredAccelerator !== null,
+    };
+  });
+  handleWorkflow('workflow:window:raise', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    raiseMainWindow();
   });
   handleWorkflow('workflow:capture:displays', (_event, ...args) => {
     z.tuple([]).parse(args);
@@ -2011,14 +2029,13 @@ function registerIpc(): void {
         .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
         .parse(args);
       const png = pendingCapturePng;
-      pendingCapturePng = null;
       if (!png)
         throw new NativeWorkflowError(
           'capture-failed',
           'The captured screenshot is no longer available. Capture the region again.',
         );
       const safeProjectPath = await assertProjectPath(input.projectPath);
-      return insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
+      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
         if (
           event.sender.isDestroyed() ||
           !mainWindow ||
@@ -2027,6 +2044,8 @@ function registerIpc(): void {
         )
           throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
       });
+      pendingCapturePng = null;
+      return inserted;
     },
     true,
   );
@@ -2932,6 +2951,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const createdWindow = mainWindow;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
+    if (BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
   });
   createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -3100,10 +3120,12 @@ app.whenReady().then(async () => {
     return;
   }
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    if (BrowserWindow.getAllWindows().length === 0)
+      void createWindow().then(() => syncCaptureGlobalShortcut());
   });
 });
 app.on('window-all-closed', () => {
+  captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('before-quit', () => {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CaptureGlobalShortcut,
   captureRegionBinding,
+  isOsHeldGlobalCaptureShortcut,
+  resolveCaptureGlobalShortcut,
   shortcutPlatformFromProcess,
   toElectronAccelerator,
 } from './capture-global-shortcut.js';
@@ -16,6 +18,43 @@ describe('capture global shortcut', () => {
     expect(shortcutPlatformFromProcess('win32')).toBe('windows');
     expect(captureRegionBinding({}, 'win32')).toBe('Ctrl+Shift+5');
     expect(captureRegionBinding({}, 'darwin')).toBe('Meta+Shift+5');
+    expect(isOsHeldGlobalCaptureShortcut('Meta+Shift+5', 'mac')).toBe(true);
+    expect(isOsHeldGlobalCaptureShortcut('Ctrl+Shift+5', 'windows')).toBe(false);
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: {},
+        processPlatform: 'win32',
+        experimentalEnabled: true,
+      }),
+    ).toBe('Ctrl+Shift+5');
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: {},
+        processPlatform: 'win32',
+        experimentalEnabled: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: {},
+        processPlatform: 'linux',
+        experimentalEnabled: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: {},
+        processPlatform: 'darwin',
+        experimentalEnabled: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: { 'capture.region': 'Ctrl+Shift+S' },
+        processPlatform: 'darwin',
+        experimentalEnabled: true,
+      }),
+    ).toBe('Ctrl+Shift+S');
   });
 
   it('registers, replaces, and clears the capture accelerator', () => {

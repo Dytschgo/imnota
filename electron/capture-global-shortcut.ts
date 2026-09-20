@@ -41,6 +41,31 @@ export function captureRegionBinding(bindings: ShortcutBindings, platform: NodeJ
   return resolveShortcutBindings(bindings, shortcutPlatformFromProcess(platform))['capture.region'];
 }
 
+const OS_HELD_GLOBAL_CAPTURE: Record<ShortcutPlatform, ReadonlySet<string>> = {
+  mac: new Set(['Meta+Shift+3', 'Meta+Shift+4', 'Meta+Shift+5']),
+  windows: new Set(),
+  linux: new Set(),
+};
+
+export function isOsHeldGlobalCaptureShortcut(binding: string, platform: ShortcutPlatform): boolean {
+  const normalized = normalizeShortcut(binding, platform);
+  return normalized !== null && OS_HELD_GLOBAL_CAPTURE[platform].has(normalized);
+}
+
+/** Binding to register globally, or null when capture is off, unsupported, cleared, or OS-owned. */
+export function resolveCaptureGlobalShortcut(input: {
+  bindings: ShortcutBindings;
+  processPlatform: NodeJS.Platform;
+  experimentalEnabled: boolean;
+}): string | null {
+  if (!input.experimentalEnabled) return null;
+  if (input.processPlatform !== 'win32' && input.processPlatform !== 'darwin') return null;
+  const binding = captureRegionBinding(input.bindings, input.processPlatform);
+  if (!binding) return null;
+  if (isOsHeldGlobalCaptureShortcut(binding, shortcutPlatformFromProcess(input.processPlatform))) return null;
+  return binding;
+}
+
 /** Convert a stored Imnota binding to an Electron accelerator, or null if it cannot be registered. */
 export function toElectronAccelerator(binding: string): string | null {
   const normalized = normalizeShortcut(binding, 'windows');

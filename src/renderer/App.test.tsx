@@ -102,8 +102,9 @@ describe('feedback controls', () => {
       }),
       getNativeCapabilities: async () => ({
         ok: true,
-        value: { windowsFileClipboard: true },
+        value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
+      raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
       listCaptureDisplays: async () => ({
         ok: true,
         value: [
@@ -1313,6 +1314,7 @@ describe('feedback controls', () => {
   it('opens the same Windows display chooser from the capture shortcut', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn();
+    const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
     await renderEditingProject({
       getPreferenceSettings: async () => ({
         ok: true,
@@ -1344,10 +1346,12 @@ describe('feedback controls', () => {
         ],
       }),
       startRegionCapture: startRegionCapture as never,
+      raiseMainWindow,
     });
 
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole('dialog', { name: 'Choose a display' })).toBeInTheDocument();
+    expect(raiseMainWindow).toHaveBeenCalled();
     expect(startRegionCapture).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   });
@@ -1616,6 +1620,7 @@ describe('feedback controls', () => {
     const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
     const commitBufferedCapture = vi.fn();
     const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
     renderApp({
       getPreferenceSettings: async () => ({
         ok: true,
@@ -1630,6 +1635,7 @@ describe('feedback controls', () => {
       startRegionCapture,
       commitBufferedCapture,
       discardBufferedCapture,
+      raiseMainWindow,
     });
     await screen.findByTestId('library-full-search');
     act(() => {
@@ -1638,9 +1644,51 @@ describe('feedback controls', () => {
     });
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole('dialog', { name: 'Choose a collection' })).toBeInTheDocument();
+    expect(raiseMainWindow).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(discardBufferedCapture).toHaveBeenCalledOnce());
     expect(commitBufferedCapture).not.toHaveBeenCalled();
+  });
+
+  it('keeps a buffered capture when inserting it fails', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const commitBufferedCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'io-failure' as const, message: 'Disk full', retryable: true },
+    }));
+    const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    useAppStore.setState({
+      recentCollections: [
+        {
+          projectPath: snapshot.projectPath,
+          collectionId: '001-collection',
+          openedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    renderApp({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject: async () => snapshot,
+      startRegionCapture,
+      commitBufferedCapture,
+      discardBufferedCapture,
+    });
+    await screen.findByTestId('library-full-search');
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Disk full');
+    expect(commitBufferedCapture).toHaveBeenCalled();
+    expect(discardBufferedCapture).not.toHaveBeenCalled();
   });
 
   it('preserves picker order and activates the last imported screenshot', async () => {
