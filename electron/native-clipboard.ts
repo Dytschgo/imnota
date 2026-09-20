@@ -72,19 +72,26 @@ async function verifiedContext(
   html: string,
   image: NativeImage,
 ): Promise<ClipboardFormatsReport> {
-  const [textResult, htmlResult, imageResult] = await Promise.allSettled([
-    clipboard.readText(),
-    readBlob(['text/html']).then((blob) => blob?.text()),
-    readBlob(['image/png', 'image/jpeg']).then(async (blob) =>
-      blob ? nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer())) : nativeImage.createEmpty(),
-    ),
-  ]);
-  return {
-    text: textResult.status === 'fulfilled' && textResult.value === text,
-    html: htmlResult.status === 'fulfilled' && htmlResult.value === platformClipboardHtml(html),
-    image: imageResult.status === 'fulfilled' && sameImage(imageResult.value, image),
-    files: false,
-  };
+  try {
+    const [textResult, htmlResult, imageResult] = await Promise.allSettled([
+      clipboard.readText(),
+      readBlob(['text/html']).then((blob) => blob?.text()),
+      readBlob(['image/png', 'image/jpeg']).then(async (blob) =>
+        blob
+          ? nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer()))
+          : nativeImage.createEmpty(),
+      ),
+    ]);
+    return {
+      text: textResult.status === 'fulfilled' && textResult.value === text,
+      html: htmlResult.status === 'fulfilled' && htmlResult.value === platformClipboardHtml(html),
+      image: imageResult.status === 'fulfilled' && sameImage(imageResult.value, image),
+      files: false,
+    };
+  } catch {
+    // A failed read-back must not be reported as a successful combined copy.
+    return { text: false, html: false, image: false, files: false };
+  }
 }
 
 /** Main-process clipboard boundary; callers wait for native reads and writes. */
