@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from 'vitest';
 import { noteToMarkdown, parseNotesMarkdown } from '../notes';
 import { EMPTY_NOTES } from '../utils';
