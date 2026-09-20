@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { captureRectangleToImagePixels, normalizeCaptureRectangle } from '../capture';
+import { captureRectangleToImagePixels, isCaptureDelaySeconds, normalizeCaptureRectangle } from '../capture';
 
 describe('capture rectangle mapping', () => {
   it('does not include an extra pixel when mapping exact one-to-one coordinates', () => {
@@ -45,5 +45,13 @@ describe('capture rectangle mapping', () => {
         { width: 200, height: 100 },
       ),
     ).toBeNull();
+  });
+
+  it('accepts only the 3s and 5s capture delays', () => {
+    expect(isCaptureDelaySeconds(3)).toBe(true);
+    expect(isCaptureDelaySeconds(5)).toBe(true);
+    expect(isCaptureDelaySeconds(0)).toBe(false);
+    expect(isCaptureDelaySeconds(4)).toBe(false);
+    expect(isCaptureDelaySeconds(undefined)).toBe(false);
   });
 });

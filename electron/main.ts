@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   nativeTheme,
@@ -152,7 +153,12 @@ import {
   type CaptureOverlayFailure,
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
-import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
+import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
+import {
+  captureDelayHudWindowOptions,
+  captureOverlayWindowOptions,
+  overlayCoversDisplay,
+} from './capture-overlay-placement.js';
 import {
   captureDisplayOptions,
   captureDisplaysHaveStableGeometry,
@@ -209,6 +215,8 @@ let captureOverlay: {
   displays: CaptureDisplay[];
   disposeDisplayListeners: () => void;
 } | null = null;
+let captureDelaySession: CaptureDelaySession | null = null;
+let captureDelayHud: BrowserWindow | null = null;
 const captureAdmissionGate = new CaptureAdmissionGate();
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
 
@@ -901,6 +909,72 @@ async function smokeDesktopCaptureCapability(): Promise<{
   });
 }
 
+function cancelCaptureDelay(): void {
+  captureDelaySession?.cancel();
+}
+
+function closeCaptureDelayHud(): void {
+  const hud = captureDelayHud;
+  captureDelayHud = null;
+  if (hud && !hud.isDestroyed()) hud.close();
+}
+
+function isCaptureDelayHudSender(event: IpcMainInvokeEvent): boolean {
+  return Boolean(
+    captureDelayHud &&
+    !captureDelayHud.isDestroyed() &&
+    event.sender.id === captureDelayHud.webContents.id &&
+    event.senderFrame === event.sender.mainFrame,
+  );
+}
+
+async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<BrowserWindow | null> {
+  closeCaptureDelayHud();
+  try {
+    const placement = captureDelayHudWindowOptions(displayBounds);
+    const window = new BrowserWindow({
+      ...placement,
+      useContentSize: true,
+      show: false,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      focusable: true,
+      hasShadow: true,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+      },
+    });
+    window.setAlwaysOnTop(true, 'status');
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('will-navigate', (navigation) => navigation.preventDefault());
+    captureDelayHud = window;
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl) await window.loadURL(new URL('capture-overlay.html?countdown=1', `${devUrl}/`).toString());
+    else
+      await window.loadFile(path.join(__dirname, '../../dist/capture-overlay.html'), {
+        query: { countdown: '1' },
+      });
+    if (captureDelayHud !== window || window.isDestroyed()) return null;
+    window.showInactive();
+    return window;
+  } catch {
+    closeCaptureDelayHud();
+    return null;
+  }
+}
+
 function settleCaptureOverlay(selection: CaptureRectangle | null): void {
   const active = captureOverlay;
   if (!active || !active.session.settle(selection)) return;
@@ -1472,6 +1546,10 @@ function registerIpc(): void {
     settleCaptureOverlay(state.selection);
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
+    if (isCaptureDelayHudSender(event)) {
+      cancelCaptureDelay();
+      return;
+    }
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
@@ -1546,6 +1624,7 @@ function registerIpc(): void {
           );
         const revoke = () => {
           captureAdmissionGate.revoke(admission);
+          cancelCaptureDelay();
           settleCaptureOverlay(null);
         };
         event.sender.once('destroyed', revoke);
@@ -1822,6 +1901,7 @@ function registerIpc(): void {
             projectPath: pathInput,
             collectionId: filenameSchema,
             displayId: z.number().int().optional(),
+            delaySeconds: z.union([z.literal(3), z.literal(5)]).optional(),
           })
           .strict(),
       ])
@@ -1878,6 +1958,37 @@ function registerIpc(): void {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
       if (wasVisible) mainWindow?.hide();
+      if (input.delaySeconds) {
+        const hud = await openCaptureDelayHud({
+          x: selectedDisplay.bounds.x,
+          y: selectedDisplay.bounds.y,
+          width: selectedDisplay.bounds.width,
+          height: selectedDisplay.bounds.height,
+        });
+        const delay = new CaptureDelaySession(input.delaySeconds, undefined, (remainingSeconds) => {
+          if (hud && !hud.isDestroyed())
+            hud.webContents.send('capture-overlay:countdown', { remainingSeconds });
+        });
+        captureDelaySession = delay;
+        hud?.once('closed', () => delay.cancel());
+        const unbindDelayCancel = bindCaptureDelayCancel(
+          (accelerator, callback) => globalShortcut.register(accelerator, callback),
+          (accelerator) => {
+            globalShortcut.unregister(accelerator);
+          },
+          () => delay.cancel(),
+        );
+        try {
+          if (!captureAdmissionGate.isActive(admission)) delay.cancel();
+          if ((await delay.result) === 'cancelled')
+            throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+        } finally {
+          unbindDelayCancel();
+          if (captureDelaySession === delay) captureDelaySession = null;
+          closeCaptureDelayHud();
+        }
+        assertLiveCaptureAdmission(event, admission);
+      }
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {

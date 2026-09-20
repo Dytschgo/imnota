@@ -17,7 +17,7 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { CaptureDisplayOption } from '../shared/capture';
+import type { CaptureDelaySeconds, CaptureDisplayOption } from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -816,7 +816,7 @@ export default function App() {
       setCaptureDisplayChoices(displays);
     });
   }
-  async function captureRegion() {
+  async function captureRegion(delaySeconds?: CaptureDelaySeconds) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
@@ -881,6 +881,7 @@ export default function App() {
           projectPath: target.projectPath,
           collectionId: target.collectionId,
           displayId,
+          ...(delaySeconds ? { delaySeconds } : {}),
         }),
       );
       const accepted = await persistence.acceptMutationSnapshot(
@@ -1869,7 +1870,7 @@ export default function App() {
             onRedo={redoAnnotations}
             onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
             onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
-            onCapture={captureEnabled ? () => void captureRegion() : undefined}
+            onCapture={captureEnabled ? (delaySeconds) => void captureRegion(delaySeconds) : undefined}
             capturePrimary={platform === 'windows'}
             captureEnabled={captureEnabled}
             captureShortcut={
