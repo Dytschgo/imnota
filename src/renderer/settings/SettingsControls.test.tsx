@@ -138,12 +138,13 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ bindings: { 'tool.text': 'Ctrl+Shift+3' } }));
   });
 
-  it('offers replay without mutating completion state itself', () => {
+  it('offers replay without mutating completion state or workspace files', () => {
     const onReplay = vi.fn();
     render(<OnboardingSettings value={{ completed: true, completedVersion: 1 }} onReplay={onReplay} />);
     fireEvent.click(screen.getByRole('button', { name: 'Replay guide' }));
     expect(onReplay).toHaveBeenCalledOnce();
     expect(screen.getByText('Completed with guide version 1')).toBeInTheDocument();
+    expect(screen.getByText(/without changing a workspace/i)).toBeInTheDocument();
   });
 
   it('shows the Windows native copy default and emits a persisted-function change', async () => {

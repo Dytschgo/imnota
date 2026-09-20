@@ -37,6 +37,7 @@ export function FloatingUpdateControl({
   const failed = current.state === 'error';
   const available = current.state === 'available';
   const manualDownload = current.manualDownload === true;
+  const latest = current.state === 'not-available' && !manualDownload;
   const percent = Math.round(current.percent ?? 0);
   const channelLabel = current.sourceChannel ?? current.channel;
   const label = failed
@@ -53,7 +54,9 @@ export function FloatingUpdateControl({
               ? 'Open download'
               : available
                 ? 'Download update'
-                : 'Check for updates';
+                : latest
+                  ? 'You’re on the latest version. Check again.'
+                  : 'Check for updates';
 
   const cancelClose = () => {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);

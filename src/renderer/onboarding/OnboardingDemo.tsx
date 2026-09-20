@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -23,7 +24,8 @@ import type {
   WindowsCopyVariantId,
 } from '../../shared/workflow-bridge';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
-import { describeCopyMessage } from '../export/clipboard-delivery';
+import { describeCopyDelivery } from '../export/clipboard-delivery';
+import type { PromptDeliveryOutcome } from '../export/PromptBundleCard';
 import { renderAnnotatedImage } from '../export-image';
 import { completedOnboarding, ONBOARDING_VERSION, type OnboardingPreferences } from '../settings/preferences';
 import {
@@ -69,6 +71,19 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
   { tool: 'highlight', label: 'Highlight', icon: Highlighter },
 ];
 
+const COPY_OUTCOME_LABELS: Record<PromptDeliveryOutcome, string> = {
+  combined: 'Markdown + image prepared',
+  markdown: 'Markdown copied',
+  image: 'Image copied',
+  paths: 'File paths copied',
+  files: 'Files ready',
+};
+
+const OPEN_STATUS_LABELS: Record<OnboardingHandoffOpenTarget, string> = {
+  files: 'Generated files opened.',
+  folder: 'Export folder opened.',
+};
+
 export function OnboardingDemo({
   fileClipboardAvailable = false,
   defaultCopyVariant = 'files',
@@ -88,7 +103,9 @@ export function OnboardingDemo({
   const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
   const [bundle, setBundle] = useState<OnboardingBundle | null>(null);
   const [handoff, setHandoff] = useState<OnboardingHandoffGrant | null>(null);
-  const [copyStatus, setCopyStatus] = useState('');
+  const [copyOutcome, setCopyOutcome] = useState<PromptDeliveryOutcome>();
+  const [copyWarning, setCopyWarning] = useState('');
+  const [openStatus, setOpenStatus] = useState('');
   const [explanation, setExplanation] = useState(
     'Keep the component search visible while someone reviews several results.',
   );
@@ -191,7 +208,9 @@ export function OnboardingDemo({
       const preparedHandoff = onPrepareHandoff ? await onPrepareHandoff(preparedBundle) : null;
       setBundle(preparedBundle);
       setHandoff(preparedHandoff);
-      setCopyStatus('');
+      setCopyOutcome(undefined);
+      setCopyWarning('');
+      setOpenStatus('');
       setStep(2);
     } catch {
       setError('The annotated sample could not be prepared. Try the step again.');
@@ -207,8 +226,10 @@ export function OnboardingDemo({
     try {
       if (!handoff || !onCopyHandoff) throw new Error('The native handoff is unavailable.');
       const placed = await onCopyHandoff(handoff, variant);
-      if (placed) setCopyStatus(describeCopyMessage(variant, placed));
-      else setCopyStatus('The clipboard result was not confirmed. Try another option below.');
+      const delivery = describeCopyDelivery(variant, placed || undefined, true);
+      setCopyOutcome(delivery.outcome);
+      setCopyWarning(delivery.warning ?? '');
+      setOpenStatus('');
     } catch {
       setError(
         'The clipboard is unavailable right now. Try copying again, or continue to create your project.',
@@ -218,10 +239,7 @@ export function OnboardingDemo({
     }
   };
 
-  const runFallback = async (
-    label: string,
-    action: OnboardingHandoffAction | OnboardingHandoffOpenTarget,
-  ) => {
+  const runFallback = async (action: OnboardingHandoffAction | OnboardingHandoffOpenTarget) => {
     if (!handoff || busy) return;
     setBusy(true);
     setError('');
@@ -229,11 +247,18 @@ export function OnboardingDemo({
       if (action === 'files' || action === 'folder') {
         if (!onOpenHandoff) throw new Error('Opening generated files is unavailable.');
         await onOpenHandoff(handoff, action);
-      } else {
+        setCopyOutcome(undefined);
+        setCopyWarning('');
+        setOpenStatus(OPEN_STATUS_LABELS[action]);
+      } else if (action === 'markdown' || action === 'image' || action === 'paths') {
         if (!onCopyHandoff) throw new Error('Clipboard access is unavailable.');
         await onCopyHandoff(handoff, action);
+        setCopyOutcome(action);
+        setCopyWarning('');
+        setOpenStatus('');
+      } else {
+        throw new Error('Clipboard access is unavailable.');
       }
-      setCopyStatus(label);
     } catch {
       setError('That handoff action could not be completed. Try another option below.');
     } finally {
@@ -403,10 +428,15 @@ export function OnboardingDemo({
                 </div>
               </div>
               <div className="imnota-onboarding-instruction">
-                <h2>{copyStatus ? 'The handoff is ready' : 'Copy the matching bundle'}</h2>
+                <h2>
+                  {copyOutcome === 'combined' || copyOutcome === 'files'
+                    ? 'The handoff is ready'
+                    : 'Copy the matching bundle'}
+                </h2>
                 <p>
                   The PNG carries the visual marks. The Markdown carries the picture reference, priority,
-                  description, and text notes. Clipboard access is optional in this practice guide.
+                  description, and text notes. Copy uses the same native path as Copy Bundle and reports the
+                  formats the clipboard actually kept. You can skip copying and still create a project.
                 </p>
                 <pre>{bundle.markdown}</pre>
                 <div
@@ -451,34 +481,47 @@ export function OnboardingDemo({
                     </label>
                   )}
                 </div>
-                {copyStatus && (
+                {(copyOutcome || openStatus) && (
                   <div className="imnota-copy-success" role="status">
                     <Check size={15} aria-hidden="true" />
-                    {copyStatus}
+                    {copyOutcome ? COPY_OUTCOME_LABELS[copyOutcome] : openStatus}
                   </div>
                 )}
+                {copyWarning && (
+                  <p
+                    className="imnota-copy-warning"
+                    data-testid="onboarding-copy-warning"
+                    role={copyOutcome ? undefined : 'status'}
+                  >
+                    <AlertTriangle size={15} aria-hidden="true" />
+                    <span>{copyWarning}</span>
+                  </p>
+                )}
                 {handoff && (
-                  <div className="imnota-onboarding-fallbacks" aria-label="Bundle fallback actions">
+                  <div
+                    className={`imnota-onboarding-fallbacks${copyWarning ? ' is-needed' : ''}`}
+                    aria-label="Bundle fallback actions"
+                  >
                     <button
                       type="button"
                       className="btn btn-soft"
-                      onClick={() => void runFallback('Markdown copied.', 'markdown')}
+                      onClick={() => void runFallback('markdown')}
                       disabled={busy}
                     >
-                      <FileText size={14} aria-hidden="true" /> Copy Markdown
+                      <FileText size={14} aria-hidden="true" /> Copy Markdown only
                     </button>
                     <button
                       type="button"
                       className="btn btn-soft"
-                      onClick={() => void runFallback('Image copied.', 'image')}
+                      onClick={() => void runFallback('image')}
                       disabled={busy}
                     >
-                      <FileImage size={14} aria-hidden="true" /> Copy image
+                      <FileImage size={14} aria-hidden="true" /> Copy image only
                     </button>
                     <button
                       type="button"
                       className="btn btn-soft"
-                      onClick={() => void runFallback('Generated files opened.', 'files')}
+                      onClick={() => void runFallback('files')}
                       disabled={busy}
                     >
                       Open files
@@ -486,7 +529,7 @@ export function OnboardingDemo({
                     <button
                       type="button"
                       className="btn btn-soft"
-                      onClick={() => void runFallback('File paths copied.', 'paths')}
+                      onClick={() => void runFallback('paths')}
                       disabled={busy}
                     >
                       Copy file paths
@@ -494,7 +537,7 @@ export function OnboardingDemo({
                     <button
                       type="button"
                       className="btn btn-soft"
-                      onClick={() => void runFallback('Export folder opened.', 'folder')}
+                      onClick={() => void runFallback('folder')}
                       disabled={busy}
                     >
                       <FolderOpen size={14} aria-hidden="true" /> Open export folder
@@ -530,6 +573,9 @@ export function OnboardingDemo({
               className="imnota-onboarding-back"
               onClick={() => {
                 setError('');
+                setCopyOutcome(undefined);
+                setCopyWarning('');
+                setOpenStatus('');
                 setStep(step === 2 ? 1 : 0);
               }}
               disabled={busy}
