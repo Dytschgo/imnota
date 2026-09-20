@@ -23,7 +23,6 @@ function regionState(
     actionsDisplayId,
     mode: 'region',
     windowTitle: null,
-    windowCaptureAvailable: false,
     windowMessage: null,
     ...extra,
   };
@@ -110,7 +109,20 @@ describe('capture overlay session', () => {
       actionsDisplayId: 7,
       mode: 'display',
       windowTitle: null,
-      windowCaptureAvailable: false,
+      windowMessage: null,
+    });
+  });
+
+  it('restores the full display after Retake', () => {
+    const display = { id: 7, bounds: { x: -1200, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const coordinator = new CaptureSelectionCoordinator([display]);
+    coordinator.setMode('display');
+    expect(coordinator.update(7, 'reset')).toEqual({
+      selection: { ...display.bounds },
+      complete: true,
+      actionsDisplayId: 7,
+      mode: 'display',
+      windowTitle: null,
       windowMessage: null,
     });
   });
@@ -125,7 +137,6 @@ describe('capture overlay session', () => {
       actionsDisplayId: null,
       mode: 'window',
       windowTitle: null,
-      windowCaptureAvailable: false,
       windowMessage: WINDOW_CAPTURE_UNAVAILABLE_MESSAGE,
     });
     expect(coordinator.setMode('region').mode).toBe('region');
@@ -141,7 +152,6 @@ describe('capture overlay session', () => {
     );
     expect(coordinator.setMode('window')).toMatchObject({
       mode: 'window',
-      windowCaptureAvailable: true,
       windowMessage: null,
       complete: false,
     });
@@ -156,7 +166,26 @@ describe('capture overlay session', () => {
       actionsDisplayId: 2,
       mode: 'window',
       windowTitle: 'Editor',
-      windowCaptureAvailable: true,
+      windowMessage: null,
+    });
+  });
+
+  it('keeps a chosen window complete across mousemove', () => {
+    const coordinator = new CaptureSelectionCoordinator(
+      [{ id: 2, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
+      [
+        { id: 'front', title: 'Editor', bounds: { x: 100, y: 80, width: 400, height: 300 } },
+        { id: 'back', title: 'Desktop', bounds: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ],
+    );
+    coordinator.setMode('window');
+    coordinator.update(2, 'end', { x: 120, y: 90 });
+    expect(coordinator.update(2, 'move', { x: 50, y: 50 })).toEqual({
+      selection: { x: 100, y: 80, width: 400, height: 300 },
+      complete: true,
+      actionsDisplayId: 2,
+      mode: 'window',
+      windowTitle: 'Editor',
       windowMessage: null,
     });
   });

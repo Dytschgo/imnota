@@ -1,5 +1,4 @@
 import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
-import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../src/shared/capture.js';
 
 export interface CaptureWindowCandidate {
   id: string;
@@ -103,8 +102,4 @@ export function identifiableCaptureWindows(
     identified.push({ id: native.id, title: title.slice(0, 120), bounds });
   }
   return identified;
-}
-
-export function windowCaptureUnavailableMessage(windows: readonly CaptureWindowCandidate[]): string | null {
-  return windows.length ? null : WINDOW_CAPTURE_UNAVAILABLE_MESSAGE;
 }

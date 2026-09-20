@@ -21,7 +21,6 @@ function selectionState(
     actionsDisplayId: number | null;
     mode: CaptureOverlayMode;
     windowTitle: string | null;
-    windowCaptureAvailable: boolean;
     windowMessage: string | null;
   }> = {},
 ) {
@@ -31,7 +30,6 @@ function selectionState(
     actionsDisplayId: null as number | null,
     mode: 'region' as CaptureOverlayMode,
     windowTitle: null,
-    windowCaptureAvailable: false,
     windowMessage: null,
     ...partial,
   };
@@ -160,7 +158,6 @@ it('explains when windows cannot be identified and keeps Region available', asyn
   selectionHandler(
     selectionState({
       mode: 'window',
-      windowCaptureAvailable: false,
       windowMessage: WINDOW_CAPTURE_UNAVAILABLE_MESSAGE,
     }),
   );
@@ -193,7 +190,7 @@ it('selects the full display without a drag and saves once', async () => {
 
 it('highlights an identified window on hover and does not begin a region drag', async () => {
   const { surface, selectionHandler } = await setup();
-  selectionHandler(selectionState({ mode: 'window', windowCaptureAvailable: true }));
+  selectionHandler(selectionState({ mode: 'window' }));
   pointer(surface, 'pointermove', 120, 80);
   pointer(surface, 'pointerdown', 120, 80);
   pointer(surface, 'pointerup', 120, 80);

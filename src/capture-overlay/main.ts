@@ -7,7 +7,6 @@ interface CaptureSelectionState {
   actionsDisplayId: number | null;
   mode: CaptureOverlayMode;
   windowTitle: string | null;
-  windowCaptureAvailable: boolean;
   windowMessage: string | null;
 }
 
