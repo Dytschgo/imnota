@@ -346,7 +346,7 @@ export async function exerciseRegionCapture(
   await driver.waitFor({
     selector: `.shot-item.active [data-testid="screenshot-${annotated.id}"]`,
   });
-  await driver.waitFor({ selector: '[data-testid="tool-rectangle"][aria-pressed="true"]' });
+  await driver.waitFor({ selector: '.canvas-meta', text: 'Tool: rectangle' });
 
   overlay = await startCapture(driver);
   await overlay.click({ selector: '[data-mode="display"]' });

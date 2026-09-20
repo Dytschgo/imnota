@@ -1217,6 +1217,60 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
+  it('restores an annotation tool chosen with its keyboard shortcut after Annotate', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const capturedSnapshotRef: { current?: ProjectSnapshot } = {};
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        snapshot: capturedSnapshotRef.current!,
+        screenshotId: 'captured',
+        overlayAction: 'annotate' as const,
+      },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: capturedSnapshotRef.current!, projectRevision: 'project-2' },
+      }),
+      startRegionCapture,
+    });
+    capturedSnapshotRef.current = {
+      ...editingSnapshot,
+      project: {
+        ...editingSnapshot.project,
+        screenshots: [
+          ...editingSnapshot.project.screenshots,
+          { ...editingSnapshot.project.screenshots[0]!, id: 'captured', position: 1 },
+        ],
+      },
+    };
+
+    fireEvent.keyDown(window, { key: 'r', code: 'KeyR' });
+    await waitFor(() =>
+      expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'rectangle' }),
+    );
+    fireEvent.keyDown(window, { key: 'v', code: 'KeyV' });
+    await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'select' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Capture screen region/ }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
+    await screen.findByText('Screen capture added — annotate');
+    await waitFor(() =>
+      expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'rectangle' }),
+    );
+  });
+
   it('starts capture from the global hotkey IPC', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     let hotkey: (() => void) | undefined;

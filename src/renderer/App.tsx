@@ -1597,6 +1597,10 @@ export default function App() {
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
   );
+  function selectTool(next: ToolChoice): void {
+    setTool(next);
+    if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
+  }
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
     'project.open': () => void openProjectDialog(),
@@ -1635,12 +1639,12 @@ export default function App() {
         setSelectedAnnotationId(null);
       }
     },
-    'tool.select': () => setTool('select'),
-    'tool.text': () => setTool('text'),
-    'tool.arrow': () => setTool('arrow'),
-    'tool.rectangle': () => setTool('rectangle'),
-    'tool.highlight': () => setTool('highlight'),
-    'tool.step': () => setTool('step'),
+    'tool.select': () => selectTool('select'),
+    'tool.text': () => selectTool('text'),
+    'tool.arrow': () => selectTool('arrow'),
+    'tool.rectangle': () => selectTool('rectangle'),
+    'tool.highlight': () => selectTool('highlight'),
+    'tool.step': () => selectTool('step'),
     'screenshot.previous': () => {
       const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
       if (index > 0) void selectShot(orderedShots[index - 1]!.id);
@@ -1967,10 +1971,7 @@ export default function App() {
               fit: shortcutLabel('canvas.fit'),
               actualSize: shortcutLabel('canvas.actualSize'),
             }}
-            onTool={(next) => {
-              setTool(next);
-              if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
-            }}
+            onTool={selectTool}
             onColor={(color) => {
               setToolColors((current) => ({
                 ...current,
