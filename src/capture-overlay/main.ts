@@ -46,6 +46,7 @@ let displayBounds: CaptureRectangle | null = null;
 let dragging = false;
 let completedSelection = false;
 let saving = false;
+let copying = false;
 let mode: CaptureOverlayMode = 'region';
 
 function localPoint(event: PointerEvent, clampToSurface: boolean) {
@@ -164,10 +165,16 @@ root.querySelector<HTMLButtonElement>('[data-action="annotate"]')!.addEventListe
   });
 });
 root.querySelector<HTMLButtonElement>('[data-action="copy"]')!.addEventListener('click', () => {
-  if (!completedSelection || saving) return;
-  void window.imnotaCapture.copy().then((report) => {
-    dimensions.textContent = report.image ? 'Image copied' : 'Image was not kept on the clipboard';
-  });
+  if (!completedSelection || saving || copying) return;
+  copying = true;
+  void window.imnotaCapture
+    .copy()
+    .then((report) => {
+      dimensions.textContent = report.image ? 'Image copied' : 'Image was not kept on the clipboard';
+    })
+    .finally(() => {
+      copying = false;
+    });
 });
 for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]')) {
   button.addEventListener('click', () => {

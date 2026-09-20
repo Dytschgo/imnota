@@ -98,7 +98,7 @@ export default function App() {
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
-  const lastAnnotateTool = useRef<ToolChoice>('select');
+  const lastAnnotateTool = useRef<ToolChoice>('arrow');
   const pendingOverlayAction = useRef<'save' | 'annotate'>('save');
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -877,6 +877,7 @@ export default function App() {
     const accepted = await persistence.acceptMutationSnapshot(snapshot, screenshotId, nativeMutationToken);
     if (!accepted) return false;
     await refreshProjects();
+    useAppStore.getState().set({ activeScreenshotId: screenshotId });
     showToast(overlayAction === 'annotate' ? 'Screen capture added — annotate' : 'Screen capture added');
     if (overlayAction === 'annotate') setTool(lastAnnotateTool.current);
     window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());

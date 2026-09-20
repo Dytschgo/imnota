@@ -908,6 +908,7 @@ function captureService(): CaptureService {
 }
 
 async function smokeDesktopCaptureCapability(): Promise<{
+  windowCandidateCount: number;
   displays: Array<{
     displayId: number;
     bounds: CaptureRectangle;
@@ -926,7 +927,8 @@ async function smokeDesktopCaptureCapability(): Promise<{
       'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
     );
   const service = captureService();
-  return probeCaptureDisplays(screen.getAllDisplays(), {
+  const displays = screen.getAllDisplays();
+  const capability = await probeCaptureDisplays(displays, {
     capture: (display) =>
       captureDisplayWithStableGeometry(
         display,
@@ -937,6 +939,7 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
+  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
 }
 
 function settleCaptureOverlay(selection: CaptureRectangle | null): void {
@@ -1550,6 +1553,16 @@ function registerIpc(): void {
   });
   ipcMain.handle('capture-overlay:copy', async (event) => {
     const active = assertTrustedCaptureOverlay(event);
+    if (!captureOverlayGeometryIsStable(active)) {
+      failCaptureOverlay('display-changed');
+      return { image: false };
+    }
+    for (const overlay of active.overlays) {
+      if (!overlayCoversDisplay(overlay.window.getContentBounds(), overlay.capture.display.bounds)) {
+        failCaptureOverlay('misplaced');
+        return { image: false };
+      }
+    }
     const state = active.selection.current();
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
     const png = captureService().compose(

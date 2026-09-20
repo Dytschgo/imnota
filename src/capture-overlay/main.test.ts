@@ -156,9 +156,12 @@ it('copies the image without saving and can annotate instead of save', async () 
       actionsDisplayId: 2,
     }),
   );
-  document.querySelector<HTMLButtonElement>('[data-action=copy]')!.click();
+  const copy = document.querySelector<HTMLButtonElement>('[data-action=copy]')!;
+  copy.click();
+  copy.click();
   await Promise.resolve();
   expect(window.imnotaCapture.copy).toHaveBeenCalledOnce();
+  expect(document.querySelector('.capture-overlay')).not.toBeNull();
   expect(window.imnotaCapture.save).not.toHaveBeenCalled();
   document.querySelector<HTMLButtonElement>('[data-action=annotate]')!.click();
   expect(window.imnotaCapture.annotate).toHaveBeenCalledOnce();

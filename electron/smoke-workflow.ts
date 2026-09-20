@@ -2442,7 +2442,7 @@ export async function runSmokeWorkflow(
         ? 'toolbar, native Ctrl+Shift+5, and a display chooser when multiple displays are attached'
         : 'toolbar overlay';
     assertions.push(
-      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
+      `synthetic-only capture ${captureTriggers}; Window mode presents availability feedback, Copy reads back while the overlay remains open, Cancel leaves no files, and Save/Annotate select and export the result`,
     );
   }
 
