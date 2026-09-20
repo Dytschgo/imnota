@@ -97,7 +97,7 @@ it('keeps Settings feature cards when a screenshot is omitted or fails to load',
       onAction={vi.fn()}
     />,
   );
-  expect(screen.getByText('Select across your screens')).toBeInTheDocument();
+  expect(screen.getByText('Choose a display to capture')).toBeInTheDocument();
   const screenshots = document.querySelectorAll('.whats-new-settings .whats-new-card img');
   expect(screenshots).toHaveLength(2);
   fireEvent.error(screenshots[0]!);
