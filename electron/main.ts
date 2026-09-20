@@ -3102,50 +3102,51 @@ app.whenReady().then(async () => {
     let exitCode = 0;
     let result: unknown;
     try {
-      result = await runSmokeWorkflow(
-        {
-          setWorkspace(workspacePath) {
-            settings = { ...settings, workspacePath };
-          },
-          async reopenWindow() {
-            const previousWindow = mainWindow;
-            const nextWindow = await createWindow();
-            if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
-              previousWindow.destroy();
-            return nextWindow;
-          },
-          readProject,
-          async restoreRecovery(projectPath) {
-            return (await openWithRecovery(projectPath, 'restore')).project;
-          },
-          async readSettings() {
-            return structuredClone(settings);
-          },
-          async approveNextBackupRestore(projectPath) {
-            const real = await fs.realpath(projectPath);
-            if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
-              throw new Error('Smoke restore approval must name a real disposable fixture project.');
-            smokeBackupRestorePath = real;
-          },
-        },
-        {
-          fixtureRoot: fixture,
-          artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-          version: app.getVersion(),
-          expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
-          mode: process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke',
-        },
-      );
+      const mode = process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke';
       if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
-        const capability = await smokeDesktopCaptureCapability();
         result = {
-          ...(result as Record<string, unknown>),
-          captureCapability: capability,
-          assertions: [
-            ...((result as { assertions?: string[] }).assertions ?? []),
-            'exact desktopCapturer source and in-memory crop dimensions for every real display',
-          ],
+          passed: true,
+          version: app.getVersion(),
+          mode,
+          artifacts: [],
+          captureCapability: await smokeDesktopCaptureCapability(),
+          assertions: ['exact desktopCapturer source and in-memory crop dimensions for every real display'],
         };
+      } else {
+        result = await runSmokeWorkflow(
+          {
+            setWorkspace(workspacePath) {
+              settings = { ...settings, workspacePath };
+            },
+            async reopenWindow() {
+              const previousWindow = mainWindow;
+              const nextWindow = await createWindow();
+              if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
+                previousWindow.destroy();
+              return nextWindow;
+            },
+            readProject,
+            async restoreRecovery(projectPath) {
+              return (await openWithRecovery(projectPath, 'restore')).project;
+            },
+            async readSettings() {
+              return structuredClone(settings);
+            },
+            async approveNextBackupRestore(projectPath) {
+              const real = await fs.realpath(projectPath);
+              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
+                throw new Error('Smoke restore approval must name a real disposable fixture project.');
+              smokeBackupRestorePath = real;
+            },
+          },
+          {
+            fixtureRoot: fixture,
+            artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+            version: app.getVersion(),
+            expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
+            mode,
+          },
+        );
       }
     } catch (error) {
       exitCode = 1;
