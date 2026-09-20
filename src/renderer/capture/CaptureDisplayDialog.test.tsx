@@ -7,14 +7,12 @@ const displays = [
     id: 10,
     bounds: { x: 0, y: 0, width: 2752, height: 1152 },
     scaleFactor: 1.25,
-    primary: true,
     position: 'Primary display',
   },
   {
     id: 20,
     bounds: { x: -3440, y: 0, width: 3440, height: 1440 },
     scaleFactor: 1.5,
-    primary: false,
     position: 'Left of primary',
   },
 ] as const;

@@ -29,16 +29,15 @@ describe('capture display selection', () => {
     ];
 
     expect(captureDisplayOptions(displays, primary.id)).toEqual([
-      { ...primary, bounds: { ...primary.bounds }, primary: true, position: 'Primary display' },
-      { ...displays[3], bounds: { ...displays[3]!.bounds }, primary: false, position: 'Above primary' },
+      { ...primary, bounds: { ...primary.bounds }, position: 'Primary display' },
+      { ...displays[3], bounds: { ...displays[3]!.bounds }, position: 'Above primary' },
       {
         ...displays[4],
         bounds: { ...displays[4]!.bounds },
-        primary: false,
         position: 'Above and right',
       },
-      { ...displays[0], bounds: { ...displays[0]!.bounds }, primary: false, position: 'Left of primary' },
-      { ...displays[1], bounds: { ...displays[1]!.bounds }, primary: false, position: 'Below primary' },
+      { ...displays[0], bounds: { ...displays[0]!.bounds }, position: 'Left of primary' },
+      { ...displays[1], bounds: { ...displays[1]!.bounds }, position: 'Below primary' },
     ]);
   });
 

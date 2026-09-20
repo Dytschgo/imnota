@@ -14,7 +14,6 @@ export interface CaptureDisplay {
 
 /** Non-pixel display metadata shown before a Windows region capture begins. */
 export interface CaptureDisplayOption extends CaptureDisplay {
-  primary: boolean;
   position: string;
 }
 

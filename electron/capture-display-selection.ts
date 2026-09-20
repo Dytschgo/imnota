@@ -37,7 +37,6 @@ export function captureDisplayOptions(
       id: display.id,
       bounds: { ...display.bounds },
       scaleFactor: display.scaleFactor,
-      primary: display.id === primary.id,
       position: positionRelativeToPrimary(display, primary),
     }));
 }
