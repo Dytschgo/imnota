@@ -114,7 +114,12 @@ import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { windowsFileClipboardAvailable } from './windows-clipboard.js';
-import { MAX_OCR_DATA_URL_CHARACTERS, recognizeOnDevicePngDataUrl } from './windows-ocr.js';
+import {
+  MAX_OCR_DATA_URL_CHARACTERS,
+  recognizeOnDevicePngDataUrl,
+  windowsOcrAvailable,
+  type OcrCropRect,
+} from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
@@ -780,6 +785,14 @@ async function copyTextToClipboard(text: string): Promise<void> {
   if (typeof text !== 'string' || text.length > 2_000_000)
     throw new Error('Context is too large to copy. Export the Markdown file instead.');
   await nativeClipboard.writeText(text);
+}
+
+function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
+  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+  if (image.isEmpty()) return png;
+  const cropped = image.crop(crop);
+  if (cropped.isEmpty()) return png;
+  return cropped.toPNG();
 }
 
 function clipboardImage(imageDataUrl: string) {
@@ -1792,13 +1805,37 @@ function registerIpc(): void {
   });
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
-    return { windowsFileClipboard: windowsFileClipboardAvailable() };
+    return {
+      windowsFileClipboard: windowsFileClipboardAvailable(),
+      onDeviceOcr: windowsOcrAvailable(),
+    };
   });
   handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
+    if (!windowsOcrAvailable()) return { text: '' };
     const [input] = z
-      .tuple([z.object({ pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS) }).strict()])
+      .tuple([
+        z
+          .object({
+            pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS),
+            crop: z
+              .object({
+                x: z.number().int().nonnegative(),
+                y: z.number().int().nonnegative(),
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      ])
       .parse(args);
-    return { text: await recognizeOnDevicePngDataUrl(input.pngDataUrl) };
+    return {
+      text: await recognizeOnDevicePngDataUrl(input.pngDataUrl, {
+        crop: input.crop,
+        cropPng: cropPngForOcr,
+      }),
+    };
   });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z

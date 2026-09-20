@@ -6,6 +6,8 @@ import {
   recognizeOnDevicePngDataUrl,
   recognizePngWithWindowsOcr,
   WINDOWS_OCR_SCRIPT,
+  WINDOWS_OCR_TIMEOUT_MS,
+  windowsOcrAvailable,
   type WindowsOcrHost,
 } from './windows-ocr.js';
 
@@ -28,15 +30,20 @@ function host(overrides: Partial<WindowsOcrHost> = {}): WindowsOcrHost {
 }
 
 describe('on-device Windows OCR', () => {
-  it('uses Windows.Media.Ocr locally and returns recognised text', async () => {
+  it('uses Windows.Media.Ocr locally, downscales to MaxImageDimension, and bounds Wait', async () => {
     expect(WINDOWS_OCR_SCRIPT).toContain('Windows.Media.Ocr.OcrEngine');
+    expect(WINDOWS_OCR_SCRIPT).toContain('MaxImageDimension');
+    expect(WINDOWS_OCR_SCRIPT).toContain('$netTask.Wait($timeoutMs)');
+    expect(WINDOWS_OCR_SCRIPT).not.toContain('Wait(-1)');
     expect(WINDOWS_OCR_SCRIPT).not.toContain('http');
+    expect(windowsOcrAvailable('linux')).toBe(false);
+    expect(windowsOcrAvailable('darwin')).toBe(false);
     const execFile = vi.fn(async () => ({ stdout: 'Submit order\r\n' }));
     await expect(recognizePngWithWindowsOcr(PNG_BYTES, host({ execFile }))).resolves.toBe('Submit order');
     expect(execFile).toHaveBeenCalledWith(
       'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-      expect.arrayContaining(['-STA', '-File']),
-      expect.objectContaining({ encoding: 'utf8', windowsHide: true }),
+      expect.arrayContaining(['-STA', '-File', String(WINDOWS_OCR_TIMEOUT_MS)]),
+      expect.objectContaining({ encoding: 'utf8', windowsHide: true, timeout: WINDOWS_OCR_TIMEOUT_MS }),
     );
   });
 
@@ -65,5 +72,25 @@ describe('on-device Windows OCR', () => {
     const huge = Buffer.concat([PNG_BYTES, Buffer.alloc(MAX_OCR_PNG_BYTES)]);
     await expect(recognizePngWithWindowsOcr(huge, host({ execFile }))).resolves.toBe('');
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it('crops source pixels before OCR when a crop rect is supplied', async () => {
+    const cropped = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x02]);
+    const cropPng = vi.fn(() => cropped);
+    const writeFile = vi.fn(async () => undefined);
+    const execFile = vi.fn(async () => ({ stdout: 'Cropped label' }));
+    await expect(
+      recognizePngWithWindowsOcr(
+        PNG_BYTES,
+        host({
+          crop: { x: 10, y: 20, width: 40, height: 30 },
+          cropPng,
+          writeFile,
+          execFile,
+        }),
+      ),
+    ).resolves.toBe('Cropped label');
+    expect(cropPng).toHaveBeenCalledWith(PNG_BYTES, { x: 10, y: 20, width: 40, height: 30 });
+    expect(writeFile).toHaveBeenCalledWith(expect.stringContaining('source.png'), cropped);
   });
 });

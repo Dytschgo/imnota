@@ -30,7 +30,10 @@ describe('recognised screenshot text', () => {
     await expect(
       recognisedScreenshotText({
         includeRecognisedText: true,
-        annotations: [{ kind: 'blur' }, { kind: 'rectangle' }],
+        annotations: [
+          { id: 'blur', kind: 'blur', x: 0, y: 0, zIndex: 0 },
+          { id: 'box', kind: 'rectangle', x: 0, y: 0, zIndex: 1 },
+        ],
         pngDataUrl: 'data:image/png;base64,QUJD',
         screenshotId: 'secret',
         recognizer,
@@ -39,7 +42,7 @@ describe('recognised screenshot text', () => {
     await expect(
       recognisedScreenshotText({
         includeRecognisedText: true,
-        annotations: [{ kind: 'pixelate' }],
+        annotations: [{ id: 'pixels', kind: 'pixelate', x: 0, y: 0, zIndex: 0 }],
         pngDataUrl: 'data:image/png;base64,QUJD',
         screenshotId: 'secret',
         recognizer,
@@ -47,6 +50,29 @@ describe('recognised screenshot text', () => {
     ).resolves.toBeUndefined();
     expect(recognizer.recognize).not.toHaveBeenCalled();
     expect(screenshotHasRedaction([{ kind: 'crop' }, { kind: 'rectangle' }])).toBe(false);
+  });
+
+  it('passes the last crop so OCR can read exported pixels instead of cropped-out source', async () => {
+    const recognizer = { recognize: vi.fn(async () => 'Checkout') };
+    await expect(
+      recognisedScreenshotText({
+        includeRecognisedText: true,
+        annotations: [
+          { id: 'first', kind: 'crop', x: 0, y: 0, width: 80, height: 80, zIndex: 0 },
+          { id: 'kept', kind: 'crop', x: 10, y: 20, width: 40, height: 30, zIndex: 1 },
+        ],
+        pngDataUrl: 'data:image/png;base64,QUJD',
+        screenshotId: 'shot-1',
+        nativeWidth: 100,
+        nativeHeight: 80,
+        recognizer,
+      }),
+    ).resolves.toBe('Checkout');
+    expect(recognizer.recognize).toHaveBeenCalledWith({
+      pngDataUrl: 'data:image/png;base64,QUJD',
+      screenshotId: 'shot-1',
+      crop: { x: 10, y: 20, width: 40, height: 30 },
+    });
   });
 
   it('does not fail when the recognizer throws or the export option is off', async () => {

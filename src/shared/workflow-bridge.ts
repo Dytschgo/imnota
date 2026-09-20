@@ -56,6 +56,8 @@ export interface NativePerformanceProfile {
 export interface NativeCapabilities {
   /** True only when the running desktop host can write native Windows file clipboard entries. */
   windowsFileClipboard: boolean;
+  /** True only when Windows.Media.Ocr can run on this host without uploading pixels. */
+  onDeviceOcr: boolean;
 }
 
 export interface PromptExportSessionInfo {
@@ -200,7 +202,10 @@ export interface WorkflowBridge {
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
-  recognizeOnDeviceText(input: { pngDataUrl: string }): Promise<WorkflowResult<{ text: string }>>;
+  recognizeOnDeviceText(input: {
+    pngDataUrl: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }): Promise<WorkflowResult<{ text: string }>>;
   startRegionCapture(input: {
     projectPath: string;
     collectionId: string;

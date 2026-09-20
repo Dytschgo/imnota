@@ -57,9 +57,13 @@ function browserBridge(): PromptBundleControllerBridge {
   return {
     ...(imnota as unknown as PromptBundleControllerBridge),
     async recognizeScreenshotText(input) {
+      if (imnota.onDeviceOcrAvailable !== true) return '';
       if (typeof imnota.recognizeOnDeviceText !== 'function') return '';
       try {
-        const result = await imnota.recognizeOnDeviceText({ pngDataUrl: input.pngDataUrl });
+        const result = await imnota.recognizeOnDeviceText({
+          pngDataUrl: input.pngDataUrl,
+          crop: input.crop,
+        });
         if (!result.ok) return '';
         return result.value.text;
       } catch {

@@ -87,7 +87,11 @@ interface FakeBridgeOptions {
   /** Clipboard read-back for combined copies; defaults to every format present. */
   placed?: { text: boolean; html: boolean; image: boolean; files: boolean };
   failFinish?: boolean;
-  recognizeScreenshotText?: (input: { pngDataUrl: string; screenshotId: string }) => Promise<string>;
+  recognizeScreenshotText?: (input: {
+    pngDataUrl: string;
+    screenshotId: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }) => Promise<string>;
 }
 
 function fakeBridge(options: FakeBridgeOptions = {}) {
@@ -410,6 +414,29 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown.indexOf('Description 1')).toBeLessThan(
       native.writes[0].markdown.indexOf('### Visible text'),
     );
+  });
+
+  test('OCRs cropped source pixels when a crop mark exists', async () => {
+    const recognizer = vi.fn(async () => 'Cropped label');
+    const native = fakeBridge({
+      annotations: {
+        'shot-1': [{ id: 'crop', kind: 'crop', x: 10, y: 8, width: 40, height: 24, zIndex: 0 }],
+      },
+      recognizeScreenshotText: recognizer,
+    });
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(recognizer).toHaveBeenCalledWith({
+      pngDataUrl: PNG,
+      screenshotId: 'shot-1',
+      crop: { x: 10, y: 8, width: 40, height: 24 },
+    });
+    expect(native.writes[0].markdown).toContain('### Visible text\n\nCropped label\n');
   });
 
   test('omits Visible text for redacted screenshots and when the recognizer throws', async () => {

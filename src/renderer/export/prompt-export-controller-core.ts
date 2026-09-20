@@ -109,7 +109,11 @@ export interface PromptBundleControllerBridge {
     bundleNumber: number;
     target: 'folder' | 'png' | 'markdown' | 'master';
   }): Promise<WorkflowResult<void>>;
-  recognizeScreenshotText?(input: { pngDataUrl: string; screenshotId: string }): Promise<string>;
+  recognizeScreenshotText?(input: {
+    pngDataUrl: string;
+    screenshotId: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }): Promise<string>;
 }
 
 export interface PromptPictureResolveResult extends ResolvedPromptPicturePng {
@@ -768,11 +772,14 @@ export class PromptBundleControllerEngine {
         height: dimensions.height,
         estimatedPngCharacters: dimensions.estimatedPngCharacters,
       });
+      this.assertActive(run);
       const visibleText = await recognisedScreenshotText({
         includeRecognisedText: this.getIncludeRecognisedText(),
         annotations,
         pngDataUrl: loaded.image.dataUrl,
         screenshotId: screenshot.id,
+        nativeWidth: loaded.image.width,
+        nativeHeight: loaded.image.height,
         recognizer: this.bridge.recognizeScreenshotText
           ? { recognize: (input) => this.bridge.recognizeScreenshotText!(input) }
           : undefined,
