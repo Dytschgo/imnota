@@ -1,4 +1,54 @@
-import type { CaptureDisplay } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureDisplayOption } from '../src/shared/capture.js';
+
+function positionRelativeToPrimary(display: CaptureDisplay, primary: CaptureDisplay): string {
+  if (display.id === primary.id) return 'Primary display';
+  const horizontal =
+    display.bounds.x + display.bounds.width <= primary.bounds.x
+      ? 'left'
+      : display.bounds.x >= primary.bounds.x + primary.bounds.width
+        ? 'right'
+        : '';
+  const vertical =
+    display.bounds.y + display.bounds.height <= primary.bounds.y
+      ? 'above'
+      : display.bounds.y >= primary.bounds.y + primary.bounds.height
+        ? 'below'
+        : '';
+  if (horizontal && vertical) return `${vertical[0]!.toUpperCase()}${vertical.slice(1)} and ${horizontal}`;
+  if (horizontal) return `${horizontal[0]!.toUpperCase()}${horizontal.slice(1)} of primary`;
+  if (vertical) return `${vertical[0]!.toUpperCase()}${vertical.slice(1)} primary`;
+  return 'Overlapping primary';
+}
+
+/** Stable chooser order with the primary display first and desktop geometry after it. */
+export function captureDisplayOptions(
+  displays: readonly CaptureDisplay[],
+  primaryDisplayId: number,
+): CaptureDisplayOption[] {
+  const primary = displays.find((display) => display.id === primaryDisplayId);
+  if (!primary) return [];
+  return [...displays]
+    .sort((left, right) => {
+      if (left.id === primary.id) return -1;
+      if (right.id === primary.id) return 1;
+      return left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x || left.id - right.id;
+    })
+    .map((display) => ({
+      id: display.id,
+      bounds: { ...display.bounds },
+      scaleFactor: display.scaleFactor,
+      position: positionRelativeToPrimary(display, primary),
+    }));
+}
+
+/** Resolve only the requested Windows display. A missing/stale id never falls back. */
+export function selectedCaptureDisplay(
+  displays: readonly CaptureDisplay[],
+  selectedDisplayId: number | undefined,
+): CaptureDisplay | null {
+  if (selectedDisplayId === undefined) return null;
+  return displays.find((display) => display.id === selectedDisplayId) ?? null;
+}
 
 function sameCaptureGeometry(left: CaptureDisplay, right: CaptureDisplay): boolean {
   return (
@@ -9,6 +59,11 @@ function sameCaptureGeometry(left: CaptureDisplay, right: CaptureDisplay): boole
     left.bounds.width === right.bounds.width &&
     left.bounds.height === right.bounds.height
   );
+}
+
+/** Fullscreen changes the macOS work area without changing the captured pixels. */
+export function captureDisplayMetricsInvalidateSelection(changedMetrics: readonly string[]): boolean {
+  return changedMetrics.length === 0 || changedMetrics.some((metric) => metric !== 'workArea');
 }
 
 /** Display order is irrelevant, but every captured display must still exist with identical geometry. */
@@ -25,22 +80,7 @@ export function captureDisplaysHaveStableGeometry(
   );
 }
 
-/**
- * Capture the complete snapshotted display set through one bounded preparation
- * operation, then verify its geometry. A display add/remove, move, resize, or
- * DPI change fails closed.
- */
-export async function captureDisplaysWithStableGeometry<T>(
-  displays: readonly CaptureDisplay[],
-  capture: (displays: readonly CaptureDisplay[]) => Promise<T[]>,
-  currentDisplays: () => readonly CaptureDisplay[],
-): Promise<T[] | null> {
-  if (!displays.length) return null;
-  const captures = await capture(displays);
-  return captureDisplaysHaveStableGeometry(displays, currentDisplays()) ? captures : null;
-}
-
-/** Single-display helper retained for the capability probe and non-Windows evidence. */
+/** Capture one display, then verify its identity and DIP-to-pixel geometry. */
 export async function captureDisplayWithStableGeometry<T>(
   display: CaptureDisplay,
   capture: (display: CaptureDisplay) => Promise<T>,

@@ -2440,14 +2440,10 @@ export async function runSmokeWorkflow(
     artifacts.push(...captureSmoke.artifacts);
     const captureTriggers =
       process.platform === 'win32'
-        ? 'toolbar and native Ctrl+Shift+5 all-display overlay'
+        ? 'toolbar, native Ctrl+Shift+5, and a display chooser when multiple displays are attached'
         : 'toolbar overlay';
     assertions.push(
-      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result${
-        captureSmoke.crossDisplayVerified
-          ? '; cross-display overlay IPC composes distinct display colors at the expected PNG dimensions'
-          : ''
-      }`,
+      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
     );
   }
 

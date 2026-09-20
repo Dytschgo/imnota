@@ -85,7 +85,8 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
     afterVersion: '0.2.8-nightly.20260919.35412472439',
     channel: 'nightly',
     title: 'Choose your Windows copy format',
-    summary: 'Save your preferred copy format, capture across screens, and read update notes on hover.',
+    summary:
+      'Save your preferred copy format, choose a Windows display to capture, and read update notes on hover.',
     preview: true,
     features: [
       {
@@ -105,10 +106,10 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
         action: { kind: 'onboarding' },
       },
       {
-        id: 'capture-all-displays',
-        title: 'Select across your screens',
+        id: 'capture-choose-display',
+        title: 'Choose a display to capture',
         description:
-          'Start capture on all Windows displays at once, then drag a region within one screen or across their boundary.',
+          'On Windows with more than one display, pick which screen to capture. Imnota then captures only that display; it does not silently use the primary.',
         action: { kind: 'settings', category: 'Shortcuts' },
       },
     ],
