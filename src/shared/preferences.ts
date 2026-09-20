@@ -81,30 +81,6 @@ export interface UpdatePreferences {
 /** Opt-in local MCP access for coding agents. Default off; never a public listener. */
 export interface AgentAccessPreferences {
   enabled: boolean;
-  /** When true, prompt Markdown tells any agent to use the Imnota skill. Default on. */
-  includeSkillInstruction: boolean;
-}
-
-export const IMNOTA_SKILL_LIBRARY_URL = 'https://github.com/Dytschgo/dytschgo-skills';
-export const IMNOTA_SKILL_INSTALL_COMMAND =
-  'npx skills add https://github.com/Dytschgo/dytschgo-skills --skill imnota';
-
-/** Short block copied into prompt bundles so any agent can load the Imnota skill. */
-export function imnotaSkillInstructionMarkdown(): string {
-  return [
-    '## How to use this brief',
-    '',
-    'This is an Imnota prompt bundle: annotated screenshots, notes, and drawings for an AI coding agent.',
-    'Load the **Imnota** skill (`imnota`) if it is not already installed. It works in Claude Code, Cursor, Codex, Grok, and other skill-capable agents.',
-    '',
-    '```bash',
-    IMNOTA_SKILL_INSTALL_COMMAND,
-    '```',
-    '',
-    'If Imnota MCP tools are available, call `get_latest_bundle` instead of re-interpreting attached images.',
-    'If MCP is not available, use this Markdown and the matching PNG files. Picture numbers, Notes, and Marks name the exact elements to change.',
-    '',
-  ].join('\n');
 }
 
 export const LOCAL_AGENT_ACCESS_HOST = '127.0.0.1';
@@ -198,10 +174,7 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
 export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
-export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = {
-  enabled: false,
-  includeSkillInstruction: true,
-};
+export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,

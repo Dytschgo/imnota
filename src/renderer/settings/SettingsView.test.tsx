@@ -36,21 +36,6 @@ describe('SettingsView category navigation', () => {
     expect(screen.getByText('Allow local agent access')).toBeInTheDocument();
     expect(screen.getAllByText(/127\.0\.0\.1:17384\/mcp/).length).toBeGreaterThan(0);
     fireEvent.click(toggle);
-    expect(onAgentAccessChange).toHaveBeenCalledWith({
-      enabled: true,
-      includeSkillInstruction: true,
-    });
-  });
-
-  it('includes the Imnota skill instruction in prompt Markdown until the workspace toggle is cleared', () => {
-    const onAgentAccessChange = vi.fn();
-    render(<SettingsView activeCategory="Workspace" onAgentAccessChange={onAgentAccessChange} />);
-    const toggle = screen.getByTestId('agent-skill-instruction-toggle');
-    expect(toggle).toBeChecked();
-    fireEvent.click(toggle);
-    expect(onAgentAccessChange).toHaveBeenCalledWith({
-      enabled: false,
-      includeSkillInstruction: false,
-    });
+    expect(onAgentAccessChange).toHaveBeenCalledWith({ enabled: true });
   });
 });

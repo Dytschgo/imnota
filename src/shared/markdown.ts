@@ -54,12 +54,10 @@ export function generateMarkdown(
   collectionId: string,
   annotations: Record<string, Annotation[]>,
   markdownByTextItem: Record<string, string> = {},
-  options: { skillInstruction?: string } = {},
 ): string {
   const collection = project.collections.find((item) => item.id === collectionId);
   if (!collection) throw new Error('Collection not found.');
   const out = [`# ${collection.name}`, ''];
-  if (options.skillInstruction?.trim()) out.push(options.skillInstruction.trim(), '');
   if (collection.overallContext.trim())
     out.push('## Overall context', '', collection.overallContext.trim(), '');
 

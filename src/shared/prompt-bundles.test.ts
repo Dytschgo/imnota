@@ -152,19 +152,6 @@ describe('prompt bundle planning', () => {
     );
   });
 
-  it('prepends the Imnota skill instruction on the first bundle only', () => {
-    const instruction = '## How to use this brief\n\nLoad the Imnota skill.';
-    const result = planPromptBundles(
-      collection([screenshot('one', 0), screenshot('two', 1)]),
-      [rendered('one', 3840, 2160), rendered('two', 3840, 2160)],
-      { skillInstruction: instruction },
-    );
-    expect(result.kind).toBe('ready');
-    if (result.kind !== 'ready') return;
-    expect(result.bundles[0].markdown).toContain('Load the Imnota skill.');
-    expect(result.bundles[1].markdown).not.toContain('Load the Imnota skill.');
-  });
-
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
     const input = collection([
       screenshot('one', 0, {

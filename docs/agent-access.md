@@ -9,13 +9,7 @@ Optional, off by default. When enabled, Claude Code or Cursor can read prepared 
 3. Copy the Claude Code or Cursor snippet from that page into the editor's MCP config.
 4. Keep Imnota running, or spawn the Imnota executable with `--mcp` for stdio.
 
-**Tell agents to use the Imnota skill** (on by default) inserts a short **How to use this brief** section into every prompt bundle. That instruction is for any coding agent — Claude Code, Cursor, Codex, Grok, and others — not only MCP clients. It does not write editor config. Install the skill from [dytschgo-skills](https://github.com/Dytschgo/dytschgo-skills):
-
-```bash
-npx skills add https://github.com/Dytschgo/dytschgo-skills --skill imnota
-```
-
-Until **Allow local agent access** is on, Imnota starts no listener and a `--mcp` process exits immediately.
+Until the toggle is on, Imnota starts no listener and a `--mcp` process exits immediately.
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server.
 
@@ -35,7 +29,10 @@ Paths outside the selected workspace are rejected with the same validators as th
 
 ## Install a skill or rule
 
-Imnota never writes `~/.claude` or `.cursor`. Prefer the downloadable **Imnota** skill in [dytschgo-skills](https://github.com/Dytschgo/dytschgo-skills) so any compatible agent can load it. The in-repo [Claude Code skill](claude-code-imnota-skill.md) and [Cursor rule](cursor-imnota-rule.md) remain copies for editors that still want a local file.
+Imnota never writes `~/.claude` or `.cursor`. Copy these files yourself if you want the editor to prefer MCP over guessing from chat images:
+
+- [Claude Code skill](claude-code-imnota-skill.md)
+- [Cursor rule](cursor-imnota-rule.md)
 
 Stdio config, if you spawn Imnota instead of using the loopback URL:
 

@@ -152,11 +152,9 @@ export interface PlanPromptBundleOptions {
   layout?: Partial<PromptBundleLayoutOptions>;
   breakBeforeScreenshotIds?: ReadonlySet<string>;
   markdownIdentity?: PromptBundleMarkdownIdentity;
-  skillInstruction?: string;
 }
 export interface PromptBundleMarkdownIdentity {
   setName: string;
-  skillInstruction?: string;
 }
 export const DEFAULT_PROMPT_BUNDLE_LIMITS: PromptBundleLimits = {
   maxEdge: 8192,
@@ -271,9 +269,7 @@ function markdownForBundle(
     `Bundle ${bundle.number} of ${bundle.total}`,
     '',
   ];
-  if (identity?.skillInstruction?.trim() && bundle.number === 1)
-    lines.push(identity.skillInstruction.trim(), '');
-  if (identity?.setName)
+  if (identity)
     lines.push(
       `Export set: ${cleanHeading(identity.setName, 'Prompt export')}`,
       `Bundle reference: ${cleanHeading(identity.setName, 'Prompt export')} - ${String(bundle.number).padStart(2, '0')}`,
@@ -451,16 +447,7 @@ export function planPromptBundles(
       delivery: clipboardSafe ? 'clipboard' : 'file-only',
       warning: clipboardSafe ? undefined : FILE_ONLY_WARNING,
     };
-    bundle.markdown = markdownForBundle(
-      collection,
-      bundle,
-      options.markdownIdentity || options.skillInstruction
-        ? {
-            setName: options.markdownIdentity?.setName ?? '',
-            skillInstruction: options.skillInstruction ?? options.markdownIdentity?.skillInstruction,
-          }
-        : undefined,
-    );
+    bundle.markdown = markdownForBundle(collection, bundle, options.markdownIdentity);
     return bundle;
   });
   return {

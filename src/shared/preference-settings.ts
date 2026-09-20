@@ -19,12 +19,7 @@ const nativeCopyPreferencesSchema = z
 const updatePreferencesSchema = z
   .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
   .strict();
-const agentAccessPreferencesSchema = z
-  .object({
-    enabled: z.boolean(),
-    includeSkillInstruction: z.boolean().default(true),
-  })
-  .strict();
+const agentAccessPreferencesSchema = z.object({ enabled: z.boolean() }).strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -80,7 +75,7 @@ export const preferenceSettingsSchema = z
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     updates: updatePreferencesSchema.default({}),
-    agentAccess: agentAccessPreferencesSchema.default({ enabled: false, includeSkillInstruction: true }),
+    agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),
   })
   .strict();
 

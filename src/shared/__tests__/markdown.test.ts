@@ -49,20 +49,6 @@ describe('collection Markdown generation', () => {
     expect(markdown).not.toContain('rectangle');
   });
 
-  it('prepends a skill instruction when requested', () => {
-    const project = emptyProject('Bug', '');
-    const markdown = generateMarkdown(
-      project,
-      '001-collection',
-      {},
-      {},
-      {
-        skillInstruction: '## How to use this brief\n\nLoad the Imnota skill.',
-      },
-    );
-    expect(markdown).toContain('Load the Imnota skill.');
-  });
-
   it('writes drawing descriptions under the drawing heading', () => {
     const project = emptyProject('Architecture', '');
     project.schemaVersion = 4;
