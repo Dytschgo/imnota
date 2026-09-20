@@ -3241,5 +3241,7 @@ app.on('window-all-closed', () => {
 });
 app.on('before-quit', () => {
   captureGlobalShortcut.clear();
+  appTray?.destroy();
+  appTray = null;
   projectWatchManager?.stopAll();
 });
