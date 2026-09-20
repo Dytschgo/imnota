@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../src/shared/capture.js';
 import {
   CaptureOverlaySession,
   CaptureSelectionCoordinator,
@@ -6,8 +7,27 @@ import {
   closeCaptureOverlayWindows,
   createOverlayReadinessGuard,
   isCaptureOverlaySender,
+  type CaptureSelectionState,
   type OverlayReadinessTimer,
 } from './capture-overlay-session.js';
+
+function regionState(
+  selection: CaptureSelectionState['selection'],
+  complete: boolean,
+  actionsDisplayId: number | null,
+  extra: Partial<CaptureSelectionState> = {},
+): CaptureSelectionState {
+  return {
+    selection,
+    complete,
+    actionsDisplayId,
+    mode: 'region',
+    windowTitle: null,
+    windowCaptureAvailable: false,
+    windowMessage: null,
+    ...extra,
+  };
+}
 
 describe('capture overlay session', () => {
   it('only accepts the current overlay main frame', () => {
@@ -21,21 +41,13 @@ describe('capture overlay session', () => {
       { id: 1, bounds: { x: -1200, y: -200, width: 1200, height: 800 }, scaleFactor: 1 },
       { id: 2, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 },
     ]);
-    expect(coordinator.update(2, 'begin', { x: 300, y: 250 })).toEqual({
-      selection: null,
-      complete: false,
-      actionsDisplayId: null,
-    });
-    expect(coordinator.update(2, 'move', { x: -400, y: -150 })).toEqual({
-      selection: { x: -400, y: -150, width: 700, height: 400 },
-      complete: false,
-      actionsDisplayId: null,
-    });
-    expect(coordinator.update(2, 'end', { x: -400, y: -150 })).toEqual({
-      selection: { x: -400, y: -150, width: 700, height: 400 },
-      complete: true,
-      actionsDisplayId: 1,
-    });
+    expect(coordinator.update(2, 'begin', { x: 300, y: 250 })).toEqual(regionState(null, false, null));
+    expect(coordinator.update(2, 'move', { x: -400, y: -150 })).toEqual(
+      regionState({ x: -400, y: -150, width: 700, height: 400 }, false, null),
+    );
+    expect(coordinator.update(2, 'end', { x: -400, y: -150 })).toEqual(
+      regionState({ x: -400, y: -150, width: 700, height: 400 }, true, 1),
+    );
   });
 
   it('uses native global DIPs after pointer capture crosses from 150% to 100%', () => {
@@ -86,10 +98,80 @@ describe('capture overlay session', () => {
       width: 180,
       height: 80,
     });
-    expect(coordinator.update(1, 'reset')).toEqual({
+    expect(coordinator.update(1, 'reset')).toEqual(regionState(null, false, null));
+  });
+
+  it('selects the full captured display in Display mode, including taskbar bounds', () => {
+    const display = { id: 7, bounds: { x: -1200, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const coordinator = new CaptureSelectionCoordinator([display]);
+    expect(coordinator.setMode('display')).toEqual({
+      selection: { ...display.bounds },
+      complete: true,
+      actionsDisplayId: 7,
+      mode: 'display',
+      windowTitle: null,
+      windowCaptureAvailable: false,
+      windowMessage: null,
+    });
+  });
+
+  it('explains missing window identity and keeps Region available', () => {
+    const coordinator = new CaptureSelectionCoordinator([
+      { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },
+    ]);
+    expect(coordinator.setMode('window')).toEqual({
       selection: null,
       complete: false,
       actionsDisplayId: null,
+      mode: 'window',
+      windowTitle: null,
+      windowCaptureAvailable: false,
+      windowMessage: WINDOW_CAPTURE_UNAVAILABLE_MESSAGE,
+    });
+    expect(coordinator.setMode('region').mode).toBe('region');
+  });
+
+  it('highlights the front-most identifiable window on hover and captures it on click', () => {
+    const coordinator = new CaptureSelectionCoordinator(
+      [{ id: 2, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
+      [
+        { id: 'front', title: 'Editor', bounds: { x: 100, y: 80, width: 400, height: 300 } },
+        { id: 'back', title: 'Desktop', bounds: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ],
+    );
+    expect(coordinator.setMode('window')).toMatchObject({
+      mode: 'window',
+      windowCaptureAvailable: true,
+      windowMessage: null,
+      complete: false,
+    });
+    expect(coordinator.update(2, 'move', { x: 120, y: 90 })).toMatchObject({
+      selection: { x: 100, y: 80, width: 400, height: 300 },
+      complete: false,
+      windowTitle: 'Editor',
+    });
+    expect(coordinator.update(2, 'end', { x: 120, y: 90 })).toEqual({
+      selection: { x: 100, y: 80, width: 400, height: 300 },
+      complete: true,
+      actionsDisplayId: 2,
+      mode: 'window',
+      windowTitle: 'Editor',
+      windowCaptureAvailable: true,
+      windowMessage: null,
+    });
+  });
+
+  it('clips a window that extends past the captured display', () => {
+    const coordinator = new CaptureSelectionCoordinator(
+      [{ id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 }],
+      [{ id: 'wide', title: 'Spanning', bounds: { x: -40, y: 20, width: 900, height: 400 } }],
+    );
+    coordinator.setMode('window');
+    expect(coordinator.update(1, 'end', { x: 10, y: 30 }).selection).toEqual({
+      x: 0,
+      y: 20,
+      width: 800,
+      height: 400,
     });
   });
 
