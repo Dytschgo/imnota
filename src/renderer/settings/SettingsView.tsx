@@ -414,7 +414,24 @@ function AgentAccessSettings({
           checked={value.enabled}
           disabled={disabled}
           data-testid="agent-access-toggle"
-          onChange={(event) => void onChange({ enabled: event.target.checked })}
+          onChange={(event) => void onChange({ ...value, enabled: event.target.checked })}
+        />
+      </label>
+      <label className="settings-switch">
+        <span>
+          <strong>Tell agents to use the Imnota skill</strong>
+          <small>
+            Adds a short instruction to every prompt bundle so Claude Code, Cursor, Codex, Grok, and other
+            agents load the Imnota skill. Does not write editor config. Install with{' '}
+            <kbd>npx skills add https://github.com/Dytschgo/dytschgo-skills --skill imnota</kbd>.
+          </small>
+        </span>
+        <input
+          type="checkbox"
+          checked={value.includeSkillInstruction}
+          disabled={disabled}
+          data-testid="agent-skill-instruction-toggle"
+          onChange={(event) => void onChange({ ...value, includeSkillInstruction: event.target.checked })}
         />
       </label>
       <div className="settings-snippet">
@@ -438,8 +455,9 @@ function AgentAccessSettings({
         <pre>{cursorAgentAccessSnippet()}</pre>
       </div>
       <p className="settings-snippet-note">
-        Stdio alternative: spawn the Imnota executable with <kbd>--mcp</kbd>. Installable skill and rule files
-        are in the documentation; Imnota never writes <code>~/.claude</code> or <code>.cursor</code>.
+        Stdio alternative: spawn the Imnota executable with <kbd>--mcp</kbd>. Install the Imnota skill from{' '}
+        <a href="https://github.com/Dytschgo/dytschgo-skills">dytschgo-skills</a> for any compatible agent.
+        Imnota never writes <code>~/.claude</code> or <code>.cursor</code>.
       </p>
       <pre className="settings-snippet-stdio">{localAgentAccessStdioSnippet()}</pre>
     </section>

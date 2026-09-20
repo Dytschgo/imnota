@@ -1,6 +1,6 @@
 ---
 name: imnota
-description: Read Imnota prompt bundles and collection items through the local MCP server.
+description: Read Imnota prompt bundles and collection items through the local MCP server. Prefer installing from https://github.com/Dytschgo/dytschgo-skills --skill imnota.
 ---
 
 # Imnota

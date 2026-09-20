@@ -193,6 +193,7 @@ export interface PromptBundleControllerEngineOptions {
   bridge: PromptBundleControllerBridge;
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
+  skillInstruction?(): string | undefined;
 }
 
 interface PreparedPromptMetadata {
@@ -480,6 +481,7 @@ export class PromptBundleControllerEngine {
   private readonly rendering: PromptBundleControllerRendering;
   private readonly getSavedContext: () => Promise<SavedPromptExportContext>;
   private readonly includeMasterOverview: boolean;
+  private readonly skillInstruction?: () => string | undefined;
   private activeRun?: ActiveRun;
   private latestPlan?: PreparedPromptPlan;
   private latestArtifact?: PromptExportArtifact;
@@ -494,6 +496,7 @@ export class PromptBundleControllerEngine {
     this.getSavedContext = options.getSavedContext;
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
+    this.skillInstruction = options.skillInstruction;
   }
 
   getState = (): PromptBundleControllerState => this.state;
@@ -782,7 +785,9 @@ export class PromptBundleControllerEngine {
       screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
       items: hasMixedContentItems ? promptItems : undefined,
     }) as Readonly<PromptCollectionInput>;
-    const initial = planPromptBundles(input, measured);
+    const initial = planPromptBundles(input, measured, {
+      skillInstruction: this.skillInstruction?.(),
+    });
     if (initial.kind === 'no-content') return initial;
     return {
       context,
@@ -797,7 +802,10 @@ export class PromptBundleControllerEngine {
     metadata: PreparedPromptMetadata,
     breakBeforeScreenshotIds: ReadonlySet<string> = new Set(),
   ): PreparedPromptPlan {
-    const result = planPromptBundles(metadata.input, metadata.measured, { breakBeforeScreenshotIds });
+    const result = planPromptBundles(metadata.input, metadata.measured, {
+      breakBeforeScreenshotIds,
+      skillInstruction: this.skillInstruction?.(),
+    });
     if (result.kind === 'no-content') throw failure('no-content', result.message, true);
     return { ...metadata, plan: result, planId: planId() };
   }
@@ -1074,7 +1082,10 @@ export class PromptBundleControllerEngine {
     const session = unwrap(await this.bridge.startPromptExport(startInput));
     run.session = session;
     this.assertActive(run);
-    const identifiedPlan = applyPromptBundleMarkdownIdentity(settled.plan, { setName: session.setName });
+    const identifiedPlan = applyPromptBundleMarkdownIdentity(settled.plan, {
+      setName: session.setName,
+      skillInstruction: this.skillInstruction?.(),
+    });
     const prepared = { ...settled, plan: identifiedPlan };
     run.plan = prepared;
     this.latestPlan = prepared;

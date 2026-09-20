@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { Check, FolderOpen, FolderPlus, Heart, Plus, Search, ShieldCheck, X } from 'lucide-react';
-import { shouldShowOnboarding } from '../shared/preferences';
+import { imnotaSkillInstructionMarkdown, shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
   resolveShortcutBindings,
@@ -205,7 +205,11 @@ export default function App() {
       throw new Error('Save the current drawing or text before preparing the prompt.');
     return persistence.getSavedContext(useAppStore.getState().activeCollectionId);
   }, [persistence, contentPersistence]);
-  const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
+  const promptBundles = usePromptBundleController({
+    getSavedContext: getSavedPromptContext,
+    skillInstruction: () =>
+      preferences.settings.agentAccess.includeSkillInstruction ? imnotaSkillInstructionMarkdown() : undefined,
+  });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;

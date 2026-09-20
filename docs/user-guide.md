@@ -96,11 +96,17 @@ Markdown copy works without generating an image first. The fallback actions also
 
 ## Local agent access
 
-Off by default. **Settings → Workspace → Allow local agent access** lets Claude Code or Cursor read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota starts no listener until the toggle is on, and the listener binds only to `127.0.0.1` (or a spawned `--mcp` stdio process). There is no public HTTP server, account, or hosted model call.
+Off by default. **Settings → Workspace → Allow local agent access** lets any MCP-capable agent read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota starts no listener until the toggle is on, and the listener binds only to `127.0.0.1` (or a spawned `--mcp` stdio process). There is no public HTTP server, account, or hosted model call.
+
+**Tell agents to use the Imnota skill** (on by default) inserts a **How to use this brief** section into Copy Bundle Markdown. That instruction is for every coding agent, not only Claude Code or Cursor. Install:
+
+```bash
+npx skills add https://github.com/Dytschgo/dytschgo-skills --skill imnota
+```
+
+Imnota never writes `~/.claude` or `.cursor`. See [Local agent access](agent-access.md).
 
 Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
-
-Copy the Claude Code or Cursor snippet from Settings. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not rewrite `~/.claude` or `.cursor`. See [Local agent access](agent-access.md).
 
 ## Share a hosted link
 

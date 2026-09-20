@@ -19,6 +19,7 @@ export interface UsePromptBundleControllerOptions {
   /** Test seam for deterministic browser-free orchestration tests. */
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
+  skillInstruction?(): string | undefined;
 }
 
 export interface PromptBundleController {
@@ -57,8 +58,10 @@ function browserBridge(): PromptBundleControllerBridge {
 
 export function usePromptBundleController(options: UsePromptBundleControllerOptions): PromptBundleController {
   const getSavedContextRef = useRef(options.getSavedContext);
+  const skillInstructionRef = useRef(options.skillInstruction);
   const disposalGeneration = useRef(0);
   getSavedContextRef.current = options.getSavedContext;
+  skillInstructionRef.current = options.skillInstruction;
   const engineRef = useRef<PromptBundleControllerEngine | undefined>(undefined);
   if (!engineRef.current) {
     engineRef.current = new PromptBundleControllerEngine({
@@ -66,6 +69,7 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
       bridge: options.bridge ?? browserBridge(),
       rendering: options.rendering,
       includeMasterOverview: options.includeMasterOverview,
+      skillInstruction: () => skillInstructionRef.current?.(),
     });
   }
   const engine = engineRef.current;

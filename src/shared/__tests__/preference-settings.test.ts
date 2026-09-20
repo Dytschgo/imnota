@@ -53,6 +53,7 @@ describe('profile-aware preference settings', () => {
     expect(result.settings.nativeCopy.defaultFunction).toBe('files');
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
     expect(result.settings.agentAccess.enabled).toBe(false);
+    expect(result.settings.agentAccess.includeSkillInstruction).toBe(true);
   });
 
   it('keeps older saved preferences compatible while adding capture opt-in', () => {
@@ -80,8 +81,10 @@ describe('profile-aware preference settings', () => {
       true,
     );
     expect(withoutAgentAccess.settings.agentAccess.enabled).toBe(false);
+    expect(withoutAgentAccess.settings.agentAccess.includeSkillInstruction).toBe(true);
     expect(mergePreferenceSettings(current, { agentAccess: { enabled: true } }).agentAccess).toEqual({
       enabled: true,
+      includeSkillInstruction: true,
     });
   });
 
