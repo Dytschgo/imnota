@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { emptyProject } from '../utils.js';
 import { validateProject } from '../schema.js';

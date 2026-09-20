@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { shellQuote, terminalUpdateArguments } from '../../../electron/terminal-update.js';
 import { selectRelease } from '../../../electron/releases.js';

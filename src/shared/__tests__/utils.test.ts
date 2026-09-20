@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { emptyProject, sanitizeFilename, slugify } from '../utils.js';
 import { isPathWithin } from '../security.js';
