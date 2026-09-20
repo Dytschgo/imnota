@@ -314,7 +314,10 @@ export async function exerciseRegionCapture(
   );
   if (!selected) throw new Error('Saved capture was not selected in the screenshot rail.');
 
-  await driver.click({ selector: '[data-testid="tool-rectangle"]' });
+  // The restored window can put Rectangle in the toolbar overflow menu.
+  await driver.click({ selector: '[data-testid="annotation-canvas"]' });
+  await driver.press('R');
+  await driver.waitFor({ selector: '.canvas-meta', text: 'Tool: rectangle' });
   const canvas = await driver.waitFor({ selector: '[data-testid="annotation-canvas"]' });
   await driver.drag(
     { x: Math.round(canvas.x + canvas.width * 0.4), y: Math.round(canvas.y + canvas.height * 0.4) },
