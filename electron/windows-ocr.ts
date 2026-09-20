@@ -37,7 +37,7 @@ export const WINDOWS_OCR_SCRIPT = [
   '$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])',
   '$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])',
   '$transform = [Windows.Graphics.Imaging.BitmapTransform]::new()',
-  '$max = $engine.MaxImageDimension',
+  '$max = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension',
   'if ($decoder.PixelWidth -gt $max -or $decoder.PixelHeight -gt $max) {',
   '  $scale = [Math]::Min($max / $decoder.PixelWidth, $max / $decoder.PixelHeight)',
   '  $transform.ScaledWidth = [uint32][Math]::Max(1, [Math]::Floor($decoder.PixelWidth * $scale))',

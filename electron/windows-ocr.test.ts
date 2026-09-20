@@ -1,7 +1,6 @@
 // @vitest-environment node
-import { execFile as execFileCallback } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 import {
   decodePngDataUrlForOcr,
@@ -17,7 +16,6 @@ import {
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`;
 const READABLE_TEXT_PNG = fileURLToPath(new URL('./fixtures/windows-ocr-readable-text.png', import.meta.url));
-const execFile = promisify(execFileCallback);
 const runWindowsOcrIntegration =
   process.platform === 'win32' && process.env.IMNOTA_WINDOWS_OCR_INTEGRATION === '1';
 
@@ -105,17 +103,8 @@ describe('on-device Windows OCR', () => {
   it.runIf(runWindowsOcrIntegration)(
     'recognizes readable text through the actual Windows.Media.Ocr engine',
     async () => {
-      const pngPath = READABLE_TEXT_PNG.replaceAll("'", "''");
-      const script = WINDOWS_OCR_SCRIPT.replace(
-        'param([string]$pngPath, [int]$timeoutMs = 10000)',
-        `$pngPath = '${pngPath}'; $timeoutMs = 10000`,
-      );
-      const { stdout } = await execFile(
-        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script],
-        { encoding: 'utf8', timeout: 20_000, windowsHide: true },
-      );
-      expect(stdout).toMatch(/IMNOTA OCR READY/i);
+      const text = await recognizePngWithWindowsOcr(await readFile(READABLE_TEXT_PNG));
+      expect(text).toMatch(/IMNOTA OCR READY/i);
     },
     20_000,
   );
