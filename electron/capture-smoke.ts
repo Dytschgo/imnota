@@ -335,11 +335,15 @@ export async function exerciseRegionCapture(
       screenshot.id !== captured.id,
   );
   if (!annotated) throw new Error('Annotated capture did not create a screenshot record.');
-  await driver.waitFor({ selector: `[data-testid="screenshot-${annotated.id}"]` });
-  const rectangleIsActive = await driver.evaluate<boolean>(
-    `document.querySelector('[data-testid="tool-rectangle"]')?.getAttribute('aria-pressed') === 'true'`,
-  );
-  if (!rectangleIsActive) throw new Error('Annotated capture did not restore the last drawing tool.');
+  await driver.waitFor({
+    selector: '.toast',
+    text: 'Screen capture added — annotate',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: `.shot-item.active [data-testid="screenshot-${annotated.id}"]`,
+  });
+  await driver.waitFor({ selector: '[data-testid="tool-rectangle"][aria-pressed="true"]' });
 
   overlay = await startCapture(driver);
   await overlay.click({ selector: '[data-mode="display"]' });
