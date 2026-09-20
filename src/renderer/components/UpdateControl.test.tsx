@@ -164,7 +164,9 @@ it('copies and runs the supplied Terminal command for an available upgrade', asy
   expect(screen.queryByText(/This build opens the release download page/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
   await waitFor(() => expect(window.imnota.copyText).toHaveBeenCalledWith(command));
-  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  const runUpdate = screen.getByRole('button', { name: 'Run update in Terminal' });
+  await waitFor(() => expect(runUpdate).toBeEnabled());
+  fireEvent.click(runUpdate);
   await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
 });
 
