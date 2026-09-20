@@ -136,7 +136,7 @@ Keyboard shortcuts are configurable in Settings with Windows/macOS-aware default
 
 ## Updates
 
-A compact update control stays beside **About** in the workspace navigation (lower-left when navigation is hidden). It is always available: refresh when you are on the latest version or have not checked yet, a disabled progress state while checking or downloading, download when an update is ready, restart/install after the file is downloaded, and retry after a failure. Hover the control for the current status and, when a release is available, its notes. Nothing downloads or installs until you choose that action.
+A compact update control stays beside **About** in the workspace navigation. When navigation is hidden, it sits in the top bar beside Show navigation / Back. It is always available: refresh when you are on the latest version or have not checked yet, a disabled progress state while checking or downloading, download when an update is ready, restart/install after the file is downloaded, and retry after a failure. Hover the control for the current status and, when a release is available, its notes. Nothing downloads or installs until you choose that action.
 
 Installed builds also check the selected channel (Stable or Nightly) shortly after Imnota starts and about once an hour while it stays open. Those background checks are discovery only. They stay quiet while discovery is offline; a manual check reports the failure. If preparing a discovered update fails, Imnota clears the download action and shows a retry message. Switch channels and check again in Settings → Updates & about → App updates. Nightly is labeled as a preview. Checking contacts GitHub for release information only; your project files stay local.
 

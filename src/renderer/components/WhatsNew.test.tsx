@@ -36,11 +36,11 @@ it('labels nightly guidance as preview and keeps missing screenshots from blocki
 
   expect(screen.getByTestId('whats-new-dialog')).toHaveTextContent('Nightly preview');
   expect(screen.getByText('Preview the next update controls.')).toBeInTheDocument();
-  const screenshot = document.querySelector('.whats-new-card img');
-  expect(screenshot).toHaveAttribute('src', 'https://example.test/handoff.png');
-  fireEvent.error(screenshot!);
-  expect(screenshot).not.toBeVisible();
+  expect(document.querySelectorAll('.whats-new-card img')).toHaveLength(1);
+  fireEvent.error(document.querySelector('.whats-new-card img')!);
+  expect(document.querySelector('.whats-new-card img')).not.toBeInTheDocument();
   expect(screen.getByTestId('whats-new-dialog')).toBeInTheDocument();
+  expect(screen.getByText('Updates stay within reach')).toBeInTheDocument();
 
   fireEvent.click(screen.getAllByRole('button', { name: 'Try it now' })[0]!);
   expect(onAction).toHaveBeenCalledWith({ kind: 'settings', category: 'Updates & about' });
@@ -62,7 +62,7 @@ it('omits the preview label for stable notes', () => {
   expect(screen.queryByText(/Nightly preview/)).not.toBeInTheDocument();
 });
 
-it('replays bundled notes from Settings and stays usable when this version has no screenshots', () => {
+it('replays bundled notes from Settings and stays available when this version has no release notes', () => {
   const onReplay = vi.fn();
   const onAction = vi.fn();
   const { rerender } = render(
@@ -86,4 +86,23 @@ it('replays bundled notes from Settings and stays usable when this version has n
   rerender(<WhatsNewSettings version="0.2.7" channel="stable" onReplay={onReplay} onAction={onAction} />);
   expect(screen.getByRole('button', { name: 'Replay what’s new' })).toBeDisabled();
   expect(screen.getByText(/Release guidance for this version is not bundled yet/)).toBeInTheDocument();
+});
+
+it('keeps Settings feature cards when a screenshot is omitted or fails to load', () => {
+  render(
+    <WhatsNewSettings
+      version="0.2.8-nightly.20260919.35412472440"
+      channel="nightly"
+      onReplay={vi.fn()}
+      onAction={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Select across your screens')).toBeInTheDocument();
+  const screenshots = document.querySelectorAll('.whats-new-settings .whats-new-card img');
+  expect(screenshots).toHaveLength(2);
+  fireEvent.error(screenshots[0]!);
+  expect(document.querySelectorAll('.whats-new-settings .whats-new-card img')).toHaveLength(1);
+  expect(screen.getByText('Read before downloading')).toBeInTheDocument();
+  expect(screen.getByText('Choose what to copy')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Replay what’s new' })).toBeEnabled();
 });
