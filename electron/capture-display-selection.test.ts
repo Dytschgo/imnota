@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CaptureDisplay } from '../src/shared/capture.js';
 import {
   captureDisplayOptions,
+  captureDisplayMetricsInvalidateSelection,
   captureDisplayWithStableGeometry,
   captureDisplaysHaveStableGeometry,
   selectedCaptureDisplay,
@@ -56,6 +57,14 @@ describe('capture display selection', () => {
 });
 
 describe('capture display geometry', () => {
+  it('keeps selection open for fullscreen work-area changes but invalidates pixel geometry changes', () => {
+    expect(captureDisplayMetricsInvalidateSelection(['workArea'])).toBe(false);
+    for (const metric of ['bounds', 'scaleFactor', 'rotation', 'unknown']) {
+      expect(captureDisplayMetricsInvalidateSelection(['workArea', metric])).toBe(true);
+    }
+    expect(captureDisplayMetricsInvalidateSelection([])).toBe(true);
+  });
+
   it('accepts the same complete desktop independent of enumeration order', () => {
     expect(captureDisplaysHaveStableGeometry([primary, secondary], [secondary, primary])).toBe(true);
   });
