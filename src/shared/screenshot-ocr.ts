@@ -61,16 +61,27 @@ export async function recognisedScreenshotText(input: {
   nativeWidth?: number;
   nativeHeight?: number;
   recognizer?: ScreenshotTextRecognizer;
+  /** Export-wide cancellation or time budget. The native request may finish later but is ignored. */
+  signal?: AbortSignal;
 }): Promise<string | undefined> {
   if (!input.includeRecognisedText || !input.recognizer) return undefined;
   if (screenshotHasRedaction(input.annotations)) return undefined;
+  if (input.signal?.aborted) return undefined;
   const crop = visibleTextCropRect(input.nativeWidth, input.nativeHeight, input.annotations);
   try {
-    const text = await input.recognizer.recognize({
+    const recognition = input.recognizer.recognize({
       pngDataUrl: input.pngDataUrl,
       screenshotId: input.screenshotId,
       ...(crop ? { crop } : {}),
     });
+    const text = input.signal
+      ? await Promise.race([
+          recognition,
+          new Promise<undefined>((resolve) =>
+            input.signal!.addEventListener('abort', () => resolve(undefined), { once: true }),
+          ),
+        ])
+      : await recognition;
     const trimmed = text?.replace(/\r\n?/g, '\n').trim();
     return trimmed || undefined;
   } catch {

@@ -23,6 +23,10 @@ Screenshots, Markdown text blocks and drawings are implemented in one ordered co
 
 Acceptance: a project containing text -> drawing -> screenshot -> text survives close/reopen, reorder, hide, duplicate, delete/Undo and export without losing identity or order.
 
+### Decision: optional on-device OCR stays export-scoped
+
+Copy Bundle may offer optional recognised text when the operating system provides a local OCR engine. Recognition runs only while creating that Markdown, reads only the pixels being exported, and does not persist recognised text in the project. Unsupported platforms, redacted screenshots, failures and the export-wide time budget simply omit the section while the export still succeeds. This is not a commitment to an OCR suite, background indexing, cloud recognition or a new product surface.
+
 ### 2. Validate the existing import-to-copy workflow
 
 Run 5-8 moderated sessions with people who regularly give visual feedback to developers or coding agents. Use disposable projects and real, anonymised examples.

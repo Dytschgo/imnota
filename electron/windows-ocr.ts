@@ -15,12 +15,12 @@ export const MAX_OCR_DATA_URL_CHARACTERS = PNG_DATA_URL_PREFIX.length + Math.cei
 export const WINDOWS_OCR_TIMEOUT_MS = 10_000;
 
 export const WINDOWS_OCR_SCRIPT = [
+  'param([string]$pngPath, [int]$timeoutMs = 10000)',
   "$ErrorActionPreference = 'Stop'",
   '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false',
-  '$timeoutMs = 10000',
-  'if ($args.Count -gt 1) { $timeoutMs = [Math]::Max(1, [int]$args[1]) }',
+  '$timeoutMs = [Math]::Max(1, $timeoutMs)',
   'Add-Type -AssemblyName System.Runtime.WindowsRuntime',
-  "$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]",
+  "$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1 -and $_.ToString().Contains('IAsyncOperation`1') })[0]",
   'function Await($WinRtTask, $ResultType) {',
   '  $netTask = $asTaskGeneric.MakeGenericMethod($ResultType).Invoke($null, @($WinRtTask))',
   '  if (-not $netTask.Wait($timeoutMs)) { throw "OCR timed out." }',
@@ -33,7 +33,7 @@ export const WINDOWS_OCR_SCRIPT = [
   '[Windows.Graphics.Imaging.BitmapTransform,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null',
   '$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()',
   'if (-not $engine) { return }',
-  '$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($args[0])) ([Windows.Storage.StorageFile])',
+  '$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($pngPath)) ([Windows.Storage.StorageFile])',
   '$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])',
   '$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])',
   '$transform = [Windows.Graphics.Imaging.BitmapTransform]::new()',

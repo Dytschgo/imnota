@@ -485,6 +485,29 @@ describe('prompt export controller orchestration', () => {
     expect(disabled.writes[0].markdown).not.toContain('### Visible text');
   });
 
+  test('uses one bounded OCR wait for the whole export and still writes Markdown when OCR never returns', async () => {
+    vi.useFakeTimers();
+    try {
+      const recognizer = vi.fn(() => new Promise<string>(() => undefined));
+      const native = fakeBridge({ recognizeScreenshotText: recognizer });
+      const controller = engine(
+        async () => savedContext([screenshot(0), screenshot(1)]),
+        native.bridge,
+        fakeRendering().rendering,
+      );
+
+      const result = controller.prepareFreshFiles();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await result).toEqual({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
+      expect(recognizer).toHaveBeenCalledTimes(1);
+      expect(native.writes).toHaveLength(1);
+      expect(native.writes[0].markdown).not.toContain('### Visible text');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('preserves indented Markdown in master context and descriptions while normalizing line endings', async () => {
     const context = savedContext([screenshot(0)]);
     context.snapshot.project.collections[0].overallContext =

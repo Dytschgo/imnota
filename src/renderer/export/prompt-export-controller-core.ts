@@ -246,6 +246,8 @@ class ControllerFailure extends Error {
 
 const HARD_BUNDLE_MAX_EDGE = 16_384;
 const HARD_BUNDLE_MAX_PIXELS = 64_000_000;
+/** OCR is optional metadata: all screenshots in one Copy Bundle share this wait budget. */
+const OCR_EXPORT_BUDGET_MS = 10_000;
 let nextPlanId = 0;
 
 function freezeDeep<T>(value: T): Readonly<T> {
@@ -651,39 +653,85 @@ export class PromptBundleControllerEngine {
       (context.snapshot.project as ProjectData & { contentItems?: unknown[] }).contentItems?.length,
     );
     const sourceByItemId = new Map<string, { filename: string; source: string; contentRevision: string }>();
-    for (const entry of orderedCollectionItems(context.snapshot.project, context.collectionId)) {
-      this.assertActive(run);
-      if (entry.kind === 'text') {
-        const item = entry.item;
-        if (!item.includeInExport) {
+    const ocrController = new AbortController();
+    const cancelOcr = () => ocrController.abort();
+    run.controller.signal.addEventListener('abort', cancelOcr, { once: true });
+    const ocrTimeout = window.setTimeout(cancelOcr, OCR_EXPORT_BUDGET_MS);
+    try {
+      for (const entry of orderedCollectionItems(context.snapshot.project, context.collectionId)) {
+        this.assertActive(run);
+        if (entry.kind === 'text') {
+          const item = entry.item;
+          if (!item.includeInExport) {
+            promptItems.push({
+              id: item.id,
+              kind: 'text',
+              position: item.position,
+              includeInExport: false,
+              markdown: '',
+              contentRevision: 'excluded',
+            });
+            continue;
+          }
+          const loaded = await this.loadContentItem({
+            projectPath: context.snapshot.projectPath,
+            itemId: item.id,
+          });
+          this.assertActive(run);
           promptItems.push({
             id: item.id,
             kind: 'text',
             position: item.position,
-            includeInExport: false,
-            markdown: '',
-            contentRevision: 'excluded',
-          });
+            includeInExport: true,
+            markdown: loaded.markdown ?? '',
+            contentRevision: loaded.contentRevision,
+          } satisfies PromptTextInput);
           continue;
         }
-        const loaded = await this.loadContentItem({
-          projectPath: context.snapshot.projectPath,
-          itemId: item.id,
-        });
-        this.assertActive(run);
-        promptItems.push({
-          id: item.id,
-          kind: 'text',
-          position: item.position,
-          includeInExport: true,
-          markdown: loaded.markdown ?? '',
-          contentRevision: loaded.contentRevision,
-        } satisfies PromptTextInput);
-        continue;
-      }
-      if (entry.kind === 'drawing') {
-        const item = entry.item;
-        if (!item.includeInExport) {
+        if (entry.kind === 'drawing') {
+          const item = entry.item;
+          if (!item.includeInExport) {
+            promptItems.push({
+              id: item.id,
+              kind: 'drawing',
+              position: item.position,
+              title: item.title ?? 'Untitled drawing',
+              originalFilename: item.imageFilename,
+              description: item.description ?? '',
+              includeInExport: false,
+              nativeWidth: item.originalWidth ?? 1,
+              nativeHeight: item.originalHeight ?? 1,
+              contentRevision: 'excluded',
+              sourceFilename: item.sourceFilename ?? `${item.id}.json`,
+            });
+            continue;
+          }
+          const loaded = await this.loadContentItem({
+            projectPath: context.snapshot.projectPath,
+            itemId: item.id,
+          });
+          this.assertActive(run);
+          if (!loaded.image)
+            throw failure(
+              'content-changed',
+              'A drawing image is unavailable. Save the drawing and export again.',
+              true,
+            );
+          // Drawing PNGs already contain their final white crop/padding. Screenshot
+          // preflight adds annotation margins that resolvePicture does not render again.
+          measured.push({
+            screenshotId: item.id,
+            width: loaded.image.width,
+            height: loaded.image.height,
+            estimatedPngCharacters: loaded.image.dataUrl.length,
+          });
+          const sourceFilename = item.sourceFilename ?? `${item.id}.json`;
+          if (loaded.source)
+            sourceByItemId.set(item.id, {
+              filename: sourceFilename,
+              source: loaded.source,
+              contentRevision: loaded.contentRevision,
+            });
           promptItems.push({
             id: item.id,
             kind: 'drawing',
@@ -691,115 +739,79 @@ export class PromptBundleControllerEngine {
             title: item.title ?? 'Untitled drawing',
             originalFilename: item.imageFilename,
             description: item.description ?? '',
+            includeInExport: true,
+            nativeWidth: loaded.image.width,
+            nativeHeight: loaded.image.height,
+            contentRevision: loaded.contentRevision,
+            sourceFilename,
+          } satisfies PromptDrawingInput);
+          continue;
+        }
+        const screenshot = entry.item as ScreenshotRecord;
+        if (!screenshot.includeInExport) {
+          promptItems.push({
+            id: screenshot.id,
+            kind: 'screenshot',
+            position: screenshot.position,
+            title: screenshot.title,
+            originalFilename: screenshot.originalFilename,
+            description: screenshot.description,
+            priority: screenshot.priority,
             includeInExport: false,
-            nativeWidth: item.originalWidth ?? 1,
-            nativeHeight: item.originalHeight ?? 1,
+            nativeWidth: screenshot.originalWidth,
+            nativeHeight: screenshot.originalHeight,
             contentRevision: 'excluded',
-            sourceFilename: item.sourceFilename ?? `${item.id}.json`,
+            annotations: [],
           });
           continue;
         }
-        const loaded = await this.loadContentItem({
+        const loaded = await this.bridge.loadScreenshotContent({
           projectPath: context.snapshot.projectPath,
-          itemId: item.id,
+          screenshot: cloneAndFreeze(screenshot) as ScreenshotRecord,
         });
         this.assertActive(run);
-        if (!loaded.image)
-          throw failure(
-            'content-changed',
-            'A drawing image is unavailable. Save the drawing and export again.',
-            true,
-          );
-        // Drawing PNGs already contain their final white crop/padding. Screenshot
-        // preflight adds annotation margins that resolvePicture does not render again.
+        const annotations = cloneAndFreeze(loaded.annotations) as readonly Annotation[];
+        const dimensions = await this.rendering.preflight(loaded.image, annotations, run.controller.signal);
+        this.assertActive(run);
         measured.push({
-          screenshotId: item.id,
-          width: loaded.image.width,
-          height: loaded.image.height,
-          estimatedPngCharacters: loaded.image.dataUrl.length,
+          screenshotId: screenshot.id,
+          width: dimensions.width,
+          height: dimensions.height,
+          estimatedPngCharacters: dimensions.estimatedPngCharacters,
         });
-        const sourceFilename = item.sourceFilename ?? `${item.id}.json`;
-        if (loaded.source)
-          sourceByItemId.set(item.id, {
-            filename: sourceFilename,
-            source: loaded.source,
-            contentRevision: loaded.contentRevision,
-          });
-        promptItems.push({
-          id: item.id,
-          kind: 'drawing',
-          position: item.position,
-          title: item.title ?? 'Untitled drawing',
-          originalFilename: item.imageFilename,
-          description: item.description ?? '',
-          includeInExport: true,
+        this.assertActive(run);
+        const visibleText = await recognisedScreenshotText({
+          includeRecognisedText: this.getIncludeRecognisedText(),
+          annotations,
+          pngDataUrl: loaded.image.dataUrl,
+          screenshotId: screenshot.id,
           nativeWidth: loaded.image.width,
           nativeHeight: loaded.image.height,
-          contentRevision: loaded.contentRevision,
-          sourceFilename,
-        } satisfies PromptDrawingInput);
-        continue;
-      }
-      const screenshot = entry.item as ScreenshotRecord;
-      if (!screenshot.includeInExport) {
+          recognizer: this.bridge.recognizeScreenshotText
+            ? { recognize: (input) => this.bridge.recognizeScreenshotText!(input) }
+            : undefined,
+          signal: ocrController.signal,
+        });
+        this.assertActive(run);
         promptItems.push({
           id: screenshot.id,
           kind: 'screenshot',
           position: screenshot.position,
           title: screenshot.title,
           originalFilename: screenshot.originalFilename,
-          description: screenshot.description,
+          description: loaded.description,
           priority: screenshot.priority,
-          includeInExport: false,
-          nativeWidth: screenshot.originalWidth,
-          nativeHeight: screenshot.originalHeight,
-          contentRevision: 'excluded',
-          annotations: [],
+          includeInExport: true,
+          nativeWidth: loaded.image.width,
+          nativeHeight: loaded.image.height,
+          contentRevision: loaded.contentRevision,
+          annotations,
+          ...(visibleText ? { visibleText } : {}),
         });
-        continue;
       }
-      const loaded = await this.bridge.loadScreenshotContent({
-        projectPath: context.snapshot.projectPath,
-        screenshot: cloneAndFreeze(screenshot) as ScreenshotRecord,
-      });
-      this.assertActive(run);
-      const annotations = cloneAndFreeze(loaded.annotations) as readonly Annotation[];
-      const dimensions = await this.rendering.preflight(loaded.image, annotations, run.controller.signal);
-      this.assertActive(run);
-      measured.push({
-        screenshotId: screenshot.id,
-        width: dimensions.width,
-        height: dimensions.height,
-        estimatedPngCharacters: dimensions.estimatedPngCharacters,
-      });
-      this.assertActive(run);
-      const visibleText = await recognisedScreenshotText({
-        includeRecognisedText: this.getIncludeRecognisedText(),
-        annotations,
-        pngDataUrl: loaded.image.dataUrl,
-        screenshotId: screenshot.id,
-        nativeWidth: loaded.image.width,
-        nativeHeight: loaded.image.height,
-        recognizer: this.bridge.recognizeScreenshotText
-          ? { recognize: (input) => this.bridge.recognizeScreenshotText!(input) }
-          : undefined,
-      });
-      this.assertActive(run);
-      promptItems.push({
-        id: screenshot.id,
-        kind: 'screenshot',
-        position: screenshot.position,
-        title: screenshot.title,
-        originalFilename: screenshot.originalFilename,
-        description: loaded.description,
-        priority: screenshot.priority,
-        includeInExport: true,
-        nativeWidth: loaded.image.width,
-        nativeHeight: loaded.image.height,
-        contentRevision: loaded.contentRevision,
-        annotations,
-        ...(visibleText ? { visibleText } : {}),
-      });
+    } finally {
+      window.clearTimeout(ocrTimeout);
+      run.controller.signal.removeEventListener('abort', cancelOcr);
     }
     const input = cloneAndFreeze({
       collectionId: collection.id,

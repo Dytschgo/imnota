@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { execFile as execFileCallback } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 import {
   decodePngDataUrlForOcr,
@@ -13,6 +16,10 @@ import {
 
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`;
+const READABLE_TEXT_PNG = fileURLToPath(new URL('./fixtures/windows-ocr-readable-text.png', import.meta.url));
+const execFile = promisify(execFileCallback);
+const runWindowsOcrIntegration =
+  process.platform === 'win32' && process.env.IMNOTA_WINDOWS_OCR_INTEGRATION === '1';
 
 function host(overrides: Partial<WindowsOcrHost> = {}): WindowsOcrHost {
   const files = new Map<string, string | Uint8Array>();
@@ -33,6 +40,7 @@ describe('on-device Windows OCR', () => {
   it('uses Windows.Media.Ocr locally, downscales to MaxImageDimension, and bounds Wait', async () => {
     expect(WINDOWS_OCR_SCRIPT).toContain('Windows.Media.Ocr.OcrEngine');
     expect(WINDOWS_OCR_SCRIPT).toContain('MaxImageDimension');
+    expect(WINDOWS_OCR_SCRIPT).toContain('IAsyncOperation`1');
     expect(WINDOWS_OCR_SCRIPT).toContain('$netTask.Wait($timeoutMs)');
     expect(WINDOWS_OCR_SCRIPT).not.toContain('Wait(-1)');
     expect(WINDOWS_OCR_SCRIPT).not.toContain('http');
@@ -93,4 +101,22 @@ describe('on-device Windows OCR', () => {
     expect(cropPng).toHaveBeenCalledWith(PNG_BYTES, { x: 10, y: 20, width: 40, height: 30 });
     expect(writeFile).toHaveBeenCalledWith(expect.stringContaining('source.png'), cropped);
   });
+
+  it.runIf(runWindowsOcrIntegration)(
+    'recognizes readable text through the actual Windows.Media.Ocr engine',
+    async () => {
+      const pngPath = READABLE_TEXT_PNG.replaceAll("'", "''");
+      const script = WINDOWS_OCR_SCRIPT.replace(
+        'param([string]$pngPath, [int]$timeoutMs = 10000)',
+        `$pngPath = '${pngPath}'; $timeoutMs = 10000`,
+      );
+      const { stdout } = await execFile(
+        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script],
+        { encoding: 'utf8', timeout: 20_000, windowsHide: true },
+      );
+      expect(stdout).toMatch(/IMNOTA OCR READY/i);
+    },
+    20_000,
+  );
 });
