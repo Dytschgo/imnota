@@ -42,6 +42,7 @@ export interface PreferenceSettingsUpdate {
   onboarding?: Partial<PreferenceSettings['onboarding']>;
   workbench?: Partial<PreferenceSettings['workbench']>;
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
+  promptExport?: Partial<PreferenceSettings['promptExport']>;
   updates?: Partial<PreferenceSettings['updates']>;
 }
 
@@ -199,6 +200,7 @@ export interface WorkflowBridge {
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
+  recognizeOnDeviceText(input: { pngDataUrl: string }): Promise<WorkflowResult<{ text: string }>>;
   startRegionCapture(input: {
     projectPath: string;
     collectionId: string;

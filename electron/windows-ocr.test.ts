@@ -1,0 +1,69 @@
+// @vitest-environment node
+import { describe, expect, it, vi } from 'vitest';
+import {
+  decodePngDataUrlForOcr,
+  MAX_OCR_PNG_BYTES,
+  recognizeOnDevicePngDataUrl,
+  recognizePngWithWindowsOcr,
+  WINDOWS_OCR_SCRIPT,
+  type WindowsOcrHost,
+} from './windows-ocr.js';
+
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+const PNG_DATA_URL = `data:image/png;base64,${PNG_BYTES.toString('base64')}`;
+
+function host(overrides: Partial<WindowsOcrHost> = {}): WindowsOcrHost {
+  const files = new Map<string, string | Uint8Array>();
+  return {
+    platform: 'win32',
+    powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    mkdtemp: async (prefix) => `${prefix}test`,
+    writeFile: async (filePath, contents) => {
+      files.set(filePath, contents);
+    },
+    rm: async () => undefined,
+    execFile: async () => ({ stdout: 'Submit order\r\n' }),
+    ...overrides,
+  };
+}
+
+describe('on-device Windows OCR', () => {
+  it('uses Windows.Media.Ocr locally and returns recognised text', async () => {
+    expect(WINDOWS_OCR_SCRIPT).toContain('Windows.Media.Ocr.OcrEngine');
+    expect(WINDOWS_OCR_SCRIPT).not.toContain('http');
+    const execFile = vi.fn(async () => ({ stdout: 'Submit order\r\n' }));
+    await expect(recognizePngWithWindowsOcr(PNG_BYTES, host({ execFile }))).resolves.toBe('Submit order');
+    expect(execFile).toHaveBeenCalledWith(
+      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      expect.arrayContaining(['-STA', '-File']),
+      expect.objectContaining({ encoding: 'utf8', windowsHide: true }),
+    );
+  });
+
+  it('returns empty text outside Windows, for invalid images, and when the engine fails', async () => {
+    const execFile = vi.fn(async () => ({ stdout: 'nope' }));
+    await expect(recognizePngWithWindowsOcr(PNG_BYTES, host({ platform: 'linux', execFile }))).resolves.toBe(
+      '',
+    );
+    await expect(recognizePngWithWindowsOcr(Buffer.from('not-png'), host({ execFile }))).resolves.toBe('');
+    await expect(
+      recognizePngWithWindowsOcr(PNG_BYTES, {
+        ...host(),
+        execFile: async () => {
+          throw new Error('powershell missing');
+        },
+      }),
+    ).resolves.toBe('');
+    expect(execFile).not.toHaveBeenCalled();
+    expect(decodePngDataUrlForOcr('data:image/jpeg;base64,AAAA')).toBeUndefined();
+    expect(Buffer.from(decodePngDataUrlForOcr(PNG_DATA_URL) ?? []).equals(PNG_BYTES)).toBe(true);
+    await expect(recognizeOnDevicePngDataUrl(PNG_DATA_URL, host())).resolves.toBe('Submit order');
+  });
+
+  it('skips oversized screenshots without spawning the engine', async () => {
+    const execFile = vi.fn(async () => ({ stdout: 'huge' }));
+    const huge = Buffer.concat([PNG_BYTES, Buffer.alloc(MAX_OCR_PNG_BYTES)]);
+    await expect(recognizePngWithWindowsOcr(huge, host({ execFile }))).resolves.toBe('');
+    expect(execFile).not.toHaveBeenCalled();
+  });
+});

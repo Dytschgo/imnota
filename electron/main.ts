@@ -114,6 +114,7 @@ import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { windowsFileClipboardAvailable } from './windows-clipboard.js';
+import { MAX_OCR_DATA_URL_CHARACTERS, recognizeOnDevicePngDataUrl } from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
@@ -1792,6 +1793,12 @@ function registerIpc(): void {
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return { windowsFileClipboard: windowsFileClipboardAvailable() };
+  });
+  handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
+    const [input] = z
+      .tuple([z.object({ pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS) }).strict()])
+      .parse(args);
+    return { text: await recognizeOnDevicePngDataUrl(input.pngDataUrl) };
   });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z

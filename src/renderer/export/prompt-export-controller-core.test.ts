@@ -87,6 +87,7 @@ interface FakeBridgeOptions {
   /** Clipboard read-back for combined copies; defaults to every format present. */
   placed?: { text: boolean; html: boolean; image: boolean; files: boolean };
   failFinish?: boolean;
+  recognizeScreenshotText?: (input: { pngDataUrl: string; screenshotId: string }) => Promise<string>;
 }
 
 function fakeBridge(options: FakeBridgeOptions = {}) {
@@ -249,6 +250,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
       opens.push(structuredClone(input));
       return ok(undefined);
     },
+    recognizeScreenshotText: options.recognizeScreenshotText,
   };
   return { bridge, starts, writes, copies, opens, finishes, cancellations, loadCounts };
 }
@@ -340,8 +342,9 @@ function engine(
   getSavedContext: () => Promise<SavedPromptExportContext>,
   bridge: PromptBundleControllerBridge,
   rendering: PromptBundleControllerRendering,
+  extra: { getIncludeRecognisedText?: () => boolean } = {},
 ) {
-  return new PromptBundleControllerEngine({ getSavedContext, bridge, rendering });
+  return new PromptBundleControllerEngine({ getSavedContext, bridge, rendering, ...extra });
 }
 
 describe('prompt export controller orchestration', () => {
@@ -387,6 +390,72 @@ describe('prompt export controller orchestration', () => {
     expect(native.finishes[0].masterMarkdown).toContain('Picture 2 — Picture title 2');
     expect(native.finishes[0].masterMarkdown).toContain('Keep the checkout accessible.');
     expect(native.finishes[0].masterMarkdown).not.toContain('opaque-project-grant');
+  });
+
+  test('appends on-device Visible text from an injected recognizer', async () => {
+    const recognizer = vi.fn(async () => 'Submit order');
+    const native = fakeBridge({ recognizeScreenshotText: recognizer });
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    const result = await controller.prepareFreshFiles();
+
+    expect(result.ok).toBe(true);
+    expect(recognizer).toHaveBeenCalledWith({ pngDataUrl: PNG, screenshotId: 'shot-1' });
+    expect(native.writes[0].markdown).toContain('### Visible text\n\nSubmit order\n');
+    expect(native.writes[0].markdown).toContain('Description 1');
+    expect(native.writes[0].markdown.indexOf('Description 1')).toBeLessThan(
+      native.writes[0].markdown.indexOf('### Visible text'),
+    );
+  });
+
+  test('omits Visible text for redacted screenshots and when the recognizer throws', async () => {
+    const redacted = fakeBridge({
+      annotations: {
+        'shot-1': [{ id: 'secret', kind: 'blur', x: 4, y: 4, width: 12, height: 8, zIndex: 0 }],
+      },
+      recognizeScreenshotText: vi.fn(async () => 'secret token'),
+    });
+    const redactedController = engine(
+      async () => savedContext([screenshot(0)]),
+      redacted.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await redactedController.prepareFreshFiles()).ok).toBe(true);
+    expect(redacted.bridge.recognizeScreenshotText).not.toHaveBeenCalled();
+    expect(redacted.writes[0].markdown).not.toContain('### Visible text');
+    expect(redacted.writes[0].markdown).not.toContain('secret token');
+
+    const throwing = fakeBridge({
+      recognizeScreenshotText: vi.fn(async () => {
+        throw new Error('OCR engine failed');
+      }),
+    });
+    const throwingController = engine(
+      async () => savedContext([screenshot(0)]),
+      throwing.bridge,
+      fakeRendering().rendering,
+    );
+    const thrown = await throwingController.prepareFreshFiles();
+    expect(thrown.ok).toBe(true);
+    expect(throwing.writes[0].markdown).not.toContain('### Visible text');
+    expect(throwing.writes[0].markdown).toContain('## Picture 1 — Picture title 1');
+
+    const disabled = fakeBridge({
+      recognizeScreenshotText: vi.fn(async () => 'should not appear'),
+    });
+    const disabledController = engine(
+      async () => savedContext([screenshot(0)]),
+      disabled.bridge,
+      fakeRendering().rendering,
+      { getIncludeRecognisedText: () => false },
+    );
+    expect((await disabledController.prepareFreshFiles()).ok).toBe(true);
+    expect(disabled.bridge.recognizeScreenshotText).not.toHaveBeenCalled();
+    expect(disabled.writes[0].markdown).not.toContain('### Visible text');
   });
 
   test('preserves indented Markdown in master context and descriptions while normalizing line endings', async () => {

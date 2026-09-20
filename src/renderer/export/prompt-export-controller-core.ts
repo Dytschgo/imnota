@@ -1,6 +1,7 @@
 import { orderedCollectionItems, type CollectionContentItem } from '../../shared/markdown';
 import type { TextWidthMeasurer } from '../../shared/annotation-geometry';
 import { EXPORT_SAFETY_MARGIN, expandedExportBounds } from '../../shared/crop';
+import { recognisedScreenshotText } from '../../shared/screenshot-ocr';
 import {
   applyPromptBundleMarkdownIdentity,
   planPromptBundles,
@@ -108,6 +109,7 @@ export interface PromptBundleControllerBridge {
     bundleNumber: number;
     target: 'folder' | 'png' | 'markdown' | 'master';
   }): Promise<WorkflowResult<void>>;
+  recognizeScreenshotText?(input: { pngDataUrl: string; screenshotId: string }): Promise<string>;
 }
 
 export interface PromptPictureResolveResult extends ResolvedPromptPicturePng {
@@ -192,6 +194,7 @@ export interface PromptBundleControllerEngineOptions {
   bridge: PromptBundleControllerBridge;
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
+  getIncludeRecognisedText?(): boolean;
 }
 
 interface PreparedPromptMetadata {
@@ -433,6 +436,7 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
       lines.push(`#### Picture ${pictureNumber} / Note ${note.number}`, '', note.text, '');
     if (included?.marks.length)
       lines.push(`#### Picture ${pictureNumber} / Marks`, '', ...included.marks, '');
+    if (included?.visibleText) lines.push('#### Visible text', '', included.visibleText, '');
   }
   return `${lines.join('\n').replace(/\n+$/g, '')}\n`;
 }
@@ -482,6 +486,7 @@ export class PromptBundleControllerEngine {
   private readonly rendering: PromptBundleControllerRendering;
   private readonly getSavedContext: () => Promise<SavedPromptExportContext>;
   private readonly includeMasterOverview: boolean;
+  private readonly getIncludeRecognisedText: () => boolean;
   private activeRun?: ActiveRun;
   private latestPlan?: PreparedPromptPlan;
   private latestArtifact?: PromptExportArtifact;
@@ -496,6 +501,7 @@ export class PromptBundleControllerEngine {
     this.getSavedContext = options.getSavedContext;
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
+    this.getIncludeRecognisedText = options.getIncludeRecognisedText ?? (() => true);
   }
 
   getState = (): PromptBundleControllerState => this.state;
@@ -762,6 +768,16 @@ export class PromptBundleControllerEngine {
         height: dimensions.height,
         estimatedPngCharacters: dimensions.estimatedPngCharacters,
       });
+      const visibleText = await recognisedScreenshotText({
+        includeRecognisedText: this.getIncludeRecognisedText(),
+        annotations,
+        pngDataUrl: loaded.image.dataUrl,
+        screenshotId: screenshot.id,
+        recognizer: this.bridge.recognizeScreenshotText
+          ? { recognize: (input) => this.bridge.recognizeScreenshotText!(input) }
+          : undefined,
+      });
+      this.assertActive(run);
       promptItems.push({
         id: screenshot.id,
         kind: 'screenshot',
@@ -775,6 +791,7 @@ export class PromptBundleControllerEngine {
         nativeHeight: loaded.image.height,
         contentRevision: loaded.contentRevision,
         annotations,
+        ...(visibleText ? { visibleText } : {}),
       });
     }
     const input = cloneAndFreeze({

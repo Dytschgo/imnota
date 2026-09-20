@@ -19,6 +19,7 @@ export interface UsePromptBundleControllerOptions {
   /** Test seam for deterministic browser-free orchestration tests. */
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
+  getIncludeRecognisedText?(): boolean;
 }
 
 export interface PromptBundleController {
@@ -52,17 +53,33 @@ export interface PromptBundleController {
 }
 
 function browserBridge(): PromptBundleControllerBridge {
-  return window.imnota as unknown as PromptBundleControllerBridge;
+  const imnota = window.imnota;
+  return {
+    ...(imnota as unknown as PromptBundleControllerBridge),
+    async recognizeScreenshotText(input) {
+      if (typeof imnota.recognizeOnDeviceText !== 'function') return '';
+      try {
+        const result = await imnota.recognizeOnDeviceText({ pngDataUrl: input.pngDataUrl });
+        if (!result.ok) return '';
+        return result.value.text;
+      } catch {
+        return '';
+      }
+    },
+  };
 }
 
 export function usePromptBundleController(options: UsePromptBundleControllerOptions): PromptBundleController {
   const getSavedContextRef = useRef(options.getSavedContext);
+  const getIncludeRecognisedTextRef = useRef(options.getIncludeRecognisedText);
   const disposalGeneration = useRef(0);
   getSavedContextRef.current = options.getSavedContext;
+  getIncludeRecognisedTextRef.current = options.getIncludeRecognisedText;
   const engineRef = useRef<PromptBundleControllerEngine | undefined>(undefined);
   if (!engineRef.current) {
     engineRef.current = new PromptBundleControllerEngine({
       getSavedContext: () => getSavedContextRef.current(),
+      getIncludeRecognisedText: () => getIncludeRecognisedTextRef.current?.() ?? true,
       bridge: options.bridge ?? browserBridge(),
       rendering: options.rendering,
       includeMasterOverview: options.includeMasterOverview,

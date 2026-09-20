@@ -362,6 +362,31 @@ describe('prompt bundle planning', () => {
     expect(redacted.bundles[0].markdown).not.toContain('pixelate');
     expect(redacted.bundles[0].markdown).not.toContain('33.0%');
   });
+
+  it('appends Visible text from injected OCR and omits it for redacted screenshots', () => {
+    const result = planPromptBundles(collection([screenshot('first', 0, { visibleText: 'Submit order' })]), [
+      rendered('first'),
+    ]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain('### Visible text\n\nSubmit order\n');
+    expect(result.bundles[0].pictures[0].description).toBe('');
+
+    const redacted = planPromptBundles(
+      collection([
+        screenshot('secret', 0, {
+          visibleText: 'secret token',
+          annotations: [annotation('blur', 'blur', { x: 1, y: 1, width: 8, height: 8 })],
+        }),
+      ]),
+      [rendered('secret')],
+    );
+    expect(redacted.kind).toBe('ready');
+    if (redacted.kind !== 'ready') return;
+    expect(redacted.bundles[0].markdown).not.toContain('### Visible text');
+    expect(redacted.bundles[0].markdown).not.toContain('secret token');
+    expect(redacted.bundles[0].pictures[0].visibleText).toBeUndefined();
+  });
 });
 
 describe('prompt layout', () => {
