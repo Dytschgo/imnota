@@ -1,4 +1,4 @@
-import type { Annotation } from './types';
+import type { Annotation } from './types.js';
 
 export const NOTE_BADGE_GAP = 8;
 export const NOTE_BADGE_HEIGHT = 20;
