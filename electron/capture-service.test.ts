@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import type { NativeImage } from 'electron';
 import { captureCompositePlan, CaptureService, CaptureServiceError } from './capture-service.js';
