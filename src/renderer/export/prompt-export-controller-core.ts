@@ -519,7 +519,7 @@ export class PromptBundleControllerEngine {
 
   private deliveryCompleted(
     bundleNumber: number,
-    outcome: PromptDeliveryOutcome,
+    outcome: PromptDeliveryOutcome | undefined,
     primaryCopy = false,
     warning?: string,
   ): void {
