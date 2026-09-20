@@ -161,6 +161,7 @@ import {
 } from './capture-overlay-placement.js';
 import {
   captureDisplayOptions,
+  captureDisplayMetricsInvalidateSelection,
   captureDisplaysHaveStableGeometry,
   captureDisplayWithStableGeometry,
   selectedCaptureDisplay,
@@ -1089,9 +1090,16 @@ async function chooseCaptureRegion(
     );
   }
   const failForDisplayChange = () => failCaptureOverlay('display-changed');
+  const failForDisplayMetricsChange = (
+    _event: Electron.Event,
+    _display: Electron.Display,
+    changedMetrics: string[],
+  ) => {
+    if (captureDisplayMetricsInvalidateSelection(changedMetrics)) failForDisplayChange();
+  };
   screen.on('display-added', failForDisplayChange);
   screen.on('display-removed', failForDisplayChange);
-  screen.on('display-metrics-changed', failForDisplayChange);
+  screen.on('display-metrics-changed', failForDisplayMetricsChange);
   captureOverlay = {
     overlays,
     session,
@@ -1101,7 +1109,7 @@ async function chooseCaptureRegion(
     disposeDisplayListeners: () => {
       screen.off('display-added', failForDisplayChange);
       screen.off('display-removed', failForDisplayChange);
-      screen.off('display-metrics-changed', failForDisplayChange);
+      screen.off('display-metrics-changed', failForDisplayMetricsChange);
     },
   };
   try {
