@@ -168,6 +168,7 @@ import {
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { CaptureGlobalShortcut, resolveCaptureGlobalShortcut } from './capture-global-shortcut.js';
+import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -221,6 +222,7 @@ const captureGlobalShortcut = new CaptureGlobalShortcut({
   register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
   unregister: (accelerator) => globalShortcut.unregister(accelerator),
 });
+const captureRequests = new CaptureRequestQueue();
 let pendingCapturePng: Buffer | null = null;
 let appTray: Tray | null = null;
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
@@ -233,9 +235,8 @@ function syncCaptureGlobalShortcut(): void {
       experimentalEnabled: preferenceSettingsResult.settings.capture.experimentalRegionCapture,
     }),
     () => {
-      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
       if (captureAdmissionGate.isOccupied()) return;
-      mainWindow.webContents.send('workflow:capture:region-hotkey');
+      requestCapture({ source: 'hotkey' });
     },
   );
 }
@@ -259,19 +260,22 @@ function trayIcon(): Electron.NativeImage {
   return nativeImage.createEmpty();
 }
 
-function requestTrayCapture(mode: CaptureOverlayMode): void {
-  const send = () => {
-    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
-    mainWindow.webContents.send('workflow:capture:tray', { mode });
-  };
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    void createWindow().then(() => {
-      syncCaptureGlobalShortcut();
-      send();
-    });
+function sendCaptureRequest(request: CaptureRequest): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  if (request.source === 'hotkey') mainWindow.webContents.send('workflow:capture:region-hotkey');
+  else mainWindow.webContents.send('workflow:capture:tray', { mode: request.mode });
+}
+
+function requestCapture(request: CaptureRequest): void {
+  const pending = captureRequests.request(request);
+  if (pending) {
+    sendCaptureRequest(pending);
     return;
   }
-  send();
+  if (!mainWindow || mainWindow.isDestroyed())
+    void createWindow()
+      .then(() => syncCaptureGlobalShortcut())
+      .catch(console.error);
 }
 
 function createAppTray(): void {
@@ -284,7 +288,7 @@ function createAppTray(): void {
     Menu.buildFromTemplate(
       captureTrayTemplate({
         windowCapture: process.platform === 'win32',
-        onCapture: requestTrayCapture,
+        onCapture: (mode) => requestCapture({ source: 'tray', mode }),
         onOpen: () => {
           if (!mainWindow || mainWindow.isDestroyed())
             void createWindow().then(() => syncCaptureGlobalShortcut());
@@ -1633,6 +1637,10 @@ function registerIpc(): void {
       }),
     );
   };
+  handleWorkflow('workflow:capture:renderer-ready', (event) => {
+    const request = captureRequests.rendererReady(event.sender);
+    if (request) sendCaptureRequest(request);
+  });
   // Acquire before this request joins the shared IPC queue. Otherwise two rapid
   // toolbar/shortcut invocations can each wait for a previous operation and
   // subsequently create separate overlays.
@@ -3036,7 +3044,8 @@ async function createWindow(): Promise<BrowserWindow> {
   const createdWindow = mainWindow;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
-    if (BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
+    captureRequests.windowClosed(createdWindow.webContents);
+    if (!appTray && BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
   });
   createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);

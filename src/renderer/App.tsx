@@ -1663,13 +1663,13 @@ export default function App() {
       }),
     [],
   );
-  useEffect(
-    () =>
-      window.imnota.onCaptureTray((mode) => {
-        void captureRegionRef.current(mode);
-      }),
-    [],
-  );
+  useEffect(() => {
+    const unsubscribe = window.imnota.onCaptureTray((mode) => {
+      void captureRegionRef.current(mode);
+    });
+    void window.imnota.captureRendererReady();
+    return unsubscribe;
+  }, []);
 
   if (booting || preferences.loading)
     return (

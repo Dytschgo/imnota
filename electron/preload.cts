@@ -12,6 +12,7 @@ const bridge: ImnotaBridge = {
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
   commitBufferedCapture: (input) => ipcRenderer.invoke('workflow:capture:commit-buffered', input),
   discardBufferedCapture: () => ipcRenderer.invoke('workflow:capture:discard-buffered'),
+  captureRendererReady: () => ipcRenderer.invoke('workflow:capture:renderer-ready'),
   onRegionCaptureHotkey: (handler) => {
     const listener = () => handler();
     ipcRenderer.on('workflow:capture:region-hotkey', listener);

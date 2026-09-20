@@ -216,6 +216,7 @@ export interface WorkflowBridge {
     collectionId: string;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  captureRendererReady(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
   onCaptureTray(handler: (mode: 'region' | 'window' | 'display') => void): () => void;
 
