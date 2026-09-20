@@ -7,7 +7,9 @@ describe('capture admission gate', () => {
     const first = gate.acquire();
     expect(first).not.toBeNull();
     expect(gate.acquire()).toBeNull();
+    expect(gate.isOccupied()).toBe(true);
     gate.release(first!);
+    expect(gate.isOccupied()).toBe(false);
     expect(gate.acquire()).not.toBeNull();
   });
 

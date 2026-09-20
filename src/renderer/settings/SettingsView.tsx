@@ -175,7 +175,7 @@ export function SettingsView({
                 <small data-testid="capture-shortcut-summary">
                   Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
                   {captureShortcut
-                    ? ' while Imnota is focused. Change it under Screenshots above.'
+                    ? ' even when Imnota is in the background. Change it under Screenshots above.'
                     : '. The toolbar camera button and the Add menu still work.'}
                   {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>

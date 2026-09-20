@@ -202,11 +202,17 @@ export interface WorkflowBridge {
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
-    projectPath: string;
-    collectionId: string;
+    projectPath?: string;
+    collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
+  commitBufferedCapture(input: {
+    projectPath: string;
+    collectionId: string;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  onRegionCaptureHotkey(handler: () => void): () => void;
 
   startPromptExport(input: {
     projectPath: string;
