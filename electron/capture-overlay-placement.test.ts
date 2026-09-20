@@ -14,6 +14,17 @@ describe('capture overlay placement', () => {
     });
   });
 
+  it('places a left-of-primary 125% display at its DIP origin instead of the primary', () => {
+    const left = { x: -3072, y: -216, width: 3072, height: 1728 };
+    expect(captureOverlayWindowOptions(left, 'win32')).toEqual({
+      ...left,
+      fullscreen: false,
+      fullscreenable: false,
+      simpleFullscreen: false,
+      roundedCorners: false,
+    });
+  });
+
   it('keeps macOS simple fullscreen on the captured display', () => {
     expect(captureOverlayWindowOptions(secondary, 'darwin')).toEqual({
       ...secondary,

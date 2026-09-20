@@ -19,6 +19,16 @@ describe('capture rectangle mapping', () => {
     ).toEqual({ x: 180, y: 90, width: 540, height: 360 });
   });
 
+  it('maps a 150% DIP selection through the selected display thumbnail', () => {
+    expect(
+      captureRectangleToImagePixels(
+        { x: 80, y: 40, width: 200, height: 100 },
+        { width: 1280, height: 720 },
+        { width: 1920, height: 1080 },
+      ),
+    ).toEqual({ x: 120, y: 60, width: 300, height: 150 });
+  });
+
   it('clamps a partly outside selection and rejects an empty one', () => {
     expect(
       normalizeCaptureRectangle({ x: -10, y: 10, width: 30, height: 10 }, { width: 100, height: 50 }),
