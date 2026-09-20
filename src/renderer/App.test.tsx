@@ -1208,6 +1208,62 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
+  it('keeps capture disabled until the native snapshot and project refresh are accepted', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let holdRefresh = false;
+    let releaseProjects!: (projects: never[]) => void;
+    const listProjects = vi.fn(() =>
+      holdRefresh ? new Promise<never[]>((resolve) => (releaseProjects = resolve)) : Promise.resolve([]),
+    );
+    const repeatLastRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    let resolveCapture!: (value: unknown) => void;
+    const startRegionCapture = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    const { editingSnapshot } = await renderEditingProject({
+      listProjects,
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: startRegionCapture as never,
+      repeatLastRegionCapture: repeatLastRegionCapture as never,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
+    const progress = screen.getByRole('button', { name: 'Capture in progress…' });
+    expect(progress).toBeDisabled();
+    expect(progress).toHaveAttribute('aria-busy', 'true');
+
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    expect(repeatLastRegionCapture).not.toHaveBeenCalled();
+
+    holdRefresh = true;
+    await act(async () =>
+      resolveCapture({ ok: true, value: { snapshot: editingSnapshot, screenshotId: 'shot' } }),
+    );
+    await waitFor(() => expect(releaseProjects).toBeTypeOf('function'));
+    expect(screen.getByRole('button', { name: 'Capture in progress…' })).toBeDisabled();
+    await act(async () => releaseProjects([]));
+    const ready = await screen.findByRole('button', { name: /Capture screen region/ });
+    expect(ready).toBeEnabled();
+    expect(ready).not.toHaveAttribute('aria-busy');
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledOnce());
+  });
+
   it('chooses an exact Windows display before toolbar capture', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({

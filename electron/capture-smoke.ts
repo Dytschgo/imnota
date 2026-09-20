@@ -308,6 +308,7 @@ export async function exerciseRegionCapture(
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+  await driver.waitFor({ selector: 'button[aria-label^="Capture screen region"]:not(:disabled)' });
 
   // Full-display capture must not replace the remembered region. Repeat uses the
   // same source pixels and crop through the normal renderer/native IPC path.

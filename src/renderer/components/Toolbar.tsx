@@ -350,6 +350,7 @@ export interface ToolbarProps {
   onActualSize?: () => void;
   onCapture?: () => void;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
   /** Enables the compact quick palette when supplied. */
@@ -370,6 +371,7 @@ export function Toolbar({
   onActualSize,
   onCapture,
   captureEnabled = false,
+  captureInProgress = false,
   captureShortcut,
   captureDisabledLabel = 'Screen capture is experimental — enable it in Settings',
   onColorSelect,
@@ -614,11 +616,14 @@ export function Toolbar({
         {onCapture && (
           <IconButton
             label={
-              captureEnabled
-                ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
-                : captureDisabledLabel
+              captureInProgress
+                ? 'Capture in progress…'
+                : captureEnabled
+                  ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                  : captureDisabledLabel
             }
-            disabled={!captureEnabled}
+            disabled={!captureEnabled || captureInProgress}
+            aria-busy={captureInProgress || undefined}
             onClick={onCapture}
           >
             <Camera size={17} />

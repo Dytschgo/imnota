@@ -125,6 +125,7 @@ export default function App() {
     query: string;
   } | null>(null);
   const captureBusyRef = useRef(false);
+  const [capturing, setCapturing] = useState(false);
   const captureDisplayResolver = useRef<((displayId: number | null) => void) | null>(null);
   const [captureDisplayChoices, setCaptureDisplayChoices] = useState<readonly CaptureDisplayOption[] | null>(
     null,
@@ -819,6 +820,7 @@ export default function App() {
   async function captureRegion(repeatLast = false) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
+    setCapturing(true);
     let nativeMutationToken: number | null = null;
     const current = useAppStore.getState();
     try {
@@ -909,6 +911,7 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
     } finally {
       captureBusyRef.current = false;
+      setCapturing(false);
     }
   }
   async function selectShot(id: string) {
@@ -1882,6 +1885,7 @@ export default function App() {
             onCapture={captureEnabled ? () => void captureRegion() : undefined}
             capturePrimary={platform === 'windows'}
             captureEnabled={captureEnabled}
+            captureInProgress={capturing}
             captureShortcut={
               resolvedShortcuts['capture.region'] ? shortcutLabel('capture.region') : undefined
             }

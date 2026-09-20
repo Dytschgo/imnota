@@ -42,6 +42,7 @@ export interface CollectionRailProps {
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
   capturePrimary?: boolean;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureDisabledLabel?: string;
 }
 
@@ -355,6 +356,7 @@ export function CollectionRail({
   onCapture,
   capturePrimary = false,
   captureEnabled = false,
+  captureInProgress = false,
   captureDisabledLabel,
 }: CollectionRailProps) {
   const store = useAppStore();
@@ -394,7 +396,7 @@ export function CollectionRail({
               : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
             icon: Camera,
             run: onCapture,
-            disabled: !captureEnabled,
+            disabled: !captureEnabled || captureInProgress,
           },
         ]
       : []),
@@ -668,7 +670,8 @@ export function CollectionRail({
                 <div className="add-item-primary">
                   <Button
                     variant="primary"
-                    disabled={collection?.archived}
+                    disabled={collection?.archived || (captureIsPrimary && captureInProgress)}
+                    aria-busy={captureIsPrimary && captureInProgress ? true : undefined}
                     data-testid="add-screenshot"
                     title={
                       collection?.archived
