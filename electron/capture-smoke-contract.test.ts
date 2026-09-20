@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { CaptureDisplay } from '../src/shared/capture.js';
 import { planCrossDisplaySmokeSelection, syntheticCaptureColor } from './capture-smoke-contract.js';

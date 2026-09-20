@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { orderedCollectionItems, type DrawingRecord, type TextBlockRecord } from '../content-items.js';
 import { validateProject } from '../schema.js';
