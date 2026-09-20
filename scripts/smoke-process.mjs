@@ -28,10 +28,15 @@ export function isStrictChild(parent, target) {
   return difference !== '' && !difference.startsWith('..') && !isAbsolute(difference);
 }
 
-export function nativeVerificationEnvironment(inherited) {
+export function nativeVerificationEnvironment(inherited, platform = process.platform) {
   const environment = { ...inherited };
   delete environment.ELECTRON_RUN_AS_NODE;
   delete environment.VITE_DEV_SERVER_URL;
+  if (inherited.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only')
+    delete environment.IMNOTA_SMOKE_CAPTURE_SOURCE;
+  else if (platform === 'win32' || platform === 'darwin')
+    environment.IMNOTA_SMOKE_CAPTURE_SOURCE = 'synthetic';
+  else delete environment.IMNOTA_SMOKE_CAPTURE_SOURCE;
   return environment;
 }
 
