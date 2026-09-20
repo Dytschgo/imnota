@@ -350,8 +350,10 @@ describe('prompt export controller orchestration', () => {
     const annotations: Record<string, Annotation[]> = {
       'shot-1': [
         { id: 'first', kind: 'text', x: 0, y: 0, text: 'First note', zIndex: 99 },
-        { id: 'shape', kind: 'rectangle', x: 0, y: 0, zIndex: 2 },
+        { id: 'shape', kind: 'rectangle', x: 10, y: 8, width: 20, height: 16, zIndex: 2 },
         { id: 'blank', kind: 'text', x: 0, y: 0, text: '   ', zIndex: 1 },
+        { id: 'a1', kind: 'arrow', x: 12, y: 32, points: [0, 0, 38, 8], zIndex: 3 },
+        { id: 's2', kind: 'step', x: 70, y: 40, stepNumber: 1, zIndex: 4 },
         { id: 'second', kind: 'callout', x: 0, y: 0, text: 'Second note', zIndex: 0 },
       ],
     };
@@ -368,6 +370,17 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown).toContain('Picture 2 was intentionally excluded');
     expect(native.writes[0].markdown.indexOf('Picture 1 / Note 1')).toBeLessThan(
       native.writes[0].markdown.indexOf('Picture 1 / Note 2'),
+    );
+    expect(native.writes[0].markdown).toContain(
+      [
+        '### Picture 1 / Marks',
+        '',
+        '- text `first` note 1 at 0.0%,0.0% 0.0%×0.0%',
+        '- rectangle `shape` at 10.0%,10.0% 20.0%×20.0%',
+        '- arrow `a1` from 12.0%,40.0% to 50.0%,50.0%',
+        '- step `s2` number 1 at 70.0%,50.0%',
+        '- callout `second` note 2 at 0.0%,0.0% 0.0%×0.0%',
+      ].join('\n'),
     );
     expect(native.writes[0].markdown).not.toContain('Note 3');
     expect(native.writes[0].markdown).not.toContain('opaque-project-grant');

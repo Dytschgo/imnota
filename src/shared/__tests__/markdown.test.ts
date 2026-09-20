@@ -197,4 +197,33 @@ describe('collection Markdown generation', () => {
     expect(redactionOnly).not.toContain('/ Marks');
     expect(redactionOnly).not.toContain('33.0%');
   });
+
+  it('lists remaining visual kinds, negative box bounds, and PNG arrow-point fallbacks', () => {
+    const project = emptyProject('Review', '');
+    project.screenshots = [screenshot('first', 0)];
+    const markdown = generateMarkdown(project, '001-collection', {
+      first: [
+        { id: 'ln', kind: 'line', x: 10, y: 20, points: [0, 0, 40, 10], zIndex: 0 },
+        { id: 'rr', kind: 'rounded-rectangle', x: 50, y: 10, width: 20, height: 10, zIndex: 1 },
+        { id: 'el', kind: 'ellipse', x: 5, y: 5, width: 10, height: 20, zIndex: 2 },
+        { id: 'hi', kind: 'highlight', x: 0, y: 80, width: 100, height: 10, zIndex: 3 },
+        { id: 'pen', kind: 'pen', x: 20, y: 30, points: [0, 0, 10, -5, 15, 20], zIndex: 4 },
+        { id: 'neg', kind: 'rectangle', x: 80, y: 40, width: -30, height: 20, zIndex: 5 },
+        { id: 'a0', kind: 'arrow', x: 0, y: 0, zIndex: 6 },
+      ],
+    });
+    expect(markdown).toContain(
+      [
+        '### Picture 1 / Marks',
+        '',
+        '- line `ln` from 10.0%,20.0% to 50.0%,30.0%',
+        '- rounded-rectangle `rr` at 50.0%,10.0% 20.0%×10.0%',
+        '- ellipse `el` at 5.0%,5.0% 10.0%×20.0%',
+        '- highlight `hi` at 0.0%,80.0% 100.0%×10.0%',
+        '- pen `pen` at 20.0%,25.0% 15.0%×25.0%',
+        '- rectangle `neg` at 50.0%,40.0% 30.0%×20.0%',
+        '- arrow `a0` from 0.0%,0.0% to 10.0%,10.0%',
+      ].join('\n'),
+    );
+  });
 });
