@@ -60,15 +60,6 @@ export class CaptureDelaySession {
   }
 }
 
-/** Starts overlay/file work only after the delay elapses without cancellation. */
-export async function completeDelayedCaptureStart<T>(
-  session: Pick<CaptureDelaySession, 'result'>,
-  afterDelay: () => Promise<T>,
-): Promise<{ kind: 'cancelled' } | { kind: 'completed'; value: T }> {
-  if ((await session.result) === 'cancelled') return { kind: 'cancelled' };
-  return { kind: 'completed', value: await afterDelay() };
-}
-
 export function bindCaptureDelayCancel(
   register: (accelerator: string, callback: () => void) => boolean,
   unregister: (accelerator: string) => void,

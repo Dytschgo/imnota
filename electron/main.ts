@@ -913,10 +913,18 @@ function cancelCaptureDelay(): void {
   captureDelaySession?.cancel();
 }
 
-function closeCaptureDelayHud(): void {
+async function closeCaptureDelayHud(): Promise<void> {
   const hud = captureDelayHud;
   captureDelayHud = null;
-  if (hud && !hud.isDestroyed()) hud.close();
+  if (!hud || hud.isDestroyed()) return;
+  await new Promise<void>((resolve) => {
+    if (hud.isDestroyed()) {
+      resolve();
+      return;
+    }
+    hud.once('closed', () => resolve());
+    hud.close();
+  });
 }
 
 function isCaptureDelayHudSender(event: IpcMainInvokeEvent): boolean {
@@ -929,7 +937,7 @@ function isCaptureDelayHudSender(event: IpcMainInvokeEvent): boolean {
 }
 
 async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<BrowserWindow | null> {
-  closeCaptureDelayHud();
+  await closeCaptureDelayHud();
   try {
     const placement = captureDelayHudWindowOptions(displayBounds);
     const window = new BrowserWindow({
@@ -970,7 +978,7 @@ async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<Bro
     window.showInactive();
     return window;
   } catch {
-    closeCaptureDelayHud();
+    await closeCaptureDelayHud();
     return null;
   }
 }
@@ -1959,18 +1967,14 @@ function registerIpc(): void {
       // be present in the image. Hiding the main window prevents self-capture.
       if (wasVisible) mainWindow?.hide();
       if (input.delaySeconds) {
-        const hud = await openCaptureDelayHud({
-          x: selectedDisplay.bounds.x,
-          y: selectedDisplay.bounds.y,
-          width: selectedDisplay.bounds.width,
-          height: selectedDisplay.bounds.height,
-        });
-        const delay = new CaptureDelaySession(input.delaySeconds, undefined, (remainingSeconds) => {
-          if (hud && !hud.isDestroyed())
-            hud.webContents.send('capture-overlay:countdown', { remainingSeconds });
-        });
+        let remainingSeconds: number = input.delaySeconds;
+        const sendTick = (seconds: number) => {
+          remainingSeconds = seconds;
+          if (captureDelayHud && !captureDelayHud.isDestroyed())
+            captureDelayHud.webContents.send('capture-overlay:countdown', { remainingSeconds: seconds });
+        };
+        const delay = new CaptureDelaySession(input.delaySeconds, undefined, sendTick);
         captureDelaySession = delay;
-        hud?.once('closed', () => delay.cancel());
         const unbindDelayCancel = bindCaptureDelayCancel(
           (accelerator, callback) => globalShortcut.register(accelerator, callback),
           (accelerator) => {
@@ -1978,6 +1982,19 @@ function registerIpc(): void {
           },
           () => delay.cancel(),
         );
+        void openCaptureDelayHud({
+          x: selectedDisplay.bounds.x,
+          y: selectedDisplay.bounds.y,
+          width: selectedDisplay.bounds.width,
+          height: selectedDisplay.bounds.height,
+        })
+          .then((hud) => {
+            if (hud && !hud.isDestroyed()) {
+              hud.once('closed', () => delay.cancel());
+              sendTick(remainingSeconds);
+            }
+          })
+          .catch(() => undefined);
         try {
           if (!captureAdmissionGate.isActive(admission)) delay.cancel();
           if ((await delay.result) === 'cancelled')
@@ -1985,7 +2002,7 @@ function registerIpc(): void {
         } finally {
           unbindDelayCancel();
           if (captureDelaySession === delay) captureDelaySession = null;
-          closeCaptureDelayHud();
+          await closeCaptureDelayHud();
         }
         assertLiveCaptureAdmission(event, admission);
       }

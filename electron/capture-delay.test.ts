@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  bindCaptureDelayCancel,
-  CaptureDelaySession,
-  completeDelayedCaptureStart,
-  type CaptureDelayTimer,
-} from './capture-delay.js';
+import { bindCaptureDelayCancel, CaptureDelaySession, type CaptureDelayTimer } from './capture-delay.js';
 
 function manualTimer() {
   const scheduled: Array<{ at: number; callback: () => void; id: number }> = [];
@@ -72,22 +67,13 @@ describe('capture delay', () => {
     await expect(session.result).resolves.toBe('elapsed');
   });
 
-  it('keeps cancellation from opening an overlay or writing files', async () => {
+  it('keeps cancellation from becoming a late elapsed overlay start', async () => {
     const clock = manualTimer();
     const session = new CaptureDelaySession(3, clock.timer);
-    const openOverlay = vi.fn(async () => 'overlay');
-    const writeFile = vi.fn(async () => 'file');
     clock.advance(1000);
     expect(session.cancel()).toBe(true);
     clock.advance(2000);
-    const outcome = await completeDelayedCaptureStart(session, async () => {
-      await openOverlay();
-      await writeFile();
-      return 'saved';
-    });
-    expect(outcome).toEqual({ kind: 'cancelled' });
-    expect(openOverlay).not.toHaveBeenCalled();
-    expect(writeFile).not.toHaveBeenCalled();
+    await expect(session.result).resolves.toBe('cancelled');
     expect(clock.pending).toBe(0);
     expect(session.cancel()).toBe(false);
   });
@@ -95,12 +81,14 @@ describe('capture delay', () => {
   it('starts overlay work only after the delay elapses', async () => {
     const clock = manualTimer();
     const session = new CaptureDelaySession(5, clock.timer);
-    const afterDelay = vi.fn(async () => 'captured');
-    const pending = completeDelayedCaptureStart(session, afterDelay);
+    const afterDelay = vi.fn();
+    const pending = session.result.then((outcome) => {
+      if (outcome === 'elapsed') afterDelay();
+    });
     clock.advance(4000);
     expect(afterDelay).not.toHaveBeenCalled();
     clock.advance(1000);
-    await expect(pending).resolves.toEqual({ kind: 'completed', value: 'captured' });
+    await pending;
     expect(afterDelay).toHaveBeenCalledOnce();
   });
 
