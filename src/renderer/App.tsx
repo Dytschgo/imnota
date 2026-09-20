@@ -98,6 +98,8 @@ export default function App() {
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
+  const lastAnnotateTool = useRef<ToolChoice>('select');
+  const pendingOverlayAction = useRef<'save' | 'annotate'>('save');
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [history, setHistory] = useState<Annotation[][]>([]);
@@ -870,11 +872,13 @@ export default function App() {
     snapshot: ProjectSnapshot,
     screenshotId: string,
     nativeMutationToken: number,
+    overlayAction: 'save' | 'annotate' = 'save',
   ): Promise<boolean> {
     const accepted = await persistence.acceptMutationSnapshot(snapshot, screenshotId, nativeMutationToken);
     if (!accepted) return false;
     await refreshProjects();
-    showToast('Screen capture added');
+    showToast(overlayAction === 'annotate' ? 'Screen capture added — annotate' : 'Screen capture added');
+    if (overlayAction === 'annotate') setTool(lastAnnotateTool.current);
     window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());
     return true;
   }
@@ -905,7 +909,12 @@ export default function App() {
     const nativeMutationToken = persistence.beginNativeMutation();
     try {
       const committed = workflowValue(await window.imnota.commitBufferedCapture(destination));
-      await finishCapturedScreenshot(committed.snapshot, committed.screenshotId, nativeMutationToken);
+      await finishCapturedScreenshot(
+        committed.snapshot,
+        committed.screenshotId,
+        nativeMutationToken,
+        pendingOverlayAction.current,
+      );
     } catch (reason) {
       await persistence.cancelNativeMutation(nativeMutationToken);
       throw reason;
@@ -978,6 +987,7 @@ export default function App() {
           }),
         );
         if ('buffered' in result) {
+          pendingOverlayAction.current = result.overlayAction;
           await persistence.cancelNativeMutation(nativeMutationToken);
           nativeMutationToken = null;
           await settleBufferedCapture();
@@ -987,6 +997,7 @@ export default function App() {
           result.snapshot,
           result.screenshotId,
           nativeMutationToken,
+          result.overlayAction,
         );
         nativeMutationToken = null;
         if (!accepted) return;
@@ -994,6 +1005,7 @@ export default function App() {
       }
       const result = workflowValue(await window.imnota.startRegionCapture({ displayId }));
       if (!('buffered' in result)) return;
+      pendingOverlayAction.current = result.overlayAction;
       await settleBufferedCapture();
     } catch (reason) {
       if (nativeMutationToken !== null) {
@@ -1954,7 +1966,10 @@ export default function App() {
               fit: shortcutLabel('canvas.fit'),
               actualSize: shortcutLabel('canvas.actualSize'),
             }}
-            onTool={setTool}
+            onTool={(next) => {
+              setTool(next);
+              if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
+            }}
             onColor={(color) => {
               setToolColors((current) => ({
                 ...current,

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('imnotaCapture', {
     ipcRenderer.send('capture-overlay:pointer', update),
   setMode: (mode: CaptureOverlayMode) => ipcRenderer.send('capture-overlay:mode', mode),
   save: () => ipcRenderer.invoke('capture-overlay:save'),
+  annotate: () => ipcRenderer.invoke('capture-overlay:annotate'),
+  copy: () => ipcRenderer.invoke('capture-overlay:copy') as Promise<{ image: boolean }>,
   cancel: () => ipcRenderer.invoke('capture-overlay:cancel'),
   onPayload: (
     handler: (payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void,

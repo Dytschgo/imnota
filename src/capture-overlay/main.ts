@@ -17,6 +17,8 @@ declare global {
       pointer(update: { phase: 'begin' | 'move' | 'end' | 'reset'; point?: { x: number; y: number } }): void;
       setMode(mode: CaptureOverlayMode): void;
       save(): Promise<void>;
+      annotate(): Promise<void>;
+      copy(): Promise<{ image: boolean }>;
       cancel(): Promise<void>;
       onPayload(
         handler: (payload: {
@@ -31,9 +33,10 @@ declare global {
 }
 
 const root = document.querySelector<HTMLDivElement>('#root')!;
-root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
+root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
 
 const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
+const freezeFrame = root.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
 const selectionElement = root.querySelector<HTMLElement>('.capture-selection')!;
 const actions = root.querySelector<HTMLElement>('.capture-actions')!;
 const instruction = root.querySelector<HTMLElement>('.capture-instruction')!;
@@ -153,6 +156,19 @@ root.querySelector<HTMLButtonElement>('[data-action="save"]')!.addEventListener(
     saving = false;
   });
 });
+root.querySelector<HTMLButtonElement>('[data-action="annotate"]')!.addEventListener('click', () => {
+  if (!completedSelection || saving) return;
+  saving = true;
+  void window.imnotaCapture.annotate().catch(() => {
+    saving = false;
+  });
+});
+root.querySelector<HTMLButtonElement>('[data-action="copy"]')!.addEventListener('click', () => {
+  if (!completedSelection || saving) return;
+  void window.imnotaCapture.copy().then((report) => {
+    dimensions.textContent = report.image ? 'Image copied' : 'Image was not kept on the clipboard';
+  });
+});
 for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]')) {
   button.addEventListener('click', () => {
     const next = button.dataset.mode;
@@ -163,9 +179,30 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') void window.imnotaCapture.cancel();
 });
 window.imnotaCapture.onSelection(draw);
+
+function presentCapturedStill(imageDataUrl: string): void {
+  let settled = false;
+  const succeed = () => {
+    if (settled) return;
+    settled = true;
+    freezeFrame.removeEventListener('load', succeed);
+    freezeFrame.removeEventListener('error', fail);
+    void window.imnotaCapture.ready();
+  };
+  const fail = () => {
+    if (settled) return;
+    settled = true;
+    freezeFrame.removeEventListener('load', succeed);
+    freezeFrame.removeEventListener('error', fail);
+  };
+  freezeFrame.addEventListener('load', succeed);
+  freezeFrame.addEventListener('error', fail);
+  freezeFrame.src = imageDataUrl;
+  if (freezeFrame.complete && freezeFrame.naturalWidth > 0) succeed();
+}
+
 window.imnotaCapture.onPayload((payload) => {
   displayId = payload.displayId;
   displayBounds = payload.displayBounds;
-  surface.style.backgroundImage = `url("${payload.imageDataUrl}")`;
-  void window.imnotaCapture.ready();
+  presentCapturedStill(payload.imageDataUrl);
 });

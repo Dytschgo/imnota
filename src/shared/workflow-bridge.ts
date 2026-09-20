@@ -209,11 +209,16 @@ export interface WorkflowBridge {
     collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
+  }): Promise<
+    WorkflowResult<
+      | { snapshot: ProjectSnapshot; screenshotId: string; overlayAction: 'save' | 'annotate' }
+      | { buffered: true; overlayAction: 'save' | 'annotate' }
+    >
+  >;
   commitBufferedCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
 

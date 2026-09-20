@@ -35,6 +35,8 @@ function selectionState(
   };
 }
 
+const STILL = 'data:image/png;base64,cG5n';
+
 async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, height: 600 }) {
   let payloadHandler:
     | ((payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void)
@@ -54,7 +56,7 @@ async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, he
   surface.setPointerCapture = vi.fn();
   surface.hasPointerCapture = () => true;
   surface.releasePointerCapture = vi.fn();
-  payloadHandler!({ displayId, displayBounds, imageDataUrl: 'data:image/png;base64,cG5n' });
+  payloadHandler!({ displayId, displayBounds, imageDataUrl: STILL });
   return { surface, selectionHandler: selectionHandler! };
 }
 
@@ -66,10 +68,30 @@ beforeEach(() => {
     pointer: vi.fn(),
     setMode: vi.fn(),
     save: vi.fn(async () => {}),
+    annotate: vi.fn(async () => {}),
+    copy: vi.fn(async () => ({ image: true })),
     cancel: vi.fn(async () => {}),
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
   };
+});
+
+it('paints the captured still and only then marks the overlay ready', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  expect(still.getAttribute('src')).toBe(STILL);
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).toHaveBeenCalledOnce();
+});
+
+it('does not become ready when the captured still fails to load', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  still.dispatchEvent(new Event('error'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
 });
 
 it('reports uncapped pointer-capture coordinates for a cross-monitor reverse drag', async () => {
@@ -123,6 +145,23 @@ it('draws only this display intersection and saves the coordinated selection onc
   button.click();
   expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
   expect(window.imnotaCapture.save).toHaveBeenCalledWith();
+});
+
+it('copies the image without saving and can annotate instead of save', async () => {
+  const { selectionHandler } = await setup(2, { x: 0, y: 0, width: 800, height: 600 });
+  selectionHandler(
+    selectionState({
+      selection: { x: 10, y: 10, width: 40, height: 40 },
+      complete: true,
+      actionsDisplayId: 2,
+    }),
+  );
+  document.querySelector<HTMLButtonElement>('[data-action=copy]')!.click();
+  await Promise.resolve();
+  expect(window.imnotaCapture.copy).toHaveBeenCalledOnce();
+  expect(window.imnotaCapture.save).not.toHaveBeenCalled();
+  document.querySelector<HTMLButtonElement>('[data-action=annotate]')!.click();
+  expect(window.imnotaCapture.annotate).toHaveBeenCalledOnce();
 });
 
 it('retake clears every overlay through the coordinator and cancellation remains global', async () => {
