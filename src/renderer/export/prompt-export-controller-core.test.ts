@@ -612,11 +612,39 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
       outcome: 'markdown',
-      warning: expect.stringContaining('Copy image'),
+      warning: expect.stringMatching(/Image was not confirmed.*Copy PNG or Open files/),
     });
     const image = await controller.copyImage(controller.getState().cards[0]);
     expect(image.ok).toBe(true);
     expect(controller.getState().cards[0]).toMatchObject({ outcome: 'image', warning: undefined });
+  });
+
+  test('reports image-only Windows retention without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: true, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      outcome: 'image',
+      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown or Open files/),
+    });
+  });
+
+  test('reports an unverified clipboard read-back without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: false, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      outcome: 'files',
+      warning: expect.stringMatching(
+        /Markdown and image were not confirmed.*Copy Markdown, Copy PNG, or Open files/,
+      ),
+    });
   });
 
   test('exposes same-session fallbacks when combined clipboard copy fails', async () => {

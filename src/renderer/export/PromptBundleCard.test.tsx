@@ -348,3 +348,29 @@ it('identifies prepared formats and exposes generated filenames and path copying
     expect.objectContaining({ artifactSessionId: 'session-current', bundleNumber: 2 }),
   );
 });
+
+it('does not claim Markdown + image prepared when only one format is confirmed', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({
+        outcome: 'markdown',
+        warning:
+          'Markdown and HTML were confirmed on the clipboard. Image was not confirmed. Use Copy PNG or Open files.',
+      })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyMarkdown={vi.fn()}
+      onCopyImage={vi.fn()}
+      onOpenFiles={vi.fn()}
+      onCopyPaths={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Markdown copied');
+  expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
+  expect(screen.getByText(/Image was not confirmed/)).toBeInTheDocument();
+  expect(screen.getByText(/Copy PNG or Open files/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /markdown only/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /image only/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /^open files$/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /file paths/i })).toBeEnabled();
+});

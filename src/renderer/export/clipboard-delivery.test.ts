@@ -35,9 +35,36 @@ describe('clipboard variant reporting', () => {
   it('points partial rich copies at exact separate fallbacks', () => {
     expect(
       describeCopyDelivery('rich', { text: true, html: true, image: false, files: false }, true),
-    ).toMatchObject({ outcome: 'markdown', warning: expect.stringContaining('Copy image only') });
+    ).toMatchObject({
+      outcome: 'markdown',
+      warning: expect.stringMatching(/Image was not confirmed.*Copy PNG or Open files/i),
+    });
     expect(
       describeCopyDelivery('rich', { text: false, html: false, image: true, files: false }, true),
-    ).toMatchObject({ outcome: 'image', warning: expect.stringContaining('Copy Markdown only') });
+    ).toMatchObject({
+      outcome: 'image',
+      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown or Open files/i),
+    });
+    expect(
+      describeCopyDelivery('rich', { text: false, html: false, image: false, files: false }, true),
+    ).toMatchObject({
+      outcome: 'files',
+      warning: expect.stringMatching(
+        /Markdown and image were not confirmed.*Copy Markdown, Copy PNG, or Open files/,
+      ),
+    });
+  });
+
+  it('does not claim Markdown + image when read-back fails', () => {
+    expect(describeCopyDelivery('rich', undefined, true)).toMatchObject({
+      outcome: 'files',
+      warning: expect.stringMatching(/could not be confirmed.*Copy Markdown, Copy PNG, or Open files/),
+    });
+    expect(describeCopyMessage('rich', { text: true, html: true, image: false, files: false })).toMatch(
+      /Image was not confirmed/i,
+    );
+    expect(describeCopyMessage('rich', { text: false, html: false, image: true, files: false })).toMatch(
+      /Markdown was not confirmed/i,
+    );
   });
 });
