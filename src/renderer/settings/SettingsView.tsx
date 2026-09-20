@@ -98,9 +98,9 @@ export function SettingsView({
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
   const shortcutPlatform = detectShortcutPlatform();
-  const captureShortcut = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform)[
-    'capture.region'
-  ];
+  const shortcutBindings = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform);
+  const captureShortcut = shortcutBindings['capture.region'];
+  const repeatLastShortcut = shortcutBindings['capture.repeatLastRegion'];
   const captureShortcutNote = captureShortcut
     ? describeCommonShortcut(captureShortcut, shortcutPlatform)
     : null;
@@ -173,10 +173,30 @@ export function SettingsView({
                   display; macOS uses the display under the pointer.
                 </small>
                 <small data-testid="capture-shortcut-summary">
-                  Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
-                  {captureShortcut
-                    ? ' while Imnota is focused. Change it under Screenshots above.'
-                    : '. The toolbar camera button and the Add menu still work.'}
+                  {captureShortcut ? (
+                    <>
+                      Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd> captures a
+                      region
+                      {repeatLastShortcut ? (
+                        <>
+                          ; <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> recaptures the
+                          last region from this session
+                        </>
+                      ) : null}
+                      . Change these under Screenshots above while Imnota is focused.
+                    </>
+                  ) : (
+                    <>
+                      Shortcut: not set. The toolbar camera button and the Add menu still work.
+                      {repeatLastShortcut ? (
+                        <>
+                          {' '}
+                          <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> still recaptures
+                          the last region from this session while Imnota is focused.
+                        </>
+                      ) : null}
+                    </>
+                  )}
                   {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>
               </span>

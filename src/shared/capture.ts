@@ -24,6 +24,21 @@ export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
 export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
   'Imnota could not identify windows on this computer. Use Region to select an area.';
 
+/** Last successful region from this app session. Bounds are DIP, relative to that display. */
+export interface LastCaptureRegion {
+  displayId: number;
+  bounds: CaptureRectangle;
+}
+
+export const LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE =
+  'Capture a region first. Repeat last region uses the last successful region from this session.';
+
+export const LAST_CAPTURE_REGION_DISPLAY_GONE_MESSAGE =
+  'The display used for the last region is no longer connected. Capture a new region, or reconnect that display.';
+
+export const LAST_CAPTURE_REGION_INVALID_MESSAGE =
+  'The last captured region no longer fits that display. Capture a new region.';
+
 export const MAX_CAPTURE_DIMENSION = 16_384;
 /** 8K fits; prohibit decoded images that would require excessive native memory. */
 export const MAX_CAPTURE_PIXELS = 64_000_000;

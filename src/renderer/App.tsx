@@ -816,7 +816,7 @@ export default function App() {
       setCaptureDisplayChoices(displays);
     });
   }
-  async function captureRegion() {
+  async function captureRegion(repeatLast = false) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
@@ -839,23 +839,25 @@ export default function App() {
         collectionId: collection.id,
         navigationIdentity: navigationIdentity.current,
       };
-      const displayId = await chooseCaptureDisplay();
+      const displayId = repeatLast ? undefined : await chooseCaptureDisplay();
       if (displayId === null) return;
-      const afterChoice = useAppStore.getState();
-      const chosenSnapshot = afterChoice.snapshot;
-      const chosenCollection = chosenSnapshot?.project.collections.find(
-        (item) => item.id === target.collectionId,
-      );
-      if (
-        navigationIdentity.current !== target.navigationIdentity ||
-        !chosenSnapshot ||
-        chosenSnapshot.projectPath !== target.projectPath ||
-        chosenSnapshot.project.id !== target.projectId ||
-        afterChoice.activeCollectionId !== target.collectionId ||
-        !chosenCollection ||
-        chosenCollection.archived
-      )
-        return;
+      if (!repeatLast) {
+        const afterChoice = useAppStore.getState();
+        const chosenSnapshot = afterChoice.snapshot;
+        const chosenCollection = chosenSnapshot?.project.collections.find(
+          (item) => item.id === target.collectionId,
+        );
+        if (
+          navigationIdentity.current !== target.navigationIdentity ||
+          !chosenSnapshot ||
+          chosenSnapshot.projectPath !== target.projectPath ||
+          chosenSnapshot.project.id !== target.projectId ||
+          afterChoice.activeCollectionId !== target.collectionId ||
+          !chosenCollection ||
+          chosenCollection.archived
+        )
+          return;
+      }
       nativeMutationToken = await beginCurrentProjectMutation();
       if (nativeMutationToken === null) return;
       const afterFlush = useAppStore.getState();
@@ -877,11 +879,16 @@ export default function App() {
         return;
       }
       const result = workflowValue(
-        await window.imnota.startRegionCapture({
-          projectPath: target.projectPath,
-          collectionId: target.collectionId,
-          displayId,
-        }),
+        repeatLast
+          ? await window.imnota.repeatLastRegionCapture({
+              projectPath: target.projectPath,
+              collectionId: target.collectionId,
+            })
+          : await window.imnota.startRegionCapture({
+              projectPath: target.projectPath,
+              collectionId: target.collectionId,
+              displayId,
+            }),
       );
       const accepted = await persistence.acceptMutationSnapshot(
         result.snapshot,
@@ -1513,6 +1520,9 @@ export default function App() {
     },
     'capture.region': () => {
       if (captureEnabled) void captureRegion();
+    },
+    'capture.repeatLastRegion': () => {
+      if (captureEnabled) void captureRegion(true);
     },
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {

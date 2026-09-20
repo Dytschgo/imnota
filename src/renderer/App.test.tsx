@@ -1163,6 +1163,8 @@ describe('feedback controls', () => {
     expect(importClick).toHaveBeenCalledOnce();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(startRegionCapture).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    expect(startRegionCapture).not.toHaveBeenCalled();
   });
 
   it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {
@@ -1488,6 +1490,65 @@ describe('feedback controls', () => {
       }),
     );
     await waitFor(() => expect(startRegionCapture).not.toHaveBeenCalled());
+  });
+
+  it('repeats the last region without a display chooser and explains when this session has none', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    const repeatLastRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: 'capture-unavailable' as const,
+        message:
+          'Capture a region first. Repeat last region uses the last successful region from this session.',
+        retryable: false,
+      },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            position: 'Left of primary',
+          },
+        ],
+      }),
+      startRegionCapture: startRegionCapture as never,
+      repeatLastRegionCapture: repeatLastRegionCapture as never,
+    });
+
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledTimes(1));
+    expect(repeatLastRegionCapture).toHaveBeenCalledWith({
+      projectPath: '/workspace/project',
+      collectionId: '001-collection',
+    });
+    expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
+    expect(startRegionCapture).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        'Capture a region first. Repeat last region uses the last successful region from this session.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('preserves picker order and activates the last imported screenshot', async () => {

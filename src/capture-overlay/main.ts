@@ -1,4 +1,5 @@
 import type { CaptureOverlayMode, CaptureRectangle } from '../shared/capture';
+import { LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE } from '../shared/capture';
 import './style.css';
 
 interface CaptureSelectionState {
@@ -16,6 +17,7 @@ declare global {
       ready(): Promise<void>;
       pointer(update: { phase: 'begin' | 'move' | 'end' | 'reset'; point?: { x: number; y: number } }): void;
       setMode(mode: CaptureOverlayMode): void;
+      repeatLastRegion(): void;
       save(): Promise<void>;
       cancel(): Promise<void>;
       onPayload(
@@ -23,6 +25,8 @@ declare global {
           displayId: number;
           displayBounds: CaptureRectangle;
           imageDataUrl: string;
+          lastRegion: CaptureRectangle | null;
+          lastRegionAvailable: boolean;
         }) => void,
       ): () => void;
       onSelection(handler: (state: CaptureSelectionState) => void): () => void;
@@ -31,13 +35,15 @@ declare global {
 }
 
 const root = document.querySelector<HTMLDivElement>('#root')!;
-root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
+root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><button type="button" data-action="last-region" disabled>Last region</button><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
 
 const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
 const selectionElement = root.querySelector<HTMLElement>('.capture-selection')!;
 const actions = root.querySelector<HTMLElement>('.capture-actions')!;
 const instruction = root.querySelector<HTMLElement>('.capture-instruction')!;
 const dimensions = root.querySelector<HTMLElement>('.capture-dimensions')!;
+const lastRegionButton = root.querySelector<HTMLButtonElement>('[data-action="last-region"]')!;
+setLastRegionAvailability(null, false);
 let displayId: number | null = null;
 let displayBounds: CaptureRectangle | null = null;
 let dragging = false;
@@ -100,6 +106,15 @@ function draw(state: CaptureSelectionState) {
     button.setAttribute('aria-checked', button.dataset.mode === state.mode ? 'true' : 'false');
 }
 
+function setLastRegionAvailability(lastRegion: CaptureRectangle | null, lastRegionAvailable: boolean) {
+  lastRegionButton.disabled = !lastRegion;
+  lastRegionButton.title = lastRegion
+    ? 'Select the last captured region from this session'
+    : lastRegionAvailable
+      ? 'The last region was captured on a different display.'
+      : LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE;
+}
+
 function ignoreChrome(event: Event): boolean {
   return Boolean((event.target as HTMLElement).closest('.capture-actions, .capture-toolbar'));
 }
@@ -159,6 +174,10 @@ for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes
     if (next === 'region' || next === 'window' || next === 'display') window.imnotaCapture.setMode(next);
   });
 }
+lastRegionButton.addEventListener('click', () => {
+  if (lastRegionButton.disabled) return;
+  window.imnotaCapture.repeatLastRegion();
+});
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') void window.imnotaCapture.cancel();
 });
@@ -166,6 +185,7 @@ window.imnotaCapture.onSelection(draw);
 window.imnotaCapture.onPayload((payload) => {
   displayId = payload.displayId;
   displayBounds = payload.displayBounds;
+  setLastRegionAvailability(payload.lastRegion, payload.lastRegionAvailable);
   surface.style.backgroundImage = `url("${payload.imageDataUrl}")`;
   void window.imnotaCapture.ready();
 });

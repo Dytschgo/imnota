@@ -207,6 +207,10 @@ export interface WorkflowBridge {
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  repeatLastRegionCapture(input: {
+    projectPath: string;
+    collectionId: string;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
 
   startPromptExport(input: {
     projectPath: string;
