@@ -48,7 +48,7 @@ describe('what’s new releases', () => {
     expect(next?.features.map((feature) => feature.id)).toEqual([
       'update-hover',
       'copy-variants',
-      'capture-all-displays',
+      'capture-choose-display',
     ]);
     expect(findWhatsNewRelease('0.2.8')?.features[0]?.id).toBe('updates');
   });

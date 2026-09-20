@@ -3,14 +3,6 @@ import type { CaptureDisplayOption } from '../../shared/capture';
 import { Button, Modal } from '../components/ui';
 import './capture-display-dialog.css';
 
-function displayTitle(display: CaptureDisplayOption): string {
-  return display.primary ? 'Primary display' : display.position;
-}
-
-function scalePercent(scaleFactor: number): string {
-  return `${Math.round(scaleFactor * 100)}% scale`;
-}
-
 export function CaptureDisplayDialog({
   displays,
   onSelect,
@@ -29,8 +21,7 @@ export function CaptureDisplayDialog({
     >
       <div className="capture-display-list" data-testid="capture-display-dialog">
         {displays.map((display, index) => {
-          const title = displayTitle(display);
-          const details = `${display.bounds.width} × ${display.bounds.height} points · ${scalePercent(display.scaleFactor)}`;
+          const details = `${display.bounds.width} × ${display.bounds.height} points · ${Math.round(display.scaleFactor * 100)}% scale`;
           const position = `Desktop position ${display.bounds.x}, ${display.bounds.y}`;
           return (
             <button
@@ -39,14 +30,14 @@ export function CaptureDisplayDialog({
               className="capture-display-option"
               data-autofocus={index === 0 ? true : undefined}
               data-display-id={display.id}
-              aria-label={`Capture ${title}. ${details}. ${position}.`}
+              aria-label={`Capture ${display.position}. ${details}. ${position}.`}
               onClick={() => onSelect(display.id)}
             >
               <span className="capture-display-icon" aria-hidden="true">
                 <Monitor size={22} />
               </span>
               <span className="capture-display-copy">
-                <strong>{title}</strong>
+                <strong>{display.position}</strong>
                 <span>{details}</span>
                 <small>{position}</small>
               </span>

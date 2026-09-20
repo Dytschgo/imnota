@@ -1,10 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CaptureDisplay } from '../src/shared/capture.js';
 import {
   captureDisplayOptions,
   captureDisplayWithStableGeometry,
   captureDisplaysHaveStableGeometry,
-  captureDisplaysWithStableGeometry,
   selectedCaptureDisplay,
 } from './capture-display-selection.js';
 
@@ -47,8 +46,9 @@ describe('capture display selection', () => {
     expect(captureDisplayOptions([primary], 99)).toEqual([]);
   });
 
-  it('allows an omitted id only for one display and never falls back from a stale selected id', () => {
-    expect(selectedCaptureDisplay([primary], undefined)).toBe(primary);
+  it('resolves only an exact display id and never falls back to the remaining display', () => {
+    expect(selectedCaptureDisplay([primary], undefined)).toBeNull();
+    expect(selectedCaptureDisplay([primary], 1)).toBe(primary);
     expect(selectedCaptureDisplay([primary, secondary], undefined)).toBeNull();
     expect(selectedCaptureDisplay([primary, secondary], 2)).toBe(secondary);
     expect(selectedCaptureDisplay([primary, secondary], 999)).toBeNull();
@@ -67,24 +67,6 @@ describe('capture display geometry', () => {
     ['DPI change', [primary, { ...secondary, scaleFactor: 2 }]],
   ])('rejects a %s', (_label, current) => {
     expect(captureDisplaysHaveStableGeometry([primary, secondary], current)).toBe(false);
-  });
-
-  it('captures every exact display and rejects geometry changed after the last source resolves', async () => {
-    let current: readonly CaptureDisplay[] = [primary, secondary];
-    let finishSecond!: () => void;
-    const secondPending = new Promise<void>((resolve) => {
-      finishSecond = resolve;
-    });
-    const capture = vi.fn(async (displays: readonly CaptureDisplay[]) => {
-      await secondPending;
-      return displays.map((display) => `capture-${display.id}`);
-    });
-    const result = captureDisplaysWithStableGeometry([primary, secondary], capture, () => current);
-    current = [primary, { ...secondary, bounds: { ...secondary.bounds, y: -100 } }];
-    finishSecond();
-    await expect(result).resolves.toBeNull();
-    expect(capture).toHaveBeenCalledOnce();
-    expect(capture.mock.calls[0]![0].map((display) => display.id)).toEqual([1, 2]);
   });
 
   it('keeps the single-display helper fail closed', async () => {

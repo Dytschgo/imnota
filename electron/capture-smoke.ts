@@ -12,7 +12,6 @@ export interface CaptureSmokeHost {
 export interface CaptureSmokeResult {
   artifacts: SmokeCapture[];
   skipped: boolean;
-  crossDisplayVerified: boolean;
 }
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -212,7 +211,7 @@ export async function exerciseRegionCapture(
   host: CaptureSmokeHost,
   artifactDirectory?: string,
 ): Promise<CaptureSmokeResult> {
-  if (!smokeCaptureIsEnabled()) return { artifacts: [], skipped: true, crossDisplayVerified: false };
+  if (!smokeCaptureIsEnabled()) return { artifacts: [], skipped: true };
   if (!['win32', 'darwin'].includes(process.platform))
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
@@ -289,5 +288,5 @@ export async function exerciseRegionCapture(
   const exported = await fs.stat(exportPath);
   if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
 
-  return { artifacts, skipped: false, crossDisplayVerified: false };
+  return { artifacts, skipped: false };
 }

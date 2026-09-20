@@ -47,7 +47,6 @@ export function selectedCaptureDisplay(
   displays: readonly CaptureDisplay[],
   selectedDisplayId: number | undefined,
 ): CaptureDisplay | null {
-  if (displays.length === 1 && selectedDisplayId === undefined) return displays[0]!;
   if (selectedDisplayId === undefined) return null;
   return displays.find((display) => display.id === selectedDisplayId) ?? null;
 }
@@ -75,21 +74,6 @@ export function captureDisplaysHaveStableGeometry(
       return Boolean(match && sameCaptureGeometry(display, match));
     })
   );
-}
-
-/**
- * Capture the complete snapshotted display set through one bounded preparation
- * operation, then verify its geometry. A display add/remove, move, resize, or
- * DPI change fails closed.
- */
-export async function captureDisplaysWithStableGeometry<T>(
-  displays: readonly CaptureDisplay[],
-  capture: (displays: readonly CaptureDisplay[]) => Promise<T[]>,
-  currentDisplays: () => readonly CaptureDisplay[],
-): Promise<T[] | null> {
-  if (!displays.length) return null;
-  const captures = await capture(displays);
-  return captureDisplaysHaveStableGeometry(displays, currentDisplays()) ? captures : null;
 }
 
 /** Capture one display, then verify its identity and DIP-to-pixel geometry. */
