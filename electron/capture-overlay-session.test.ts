@@ -100,16 +100,16 @@ describe('capture overlay session', () => {
     await expect(session.result).resolves.toEqual({ kind: 'cancelled' });
   });
 
-  it('closes every live display overlay on group cancellation', () => {
+  it('destroys every live display overlay on group cancellation', () => {
     const windows = [
-      { isDestroyed: () => false, close: vi.fn() },
-      { isDestroyed: () => true, close: vi.fn() },
-      { isDestroyed: () => false, close: vi.fn() },
+      { isDestroyed: () => false, destroy: vi.fn() },
+      { isDestroyed: () => true, destroy: vi.fn() },
+      { isDestroyed: () => false, destroy: vi.fn() },
     ];
     closeCaptureOverlayWindows(windows);
-    expect(windows[0].close).toHaveBeenCalledOnce();
-    expect(windows[1].close).not.toHaveBeenCalled();
-    expect(windows[2].close).toHaveBeenCalledOnce();
+    expect(windows[0].destroy).toHaveBeenCalledOnce();
+    expect(windows[1].destroy).not.toHaveBeenCalled();
+    expect(windows[2].destroy).toHaveBeenCalledOnce();
   });
 
   it('keeps an infrastructure failure distinct from a user cancellation', async () => {

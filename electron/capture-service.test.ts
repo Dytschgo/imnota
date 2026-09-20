@@ -164,6 +164,38 @@ describe('CaptureService', () => {
     );
   });
 
+  it('crops the selected 150% display and never a primary source', async () => {
+    const primary = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 };
+    const secondary = {
+      id: 2,
+      bounds: { x: 1920, y: 0, width: 1280, height: 720 },
+      scaleFactor: 1.5,
+    };
+    const cropped = image({ width: 1920, height: 1080 });
+    const getSources = vi.fn(async (options: { thumbnailSize: { width: number; height: number } }) => [
+      { display_id: String(primary.id), thumbnail: image({ width: 1920, height: 1080 }) },
+      { display_id: String(secondary.id), thumbnail: image(options.thumbnailSize) },
+    ]);
+    const service = new CaptureService({
+      physicalDisplaySize: (display) => ({
+        width: Math.round(display.bounds.width * display.scaleFactor),
+        height: Math.round(display.bounds.height * display.scaleFactor),
+      }),
+      getSources,
+      createImage: () => cropped,
+      createBitmapImage: () => image({ width: 1, height: 1 }),
+    });
+
+    const capture = await service.captureDisplay(secondary);
+    expect(getSources).toHaveBeenCalledWith({
+      types: ['screen'],
+      thumbnailSize: { width: 1920, height: 1080 },
+    });
+    expect(service.crop(capture, { x: 100, y: 50, width: 200, height: 100 })).toEqual(Buffer.from('cropped'));
+    expect(cropped.crop).toHaveBeenCalledWith({ x: 150, y: 75, width: 300, height: 150 });
+    expect(capture.display.id).toBe(2);
+  });
+
   it('does not fall back to a mismatched display source', async () => {
     const service = new CaptureService({
       physicalDisplaySize: () => ({ width: 100, height: 100 }),
@@ -180,6 +212,29 @@ describe('CaptureService', () => {
     ).rejects.toMatchObject({
       kind: 'sources-unavailable',
     } satisfies Partial<CaptureServiceError>);
+  });
+
+  it('plans a left-hand 150% selection from that display only', () => {
+    const left = {
+      display: {
+        id: 2,
+        bounds: { x: -1280, y: 0, width: 1280, height: 720 },
+        scaleFactor: 1.5,
+      },
+      imageSize: { width: 1920, height: 1080 },
+      png: Buffer.from('left'),
+    };
+    expect(captureCompositePlan([left], { x: -1180, y: 40, width: 200, height: 100 })).toEqual({
+      width: 300,
+      height: 150,
+      parts: [
+        {
+          capture: left,
+          source: { x: 150, y: 60, width: 300, height: 150 },
+          destination: { x: 0, y: 0, width: 300, height: 150 },
+        },
+      ],
+    });
   });
 
   it('plans a negative-coordinate mixed-DPI selection on one densest output grid', () => {
