@@ -277,20 +277,19 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
-  if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
   const persisted = preferenceSettingsEnvelope(
     nextSettings as unknown as Record<string, unknown>,
     nextPreferences,
     preferenceSettingsResult.profile,
   );
-  await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
-  settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
-  preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
-  await localMcpServer?.sync().catch((error) => {
-    process.stderr.write(
-      `Local agent access could not start: ${error instanceof Error ? error.message : error}\n`,
-    );
-  });
+  const persist = async () => {
+    await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
+    if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
+    settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
+    preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  };
+  if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
+  else await persist();
 }
 const projectInput = z.object({
   name: z.string().min(1).max(120),
@@ -2902,13 +2901,20 @@ app.whenReady().then(async () => {
   }
   configureAutoUpdates();
   registerIpc();
+  let agentAccessStartupError = '';
   if (process.env.IMNOTA_SMOKE !== '1')
-    await localMcpServer.sync().catch((error) => {
-      process.stderr.write(
-        `Local agent access could not start: ${error instanceof Error ? error.message : error}\n`,
-      );
+    await localMcpServer.sync().catch(async () => {
+      agentAccessStartupError =
+        'Local agent access could not start. Port 17384 may be in use. Access is off; free the port and enable it again in Settings → Workspace.';
+      const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
+      // Fail closed for this process even if storing the disabled preference also fails.
+      preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
+      await persistApplicationSettings(settings, next).catch(() => {
+        agentAccessStartupError += ' The disabled preference could not be saved.';
+      });
     });
   await createWindow();
+  if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));

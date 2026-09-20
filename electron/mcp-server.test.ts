@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectData } from '../src/shared/types.js';
 import { emptyProject } from '../src/shared/utils.js';
 import {
@@ -16,6 +16,63 @@ import {
 
 const fixtures: string[] = [];
 const servers: LocalMcpServer[] = [];
+
+describe('local MCP preference lifecycle', () => {
+  it('does not persist opt-in when the loopback port is already occupied', async () => {
+    const occupied = new LocalMcpServer({
+      enabled: () => true,
+      workspacePath: () => null,
+      appVersion: () => 'test',
+    });
+    const candidate = new LocalMcpServer({
+      enabled: () => false,
+      workspacePath: () => null,
+      appVersion: () => 'test',
+    });
+    servers.push(occupied, candidate);
+    const address = await occupied.sync({ port: 0 });
+    const persist = vi.fn(async () => {});
+    await expect(candidate.savePreference(true, persist, { port: address!.port })).rejects.toThrow(
+      'Your setting was not changed',
+    );
+    expect(persist).not.toHaveBeenCalled();
+    expect(candidate.listening()).toBeNull();
+    expect(occupied.listening()).toEqual(address);
+  });
+
+  it('closes a staged listener after a failed save and can retry successfully', async () => {
+    let enabled = false;
+    const server = new LocalMcpServer({
+      enabled: () => enabled,
+      workspacePath: () => null,
+      appVersion: () => 'test',
+    });
+    servers.push(server);
+    await expect(
+      server.savePreference(
+        true,
+        async () => {
+          throw new Error('disk full');
+        },
+        { port: 0 },
+      ),
+    ).rejects.toThrow('disk full');
+    expect(server.listening()).toBeNull();
+    expect(enabled).toBe(false);
+    await server.savePreference(
+      true,
+      async () => {
+        enabled = true;
+      },
+      { port: 0 },
+    );
+    expect(server.listening()?.host).toBe('127.0.0.1');
+    await server.savePreference(false, async () => {
+      enabled = false;
+    });
+    expect(server.listening()).toBeNull();
+  });
+});
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop();
   for (const fixture of fixtures.splice(0)) await fs.rm(fixture, { recursive: true, force: true });

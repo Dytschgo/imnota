@@ -13,6 +13,8 @@ Until the toggle is on, Imnota starts no listener and a `--mcp` process exits im
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server.
 
+Enabling access first checks that the listener can bind. If the port is occupied, Settings reports the failure and leaves access off. A failed settings write closes a newly started listener. If a later app launch cannot bind, Imnota disables access and explains how to retry. Disabling access stops the listener and rejects further requests.
+
 ## What agents can read
 
 | Tool                    | Result                                                           |

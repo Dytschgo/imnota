@@ -497,8 +497,34 @@ export class LocalMcpServer {
     return this.listen(options.port ?? LOCAL_AGENT_ACCESS_PORT);
   }
 
+  /** Bind before saving opt-in; requests remain denied until the preference is committed. */
+  async savePreference(
+    enabled: boolean,
+    persist: () => Promise<void>,
+    options: LocalMcpListenOptions = {},
+  ): Promise<void> {
+    const starting = enabled && !this.listening();
+    const port = options.port ?? LOCAL_AGENT_ACCESS_PORT;
+    if (starting) {
+      try {
+        await this.listen(port);
+      } catch (error) {
+        throw new Error(
+          `Local agent access could not start. Port ${port} may be in use. Your setting was not changed.`,
+          { cause: error },
+        );
+      }
+    }
+    try {
+      await persist();
+    } catch (error) {
+      if (starting) await this.stop();
+      throw error;
+    }
+    if (!enabled) await this.stop();
+  }
+
   private async listen(port: number): Promise<LocalMcpAddress> {
-    if (!this.context.enabled()) throw new Error('Local agent access is off.');
     if (this.http) await this.stop();
     const server = http.createServer((request, response) => {
       void this.handleHttp(request, response);
