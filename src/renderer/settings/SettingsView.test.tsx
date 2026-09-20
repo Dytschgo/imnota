@@ -27,4 +27,15 @@ describe('SettingsView category navigation', () => {
     rerender(<SettingsView activeCategory="Appearance" onCategoryChange={onCategoryChange} />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
   });
+
+  it('keeps local agent access off until the workspace toggle is enabled', () => {
+    const onAgentAccessChange = vi.fn();
+    render(<SettingsView activeCategory="Workspace" onAgentAccessChange={onAgentAccessChange} />);
+    const toggle = screen.getByTestId('agent-access-toggle');
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('Allow local agent access')).toBeInTheDocument();
+    expect(screen.getAllByText(/127\.0\.0\.1:17384\/mcp/).length).toBeGreaterThan(0);
+    fireEvent.click(toggle);
+    expect(onAgentAccessChange).toHaveBeenCalledWith({ enabled: true });
+  });
 });

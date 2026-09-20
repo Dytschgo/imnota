@@ -118,8 +118,10 @@ import { ProjectWatchManager, projectRevisionForSource } from './project-watch.j
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
+import { WorkspaceContentSearch } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
+import { LocalMcpServer } from './mcp-server.js';
+import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
@@ -186,6 +188,7 @@ let onboardingHandoffWorkflow: OnboardingHandoffWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
+let localMcpServer: LocalMcpServer | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -283,6 +286,11 @@ async function persistApplicationSettings(
   await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
   settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
   preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  await localMcpServer?.sync().catch((error) => {
+    process.stderr.write(
+      `Local agent access could not start: ${error instanceof Error ? error.message : error}\n`,
+    );
+  });
 }
 const projectInput = z.object({
   name: z.string().min(1).max(120),
@@ -298,34 +306,7 @@ function workspaceOrThrow(): string {
 }
 
 async function assertProjectPath(projectPath: string): Promise<string> {
-  pathInput.parse(projectPath);
-  const workspace = workspaceOrThrow();
-  const resolved = path.resolve(projectPath);
-  if (isReservedProjectPath(resolved))
-    throw new Error(
-      'Backup and recovery folders cannot be opened as active projects. Restore a snapshot first.',
-    );
-  await assertNoLinks(resolved);
-  if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
-    throw new Error('Project path is outside the selected workspace.');
-  const stat = await fs.stat(resolved).catch(() => null);
-  if (!stat?.isDirectory()) throw new Error('The selected project folder is unavailable.');
-  for (const name of [
-    'project.json',
-    'screenshots',
-    'annotations',
-    'notes',
-    'exports',
-    'rounds',
-    'collections',
-    '.imnota-undo',
-    '.imnota-transactions',
-    '.imnota-content-undo',
-    '.imnota-recovery.json',
-    '.imnota-recovery-backup.json',
-  ])
-    await assertNoLinks(path.join(resolved, name));
-  return resolved;
+  return authorizeProjectPath(settings.workspacePath, projectPath);
 }
 
 async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
@@ -2903,8 +2884,30 @@ app.whenReady().then(async () => {
       },
     });
   });
+  localMcpServer = new LocalMcpServer({
+    enabled: () => preferenceSettingsResult.settings.agentAccess.enabled,
+    workspacePath: () => settings.workspacePath,
+    appVersion: () => app.getVersion(),
+    search: (input) => contentSearch.search(input),
+  });
+  if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
+    const started = await localMcpServer.startStdio();
+    if (!started) {
+      process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
+      app.exit(1);
+      return;
+    }
+    app.exit(0);
+    return;
+  }
   configureAutoUpdates();
   registerIpc();
+  if (process.env.IMNOTA_SMOKE !== '1')
+    await localMcpServer.sync().catch((error) => {
+      process.stderr.write(
+        `Local agent access could not start: ${error instanceof Error ? error.message : error}\n`,
+      );
+    });
   await createWindow();
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
@@ -3021,4 +3024,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => projectWatchManager?.stopAll());
+app.on('before-quit', () => {
+  projectWatchManager?.stopAll();
+  void localMcpServer?.stop();
+});

@@ -8,6 +8,7 @@ import {
   type PreferenceSettingsResult,
   type ShortcutPreferences,
   type WorkbenchPreferences,
+  type AgentAccessPreferences,
 } from '../../shared/preferences';
 import type { BackupPreferences } from '../../shared/backups';
 import type {
@@ -42,6 +43,7 @@ export interface PreferenceController {
   saveWorkbench(value: WorkbenchPreferences): Promise<void>;
   saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
+  saveAgentAccess(value: AgentAccessPreferences): Promise<void>;
   clearError(): void;
 }
 
@@ -131,6 +133,9 @@ export function usePreferences(): PreferenceController {
     },
     saveUpdates: async (updates) => {
       await save({ updates });
+    },
+    saveAgentAccess: async (agentAccess) => {
+      await save({ agentAccess });
     },
     clearError: () => setError(''),
   };

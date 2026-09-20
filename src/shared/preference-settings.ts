@@ -19,6 +19,7 @@ const nativeCopyPreferencesSchema = z
 const updatePreferencesSchema = z
   .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
   .strict();
+const agentAccessPreferencesSchema = z.object({ enabled: z.boolean() }).strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -74,6 +75,7 @@ export const preferenceSettingsSchema = z
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     updates: updatePreferencesSchema.default({}),
+    agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),
   })
   .strict();
 
@@ -104,6 +106,7 @@ export const preferenceSettingsUpdateSchema = z
     workbench: workbenchPreferencesSchema.partial().strict().optional(),
     nativeCopy: nativeCopyPreferencesSchema.partial().strict().optional(),
     updates: updatePreferencesSchema.partial().strict().optional(),
+    agentAccess: agentAccessPreferencesSchema.partial().strict().optional(),
   })
   .strict();
 
@@ -117,6 +120,7 @@ function cloneDefaults(): PreferenceSettings {
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
     nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },
     updates: { ...DEFAULT_PREFERENCE_SETTINGS.updates },
+    agentAccess: { ...DEFAULT_PREFERENCE_SETTINGS.agentAccess },
   };
 }
 
@@ -206,6 +210,7 @@ export function mergePreferenceSettings(
     workbench: { ...current.workbench, ...update.workbench },
     nativeCopy: { ...current.nativeCopy, ...update.nativeCopy },
     updates: { ...current.updates, ...update.updates },
+    agentAccess: { ...current.agentAccess, ...update.agentAccess },
   });
 }
 

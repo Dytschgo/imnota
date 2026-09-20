@@ -1,4 +1,4 @@
-import { FolderOpen, ShieldCheck } from 'lucide-react';
+import { Copy, FolderOpen, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -8,7 +8,13 @@ import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
-import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
+import {
+  claudeCodeAgentAccessSnippet,
+  cursorAgentAccessSnippet,
+  DEFAULT_PREFERENCE_SETTINGS,
+  localAgentAccessStdioSnippet,
+  localAgentAccessUrl,
+} from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
 import {
   describeCommonShortcut,
@@ -52,6 +58,7 @@ export interface SettingsViewProps {
   onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
   onBackupRestoreFailed?(): void;
   onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
+  onAgentAccessChange?(value: PreferenceSettings['agentAccess']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
   onInstall?: () => Promise<void>;
@@ -85,6 +92,7 @@ export function SettingsView({
   onBackupRestored,
   onBackupRestoreFailed,
   onCaptureChange = async () => undefined,
+  onAgentAccessChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
   onInstall,
@@ -327,6 +335,11 @@ export function SettingsView({
               </div>
             </div>
           </section>
+          <AgentAccessSettings
+            value={preferences.agentAccess}
+            disabled={savingPreferences}
+            onChange={onAgentAccessChange}
+          />
         </div>
         {group === 'Sharing' && (
           <>
@@ -362,6 +375,73 @@ export function SettingsView({
           </>
         )}
       </div>
+    </section>
+  );
+}
+
+function AgentAccessSettings({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: PreferenceSettings['agentAccess'];
+  disabled: boolean;
+  onChange(value: PreferenceSettings['agentAccess']): void | Promise<void>;
+}) {
+  const [copied, setCopied] = useState('');
+  const copySnippet = async (label: string, snippet: string) => {
+    try {
+      await window.imnota.copyText(snippet);
+      setCopied(label);
+    } catch {
+      setCopied('');
+    }
+  };
+  return (
+    <section className="settings-section" aria-labelledby="agent-access-title">
+      <h2 id="agent-access-title">Local agent access</h2>
+      <label className="settings-switch">
+        <span>
+          <strong>Allow local agent access</strong>
+          <small>
+            Lets Claude Code or Cursor read prepared prompt bundles from this workspace. Off by default. The
+            listener binds only to {localAgentAccessUrl()} or a spawned <kbd>--mcp</kbd> stdio process. Imnota
+            does not rewrite editor config.
+          </small>
+        </span>
+        <input
+          type="checkbox"
+          checked={value.enabled}
+          disabled={disabled}
+          data-testid="agent-access-toggle"
+          onChange={(event) => void onChange({ enabled: event.target.checked })}
+        />
+      </label>
+      <div className="settings-snippet">
+        <div className="settings-snippet-heading">
+          <strong>Claude Code</strong>
+          <Button variant="ghost" onClick={() => void copySnippet('claude', claudeCodeAgentAccessSnippet())}>
+            <Copy size={14} aria-hidden="true" />
+            {copied === 'claude' ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <pre>{claudeCodeAgentAccessSnippet()}</pre>
+      </div>
+      <div className="settings-snippet">
+        <div className="settings-snippet-heading">
+          <strong>Cursor</strong>
+          <Button variant="ghost" onClick={() => void copySnippet('cursor', cursorAgentAccessSnippet())}>
+            <Copy size={14} aria-hidden="true" />
+            {copied === 'cursor' ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <pre>{cursorAgentAccessSnippet()}</pre>
+      </div>
+      <p className="settings-snippet-note">
+        Stdio alternative: spawn the Imnota executable with <kbd>--mcp</kbd>. Installable skill and rule files
+        are in the documentation; Imnota never writes <code>~/.claude</code> or <code>.cursor</code>.
+      </p>
+      <pre className="settings-snippet-stdio">{localAgentAccessStdioSnippet()}</pre>
     </section>
   );
 }

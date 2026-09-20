@@ -43,6 +43,7 @@ export interface PreferenceSettingsUpdate {
   workbench?: Partial<PreferenceSettings['workbench']>;
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
   updates?: Partial<PreferenceSettings['updates']>;
+  agentAccess?: Partial<PreferenceSettings['agentAccess']>;
 }
 
 export interface NativePerformanceProfile {
