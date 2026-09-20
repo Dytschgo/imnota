@@ -308,7 +308,7 @@ export async function exerciseRegionCapture(
 
   // Full-display capture must not replace the remembered region. Repeat uses the
   // same source pixels and crop through the normal renderer/native IPC path.
-  await driver.press('6', ['control', 'shift']);
+  await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
   const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
   const repeated = afterRepeat.screenshots.at(-1);
   if (
