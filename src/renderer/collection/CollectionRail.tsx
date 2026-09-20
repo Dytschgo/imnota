@@ -671,7 +671,7 @@ export function CollectionRail({
                   <Button
                     variant="primary"
                     disabled={collection?.archived || (captureIsPrimary && captureInProgress)}
-                    aria-busy={captureIsPrimary && captureInProgress ? true : undefined}
+                    busy={captureIsPrimary && captureInProgress}
                     data-testid="add-screenshot"
                     title={
                       collection?.archived

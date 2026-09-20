@@ -309,6 +309,20 @@ describe('CollectionRail', () => {
     expect(onCapture).not.toHaveBeenCalled();
   });
 
+  it('disables the Windows capture primary action while a capture is in progress', () => {
+    const onCapture = vi.fn();
+    render(
+      <CollectionRail
+        {...props({ onCapture, capturePrimary: true, captureEnabled: true, captureInProgress: true })}
+      />,
+    );
+    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
+    expect(addScreenshot).toBeDisabled();
+    expect(addScreenshot).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(addScreenshot);
+    expect(onCapture).not.toHaveBeenCalled();
+  });
+
   it('falls back to an enabled import primary action when Windows capture is unavailable', () => {
     const onImport = vi.fn();
     render(
