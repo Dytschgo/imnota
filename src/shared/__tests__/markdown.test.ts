@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { generateMarkdown, numberCollectionScreenshots } from '../markdown.js';
 import { emptyProject } from '../utils.js';
