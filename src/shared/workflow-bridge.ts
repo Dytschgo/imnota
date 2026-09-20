@@ -56,8 +56,6 @@ export interface NativePerformanceProfile {
 export interface NativeCapabilities {
   /** True only when the running desktop host can write native Windows file clipboard entries. */
   windowsFileClipboard: boolean;
-  /** True only when Windows.Media.Ocr can run on this host without uploading pixels. */
-  onDeviceOcr: boolean;
 }
 
 export interface PromptExportSessionInfo {

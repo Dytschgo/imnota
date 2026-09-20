@@ -23,7 +23,7 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reducedEffectsRecommended: false,
   reasons: [],
 };
-const UNKNOWN_CAPABILITIES: NativeCapabilities = { windowsFileClipboard: false, onDeviceOcr: false };
+const UNKNOWN_CAPABILITIES: NativeCapabilities = { windowsFileClipboard: false };
 
 export interface PreferenceController {
   result: PreferenceSettingsResult | null;

@@ -1805,10 +1805,7 @@ function registerIpc(): void {
   });
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
-    return {
-      windowsFileClipboard: windowsFileClipboardAvailable(),
-      onDeviceOcr: windowsOcrAvailable(),
-    };
+    return { windowsFileClipboard: windowsFileClipboardAvailable() };
   });
   handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
     if (!windowsOcrAvailable()) return { text: '' };
