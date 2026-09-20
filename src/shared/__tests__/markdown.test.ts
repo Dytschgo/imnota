@@ -98,18 +98,35 @@ describe('collection Markdown generation', () => {
         originalHeight: 120,
       },
     ];
-    expect(generateMarkdown(project, '001-collection', {})).toContain(
-      '## Drawing 1 — Queue\n\nWorkers pull from the left.',
-    );
+    const markdown = generateMarkdown(project, '001-collection', {});
+    expect(markdown).toContain('## Drawing 1 — Queue\n\nWorkers pull from the left.');
+    expect(markdown).not.toContain('Source size:');
   });
 
   it('retains a minimal reference without description or text annotations', () => {
     const project = emptyProject('Review', '');
     project.screenshots = [screenshot('first', 0)];
     const markdown = generateMarkdown(project, '001-collection', {});
-    expect(markdown).toContain('## Picture 1 — first.png\n\nPriority for agent: Medium');
+    expect(markdown).toContain(
+      '## Picture 1 — first.png\n\nPriority for agent: Medium\n\nSource size: 100×100',
+    );
     expect(markdown).not.toContain('/ Marks');
     expect(markdown).not.toContain('/ Note');
+  });
+
+  it('includes source pixel size for captured and imported screenshots alike', () => {
+    const project = emptyProject('Review', '');
+    project.screenshots = [
+      screenshot('captured', 0, true, { originalWidth: 1920, originalHeight: 1080 }),
+      screenshot('imported', 1, true, { originalWidth: 800, originalHeight: 600 }),
+    ];
+    const markdown = generateMarkdown(project, '001-collection', {});
+    expect(markdown).toContain(
+      '## Picture 1 — captured.png\n\nPriority for agent: Medium\n\nSource size: 1920×1080',
+    );
+    expect(markdown).toContain(
+      '## Picture 2 — imported.png\n\nPriority for agent: Medium\n\nSource size: 800×600',
+    );
   });
 
   it('lists arrow, step, and text marks with note cross-references', () => {
@@ -162,6 +179,7 @@ describe('collection Markdown generation', () => {
     project.screenshots = [screenshot('first', 0, false, { originalWidth: 1000, originalHeight: 1000 })];
     const markdown = generateMarkdown(project, '001-collection', { first: pictureMarks });
     expect(markdown).toContain('Picture 1 was intentionally excluded from this prompt bundle.');
+    expect(markdown).not.toContain('Source size:');
     expect(markdown).not.toContain('/ Marks');
     expect(markdown).not.toContain('/ Note');
     expect(markdown).not.toContain('arrow');
