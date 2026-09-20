@@ -32,42 +32,6 @@
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34786340794",
       "review": "Baseline, candidate and highlighted difference individually reviewed. The added Backups & history tab redistributes the settings navigation; content and all existing controls remain intact. The other 13 baseline captures pass unchanged. The source run timed out later during feature verification; this approves only the settings image, not native workflow completion. Strict comparison tolerance is unchanged."
     },
-    "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
     "1920x1080-workspace-light.png": {
       "reviewedAt": "2026-09-16",
       "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
@@ -104,24 +68,6 @@
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
       "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
     },
-    "backdrop-workspace.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "backdrop-collapsed.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
     "1280x800-onboarding-copy.png": {
       "reviewedAt": "2026-09-19",
       "sourceRevision": "985215bfd92ae47ac7bdbf55ce06d67f8e1cf96d",
@@ -130,6 +76,60 @@
       "devicePixelRatio": 1,
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35436813100",
       "review": "Candidate, prior baseline and difference mask independently reviewed. The handoff step adds the native copy selector, explicit Rich copy action and all fallback actions; sample, Markdown preview and footer remain aligned at 1280x800. Windows packaged native verification passed. All other approved captures passed unchanged. Strict comparison tolerance is unchanged."
+    },
+    "1280x800-workspace-dark.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "1280x800-workspace-light.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-dark.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-light.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "backdrop-collapsed.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+    },
+    "backdrop-workspace.png": {
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
+      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
     }
   }
 }

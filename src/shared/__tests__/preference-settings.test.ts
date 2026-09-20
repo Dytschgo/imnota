@@ -100,6 +100,7 @@ describe('profile-aware preference settings', () => {
     const result = resolvePreferenceSettings({ workspacePath: 'C:/work', theme: 'dark' }, true);
     expect(result.settings.appearance.mode).toBe('dark');
     expect(result.profile.migratedFromLegacyProfile).toBe(true);
+    expect(result.settings.capture.experimentalRegionCapture).toBe(false);
     expect(shouldShowOnboarding(result.settings.onboarding, result.profile)).toBe(false);
     expect(
       preferenceSettingsEnvelope({ workspacePath: 'C:/work', theme: 'dark' }, result.settings),
