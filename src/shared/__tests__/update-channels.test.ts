@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { compareReleaseVersions, discoverRelease, selectRelease } from '../../../electron/releases';
 import { UpdateController } from '../../../electron/update-controller';
