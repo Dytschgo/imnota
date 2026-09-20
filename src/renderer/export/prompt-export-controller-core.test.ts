@@ -612,7 +612,7 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
       outcome: 'markdown',
-      warning: expect.stringMatching(/Image was not confirmed.*Copy PNG or Open files/),
+      warning: expect.stringMatching(/Image was not confirmed.*Copy image only or Open files/),
     });
     const image = await controller.copyImage(controller.getState().cards[0]);
     expect(image.ok).toBe(true);
@@ -628,7 +628,7 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
       outcome: 'image',
-      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown or Open files/),
+      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown only or Open files/),
     });
   });
 
@@ -638,11 +638,11 @@ describe('prompt export controller orchestration', () => {
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     const copy = await controller.copyFresh(1);
     expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0].outcome).toBeUndefined();
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
-      outcome: 'files',
       warning: expect.stringMatching(
-        /Markdown and image were not confirmed.*Copy Markdown, Copy PNG, or Open files/,
+        /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
       ),
     });
   });

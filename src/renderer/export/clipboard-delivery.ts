@@ -2,7 +2,7 @@ import type { ClipboardFormatsReport, WindowsCopyVariantId } from '../../shared/
 import type { PromptDeliveryOutcome } from './PromptBundleCard';
 
 export interface CombinedDeliveryDescription {
-  outcome: PromptDeliveryOutcome;
+  outcome?: PromptDeliveryOutcome;
   warning?: string;
 }
 
@@ -24,14 +24,14 @@ function sentenceList(items: readonly string[]): string {
   return `${displayed.slice(0, -1).join(', ')} and ${displayed.at(-1)} were confirmed on the clipboard.`;
 }
 
-const UNCONFIRMED_RICH_FALLBACK = 'Use Copy Markdown, Copy PNG, or Open files.';
+const UNCONFIRMED_RICH_FALLBACK = 'Use Copy Markdown only, Copy image only, or Open files.';
 
 function missingRichGuidance(placed: ClipboardFormatsReport): string {
   if (placed.text && placed.image) return '';
   if (!placed.text && !placed.image)
     return `Markdown and image were not confirmed. ${UNCONFIRMED_RICH_FALLBACK}`;
-  if (!placed.image) return 'Image was not confirmed. Use Copy PNG or Open files.';
-  return 'Markdown was not confirmed. Use Copy Markdown or Open files.';
+  if (!placed.image) return 'Image was not confirmed. Use Copy image only or Open files.';
+  return 'Markdown was not confirmed. Use Copy Markdown only or Open files.';
 }
 
 export function describeCopyDelivery(
@@ -42,7 +42,6 @@ export function describeCopyDelivery(
   if (!hasImage) return { outcome: 'markdown' };
   if (!placed)
     return {
-      outcome: 'files',
       warning: `The clipboard result could not be confirmed. ${UNCONFIRMED_RICH_FALLBACK}`,
     };
   const confirmed = sentenceList(verifiedFormats(placed));
@@ -53,13 +52,12 @@ export function describeCopyDelivery(
           warning: `${confirmed} The receiving app still decides whether paste accepts file attachments.`,
         }
       : {
-          outcome: 'files',
           warning: `${confirmed} Use Copy file paths or Open files instead.`,
         };
   if (variant === 'files-rich') {
     const complete = placed.files && placed.text && placed.html && placed.image;
     return {
-      outcome: placed.files ? 'files' : placed.text && placed.image ? 'combined' : 'files',
+      outcome: placed.files ? 'files' : placed.text && placed.image ? 'combined' : undefined,
       warning: complete
         ? `${confirmed} The receiving app chooses which of these formats it pastes.`
         : `${confirmed} Try another comparison option or a separate copy action.`,
@@ -77,7 +75,6 @@ export function describeCopyDelivery(
       warning: `${confirmed} ${missingRichGuidance(placed)}`,
     };
   return {
-    outcome: 'files',
     warning: `${confirmed} ${missingRichGuidance(placed)}`,
   };
 }

@@ -355,7 +355,7 @@ it('does not claim Markdown + image prepared when only one format is confirmed',
       bundle={model({
         outcome: 'markdown',
         warning:
-          'Markdown and HTML were confirmed on the clipboard. Image was not confirmed. Use Copy PNG or Open files.',
+          'Markdown and HTML were confirmed on the clipboard. Image was not confirmed. Use Copy image only or Open files.',
       })}
       onCopyFresh={vi.fn()}
       onPrepareFreshFiles={vi.fn()}
@@ -368,9 +368,32 @@ it('does not claim Markdown + image prepared when only one format is confirmed',
   expect(screen.getByRole('status')).toHaveTextContent('Markdown copied');
   expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
   expect(screen.getByText(/Image was not confirmed/)).toBeInTheDocument();
-  expect(screen.getByText(/Copy PNG or Open files/)).toBeInTheDocument();
+  expect(screen.getByText(/Copy image only or Open files/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /markdown only/i })).toBeEnabled();
   expect(screen.getByRole('button', { name: /image only/i })).toBeEnabled();
   expect(screen.getByRole('button', { name: /^open files$/i })).toBeEnabled();
   expect(screen.getByRole('button', { name: /file paths/i })).toBeEnabled();
+});
+
+it('does not show Files ready when clipboard formats were not confirmed', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({
+        warning:
+          'No requested format was confirmed on the clipboard. Markdown and image were not confirmed. Use Copy Markdown only, Copy image only, or Open files.',
+      })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyMarkdown={vi.fn()}
+      onCopyImage={vi.fn()}
+      onOpenFiles={vi.fn()}
+    />,
+  );
+  expect(screen.queryByText('Files ready')).not.toBeInTheDocument();
+  expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.getByText(/Markdown and image were not confirmed/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /markdown only/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /image only/i })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /^open files$/i })).toBeEnabled();
 });

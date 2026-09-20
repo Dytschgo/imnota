@@ -32,7 +32,7 @@ it('reports a clipboard that kept only one format instead of claiming both', asy
   const status = await screen.findByRole('status');
   expect(status).toHaveTextContent('Markdown and HTML were confirmed on the clipboard');
   expect(status).toHaveTextContent('Image was not confirmed');
-  expect(status).toHaveTextContent('Copy PNG');
+  expect(status).toHaveTextContent('Copy image only');
   expect(status).not.toHaveTextContent('Markdown and image are on the clipboard');
 });
 
@@ -44,7 +44,7 @@ it('names missing Markdown after image-only retention', async () => {
   const status = await screen.findByRole('status');
   expect(status).toHaveTextContent('image was confirmed on the clipboard');
   expect(status).toHaveTextContent('Markdown was not confirmed');
-  expect(status).toHaveTextContent('Copy Markdown');
+  expect(status).toHaveTextContent('Copy Markdown only');
 });
 it('does not touch the clipboard on preparation failure and can retry', async () => {
   vi.mocked(prepareClipboardImage)
