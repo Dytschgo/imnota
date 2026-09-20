@@ -51,9 +51,11 @@ export class CaptureOverlaySession {
 }
 
 export function closeCaptureOverlayWindows(
-  windows: readonly { isDestroyed(): boolean; close(): void }[],
+  windows: readonly { isDestroyed(): boolean; destroy(): void }[],
 ): void {
-  for (const window of windows) if (!window.isDestroyed()) window.close();
+  // Selection windows have no unsaved renderer state. Destroy them after settling
+  // the session, without cancellable close or macOS fullscreen transitions.
+  for (const window of windows) if (!window.isDestroyed()) window.destroy();
 }
 
 export interface CaptureSelectionState {
