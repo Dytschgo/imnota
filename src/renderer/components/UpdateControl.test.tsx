@@ -126,7 +126,11 @@ it('shows actionable failure and allows retry', async () => {
   render(<UpdateControl />);
   fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
   expect(await screen.findByText(/The update action failed/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(api.check).toHaveBeenCalledTimes(2));
+  expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
+  expect(window.imnota.installUpdate).not.toHaveBeenCalled();
 });
 
 it('moves from available through download progress to a ready-to-install action', async () => {

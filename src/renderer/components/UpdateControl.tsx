@@ -106,7 +106,7 @@ export function UpdateControl({
         onClick={() => void run(() => window.imnota.checkForUpdates())}
       >
         <RefreshCw size={16} />
-        Check for updates
+        {status.state === 'error' ? 'Retry' : 'Check for updates'}
       </Button>
       {status.state === 'available' && (
         <Button
