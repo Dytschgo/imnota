@@ -168,6 +168,7 @@ import {
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
 import { CaptureGlobalShortcut, resolveCaptureGlobalShortcut } from './capture-global-shortcut.js';
+import { teardownTrayAfterSuccessfulQuit } from './tray-quit-lifecycle.js';
 import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
@@ -3239,9 +3240,10 @@ app.on('window-all-closed', () => {
   captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => {
-  captureGlobalShortcut.clear();
-  appTray?.destroy();
-  appTray = null;
-  projectWatchManager?.stopAll();
+app.on('will-quit', () => {
+  appTray = teardownTrayAfterSuccessfulQuit({
+    tray: appTray,
+    clearCaptureShortcut: () => captureGlobalShortcut.clear(),
+    stopProjectWatches: () => projectWatchManager?.stopAll(),
+  });
 });
