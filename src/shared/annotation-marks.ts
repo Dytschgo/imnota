@@ -11,17 +11,6 @@ function formatPoint(x: number, y: number, image: { originalWidth: number; origi
   return `${percent(x, image.originalWidth)},${percent(y, image.originalHeight)}`;
 }
 
-function pathEndpoints(annotation: Annotation): { fromX: number; fromY: number; toX: number; toY: number } {
-  const points = annotation.points ?? [0, 0, annotation.width ?? 10, annotation.height ?? 10];
-  const last = points.length >= 4 ? points.length - 2 - (points.length % 2) : 2;
-  return {
-    fromX: annotation.x + (points[0] ?? 0),
-    fromY: annotation.y + (points[1] ?? 0),
-    toX: annotation.x + (Number.isFinite(points[last]) ? points[last] : (annotation.width ?? 10)),
-    toY: annotation.y + (Number.isFinite(points[last + 1]) ? points[last + 1] : (annotation.height ?? 10)),
-  };
-}
-
 function pathBox(annotation: Annotation): { x: number; y: number; width: number; height: number } {
   const points = annotation.points;
   if (!points || points.length < 2) {
@@ -53,8 +42,8 @@ function formatMarkLine(
   if ((annotation.kind === 'text' || annotation.kind === 'callout') && noteNumber === undefined) return null;
   const id = `\`${annotation.id}\``;
   if (annotation.kind === 'arrow' || annotation.kind === 'line') {
-    const { fromX, fromY, toX, toY } = pathEndpoints(annotation);
-    return `${annotation.kind} ${id} from ${formatPoint(fromX, fromY, image)} to ${formatPoint(toX, toY, image)}`;
+    const points = annotation.points ?? [0, 0, annotation.width ?? 10, annotation.height ?? 10];
+    return `${annotation.kind} ${id} from ${formatPoint(annotation.x + points[0], annotation.y + points[1], image)} to ${formatPoint(annotation.x + points[points.length - 2], annotation.y + points[points.length - 1], image)}`;
   }
   if (annotation.kind === 'step') {
     return `step ${id} number ${annotation.stepNumber ?? 1} at ${formatPoint(annotation.x, annotation.y, image)}`;
