@@ -132,7 +132,6 @@ describe('local MCP server lifecycle', () => {
     expect(
       await server.startStdio(Readable.from([]), new Writable({ write: (_c, _e, done) => done() })),
     ).toBe(false);
-    expect(server.stdioStarted()).toBe(false);
   });
 
   it('listens only on 127.0.0.1 when enabled', async () => {
@@ -151,6 +150,7 @@ describe('local MCP server lifecycle', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     expect(listed.ok).toBe(true);
+    expect(listed.headers.get('access-control-allow-origin')).toBeNull();
     const body = (await listed.json()) as { result: { tools: Array<{ name: string }> } };
     expect(body.result.tools.map((tool) => tool.name)).toEqual([
       'list_projects',
@@ -159,6 +159,12 @@ describe('local MCP server lifecycle', () => {
       'get_item',
       'search_saved_text',
     ]);
+    const fromBrowser = await fetch(`http://127.0.0.1:${address!.port}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    expect(fromBrowser.status).toBe(403);
   });
 });
 

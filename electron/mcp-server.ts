@@ -5,7 +5,7 @@ import readline from 'node:readline';
 import { z } from 'zod';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import type { ContentSearchRequest, ContentSearchResponse } from '../src/shared/content-search.js';
-import { LOCAL_AGENT_ACCESS_HOST, LOCAL_AGENT_ACCESS_PORT } from '../src/shared/preferences.js';
+import { LOCAL_AGENT_ACCESS_PORT } from '../src/shared/preferences.js';
 import { filenameSchema, parseProjectFile } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { screenshotPath } from './collections.js';
@@ -41,7 +41,6 @@ export interface LocalMcpContext {
 }
 
 export interface LocalMcpListenOptions {
-  host?: string;
   port?: number;
 }
 
@@ -104,19 +103,6 @@ function isLoopbackHostHeader(host: string | undefined, port: number): boolean {
     `[::1]:${port}`,
   ]);
   return allowed.has(normalized);
-}
-
-function isLoopbackOrigin(origin: string | undefined): boolean {
-  if (!origin) return true;
-  try {
-    const url = new URL(origin);
-    return (
-      (url.protocol === 'http:' || url.protocol === 'https:') &&
-      (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]')
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function omitSecretFields(value: unknown): unknown {
@@ -490,7 +476,6 @@ async function readHttpBody(request: http.IncomingMessage, maximum: number): Pro
 
 export class LocalMcpServer {
   private http: http.Server | null = null;
-  private stdioActive = false;
   private readonly tools: McpTool[];
 
   constructor(private readonly context: LocalMcpContext) {
@@ -503,24 +488,17 @@ export class LocalMcpServer {
     return { host: address.address, port: address.port };
   }
 
-  stdioStarted(): boolean {
-    return this.stdioActive;
-  }
-
   async sync(options: LocalMcpListenOptions = {}): Promise<LocalMcpAddress | null> {
     if (!this.context.enabled()) {
       await this.stop();
       return null;
     }
     if (this.listening()) return this.listening();
-    return this.listen(options);
+    return this.listen(options.port ?? LOCAL_AGENT_ACCESS_PORT);
   }
 
-  async listen(options: LocalMcpListenOptions = {}): Promise<LocalMcpAddress> {
+  private async listen(port: number): Promise<LocalMcpAddress> {
     if (!this.context.enabled()) throw new Error('Local agent access is off.');
-    const host = options.host ?? LOCAL_AGENT_ACCESS_HOST;
-    if (host !== '127.0.0.1') throw new Error('Local agent access must bind to 127.0.0.1.');
-    const port = options.port ?? LOCAL_AGENT_ACCESS_PORT;
     if (this.http) await this.stop();
     const server = http.createServer((request, response) => {
       void this.handleHttp(request, response);
@@ -528,7 +506,7 @@ export class LocalMcpServer {
     await new Promise<void>((resolve, reject) => {
       const fail = (error: Error) => reject(error);
       server.once('error', fail);
-      server.listen(port, host, () => {
+      server.listen(port, '127.0.0.1', () => {
         server.off('error', fail);
         resolve();
       });
@@ -547,26 +525,21 @@ export class LocalMcpServer {
     output: NodeJS.WritableStream = process.stdout,
   ): Promise<boolean> {
     if (!this.context.enabled()) return false;
-    this.stdioActive = true;
-    try {
-      const lines = readline.createInterface({ input, crlfDelay: Infinity });
-      for await (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        let message: JsonRpcRequest;
-        try {
-          message = JSON.parse(trimmed) as JsonRpcRequest;
-        } catch {
-          output.write(`${JSON.stringify(jsonRpcError(null, -32700, 'Parse error'))}\n`);
-          continue;
-        }
-        const response = await handleMcpJsonRpc(message, this.tools, this.context.appVersion());
-        if (response) output.write(`${JSON.stringify(response)}\n`);
+    const lines = readline.createInterface({ input, crlfDelay: Infinity });
+    for await (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let message: JsonRpcRequest;
+      try {
+        message = JSON.parse(trimmed) as JsonRpcRequest;
+      } catch {
+        output.write(`${JSON.stringify(jsonRpcError(null, -32700, 'Parse error'))}\n`);
+        continue;
       }
-      return true;
-    } finally {
-      this.stdioActive = false;
+      const response = await handleMcpJsonRpc(message, this.tools, this.context.appVersion());
+      if (response) output.write(`${JSON.stringify(response)}\n`);
     }
+    return true;
   }
 
   async stop(): Promise<void> {
@@ -588,33 +561,16 @@ export class LocalMcpServer {
     if (!this.context.enabled()) return fail(403, 'Local agent access is off.');
     if (!isLoopbackAddress(request.socket.remoteAddress)) return fail(403, 'Loopback clients only.');
     if (!isLoopbackHostHeader(request.headers.host, port)) return fail(403, 'Loopback Host required.');
-    if (
-      !isLoopbackOrigin(
-        Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin,
-      )
-    )
-      return fail(403, 'Loopback Origin required.');
+    // Browsers send Origin; native MCP clients do not. Reject rather than CORS-allow loopback pages.
+    if (request.headers.origin) return fail(403, 'Browser Origin is not accepted.');
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
     if (url.pathname !== LOCAL_MCP_PATH) return fail(404, 'Not found.');
-    if (request.method === 'OPTIONS') {
-      response.writeHead(204, {
-        Allow: 'POST, OPTIONS',
-        'Access-Control-Allow-Origin': 'http://127.0.0.1',
-        'Access-Control-Allow-Headers': 'content-type, mcp-protocol-version, accept',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      });
-      response.end();
-      return;
-    }
     if (request.method !== 'POST') return fail(405, 'POST JSON-RPC to /mcp.');
     try {
       const body = await readHttpBody(request, MAX_JSON_RPC_BYTES);
       const message = JSON.parse(body) as JsonRpcRequest;
       const payload = await handleMcpJsonRpc(message, this.tools, this.context.appVersion());
-      response.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': 'http://127.0.0.1',
-      });
+      response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(payload ? JSON.stringify(payload) : '');
     } catch (error) {
       fail(400, error instanceof Error ? error.message : 'Invalid JSON-RPC request.');
