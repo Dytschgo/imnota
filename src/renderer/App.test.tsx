@@ -1594,7 +1594,10 @@ describe('feedback controls', () => {
 
   it('buffers a capture without a current collection and restores the last-used collection', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const loadProject = vi.fn(async () => snapshot);
     const commitBufferedCapture = vi.fn(async () => ({
       ok: true as const,
@@ -1654,7 +1657,10 @@ describe('feedback controls', () => {
       ...snapshot,
       project: { ...snapshot.project, collections: [archived, snapshot.project.collections[0]!] },
     };
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn();
     const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
     const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
@@ -1689,7 +1695,10 @@ describe('feedback controls', () => {
 
   it('keeps a buffered capture when inserting it fails', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn(async () => ({
       ok: false as const,
       error: { code: 'io-failure' as const, message: 'Disk full', retryable: true },

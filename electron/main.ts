@@ -1509,7 +1509,7 @@ function registerIpc(): void {
   });
   function assertTrustedCaptureOverlay(
     event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
-  ): typeof captureOverlay {
+  ): NonNullable<typeof captureOverlay> {
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
