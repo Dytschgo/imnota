@@ -21,7 +21,9 @@ function FeatureCards({
     <div className="whats-new-cards">
       {release.features.map((feature) => (
         <article className="whats-new-card" key={feature.id}>
-          {feature.imageSrc && <img src={feature.imageSrc} alt="" />}
+          {feature.imageSrc && (
+            <img src={feature.imageSrc} alt="" onError={(event) => (event.currentTarget.hidden = true)} />
+          )}
           <h3>{feature.title}</h3>
           <p>{feature.description}</p>
           {feature.action && (

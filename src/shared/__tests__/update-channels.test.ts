@@ -413,6 +413,8 @@ it('reports a newer background discovery without an intermediate checking state'
   await instance.check({ background: true });
   expect(states).toEqual(['available']);
   expect(instance.getStatus().version).toBe('0.4.0');
+  expect(ops.download).not.toHaveBeenCalled();
+  expect(ops.install).not.toHaveBeenCalled();
 });
 it('invalidates a cached candidate when background native preparation fails', async () => {
   const { instance, ops } = controller();

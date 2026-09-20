@@ -126,7 +126,7 @@ it('shows actionable failure and allows retry', async () => {
   render(<UpdateControl />);
   fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
   expect(await screen.findByText(/The update action failed/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
 });
 
 it('moves from available through download progress to a ready-to-install action', async () => {

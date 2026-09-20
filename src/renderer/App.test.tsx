@@ -2190,4 +2190,29 @@ describe('feedback controls', () => {
     await screen.findByRole('heading', { name: 'Projects' });
     expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
   });
+
+  it('replays what’s new from Settings after the version has been acknowledged', async () => {
+    renderApp({
+      getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }),
+      getPreferenceSettings: async () => ({
+        ok: true as const,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            updates: { whatsNewAcknowledgedVersion: '0.2.8' },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    await screen.findByTestId('app-shell');
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    fireEvent.click(screen.getByRole('button', { name: 'Updates & about' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replay what’s new' }));
+    expect(await screen.findByTestId('whats-new-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByTestId('whats-new-dialog')).not.toBeInTheDocument();
+  });
 });

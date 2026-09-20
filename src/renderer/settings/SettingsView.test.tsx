@@ -27,4 +27,17 @@ describe('SettingsView category navigation', () => {
     rerender(<SettingsView activeCategory="Appearance" onCategoryChange={onCategoryChange} />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
   });
+
+  it('replays what’s new from Updates & about', () => {
+    const onReplayWhatsNew = vi.fn();
+    render(
+      <SettingsView
+        activeCategory="Updates & about"
+        updateStatus={{ state: 'idle', currentVersion: '0.2.8', channel: 'stable' }}
+        onReplayWhatsNew={onReplayWhatsNew}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Replay what’s new' }));
+    expect(onReplayWhatsNew).toHaveBeenCalledOnce();
+  });
 });
