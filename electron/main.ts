@@ -286,7 +286,8 @@ function createAppTray(): void {
         windowCapture: process.platform === 'win32',
         onCapture: requestTrayCapture,
         onOpen: () => {
-          if (!mainWindow || mainWindow.isDestroyed()) void createWindow().then(() => syncCaptureGlobalShortcut());
+          if (!mainWindow || mainWindow.isDestroyed())
+            void createWindow().then(() => syncCaptureGlobalShortcut());
           else raiseMainWindow();
         },
       }),
