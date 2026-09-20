@@ -14,6 +14,12 @@ Formatting cannot establish whether prose, links, commands, or agent instruction
 
 To restore full PR validation, remove the classifier conditions from Validate. No branch protection or release setting needs to change.
 
+## Superseded runs and workflow linting
+
+Validate and CodeQL use a concurrency group keyed by the pull request number, so a newer push to the same PR cancels the validation still running for the superseded revision instead of competing with it for runners. Main-branch pushes are keyed by commit and never cancel each other, so every merged revision is still validated in full. Before this change, one branch produced four complete eight-minute Validate runs within 25 minutes while its earlier revisions were already obsolete.
+
+Quality also lints the workflow files with a pinned `actionlint` container before the application checks, so a workflow expression, unknown input, or shell mistake fails the PR instead of the first run that happens to reach it.
+
 ## Hosted verification
 
 The first results revision in [PR #39](https://github.com/Dytschgo/imnota/pull/39), `0ec531c463615a93017daed9ee96c31218635da0`, passed [Validate 34280717233](https://github.com/Dytschgo/imnota/actions/runs/34280717233) and [CodeQL 34280717328](https://github.com/Dytschgo/imnota/actions/runs/34280717328) on attempt 1. All six original platform/service matrix jobs reported success through their documentation step; application steps were explicitly skipped. Quality installed dependencies and passed formatting, while CodeQL and dependency review executed normally. Every original check context reported success.

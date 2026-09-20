@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR supersedes the running validation; main-branch pushes keep
+# their own group per commit so every merged revision is still validated in full.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -17,9 +23,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - id: classify
         name: Classify the exact PR changes
         run: node scripts/ci-changes.mjs
@@ -49,7 +56,7 @@ jobs:
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
         if: env.RUN_APPLICATION == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 24
@@ -75,10 +82,10 @@ jobs:
         shell: bash
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -86,6 +93,9 @@ jobs:
       - run: pnpm exec install-electron
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm format:check
+      - name: Lint workflow files
+        if: env.RUN_APPLICATION == 'true'
+        run: docker run --rm --volume "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
       - run: pnpm lint
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm typecheck
@@ -133,11 +143,11 @@ jobs:
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
       - uses: actions/checkout@v7
         if: env.RUN_APPLICATION == 'true'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: env.RUN_APPLICATION == 'true'
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 22
