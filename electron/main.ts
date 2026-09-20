@@ -3009,8 +3009,8 @@ app.whenReady().then(async () => {
   });
   configureAutoUpdates();
   registerIpc();
-  await createWindow();
   syncCaptureGlobalShortcut();
+  await createWindow();
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));

@@ -1217,6 +1217,43 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
+  it('starts capture from the global hotkey IPC', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let hotkey: (() => void) | undefined;
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+      onRegionCaptureHotkey: (handler) => {
+        hotkey = handler;
+        return () => {
+          hotkey = undefined;
+        };
+      },
+    });
+    expect(hotkey).toEqual(expect.any(Function));
+    act(() => hotkey?.());
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+      }),
+    );
+  });
+
   it('chooses an exact Windows display before toolbar capture', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
