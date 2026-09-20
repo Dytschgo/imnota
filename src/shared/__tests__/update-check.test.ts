@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { createUpdateCheck } from '../../../electron/update-check';
 it('coalesces concurrent refreshes and allows retry after failure', async () => {

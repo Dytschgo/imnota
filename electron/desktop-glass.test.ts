@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { desktopMaterial } from './desktop-glass.js';
 describe('desktop glass capability', () => {
