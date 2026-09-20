@@ -61,6 +61,11 @@ function sameCaptureGeometry(left: CaptureDisplay, right: CaptureDisplay): boole
   );
 }
 
+/** Fullscreen changes the macOS work area without changing the captured pixels. */
+export function captureDisplayMetricsInvalidateSelection(changedMetrics: readonly string[]): boolean {
+  return changedMetrics.length === 0 || changedMetrics.some((metric) => metric !== 'workArea');
+}
+
 /** Display order is irrelevant, but every captured display must still exist with identical geometry. */
 export function captureDisplaysHaveStableGeometry(
   captured: readonly CaptureDisplay[],
