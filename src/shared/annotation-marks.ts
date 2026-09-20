@@ -1,6 +1,6 @@
-import { normalizeAnnotationBounds } from './annotation-geometry';
-import { textAnnotationNoteNumbers } from './annotation-order';
-import type { Annotation } from './types';
+import { normalizeAnnotationBounds } from './annotation-geometry.js';
+import { textAnnotationNoteNumbers } from './annotation-order.js';
+import type { Annotation } from './types.js';
 
 function percent(value: number, total: number): string {
   const ratio = total > 0 && Number.isFinite(value) ? (value / total) * 100 : 0;
