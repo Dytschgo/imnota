@@ -209,6 +209,7 @@ export interface WorkflowBridge {
     collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
+    overlayMode?: 'region' | 'window' | 'display';
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
   commitBufferedCapture(input: {
     projectPath: string;
@@ -216,6 +217,7 @@ export interface WorkflowBridge {
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
+  onCaptureTray(handler: (mode: 'region' | 'window' | 'display') => void): () => void;
 
   startPromptExport(input: {
     projectPath: string;

@@ -118,6 +118,7 @@ describe('feedback controls', () => {
         ],
       }),
       onRegionCaptureHotkey: () => () => {},
+      onCaptureTray: () => () => {},
       commitBufferedCapture: async () => ({
         ok: true as const,
         value: { snapshot, screenshotId: 'shot' },
@@ -1242,6 +1243,7 @@ describe('feedback controls', () => {
           hotkey = undefined;
         };
       },
+      onCaptureTray: () => () => {},
     });
     expect(hotkey).toEqual(expect.any(Function));
     act(() => hotkey?.());

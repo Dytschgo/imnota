@@ -911,7 +911,7 @@ export default function App() {
       throw reason;
     }
   }
-  async function captureRegion() {
+  async function captureRegion(overlayMode: 'region' | 'window' | 'display' = 'region') {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
@@ -975,6 +975,7 @@ export default function App() {
             projectPath: target.projectPath,
             collectionId: target.collectionId,
             displayId,
+            overlayMode,
           }),
         );
         if ('buffered' in result) {
@@ -992,7 +993,7 @@ export default function App() {
         if (!accepted) return;
         return;
       }
-      const result = workflowValue(await window.imnota.startRegionCapture({ displayId }));
+      const result = workflowValue(await window.imnota.startRegionCapture({ displayId, overlayMode }));
       if (!('buffered' in result)) return;
       await settleBufferedCapture();
     } catch (reason) {
@@ -1659,6 +1660,13 @@ export default function App() {
     () =>
       window.imnota.onRegionCaptureHotkey(() => {
         void captureRegionRef.current();
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      window.imnota.onCaptureTray((mode) => {
+        void captureRegionRef.current(mode);
       }),
     [],
   );

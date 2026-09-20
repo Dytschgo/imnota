@@ -17,6 +17,14 @@ const bridge: ImnotaBridge = {
     ipcRenderer.on('workflow:capture:region-hotkey', listener);
     return () => ipcRenderer.removeListener('workflow:capture:region-hotkey', listener);
   },
+  onCaptureTray: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { mode: 'region' | 'window' | 'display' },
+    ) => handler(payload.mode);
+    ipcRenderer.on('workflow:capture:tray', listener);
+    return () => ipcRenderer.removeListener('workflow:capture:tray', listener);
+  },
   startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
   writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),
   finishPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:finish', input),

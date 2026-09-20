@@ -5,6 +5,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  Menu,
   nativeImage,
   nativeTheme,
   net,
@@ -12,9 +13,11 @@ import {
   session,
   screen,
   systemPreferences,
+  Tray,
 } from 'electron';
 import os from 'node:os';
 import { nativeClipboard } from './native-clipboard.js';
+import { captureTrayTemplate } from './app-tray.js';
 import {
   onboardingHandoffRoot,
   OnboardingHandoffWorkflow,
@@ -140,7 +143,7 @@ import {
   restoreBackupInputSchema,
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
@@ -219,6 +222,7 @@ const captureGlobalShortcut = new CaptureGlobalShortcut({
   unregister: (accelerator) => globalShortcut.unregister(accelerator),
 });
 let pendingCapturePng: Buffer | null = null;
+let appTray: Tray | null = null;
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
 
 function syncCaptureGlobalShortcut(): void {
@@ -241,6 +245,53 @@ function raiseMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+function trayIcon(): Electron.NativeImage {
+  const candidates = [
+    path.join(app.getAppPath(), 'build', 'icon.png'),
+    path.join(process.resourcesPath, 'icon.png'),
+    path.join(__dirname, '../../build/icon.png'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return nativeImage.createFromPath(candidate);
+  }
+  return nativeImage.createEmpty();
+}
+
+function requestTrayCapture(mode: CaptureOverlayMode): void {
+  const send = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+    mainWindow.webContents.send('workflow:capture:tray', { mode });
+  };
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    void createWindow().then(() => {
+      syncCaptureGlobalShortcut();
+      send();
+    });
+    return;
+  }
+  send();
+}
+
+function createAppTray(): void {
+  if (appTray || process.env.IMNOTA_SMOKE === '1') return;
+  const image = trayIcon();
+  if (image.isEmpty()) return;
+  appTray = new Tray(image);
+  appTray.setToolTip('Imnota');
+  appTray.setContextMenu(
+    Menu.buildFromTemplate(
+      captureTrayTemplate({
+        windowCapture: process.platform === 'win32',
+        onCapture: requestTrayCapture,
+        onOpen: () => {
+          if (!mainWindow || mainWindow.isDestroyed()) void createWindow().then(() => syncCaptureGlobalShortcut());
+          else raiseMainWindow();
+        },
+      }),
+    ),
+  );
 }
 
 function assertLiveCaptureAdmission(event: IpcMainInvokeEvent, admission: CaptureAdmission): void {
@@ -982,6 +1033,7 @@ function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): Ca
 async function chooseCaptureRegion(
   captures: readonly CapturedDisplayImage[],
   windows: readonly CaptureWindowCandidate[] = [],
+  initialMode: CaptureOverlayMode = 'region',
 ): Promise<CaptureOverlayOutcome> {
   if (captureOverlay) throw new Error('A screen capture is already in progress.');
   if (!captures.length) throw new Error('No display capture is available.');
@@ -989,6 +1041,7 @@ async function chooseCaptureRegion(
   const session = new CaptureOverlaySession();
   const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
   const selection = new CaptureSelectionCoordinator(displays, windows);
+  if (initialMode !== 'region') selection.setMode(initialMode);
   const overlays: Array<{ window: BrowserWindow; capture: CapturedDisplayImage; ready: boolean }> = [];
   try {
     for (const capture of captures) {
@@ -1885,6 +1938,7 @@ function registerIpc(): void {
             projectPath: pathInput.optional(),
             collectionId: filenameSchema.optional(),
             displayId: z.number().int().optional(),
+            overlayMode: z.enum(CAPTURE_OVERLAY_MODES).optional(),
           })
           .strict()
           .refine((value) => Boolean(value.projectPath) === Boolean(value.collectionId)),
@@ -1992,6 +2046,7 @@ function registerIpc(): void {
         outcome = await chooseCaptureRegion(
           captured,
           listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+          input.overlayMode ?? 'region',
         );
       } catch (error) {
         if (error instanceof CaptureServiceError)
@@ -3040,6 +3095,7 @@ app.whenReady().then(async () => {
   registerIpc();
   syncCaptureGlobalShortcut();
   await createWindow();
+  createAppTray();
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));
@@ -3154,6 +3210,7 @@ app.whenReady().then(async () => {
   });
 });
 app.on('window-all-closed', () => {
+  if (appTray) return;
   captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
 });

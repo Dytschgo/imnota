@@ -55,6 +55,8 @@ Enable region capture in Settings > Shortcuts > Experimental capture; the toggle
 
 The overlay defaults to Region. Drag a rectangle, choose Window and click a window if Imnota can identify one, or choose Display to capture that whole screen including the taskbar or dock. Then choose Save, Retake or Cancel. Each mode adds one PNG to the active collection through the same capture save path. Window capture is best-effort: if the operating system cannot identify windows, the overlay explains this and Region stays available. It does not silently capture the whole display instead.
 
+While Imnota is running, a tray icon (Windows and Linux) or menu-bar extra (macOS) offers Capture region, Capture window on Windows, Capture display, and Open Imnota. Those actions share capture enablement with the toolbar. Closing or hiding the main window does not unregister the capture shortcut while the tray is still running.
+
 Capture is off by default. It captures one region, window or display, with no video or GIF conversion. macOS requires Screen Recording permission. If capture is unavailable or permission is denied, use the operating system's screenshot tool and Import or Paste. Linux capture is disabled. Retina and mixed-DPI setups still need platform verification.
 
 ## Add text blocks and drawings
