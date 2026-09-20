@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
 
