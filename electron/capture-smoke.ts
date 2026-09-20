@@ -52,7 +52,8 @@ function captureOverlayWindows(mainWindow: BrowserWindow): BrowserWindow[] {
     (window) =>
       window !== mainWindow &&
       !window.isDestroyed() &&
-      window.webContents.getURL().includes('capture-overlay.html'),
+      window.webContents.getURL().includes('capture-overlay.html') &&
+      !window.webContents.getURL().includes('countdown=1'),
   );
 }
 
@@ -220,6 +221,56 @@ export async function exerciseRegionCapture(
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
+
+  // Exercise the actual countdown window and IPC in packaged Windows/macOS runs.
+  for (const seconds of [3, 5] as const) {
+    for (const cancel of [true, false]) {
+      await driver.click({ selector: 'button[aria-label="Capture delay"]' });
+      const started = Date.now();
+      await driver.click({
+        selector: '[role="menuitem"]',
+        text: `Capture in ${seconds} seconds`,
+        exact: true,
+      });
+      if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+        await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+        await driver.click({ selector: `[data-display-id="${screen.getPrimaryDisplay().id}"]` });
+      }
+      let hud: BrowserWindow | undefined;
+      while (Date.now() - started < 5000) {
+        hud = BrowserWindow.getAllWindows().find(
+          (window) =>
+            !window.isDestroyed() &&
+            window.webContents.getURL().includes('countdown=1') &&
+            window.isVisible(),
+        );
+        if (hud) break;
+        await delay(25);
+      }
+      if (!hud) throw new Error('Capture countdown did not become visible.');
+      const hudDriver = new NativeUiDriver(hud);
+      await hudDriver.waitFor({ selector: '.capture-countdown' });
+      if (captureOverlayWindows(driver.browserWindow).length)
+        throw new Error('Selection opened before the countdown elapsed.');
+      if (cancel) {
+        if (seconds === 3) await hudDriver.click({ selector: '[data-action="cancel"]' });
+        else await hudDriver.press('Escape');
+        await waitForClosed(hud, 'Cancelled countdown');
+      } else {
+        const selectedOverlay = await waitForCaptureOverlay(driver.browserWindow);
+        if (Date.now() - started < seconds * 1000) throw new Error('Capture countdown elapsed too early.');
+        await waitForClosed(hud, 'Elapsed countdown');
+        const selectedDriver = new NativeUiDriver(selectedOverlay);
+        await selectedDriver.press('Escape');
+        await waitForClosed(selectedOverlay, 'Delayed capture selection');
+      }
+      await driver.waitFor({ selector: 'button[aria-label="Capture delay"]' }, { enabled: true });
+      await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Delayed capture cancellation');
+      await waitForScreenshotCount(host, projectPath, baseline.screenshots.length);
+      if ((await screenshotFiles(projectPath)).join('\n') !== baselineFiles.join('\n'))
+        throw new Error('Cancelled delayed capture wrote screenshot files.');
+    }
+  }
 
   let overlay = await startCapture(driver);
   await selectRegion(overlay);
