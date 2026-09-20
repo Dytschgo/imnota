@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH,
   DEFAULT_PREFERENCE_SETTINGS,
+  defaultExperimentalRegionCapture,
   isAllowedBackgroundImage,
   type PreferenceSettings,
   type PreferenceSettingsResult,
@@ -112,7 +113,7 @@ function cloneDefaults(): PreferenceSettings {
     appearance: { ...DEFAULT_PREFERENCE_SETTINGS.appearance },
     backups: { ...DEFAULT_PREFERENCE_SETTINGS.backups },
     shortcuts: { bindings: { ...DEFAULT_PREFERENCE_SETTINGS.shortcuts.bindings } },
-    capture: { ...DEFAULT_PREFERENCE_SETTINGS.capture },
+    capture: { experimentalRegionCapture: defaultExperimentalRegionCapture() },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
     nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },

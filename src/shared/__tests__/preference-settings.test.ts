@@ -48,7 +48,9 @@ describe('profile-aware preference settings', () => {
       initializedAsNewProfile: true,
     });
     expect(shouldShowOnboarding(result.settings.onboarding, result.profile)).toBe(true);
-    expect(result.settings.capture.experimentalRegionCapture).toBe(false);
+    expect(result.settings.capture.experimentalRegionCapture).toBe(
+      process.platform === 'win32' || process.platform === 'darwin',
+    );
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
     expect(result.settings.nativeCopy.defaultFunction).toBe('files');
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();

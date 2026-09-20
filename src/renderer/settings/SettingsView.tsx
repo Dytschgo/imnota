@@ -163,14 +163,13 @@ export function SettingsView({
             disabled={savingPreferences}
           />
           <section className="settings-section" aria-labelledby="capture-settings-title">
-            <h2 id="capture-settings-title">Experimental capture</h2>
+            <h2 id="capture-settings-title">Screen capture</h2>
             <label className="settings-switch">
               <span>
                 <strong>Capture a screen region</strong>
                 <small>
-                  Windows and macOS only while platform validation is in progress. Captures stay local.
-                  Windows covers every display and supports dragging across display boundaries; macOS uses the
-                  display under the pointer.
+                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
+                  Linux stays Import or Paste. Captures stay local.
                 </small>
                 <small data-testid="capture-shortcut-summary">
                   Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>

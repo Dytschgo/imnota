@@ -63,6 +63,10 @@ export interface CapturePreferences {
   experimentalRegionCapture: boolean;
 }
 
+export function defaultExperimentalRegionCapture(platform = process.platform): boolean {
+  return platform === 'win32' || platform === 'darwin';
+}
+
 export interface OnboardingPreferences {
   completed: boolean;
   completedVersion: number;
