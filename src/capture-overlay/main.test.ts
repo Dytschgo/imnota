@@ -13,6 +13,8 @@ function pointer(
   target.dispatchEvent(event);
 }
 
+const STILL = 'data:image/png;base64,cG5n';
+
 async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, height: 600 }) {
   let payloadHandler:
     | ((payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void)
@@ -38,7 +40,7 @@ async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, he
   surface.setPointerCapture = vi.fn();
   surface.hasPointerCapture = () => true;
   surface.releasePointerCapture = vi.fn();
-  payloadHandler!({ displayId, displayBounds, imageDataUrl: 'data:image/png;base64,cG5n' });
+  payloadHandler!({ displayId, displayBounds, imageDataUrl: STILL });
   return { surface, selectionHandler: selectionHandler! };
 }
 
@@ -53,6 +55,24 @@ beforeEach(() => {
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
   };
+});
+
+it('paints the captured still and only then marks the overlay ready', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  expect(still.getAttribute('src')).toBe(STILL);
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).toHaveBeenCalledOnce();
+});
+
+it('does not become ready when the captured still fails to load', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  still.dispatchEvent(new Event('error'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
 });
 
 it('reports uncapped pointer-capture coordinates for a cross-monitor reverse drag', async () => {
