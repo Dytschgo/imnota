@@ -1,6 +1,6 @@
 {
   "name": "imnota",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Turn annotated screenshots into AI-ready context.",
   "private": true,
   "type": "module",
