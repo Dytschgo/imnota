@@ -1300,6 +1300,28 @@ describe('feedback controls', () => {
     );
   });
 
+  it('does not acknowledge tray capture until deferred startup has restored state', async () => {
+    let resolveSettings!: (settings: Awaited<ReturnType<ImnotaBridge['getSettings']>>) => void;
+    const captureRendererReady = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    renderApp({
+      getSettings: () =>
+        new Promise<Awaited<ReturnType<ImnotaBridge['getSettings']>>>((resolve) => {
+          resolveSettings = resolve;
+        }),
+      captureRendererReady,
+    });
+    expect(await screen.findByText('Preparing your workspace…')).toBeInTheDocument();
+    expect(captureRendererReady).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveSettings({
+        ...useAppStore.getState().settings,
+        workspacePath: null,
+        openRecentOnLaunch: false,
+      }),
+    );
+    await waitFor(() => expect(captureRendererReady).toHaveBeenCalledOnce());
+  });
+
   it('chooses an exact Windows display before toolbar capture', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({

@@ -6,6 +6,9 @@ import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 
 export interface CaptureSmokeHost {
   reopenWindow(): Promise<BrowserWindow>;
+  captureFromTray(mode: 'region' | 'window' | 'display'): Promise<BrowserWindow>;
+  trayAvailable(): boolean;
+  globalCaptureShortcutRegistered(): boolean;
   readProject(projectPath: string): Promise<ProjectData>;
 }
 
@@ -216,10 +219,26 @@ export async function exerciseRegionCapture(
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
   const artifacts: SmokeCapture[] = [];
-  const driver = await enableExperimentalCapture(initialDriver, host);
+  let driver = await enableExperimentalCapture(initialDriver, host);
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
+
+  if (!host.trayAvailable()) throw new Error('Native smoke did not create the tray icon.');
+  if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
+    throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
+  const reopenedFromTray = await host.captureFromTray('display');
+  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
+  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
+  const trayMode = await trayOverlayDriver.evaluate<boolean>(
+    `document.querySelector('[data-mode="display"]')?.getAttribute('aria-checked') === 'true'`,
+  );
+  if (!trayMode) throw new Error('Queued tray capture did not preserve Display mode after reopening.');
+  await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(trayOverlay, 'Queued tray capture overlay');
+  await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
+  driver = new NativeUiDriver(reopenedFromTray);
+  await waitForPaint(driver);
 
   let overlay = await startCapture(driver);
   const defaultRegion = await overlay.evaluate<boolean>(

@@ -36,6 +36,10 @@ export interface SmokeWorkflowHost {
   setWorkspace(workspacePath: string): void | Promise<void>;
   /** Replace the app window through the production create/load path and return the ready window. */
   reopenWindow(): Promise<BrowserWindow>;
+  /** Exercise the production tray callback after closing the current window. */
+  captureFromTray(mode: 'region' | 'window' | 'display'): Promise<BrowserWindow>;
+  trayAvailable(): boolean;
+  globalCaptureShortcutRegistered(): boolean;
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */

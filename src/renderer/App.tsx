@@ -1667,9 +1667,12 @@ export default function App() {
     const unsubscribe = window.imnota.onCaptureTray((mode) => {
       void captureRegionRef.current(mode);
     });
-    void window.imnota.captureRendererReady();
     return unsubscribe;
   }, []);
+  useEffect(() => {
+    if (booting || preferences.loading) return;
+    void window.imnota.captureRendererReady();
+  }, [booting, preferences.loading]);
 
   if (booting || preferences.loading)
     return (

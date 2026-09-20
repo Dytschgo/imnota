@@ -5,6 +5,7 @@ export function captureTrayTemplate(input: {
   windowCapture: boolean;
   onCapture(mode: CaptureOverlayMode): void;
   onOpen(): void;
+  onQuit(): void;
 }): MenuItemConstructorOptions[] {
   return [
     { label: 'Capture region', click: () => input.onCapture('region') },
@@ -16,5 +17,6 @@ export function captureTrayTemplate(input: {
     { label: 'Capture display', click: () => input.onCapture('display') },
     { type: 'separator' },
     { label: 'Open Imnota', click: () => input.onOpen() },
+    { label: 'Quit Imnota', click: () => input.onQuit() },
   ];
 }

@@ -279,7 +279,7 @@ function requestCapture(request: CaptureRequest): void {
 }
 
 function createAppTray(): void {
-  if (appTray || process.env.IMNOTA_SMOKE === '1') return;
+  if (appTray) return;
   const image = trayIcon();
   if (image.isEmpty()) return;
   appTray = new Tray(image);
@@ -294,6 +294,7 @@ function createAppTray(): void {
             void createWindow().then(() => syncCaptureGlobalShortcut());
           else raiseMainWindow();
         },
+        onQuit: () => app.quit(),
       }),
     ),
   );
@@ -3123,6 +3124,20 @@ app.whenReady().then(async () => {
             if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
               previousWindow.destroy();
             return nextWindow;
+          },
+          async captureFromTray(mode) {
+            const nextWindow = new Promise<BrowserWindow>((resolve) =>
+              app.once('browser-window-created', (_event, window) => resolve(window)),
+            );
+            mainWindow?.destroy();
+            requestCapture({ source: 'tray', mode });
+            return nextWindow;
+          },
+          trayAvailable() {
+            return appTray !== null && !appTray.isDestroyed();
+          },
+          globalCaptureShortcutRegistered() {
+            return captureGlobalShortcut.registeredAccelerator !== null;
           },
           readProject,
           async restoreRecovery(projectPath) {
