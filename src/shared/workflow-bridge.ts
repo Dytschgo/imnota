@@ -218,7 +218,9 @@ export interface WorkflowBridge {
   commitBufferedCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>>;
+  }): Promise<
+    WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>
+  >;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
 

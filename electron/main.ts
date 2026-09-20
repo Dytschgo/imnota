@@ -1507,7 +1507,9 @@ function registerIpc(): void {
     active.selection.setMode(mode);
     broadcastCaptureSelection();
   });
-  function assertTrustedCaptureOverlay(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): typeof captureOverlay {
+  function assertTrustedCaptureOverlay(
+    event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+  ): typeof captureOverlay {
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
@@ -1520,7 +1522,10 @@ function registerIpc(): void {
     if (!active) throw new Error('Capture overlay is no longer available.');
     return active;
   }
-  function commitCaptureOverlay(active: NonNullable<typeof captureOverlay>, action: 'save' | 'annotate'): void {
+  function commitCaptureOverlay(
+    active: NonNullable<typeof captureOverlay>,
+    action: 'save' | 'annotate',
+  ): void {
     if (!captureOverlayGeometryIsStable(active)) {
       failCaptureOverlay('display-changed');
       return;
