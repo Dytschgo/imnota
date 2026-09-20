@@ -103,16 +103,50 @@ describe('main-process clipboard completion', () => {
       image: true,
       files: false,
     });
+    expect(mocks.clipboard.write).toHaveBeenCalledOnce();
+  });
 
-    mocks.clipboard.readText.mockResolvedValue('changed');
-    mocks.clipboard.read.mockResolvedValue([]);
+  it('reports Windows text-only retention after one combined write', async () => {
+    const html = '<p>Markdown</p>';
+    mocks.clipboard.readText.mockResolvedValue('Markdown');
+    mocks.clipboard.read.mockResolvedValue([clipboardItem({ 'text/html': platformClipboardHtml(html) })]);
     await expect(nativeClipboard.writeContext('Markdown', html, image)).resolves.toEqual({
+      text: true,
+      html: true,
+      image: false,
+      files: false,
+    });
+    expect(mocks.clipboard.write).toHaveBeenCalledOnce();
+    expect(mocks.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('reports Windows image-only retention after one combined write', async () => {
+    mocks.clipboard.readText.mockResolvedValue('');
+    mocks.clipboard.read.mockResolvedValue([
+      clipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) }),
+    ]);
+    mocks.nativeImage.createFromBuffer.mockReturnValue(image);
+    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
+      text: false,
+      html: false,
+      image: true,
+      files: false,
+    });
+    expect(mocks.clipboard.write).toHaveBeenCalledOnce();
+  });
+
+  it('reports every format unverified when clipboard read-back fails', async () => {
+    mocks.clipboard.readText.mockImplementation(() => {
+      throw new Error('Clipboard unavailable');
+    });
+    mocks.clipboard.read.mockRejectedValue(new Error('Clipboard unavailable'));
+    await expect(nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image)).resolves.toEqual({
       text: false,
       html: false,
       image: false,
       files: false,
     });
-    expect(mocks.clipboard.write).toHaveBeenCalledTimes(2);
+    expect(mocks.clipboard.write).toHaveBeenCalledOnce();
   });
 
   it('recognizes only the exact HTML representation produced by each native platform', () => {
