@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../src/shared/capture.js';
 import {
