@@ -95,7 +95,8 @@ jobs:
       - run: pnpm format:check
       - name: Lint workflow files
         if: env.RUN_APPLICATION == 'true'
-        run: docker run --rm --volume "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+        # The container bundles shellcheck; style-level hints stay advisory, warnings and errors fail.
+        run: docker run --rm --volume "${PWD}:/repo" --workdir /repo --env SHELLCHECK_OPTS=--severity=warning rhysd/actionlint:1.7.12 -color
       - run: pnpm lint
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm typecheck

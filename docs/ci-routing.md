@@ -18,7 +18,7 @@ To restore full PR validation, remove the classifier conditions from Validate. N
 
 Validate and CodeQL use a concurrency group keyed by the pull request number, so a newer push to the same PR cancels the validation still running for the superseded revision instead of competing with it for runners. Main-branch pushes are keyed by commit and never cancel each other, so every merged revision is still validated in full. Before this change, one branch produced four complete eight-minute Validate runs within 25 minutes while its earlier revisions were already obsolete.
 
-Quality also lints the workflow files with a pinned `actionlint` container before the application checks, so a workflow expression, unknown input, or shell mistake fails the PR instead of the first run that happens to reach it.
+Quality also lints the workflow files with a pinned `actionlint` container before the application checks, so a workflow expression, unknown input, or shell mistake fails the PR instead of the first run that happens to reach it. The container's bundled shellcheck runs at warning severity: style hints stay advisory rather than blocking a release workflow nobody is editing.
 
 ## Hosted verification
 
