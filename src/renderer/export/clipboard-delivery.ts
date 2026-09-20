@@ -2,7 +2,7 @@ import type { ClipboardFormatsReport, WindowsCopyVariantId } from '../../shared/
 import type { PromptDeliveryOutcome } from './PromptBundleCard';
 
 export interface CombinedDeliveryDescription {
-  outcome: PromptDeliveryOutcome;
+  outcome?: PromptDeliveryOutcome;
   warning?: string;
 }
 
@@ -24,6 +24,16 @@ function sentenceList(items: readonly string[]): string {
   return `${displayed.slice(0, -1).join(', ')} and ${displayed.at(-1)} were confirmed on the clipboard.`;
 }
 
+const UNCONFIRMED_RICH_FALLBACK = 'Use Copy Markdown only, Copy image only, or Open files.';
+
+function missingRichGuidance(placed: ClipboardFormatsReport): string {
+  if (placed.text && placed.image) return '';
+  if (!placed.text && !placed.image)
+    return `Markdown and image were not confirmed. ${UNCONFIRMED_RICH_FALLBACK}`;
+  if (!placed.image) return 'Image was not confirmed. Use Copy image only or Open files.';
+  return 'Markdown was not confirmed. Use Copy Markdown only or Open files.';
+}
+
 export function describeCopyDelivery(
   variant: WindowsCopyVariantId,
   placed: ClipboardFormatsReport | undefined,
@@ -32,8 +42,7 @@ export function describeCopyDelivery(
   if (!hasImage) return { outcome: 'markdown' };
   if (!placed)
     return {
-      outcome: 'files',
-      warning: 'The clipboard result could not be confirmed. Try a separate copy action.',
+      warning: `The clipboard result could not be confirmed. ${UNCONFIRMED_RICH_FALLBACK}`,
     };
   const confirmed = sentenceList(verifiedFormats(placed));
   if (variant === 'files')
@@ -43,13 +52,12 @@ export function describeCopyDelivery(
           warning: `${confirmed} The receiving app still decides whether paste accepts file attachments.`,
         }
       : {
-          outcome: 'files',
           warning: `${confirmed} Use Copy file paths or Open files instead.`,
         };
   if (variant === 'files-rich') {
     const complete = placed.files && placed.text && placed.html && placed.image;
     return {
-      outcome: placed.files ? 'files' : placed.text && placed.image ? 'combined' : 'files',
+      outcome: placed.files ? 'files' : placed.text && placed.image ? 'combined' : undefined,
       warning: complete
         ? `${confirmed} The receiving app chooses which of these formats it pastes.`
         : `${confirmed} Try another comparison option or a separate copy action.`,
@@ -59,16 +67,15 @@ export function describeCopyDelivery(
   if (placed.text)
     return {
       outcome: 'markdown',
-      warning: `${confirmed} Use Copy image only if the receiver omitted the picture.`,
+      warning: `${confirmed} ${missingRichGuidance(placed)}`,
     };
   if (placed.image)
     return {
       outcome: 'image',
-      warning: `${confirmed} Use Copy Markdown only if the receiver omitted the text.`,
+      warning: `${confirmed} ${missingRichGuidance(placed)}`,
     };
   return {
-    outcome: 'files',
-    warning: `${confirmed} Use a separate copy action or Copy files.`,
+    warning: `${confirmed} ${missingRichGuidance(placed)}`,
   };
 }
 
@@ -82,7 +89,7 @@ export function describeCopyMessage(variant: WindowsCopyVariantId, placed: Clipb
     return `${confirmed} The test app may choose only one representation when you paste.`;
   if (placed.text && placed.image)
     return 'Markdown and image are on the clipboard. The test app may paste only one format.';
-  return `${confirmed} Try another option below if the test app needs the missing format.`;
+  return `${confirmed} ${missingRichGuidance(placed)}`;
 }
 
 /** Existing compact copy surfaces use the rich variant outside the comparison UI. */
