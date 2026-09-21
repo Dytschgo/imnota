@@ -1,6 +1,6 @@
 # Engineering follow-up plan — 2026-09-18
 
-Status: Phase 0 housekeeping is complete in this repository. Phases 1–3 remain proposal-only; each item needs its own decision and its own PR. This document complements [the feedback follow-up plan](follow-up-plan-20260918.md), which covers product-facing items from the feedback round. It covers the codebase itself: structure, tests, evidence and housekeeping.
+Status: Phase 0 housekeeping is complete in this repository. Phases 1–3 are a proposal snapshot from 2026-09-18, not current release prerequisites. They may inform separately authorized work when their stated evidence condition still applies. This document complements [the feedback follow-up plan](follow-up-plan-20260918.md), which covers product-facing items from the feedback round. It covers the codebase itself: structure, tests, evidence and housekeeping.
 
 Historical baseline for measurements below: `main` at `36ff189` (2026-09-18), when PRs #72–#76 were open. It is not a statement about the current branch.
 
@@ -14,7 +14,7 @@ Principles, taken from [AGENTS.md](../AGENTS.md):
 
 ### 0.1 Move finished root-level plans into `docs/` — completed
 
-Why: 11 Markdown files sit in the repository root. Five are dated execution plans (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`) that may belong with historical records once their delivery and release status are verified. Every agent session pays context cost for them; filenames with spaces require quoting in shell commands.
+Why: At the time of this plan, 11 Markdown files sat in the repository root. Five were dated execution plans (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`) that belonged with historical records once their delivery and release status were verified. Every agent session paid context cost for them; filenames with spaces required quoting in shell commands.
 
 Outcome: the four completed execution records now live under [`docs/history`](history/README.md), with corrected descriptive filenames. The living status document is [`docs/implementation-plan.md`](implementation-plan.md), not history, because it contains current release status and open acceptance work. Root-level policy, contribution, security and release files remain in place.
 
@@ -40,7 +40,7 @@ When: not scheduled by this plan.
 
 The index now separates living guidance, proposal-only plans, historical records and the separately deployed sharing service, so agents can identify the authoritative document before acting.
 
-## Phase 1 — Evidence for the things users actually reported (next nightly)
+## Phase 1 — Proposed evidence for reported behavior
 
 ### 1.1 Capture display matrix document and a runnable native check
 
@@ -75,7 +75,7 @@ console.log(
 
 Use a disposable or synthetic desktop scene, or obtain authorization for any real content that may enter the capture. Captured pixels remain local and must not be included in the matrix record.
 
-When: before the nightly that carries #72. Decides items 2.1 and 2.2 of the feedback follow-up plan.
+When: before claiming multi-display capture evidence. This may inform items 2.1 and 2.2 of the feedback follow-up plan when that evidence is commissioned.
 
 Verification: filesystem/native tier — run on Windows with two displays and on macOS; Linux is not applicable.
 
@@ -83,11 +83,11 @@ Verification: filesystem/native tier — run on Windows with two displays and on
 
 Why: `docs/clipboard-receiver-matrix.md` has every Windows cell at "testing". #76 makes Imnota report what the clipboard holds, but only a real paste into Cursor, VS Code, a browser assistant and a native Markdown editor answers the user's question.
 
-What: no code. Run the matrix on the nightly that carries #76, record Windows build, Imnota revision, receiving app version, and whether the card warning matched what the receiver pasted.
+What: no code. When clipboard receiver evidence is commissioned, record the Windows build, Imnota revision, receiving app version, and whether the card warning matched what the receiver pasted.
 
-When: same nightly as 1.1.
+When: alongside the capture matrix only when both evidence activities are commissioned.
 
-## Phase 2 — Structural extractions, driven by the areas the feedback touched (next 2–3 weeks)
+## Phase 2 — Proposed structural extractions, driven by the areas the feedback touched
 
 Each item is one mechanical-move PR followed, only if needed, by a behaviour PR. Extraction order follows the areas most likely to be touched again.
 
@@ -135,7 +135,7 @@ export function createCaptureWorkflow(deps: CaptureWorkflowDependencies) {
 
 Why a factory and not a class with globals: the current `captureOverlay` module variable is the reason the overlay handlers cannot be unit-tested; with injected dependencies the `misplaced` path from #72 can get a test that fakes `getContentBounds()`.
 
-When: after #72 merges and the matrix has run once, so the extraction moves settled code. Mechanical PR first (no behaviour change, existing smoke must pass); then, if 1.1 asks for a tolerance, that is a separate 10-line PR with a test.
+When: if capture work becomes active after the matrix identifies a concrete maintenance need. Mechanical PR first (no behaviour change, existing smoke must pass); then, if 1.1 identifies a tolerance, that is a separate 10-line PR with a test.
 
 Verification: filesystem/native tier. Run the affected native checks on Windows and macOS, then use `IMNOTA_SMOKE_CAPTURE_SOURCE=synthetic corepack pnpm smoke` only for the synthetic branch; ordinary `pnpm smoke` does not exercise that capture source. Review the affected capture UI and permission/failure states.
 
@@ -208,7 +208,7 @@ export function useRegionCapture(input: {
 
 Each extraction moves code verbatim, then the matching `App.test.tsx` cases move to `use*.test.tsx` next to the hook.
 
-When: one hook per PR, after the feedback PRs have merged (they are the ones that would conflict). Do not start until #73 and #75 are in.
+When: one hook per PR if a focused App area needs maintenance. The feedback PRs referenced by this 2026-09-18 snapshot have merged; their former merge order is historical context only.
 
 Verification: application tier; `App.test.tsx` and the new hook tests must both pass, and the affected UI flows need review even when their intended appearance is unchanged. `useRegionCapture` also needs filesystem/native-tier evidence on each affected supported OS.
 
@@ -260,7 +260,7 @@ void this.check({ background: true });
 
 plus one test: switch channel while offline → status stays `idle` with the new channel, no `error` emitted.
 
-When: only after #74 merges; it is a 2-line follow-up.
+When: if the update-switching behavior is reported; #74 is already merged.
 
 ### 3.3 Shortcut recorder: `event.code` for letters too
 
@@ -278,17 +278,17 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 
 ## Timeline summary
 
-| When                                | Item                                                                    | Type                     |
-| ----------------------------------- | ----------------------------------------------------------------------- | ------------------------ |
-| Completed                           | 0.1 move root plans, 0.3 docs index                                     | docs housekeeping        |
-| When separately authorized          | 0.2 per-worktree maintenance                                            | local, no PR             |
-| Next nightly (carrying #72 and #76) | 1.1 capture matrix + probe, 1.2 receiver matrix                         | native evidence          |
-| After #72 merges and 1.1 has run    | 2.1 capture workflow extraction                                         | mechanical PR            |
-| Right after 2.1                     | 2.2 smoke profile module                                                | mechanical PR + one test |
-| After #73 and #75 merge             | 2.3 `useRegionCapture`, then `useUpdateFlow`, then `useClipboardImport` | one mechanical PR each   |
-| With the first 2.3 PR               | 2.4 deletion-confirm flake                                              | test fix                 |
-| After #74 merges                    | 3.2 background check on channel switch                                  | 2-line PR + test         |
-| Next `Toolbar.tsx` change           | 3.1 `shortcutHint`                                                      | small PR                 |
-| Before next release prep            | Decide on an `Unreleased` changelog section (feedback plan 1.3)         | release-preparation PR   |
+| When                                            | Item                                                                    | Type                     |
+| ----------------------------------------------- | ----------------------------------------------------------------------- | ------------------------ |
+| Completed                                       | 0.1 move root plans, 0.3 docs index                                     | docs housekeeping        |
+| When separately authorized                      | 0.2 per-worktree maintenance                                            | local, no PR             |
+| When the corresponding evidence is commissioned | 1.1 capture matrix + probe, 1.2 receiver matrix                         | native evidence          |
+| If the matrix identifies a maintenance need     | 2.1 capture workflow extraction                                         | mechanical PR            |
+| After 2.1, if extraction proceeds               | 2.2 smoke profile module                                                | mechanical PR + one test |
+| If a focused App area needs maintenance         | 2.3 `useRegionCapture`, then `useUpdateFlow`, then `useClipboardImport` | one mechanical PR each   |
+| With the first 2.3 PR                           | 2.4 deletion-confirm flake                                              | test fix                 |
+| If update switching is reported                 | 3.2 background check on channel switch                                  | 2-line PR + test         |
+| Next `Toolbar.tsx` change                       | 3.1 `shortcutHint`                                                      | small PR                 |
+| Before next release prep                        | Decide on an `Unreleased` changelog section (feedback plan 1.3)         | release-preparation PR   |
 
 Aim for one independently reviewable outcome per PR. Split separable outcomes, and explain why any cohesive larger change belongs together.
