@@ -350,8 +350,10 @@ describe('prompt export controller orchestration', () => {
     const annotations: Record<string, Annotation[]> = {
       'shot-1': [
         { id: 'first', kind: 'text', x: 0, y: 0, text: 'First note', zIndex: 99 },
-        { id: 'shape', kind: 'rectangle', x: 0, y: 0, zIndex: 2 },
+        { id: 'shape', kind: 'rectangle', x: 10, y: 8, width: 20, height: 16, zIndex: 2 },
         { id: 'blank', kind: 'text', x: 0, y: 0, text: '   ', zIndex: 1 },
+        { id: 'a1', kind: 'arrow', x: 12, y: 32, points: [0, 0, 38, 8], zIndex: 3 },
+        { id: 's2', kind: 'step', x: 70, y: 40, stepNumber: 1, zIndex: 4 },
         { id: 'second', kind: 'callout', x: 0, y: 0, text: 'Second note', zIndex: 0 },
       ],
     };
@@ -368,6 +370,17 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown).toContain('Picture 2 was intentionally excluded');
     expect(native.writes[0].markdown.indexOf('Picture 1 / Note 1')).toBeLessThan(
       native.writes[0].markdown.indexOf('Picture 1 / Note 2'),
+    );
+    expect(native.writes[0].markdown).toContain(
+      [
+        '### Picture 1 / Marks',
+        '',
+        '- text `first` note 1 at 0.0%,0.0% 0.0%×0.0%',
+        '- rectangle `shape` at 10.0%,10.0% 20.0%×20.0%',
+        '- arrow `a1` from 12.0%,40.0% to 50.0%,50.0%',
+        '- step `s2` number 1 at 70.0%,50.0%',
+        '- callout `second` note 2 at 0.0%,0.0% 0.0%×0.0%',
+      ].join('\n'),
     );
     expect(native.writes[0].markdown).not.toContain('Note 3');
     expect(native.writes[0].markdown).not.toContain('opaque-project-grant');
@@ -612,11 +625,39 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
       outcome: 'markdown',
-      warning: expect.stringContaining('Copy image'),
+      warning: expect.stringMatching(/Image was not confirmed.*Copy image only or Open files/),
     });
     const image = await controller.copyImage(controller.getState().cards[0]);
     expect(image.ok).toBe(true);
     expect(controller.getState().cards[0]).toMatchObject({ outcome: 'image', warning: undefined });
+  });
+
+  test('reports image-only Windows retention without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: true, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      outcome: 'image',
+      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown only or Open files/),
+    });
+  });
+
+  test('reports an unverified clipboard read-back without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: false, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0].outcome).toBeUndefined();
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      warning: expect.stringMatching(
+        /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
+      ),
+    });
   });
 
   test('exposes same-session fallbacks when combined clipboard copy fails', async () => {

@@ -1,4 +1,3 @@
-import { isTextAnnotation } from '../../shared/annotation-order';
 import { orderedCollectionItems, type CollectionContentItem } from '../../shared/markdown';
 import type { TextWidthMeasurer } from '../../shared/annotation-geometry';
 import { EXPORT_SAFETY_MARGIN, expandedExportBounds } from '../../shared/crop';
@@ -429,8 +428,11 @@ function masterMarkdown(plan: PromptBundlePlan, input: PromptCollectionInput, se
       const description = normalizedMarkdown(item.description ?? '');
       if (description.trim()) lines.push(description, '');
     }
-    for (const note of includedById.get(screenshot.id)?.notes ?? [])
+    const included = includedById.get(screenshot.id);
+    for (const note of included?.notes ?? [])
       lines.push(`#### Picture ${pictureNumber} / Note ${note.number}`, '', note.text, '');
+    if (included?.marks.length)
+      lines.push(`#### Picture ${pictureNumber} / Marks`, '', ...included.marks, '');
   }
   return `${lines.join('\n').replace(/\n+$/g, '')}\n`;
 }
@@ -519,7 +521,7 @@ export class PromptBundleControllerEngine {
 
   private deliveryCompleted(
     bundleNumber: number,
-    outcome: PromptDeliveryOutcome,
+    outcome: PromptDeliveryOutcome | undefined,
     primaryCopy = false,
     warning?: string,
   ): void {
@@ -772,7 +774,7 @@ export class PromptBundleControllerEngine {
         nativeWidth: loaded.image.width,
         nativeHeight: loaded.image.height,
         contentRevision: loaded.contentRevision,
-        annotations: annotations.filter(isTextAnnotation).map(({ kind, text }) => ({ kind, text })),
+        annotations,
       });
     }
     const input = cloneAndFreeze({

@@ -156,9 +156,11 @@ import {
 } from './capture-overlay-session.js';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
 import {
+  captureDisplayOptions,
+  captureDisplayMetricsInvalidateSelection,
   captureDisplaysHaveStableGeometry,
-  captureDisplaysWithStableGeometry,
   captureDisplayWithStableGeometry,
+  selectedCaptureDisplay,
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
@@ -912,10 +914,9 @@ function captureOverlayIds(): number[] | undefined {
 
 function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverlay>): boolean {
   const current = screen.getAllDisplays();
-  const relevant =
-    process.platform === 'win32'
-      ? current
-      : current.filter((display) => active.displays.some((captured) => captured.id === display.id));
+  const relevant = current.filter((display) =>
+    active.displays.some((captured) => captured.id === display.id),
+  );
   return captureDisplaysHaveStableGeometry(active.displays, relevant);
 }
 
@@ -987,9 +988,16 @@ async function chooseCaptureRegion(
     );
   }
   const failForDisplayChange = () => failCaptureOverlay('display-changed');
+  const failForDisplayMetricsChange = (
+    _event: Electron.Event,
+    _display: Electron.Display,
+    changedMetrics: string[],
+  ) => {
+    if (captureDisplayMetricsInvalidateSelection(changedMetrics)) failForDisplayChange();
+  };
   screen.on('display-added', failForDisplayChange);
   screen.on('display-removed', failForDisplayChange);
-  screen.on('display-metrics-changed', failForDisplayChange);
+  screen.on('display-metrics-changed', failForDisplayMetricsChange);
   captureOverlay = {
     overlays,
     session,
@@ -999,7 +1007,7 @@ async function chooseCaptureRegion(
     disposeDisplayListeners: () => {
       screen.off('display-added', failForDisplayChange);
       screen.off('display-removed', failForDisplayChange);
-      screen.off('display-metrics-changed', failForDisplayChange);
+      screen.off('display-metrics-changed', failForDisplayMetricsChange);
     },
   };
   try {
@@ -1773,6 +1781,27 @@ function registerIpc(): void {
     z.tuple([]).parse(args);
     return { windowsFileClipboard: windowsFileClipboardAvailable() };
   });
+  handleWorkflow('workflow:capture:displays', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
+      );
+    if (process.platform !== 'win32')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Display selection is only available for Windows capture.',
+      );
+    const displays = captureDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+    if (displays.length === 0)
+      throw new NativeWorkflowError(
+        'capture-sources-unavailable',
+        'Windows did not report an available display to capture. Use Import or Paste instead.',
+        true,
+      );
+    return displays;
+  });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z
       .tuple([
@@ -1780,6 +1809,7 @@ function registerIpc(): void {
           .object({
             projectPath: pathInput,
             collectionId: filenameSchema,
+            displayId: z.number().int().optional(),
           })
           .strict(),
       ])
@@ -1817,14 +1847,16 @@ function registerIpc(): void {
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
     assertLiveCaptureAdmission(event, admission);
-    const selectedDisplays =
+    const selectedDisplay =
       process.platform === 'win32'
-        ? screen.getAllDisplays()
-        : [screen.getDisplayNearestPoint(screen.getCursorScreenPoint())];
-    if (selectedDisplays.length === 0)
+        ? selectedCaptureDisplay(screen.getAllDisplays(), input.displayId)
+        : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (!selectedDisplay)
       throw new NativeWorkflowError(
         'capture-sources-unavailable',
-        'The operating system did not report an available display. Use Import or Paste instead.',
+        input.displayId === undefined
+          ? 'Choose a display before selecting a region.'
+          : 'The selected display is no longer available. Choose an available display and try again.',
         true,
       );
     assertLiveCaptureAdmission(event, admission);
@@ -1837,25 +1869,20 @@ function registerIpc(): void {
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
-        const stableCapture =
-          process.platform === 'win32'
-            ? await captureDisplaysWithStableGeometry(
-                selectedDisplays,
-                (displays) => service.captureDisplays(displays),
-                () => screen.getAllDisplays(),
-              )
-            : await captureDisplayWithStableGeometry(
-                selectedDisplays[0]!,
-                (display) => service.captureDisplay(display),
-                () => screen.getAllDisplays(),
-              ).then((capture) => (capture ? [capture] : null));
+        const stableCapture = await captureDisplayWithStableGeometry(
+          selectedDisplay,
+          (display) => service.captureDisplay(display),
+          () => screen.getAllDisplays(),
+        );
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            'The display layout changed while capture was being prepared. Try again after the displays settle.',
+            process.platform === 'win32'
+              ? 'The selected display changed while the capture was being prepared. Choose an available display and try again.'
+              : 'The display layout changed while capture was being prepared. Try again after the displays settle.',
             true,
           );
-        captured = stableCapture;
+        captured = [stableCapture];
       } catch (error) {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
@@ -1900,10 +1927,10 @@ function registerIpc(): void {
         throw new NativeWorkflowError(
           'capture-failed',
           outcome.reason === 'misplaced'
-            ? 'A selection window could not cover its display. Use Import or Paste instead.'
+            ? 'The selection window could not cover the selected display. Choose the display again, or use Import or Paste instead.'
             : outcome.reason === 'display-changed'
               ? 'The display layout changed during capture. Try again after the displays settle.'
-              : 'The screen selection windows stopped before they were ready. Use Import or Paste instead.',
+              : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
           true,
         );
       const selection = outcome.selection;

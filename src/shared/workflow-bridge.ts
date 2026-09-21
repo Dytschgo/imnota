@@ -1,5 +1,6 @@
 import type { NativeCopyFunction, PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
 import type { ProjectData, ProjectSnapshot } from './types.js';
+import type { CaptureDisplayOption } from './capture.js';
 
 export type WorkflowErrorCode =
   | 'invalid-input'
@@ -200,9 +201,12 @@ export interface WorkflowBridge {
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
+  listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
     projectPath: string;
     collectionId: string;
+    /** Required for Windows when more than one display is attached. */
+    displayId?: number;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
 
   startPromptExport(input: {

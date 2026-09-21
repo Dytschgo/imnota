@@ -1,10 +1,11 @@
+import { annotationMarkListItems } from './annotation-marks';
+import { pictureSourceSizeLine } from './markdown';
+import { textAnnotationReferences } from './annotation-order';
+import type { Annotation } from './types';
+
 export type PromptPriority = 'low' | 'medium' | 'high';
 export type PromptVisualKind = 'screenshot' | 'drawing';
-
-export interface PromptAnnotationInput {
-  kind: string;
-  text?: string;
-}
+export type PromptAnnotationInput = Annotation;
 export interface PromptScreenshotInput {
   id: string;
   position: number;
@@ -70,11 +71,14 @@ export interface PromptBundlePicture {
   priority: PromptPriority;
   contentRevision: string;
   notes: PromptTextNote[];
+  marks: string[];
   sourceFilename?: string;
   estimatedPngCharacters?: number;
   dataUrl?: string;
   width: number;
   height: number;
+  nativeWidth: number;
+  nativeHeight: number;
 }
 export interface PromptBundleText {
   itemId: string;
@@ -187,13 +191,10 @@ function normalized(value: string): string {
 }
 
 export function mapPromptTextNotes(annotations: readonly PromptAnnotationInput[]): PromptTextNote[] {
-  const notes: PromptTextNote[] = [];
-  for (const annotation of annotations) {
-    if (annotation.kind !== 'text' && annotation.kind !== 'callout') continue;
-    const text = annotation.text && normalized(annotation.text);
-    if (text?.trim()) notes.push({ number: notes.length + 1, text });
-  }
-  return notes;
+  return textAnnotationReferences(annotations).map(({ annotation, noteNumber }) => ({
+    number: noteNumber,
+    text: normalized(annotation.text ?? ''),
+  }));
 }
 
 export function calculatePromptBundleLayout(
@@ -289,9 +290,12 @@ function markdownForBundle(
     lines.push(`## ${visualLabel(picture)} — ${cleanHeading(picture.title, picture.originalFilename)}`, '');
     if (picture.kind === 'screenshot') {
       lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
+      lines.push(pictureSourceSizeLine(picture.nativeWidth, picture.nativeHeight), '');
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
+      if (picture.marks.length)
+        lines.push(`### Picture ${picture.pictureNumber} / Marks`, '', ...picture.marks, '');
     } else if (normalized(picture.description).trim()) {
       lines.push(normalized(picture.description), '');
     }
@@ -345,11 +349,19 @@ function resolveRendered(
     priority: drawing ? 'medium' : item.priority,
     contentRevision: item.contentRevision,
     notes: drawing ? [] : mapPromptTextNotes(item.annotations),
+    marks: drawing
+      ? []
+      : annotationMarkListItems(item.annotations, {
+          originalWidth: item.nativeWidth,
+          originalHeight: item.nativeHeight,
+        }),
     sourceFilename: drawing ? item.sourceFilename : undefined,
     estimatedPngCharacters: rendered.estimatedPngCharacters,
     dataUrl: rendered.dataUrl,
     width: rendered.width,
     height: rendered.height,
+    nativeWidth: item.nativeWidth,
+    nativeHeight: item.nativeHeight,
   };
 }
 
