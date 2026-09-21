@@ -24,31 +24,31 @@
   "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all seven changed captures and their difference images individually reviewed. Four light workspaces and three light onboarding scenes adopt stronger graphite ink, surfaces, borders, and the light scrim. Existing adaptive toolbar layout is preserved. Seven dark/settings/backdrop captures retained within the unchanged strict tolerance. Native verification passed.",
   "captureUpdates": {
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-14",
-      "sourceRevision": "c46db381e992801fa5a6a58e7dd7533262e85778",
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34786340794",
-      "review": "Baseline, candidate and highlighted difference individually reviewed. The added Backups & history tab redistributes the settings navigation; content and all existing controls remain intact. The other 13 baseline captures pass unchanged. The source run timed out later during feature verification; this approves only the settings image, not native workflow completion. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
+      "reviewedAt": "2026-09-21",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "3440x1440-workspace-light.png": {
       "reviewedAt": "2026-09-16",
@@ -79,39 +79,39 @@
     },
     "1280x800-workspace-dark.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "1280x800-workspace-light.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "1440x900-workspace-dark.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "1440x900-workspace-light.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "backdrop-collapsed.png": {
       "reviewedAt": "2026-09-21",
@@ -124,12 +124,12 @@
     },
     "backdrop-workspace.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
+      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     }
   }
 }
