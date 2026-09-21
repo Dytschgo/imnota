@@ -175,16 +175,16 @@ export function SettingsView({
             disabled={savingPreferences}
           />
           <section className="settings-section" aria-labelledby="capture-settings-title">
-            <h2 id="capture-settings-title">Experimental capture</h2>
+            <h2 id="capture-settings-title">Screen capture</h2>
             <label className="settings-switch">
               <span>
                 <strong>Capture a screen region</strong>
                 <small>
-                  Windows and macOS only while platform validation is in progress. Captures stay local.
-                  Windows lets you choose a display when more than one is attached and captures only that
-                  display; macOS uses the display under the pointer. Capture in 3 or 5 seconds waits after
-                  Imnota hides so hover menus and tooltips can appear. Press Escape during that wait to
-                  cancel; no overlay opens and no file is saved.
+                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
+                  Linux stays Import or Paste. Captures stay local. Windows lets you choose a display when
+                  more than one is attached and captures only that display; macOS uses the display under the
+                  pointer. Capture in 3 or 5 seconds waits after Imnota hides so hover menus and tooltips can
+                  appear. Press Escape during that wait to cancel; no overlay opens and no file is saved.
                 </small>
                 <small data-testid="capture-shortcut-summary">
                   {captureShortcut ? (

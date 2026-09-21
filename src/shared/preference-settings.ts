@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   BACKGROUND_IMAGE_MAX_DATA_URL_LENGTH,
   DEFAULT_PREFERENCE_SETTINGS,
+  defaultExperimentalRegionCapture,
   isAllowedBackgroundImage,
   type PreferenceSettings,
   type PreferenceSettingsResult,
@@ -113,12 +114,12 @@ export const preferenceSettingsUpdateSchema = z
   })
   .strict();
 
-function cloneDefaults(): PreferenceSettings {
+function cloneDefaults(newProfile = false): PreferenceSettings {
   return {
     appearance: { ...DEFAULT_PREFERENCE_SETTINGS.appearance },
     backups: { ...DEFAULT_PREFERENCE_SETTINGS.backups },
     shortcuts: { bindings: { ...DEFAULT_PREFERENCE_SETTINGS.shortcuts.bindings } },
-    capture: { ...DEFAULT_PREFERENCE_SETTINGS.capture },
+    capture: { experimentalRegionCapture: newProfile && defaultExperimentalRegionCapture() },
     onboarding: { ...DEFAULT_PREFERENCE_SETTINGS.onboarding },
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
     nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },
@@ -166,7 +167,7 @@ export function resolvePreferenceSettings(
 ): PreferenceSettingsResult {
   if (!settingsFileExists)
     return {
-      settings: cloneDefaults(),
+      settings: cloneDefaults(true),
       profile: {
         settingsFileExists: false,
         migratedFromLegacyProfile: false,
