@@ -222,6 +222,10 @@ export interface WorkflowBridge {
     projectPath: string;
     collectionId: string;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  repeatLastRegionCapture(input: {
+    projectPath: string;
+    collectionId: string;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
 

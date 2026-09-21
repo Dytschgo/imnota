@@ -148,8 +148,9 @@ import {
   restoreBackupInputSchema,
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
@@ -232,6 +233,7 @@ let captureOverlay: {
 let captureDelaySession: CaptureDelaySession | null = null;
 let captureDelayHud: BrowserWindow | null = null;
 const captureAdmissionGate = new CaptureAdmissionGate();
+const lastCaptureRegionMemory = new LastCaptureRegionMemory();
 const captureGlobalShortcut = new CaptureGlobalShortcut({
   register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
   unregister: (accelerator) => globalShortcut.unregister(accelerator),
@@ -1010,9 +1012,9 @@ async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<Bro
   }
 }
 
-function settleCaptureOverlay(selection: CaptureRectangle | null): void {
+function settleCaptureOverlay(selection: CaptureRectangle | null, mode: CaptureOverlayMode = 'region'): void {
   const active = captureOverlay;
-  if (!active || !active.session.settle(selection)) return;
+  if (!active || !active.session.settle(selection, mode)) return;
   captureOverlay = null;
   active.readiness.dispose();
   active.disposeDisplayListeners();
@@ -1106,10 +1108,13 @@ async function chooseCaptureRegion(
         const active = captureOverlay;
         if (!active?.overlays.some((candidate) => candidate.window === window) || window.isDestroyed())
           return;
+        const remembered = lastCaptureRegionMemory.peek();
         window.webContents.send('capture-overlay:payload', {
           displayId: capture.display.id,
           displayBounds,
           imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
+          lastRegion: lastCaptureRegionForDisplay(remembered, capture.display.id),
+          lastRegionAvailable: remembered !== null,
         });
       });
       overlays.push({ window, capture, ready: false });
@@ -1607,7 +1612,21 @@ function registerIpc(): void {
     }
     const state = active.selection.current();
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
-    settleCaptureOverlay(state.selection);
+    settleCaptureOverlay(state.selection, state.mode);
+  });
+  ipcMain.on('capture-overlay:repeat-last', (event) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    active.selection.applyLastRegion(lastCaptureRegionMemory.peek());
+    broadcastCaptureSelection();
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
     if (isCaptureDelayHudSender(event)) {
@@ -1669,13 +1688,14 @@ function registerIpc(): void {
   // toolbar/shortcut invocations can each wait for a previous operation and
   // subsequently create separate overlays.
   const handleCaptureWorkflow = (
+    channel: 'workflow:capture:region' | 'workflow:capture:repeat-last-region',
     listener: (
       event: IpcMainInvokeEvent,
       admission: CaptureAdmission,
       ...args: unknown[]
     ) => Promise<unknown> | unknown,
   ) => {
-    ipcMain.handle('workflow:capture:region', (event, ...args) =>
+    ipcMain.handle(channel, (event, ...args) =>
       workflowOutcome(async () => {
         if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
           throw new Error('Untrusted IPC sender.');
@@ -1991,7 +2011,7 @@ function registerIpc(): void {
       );
     return displays;
   });
-  handleCaptureWorkflow(async (event, admission, ...args) => {
+  handleCaptureWorkflow('workflow:capture:region', async (event, admission, ...args) => {
     const [input] = z
       .tuple([
         z
@@ -2191,11 +2211,121 @@ function registerIpc(): void {
           true,
         );
       }
+      lastCaptureRegionMemory.remember(captured[0]!.display, selection, outcome.mode);
       assertLiveCaptureAdmission(event, admission);
       if (!safeProjectPath || !input.collectionId) {
         pendingCapturePng = png;
         return { buffered: true as const };
       }
+      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
+        assertLiveCaptureAdmission(event, admission),
+      );
+    } finally {
+      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        if (wasFocused) mainWindow.focus();
+      }
+    }
+  });
+  handleCaptureWorkflow('workflow:capture:repeat-last-region', async (event, admission, ...args) => {
+    const [input] = z
+      .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
+      .parse(args);
+    assertLiveCaptureAdmission(event, admission);
+    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
+      );
+    if (process.platform === 'linux')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen capture is unavailable on Linux in this experimental release. Use Import or Paste instead.',
+      );
+    if (process.platform !== 'win32' && process.platform !== 'darwin')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen capture is unavailable on this platform. Use Import or Paste instead.',
+      );
+    if (process.platform === 'darwin') {
+      const permission = systemPreferences.getMediaAccessStatus('screen');
+      if (permission === 'denied' || permission === 'restricted')
+        throw new NativeWorkflowError(
+          'capture-permission-denied',
+          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+        );
+    }
+    const safeProjectPath = await assertProjectPath(input.projectPath);
+    const beforeCapture = await readProjectMetadata(safeProjectPath);
+    const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
+    if (!beforeCollection || beforeCollection.archived)
+      throw new NativeWorkflowError('collection-not-found', 'Choose a current collection before capturing.');
+    assertLiveCaptureAdmission(event, admission);
+    const resolved = lastCaptureRegionMemory.resolve(screen.getAllDisplays());
+    if (!resolved.ok)
+      throw new NativeWorkflowError(
+        resolved.kind === 'unavailable' ? 'capture-unavailable' : 'capture-sources-unavailable',
+        resolved.message,
+        resolved.kind === 'display-gone',
+      );
+    const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
+    const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
+    try {
+      if (wasVisible) mainWindow?.hide();
+      let captured: CapturedDisplayImage[];
+      const service = captureService();
+      try {
+        const stableCapture = await captureDisplayWithStableGeometry(
+          resolved.display,
+          (display) => service.captureDisplay(display),
+          () => screen.getAllDisplays(),
+        );
+        if (!stableCapture)
+          throw new NativeWorkflowError(
+            'capture-sources-unavailable',
+            'The display used for the last region changed while the capture was being prepared. Capture a new region, or reconnect that display.',
+            true,
+          );
+        captured = [stableCapture];
+      } catch (error) {
+        if (error instanceof NativeWorkflowError) throw error;
+        if (error instanceof CaptureServiceError) {
+          if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
+            throw new NativeWorkflowError(
+              'capture-permission-denied',
+              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+            );
+          throw new NativeWorkflowError(
+            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
+            `${error.message} Use Import or Paste instead.`,
+            true,
+          );
+        }
+        throw new NativeWorkflowError(
+          'capture-sources-unavailable',
+          'The screen capture source could not be read. Use Import or Paste instead.',
+          true,
+        );
+      }
+      assertLiveCaptureAdmission(event, admission);
+      let png: Buffer;
+      try {
+        png = service.compose(captured, resolved.selection);
+      } catch (error) {
+        if (error instanceof CaptureServiceError)
+          throw new NativeWorkflowError(
+            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
+            `${error.message} Use Import or Paste instead.`,
+            error.kind !== 'empty-region',
+          );
+        throw new NativeWorkflowError(
+          'capture-sources-unavailable',
+          'The selected screen area could not be prepared. Use Import or Paste instead.',
+          true,
+        );
+      }
+      lastCaptureRegionMemory.remember(captured[0]!.display, resolved.selection, 'region');
+      assertLiveCaptureAdmission(event, admission);
       return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
         assertLiveCaptureAdmission(event, admission),
       );

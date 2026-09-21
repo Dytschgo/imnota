@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
+import { screenshotPath } from './collections.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from './windows-smoke-input.js';
 
@@ -418,6 +419,35 @@ export async function exerciseRegionCapture(
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+  await driver.waitFor({ selector: 'button[aria-label^="Capture screen region"]:not(:disabled)' });
+
+  // Full-display capture must not replace the remembered region. Repeat uses the
+  // same source pixels and crop through the normal renderer/native IPC path.
+  await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
+  const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  const repeated = afterRepeat.screenshots.at(-1);
+  if (
+    !repeated ||
+    repeated.id === captured.id ||
+    repeated.originalWidth !== captured.originalWidth ||
+    repeated.originalHeight !== captured.originalHeight
+  )
+    throw new Error('Repeat capture did not preserve the original crop dimensions.');
+  const [originalBytes, repeatedBytes] = await Promise.all([
+    fs.readFile(screenshotPath(projectPath, captured)),
+    fs.readFile(screenshotPath(projectPath, repeated)),
+  ]);
+  if (!originalBytes.equals(repeatedBytes))
+    throw new Error('Repeat capture changed the synthetic region pixels.');
+  await driver.waitFor({ selector: `[data-testid="screenshot-${repeated.id}"]` });
+
+  overlay = await startCapture(driver);
+  await overlay.click({ selector: '[data-action="last-region"]' });
+  await overlay.waitFor({ selector: '.capture-actions' });
+  const repeatOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
 
   return { artifacts, skipped: false };
 }
