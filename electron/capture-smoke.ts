@@ -166,13 +166,7 @@ async function startCapture(
 ): Promise<NativeUiDriver> {
   if (trigger === 'shortcut') await driver.press('5', ['control', 'shift']);
   else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
-  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    const displays = screen.getAllDisplays();
-    const primaryId = screen.getPrimaryDisplay().id;
-    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
-    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
-  }
+  await chooseCaptureDisplay(driver);
   const overlay = await waitForCaptureOverlay(driver.browserWindow);
   const overlayDriver = new NativeUiDriver(overlay);
   await overlayDriver.waitFor({ selector: '.capture-overlay' });
@@ -188,6 +182,16 @@ async function startCapture(
     check();
   })`);
   return overlayDriver;
+}
+
+async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
+  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    const displays = screen.getAllDisplays();
+    const primaryId = screen.getPrimaryDisplay().id;
+    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
+    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+  }
 }
 
 async function waitForScreenshotCount(
@@ -228,6 +232,7 @@ export async function exerciseRegionCapture(
   if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
     throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
   const reopenedFromTray = await host.captureFromTray('display');
+  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
   const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
   const trayOverlayDriver = new NativeUiDriver(trayOverlay);
   const trayMode = await trayOverlayDriver.evaluate<boolean>(

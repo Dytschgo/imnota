@@ -3052,9 +3052,10 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
   const createdWindow = mainWindow;
+  const createdWebContents = createdWindow.webContents;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
-    captureRequests.windowClosed(createdWindow.webContents);
+    captureRequests.windowClosed(createdWebContents);
     if (!appTray && BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
   });
   createdWindow.webContents.setWindowOpenHandler(({ url }) => {
