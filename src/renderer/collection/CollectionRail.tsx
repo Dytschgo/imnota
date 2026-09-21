@@ -17,7 +17,7 @@ import {
   Plus,
   Upload,
 } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import { orderedCollectionItems } from '../../shared/content-items';
@@ -88,11 +88,12 @@ export function CollectionControls({
   const operationPending = useRef(false);
   const [error, setError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [focusedItemIndex, setFocusedItemIndex] = useState(0);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement>(null);
   const pickerMenuRef = useRef<HTMLDivElement>(null);
-  const pickerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pickerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const restorePickerFocusAfterRename = useRef(false);
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
   const selectedIndex = Math.max(
@@ -113,40 +114,77 @@ export function CollectionControls({
   useEffect(() => {
     if (!pickerOpen) return;
     const frame = window.requestAnimationFrame(() => {
-      const option = pickerOptionRefs.current[focusedIndex];
+      const item = pickerItemRefs.current[focusedItemIndex];
       const menu = pickerMenuRef.current;
-      if (!option || !menu) return;
-      const top = option.offsetTop;
-      const bottom = top + option.offsetHeight;
+      if (!item || !menu) return;
+      if (item.disabled) {
+        setFocusedItemIndex(Math.floor(focusedItemIndex / 3) * 3);
+        return;
+      }
+      const top = item.offsetTop;
+      const bottom = top + item.offsetHeight;
       if (top < menu.scrollTop) menu.scrollTop = top;
       else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
-      option.focus();
+      item.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedIndex, pickerOpen]);
+  }, [busy, focusedItemIndex, pickerOpen]);
   if (!project || !current || !store.snapshot) return null;
 
   const closePicker = (restoreFocus = false) => {
     setPickerOpen(false);
     if (restoreFocus) window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
   };
-  const openPicker = (index = selectedIndex) => {
-    setFocusedIndex(Math.min(Math.max(index, 0), collections.length - 1));
+  const openPicker = (collectionIndex = selectedIndex) => {
+    setFocusedItemIndex(Math.min(Math.max(collectionIndex, 0), collections.length - 1) * 3);
     setPickerOpen(true);
   };
   const chooseCollection = (collectionId: string) => {
     closePicker(true);
     void (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(collectionId);
   };
-  const moveFocus = (nextIndex: number) => {
-    setFocusedIndex(Math.min(Math.max(nextIndex, 0), collections.length - 1));
+  const movePickerFocus = (nextIndex: number, direction = 0) => {
+    const lastItemIndex = collections.length * 3 - 1;
+    let candidate = Math.min(Math.max(nextIndex, 0), lastItemIndex);
+    while (busy && candidate % 3 !== 0) {
+      if (direction > 0 && candidate < lastItemIndex) candidate += 1;
+      else if (direction < 0 && candidate > 0) candidate -= 1;
+      else candidate -= candidate % 3;
+    }
+    setFocusedItemIndex(candidate);
+  };
+  const handlePickerItemKeyDown = (event: KeyboardEvent<HTMLButtonElement>, itemIndex: number) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      movePickerFocus(itemIndex + 1, 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      movePickerFocus(itemIndex - 1, -1);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      movePickerFocus(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      movePickerFocus(collections.length * 3 - 1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closePicker(true);
+    }
   };
 
   const renaming = renamingId ? collections.find((collection) => collection.id === renamingId) : undefined;
   const beginRename = (collection: (typeof collections)[number]) => {
     closePicker();
+    restorePickerFocusAfterRename.current = true;
     setName(collection.name);
     setRenamingId(collection.id);
+  };
+  const closeRename = () => {
+    setRenamingId(null);
+    if (restorePickerFocusAfterRename.current) {
+      restorePickerFocusAfterRename.current = false;
+      window.requestAnimationFrame(() => pickerTriggerRef.current?.focus());
+    }
   };
 
   async function apply(action: 'create' | 'rename' | 'archive' | 'restore', collectionId = current!.id) {
@@ -168,7 +206,7 @@ export function CollectionControls({
         createdId ? undefined : (store.activeScreenshotId ?? undefined),
       );
       if (createdId) await (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(createdId);
-      setRenamingId(null);
+      if (action === 'rename') closeRename();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The collection could not be saved.');
     } finally {
@@ -249,72 +287,78 @@ export function CollectionControls({
               if (!event.currentTarget.contains(event.relatedTarget)) closePicker();
             }}
           >
-            {collections.map((collection, index) => (
-              <div className="collection-picker-row" key={collection.id}>
-                <button
-                  ref={(element) => {
-                    pickerOptionRefs.current[index] = element;
-                  }}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={collection.id === current.id}
-                  aria-label={collection.name}
-                  aria-description={collection.archived ? 'Archived' : 'Active'}
-                  tabIndex={index === focusedIndex ? 0 : -1}
-                  className="collection-picker-option"
-                  onClick={() => chooseCollection(collection.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      moveFocus(index + 1);
-                    } else if (event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      moveFocus(index - 1);
-                    } else if (event.key === 'Home') {
-                      event.preventDefault();
-                      moveFocus(0);
-                    } else if (event.key === 'End') {
-                      event.preventDefault();
-                      moveFocus(collections.length - 1);
-                    } else if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      chooseCollection(collection.id);
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      closePicker(true);
-                    }
-                  }}
-                >
-                  <span>{collection.name}</span>
-                  <CollectionStatus archived={collection.archived} decorative />
-                  {collection.id === current.id && (
-                    <Check className="collection-picker-check" size={13} aria-hidden="true" />
-                  )}
-                </button>
-                <IconButton
-                  role="menuitem"
-                  tabIndex={-1}
-                  label={`Rename ${collection.name}`}
-                  disabled={busy}
-                  onClick={() => beginRename(collection)}
-                >
-                  <Pencil size={13} aria-hidden="true" />
-                </IconButton>
-                <IconButton
-                  role="menuitem"
-                  tabIndex={-1}
-                  label={`${collection.archived ? 'Restore' : 'Archive'} ${collection.name}`}
-                  disabled={busy}
-                  onClick={() => void apply(collection.archived ? 'restore' : 'archive', collection.id)}
-                >
-                  {collection.archived ? (
-                    <ArchiveRestore size={13} aria-hidden="true" />
-                  ) : (
-                    <Archive size={13} aria-hidden="true" />
-                  )}
-                </IconButton>
-              </div>
-            ))}
+            {collections.map((collection, index) => {
+              const optionIndex = index * 3;
+              return (
+                <div className="collection-picker-row" key={collection.id}>
+                  <button
+                    ref={(element) => {
+                      pickerItemRefs.current[optionIndex] = element;
+                    }}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={collection.id === current.id}
+                    aria-label={collection.name}
+                    aria-description={collection.archived ? 'Archived' : 'Active'}
+                    tabIndex={optionIndex === focusedItemIndex ? 0 : -1}
+                    className="collection-picker-option"
+                    onClick={() => chooseCollection(collection.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        chooseCollection(collection.id);
+                      } else handlePickerItemKeyDown(event, optionIndex);
+                    }}
+                  >
+                    <span>{collection.name}</span>
+                    <CollectionStatus archived={collection.archived} decorative />
+                    {collection.id === current.id && (
+                      <Check className="collection-picker-check" size={13} aria-hidden="true" />
+                    )}
+                  </button>
+                  <IconButton
+                    ref={(element) => {
+                      pickerItemRefs.current[optionIndex + 1] = element;
+                    }}
+                    role="menuitem"
+                    tabIndex={optionIndex + 1 === focusedItemIndex ? 0 : -1}
+                    label={`Rename ${collection.name}`}
+                    disabled={busy}
+                    onClick={() => beginRename(collection)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        beginRename(collection);
+                      } else handlePickerItemKeyDown(event, optionIndex + 1);
+                    }}
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </IconButton>
+                  <IconButton
+                    ref={(element) => {
+                      pickerItemRefs.current[optionIndex + 2] = element;
+                    }}
+                    role="menuitem"
+                    tabIndex={optionIndex + 2 === focusedItemIndex ? 0 : -1}
+                    label={`${collection.archived ? 'Restore' : 'Archive'} ${collection.name}`}
+                    disabled={busy}
+                    onClick={() => void apply(collection.archived ? 'restore' : 'archive', collection.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        void apply(collection.archived ? 'restore' : 'archive', collection.id);
+                      } else handlePickerItemKeyDown(event, optionIndex + 2);
+                    }}
+                  >
+                    {collection.archived ? (
+                      <ArchiveRestore size={13} aria-hidden="true" />
+                    ) : (
+                      <Archive size={13} aria-hidden="true" />
+                    )}
+                  </IconButton>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -347,7 +391,7 @@ export function CollectionControls({
         <Modal
           title="Rename collection"
           description="Screenshot files and the internal collection ID stay unchanged."
-          onClose={() => !busy && setRenamingId(null)}
+          onClose={() => !busy && closeRename()}
         >
           <form
             className="modal-form"
@@ -364,7 +408,7 @@ export function CollectionControls({
               onChange={(event) => setName(event.target.value)}
             />
             <div className="modal-actions">
-              <Button type="button" variant="ghost" disabled={busy} onClick={() => setRenamingId(null)}>
+              <Button type="button" variant="ghost" disabled={busy} onClick={closeRename}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>

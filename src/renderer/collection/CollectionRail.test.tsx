@@ -505,10 +505,19 @@ describe('CollectionRail', () => {
     expect(screen.queryByRole('button', { name: /^Archive / })).toBeNull();
     const trigger = screen.getByTestId('collection-picker');
     expect(within(trigger).getByRole('img', { name: 'Status: active' })).toBeInTheDocument();
-    fireEvent.click(trigger);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
     const menu = await screen.findByRole('menu', { name: 'Collections' });
     expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Archive Collection A' }));
+    const collectionOption = within(menu).getByRole('menuitemradio', { name: 'Collection A' });
+    await waitFor(() => expect(collectionOption).toHaveFocus());
+    fireEvent.keyDown(collectionOption, { key: 'ArrowDown' });
+    const rename = within(menu).getByRole('menuitem', { name: 'Rename Collection A' });
+    await waitFor(() => expect(rename).toHaveFocus());
+    fireEvent.keyDown(rename, { key: 'ArrowDown' });
+    const archive = within(menu).getByRole('menuitem', { name: 'Archive Collection A' });
+    await waitFor(() => expect(archive).toHaveFocus());
+    fireEvent.keyDown(archive, { key: 'Enter' });
 
     await within(menu).findByRole('menuitem', { name: 'Restore Collection A' });
     expect(within(trigger).getByRole('img', { name: 'Status: archived' })).toBeInTheDocument();
@@ -525,7 +534,9 @@ describe('CollectionRail', () => {
     expect(screen.getByTestId('add-item-trigger')).toBeDisabled();
     expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Restore Collection A' }));
+    const restore = within(menu).getByRole('menuitem', { name: 'Restore Collection A' });
+    restore.focus();
+    fireEvent.keyDown(restore, { key: ' ' });
 
     await waitFor(() =>
       expect(within(menu).getByRole('menuitem', { name: 'Archive Collection A' })).toBeEnabled(),
@@ -564,8 +575,15 @@ describe('CollectionRail', () => {
     const onSelectCollection = vi.fn();
     render(<CollectionRail {...props({ onSelectCollection })} />);
 
-    fireEvent.click(screen.getByTestId('collection-picker'));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename Collection B' }));
+    const trigger = screen.getByTestId('collection-picker');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'End' });
+    const option = await screen.findByRole('menuitemradio', { name: 'Collection B' });
+    await waitFor(() => expect(option).toHaveFocus());
+    fireEvent.keyDown(option, { key: 'ArrowDown' });
+    const rename = screen.getByRole('menuitem', { name: 'Rename Collection B' });
+    await waitFor(() => expect(rename).toHaveFocus());
+    fireEvent.keyDown(rename, { key: 'Enter' });
     const dialog = await screen.findByRole('dialog', { name: 'Rename collection' });
     expect(screen.queryByRole('menu', { name: 'Collections' })).toBeNull();
     const input = within(dialog).getByLabelText('Collection name');
@@ -574,6 +592,7 @@ describe('CollectionRail', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename collection' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename collection' })).toBeNull());
+    await waitFor(() => expect(trigger).toHaveFocus());
     expect(editCollection).toHaveBeenCalledExactlyOnceWith({
       projectPath: '/workspace/project',
       collectionId: 'collection-b',
@@ -583,6 +602,59 @@ describe('CollectionRail', () => {
     expect(onSelectCollection).not.toHaveBeenCalled();
     expect(screen.getByTestId('collection-picker')).toHaveTextContent('Collection A');
     expect(useAppStore.getState().snapshot?.project.collections[1].name).toBe('Review round');
+  });
+
+  it('returns focus to the picker after cancelling a keyboard-initiated rename', async () => {
+    render(<CollectionRail {...props()} />);
+
+    const trigger = screen.getByTestId('collection-picker');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'End' });
+    const option = await screen.findByRole('menuitemradio', { name: 'Collection B' });
+    await waitFor(() => expect(option).toHaveFocus());
+    fireEvent.keyDown(option, { key: 'ArrowDown' });
+    const rename = screen.getByRole('menuitem', { name: 'Rename Collection B' });
+    await waitFor(() => expect(rename).toHaveFocus());
+    fireEvent.keyDown(rename, { key: ' ' });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Rename collection' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename collection' })).toBeNull());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('skips disabled picker actions while an archive operation is pending', async () => {
+    let finishFlush: ((value: boolean) => void) | undefined;
+    const onFlush = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishFlush = resolve;
+        }),
+    );
+    window.imnota = {
+      editCollection: vi.fn(async () => useAppStore.getState().snapshot!),
+    } as unknown as ImnotaBridge;
+    render(<CollectionRail {...props({ onFlush })} />);
+
+    const trigger = screen.getByTestId('collection-picker');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const collectionA = await screen.findByRole('menuitemradio', { name: 'Collection A' });
+    fireEvent.keyDown(collectionA, { key: 'ArrowDown' });
+    const rename = screen.getByRole('menuitem', { name: 'Rename Collection A' });
+    await waitFor(() => expect(rename).toHaveFocus());
+    fireEvent.keyDown(rename, { key: 'ArrowDown' });
+    const archive = screen.getByRole('menuitem', { name: 'Archive Collection A' });
+    await waitFor(() => expect(archive).toHaveFocus());
+    fireEvent.keyDown(archive, { key: 'Enter' });
+
+    await waitFor(() => expect(archive).toBeDisabled());
+    await waitFor(() => expect(collectionA).toHaveFocus());
+    fireEvent.keyDown(collectionA, { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Collection B' })).toHaveFocus());
+
+    finishFlush?.(true);
+    await waitFor(() => expect(archive).toBeEnabled());
   });
 
   it('keeps the selected collection focused through complete picker keyboard navigation', async () => {
@@ -606,12 +678,27 @@ describe('CollectionRail', () => {
     await waitFor(() => expect(options[0]).toHaveFocus());
 
     fireEvent.keyDown(options[0], { key: 'ArrowDown' });
-    await waitFor(() => expect(options[1]).toHaveFocus());
-    fireEvent.keyDown(options[1], { key: 'Home' });
-    await waitFor(() => expect(options[0]).toHaveFocus());
-    fireEvent.keyDown(options[0], { key: 'End' });
-    await waitFor(() => expect(options.at(-1)).toHaveFocus());
-    fireEvent.keyDown(options.at(-1)!, { key: ' ' });
+    const rename = screen.getByRole('menuitem', { name: 'Rename Collection 1' });
+    await waitFor(() => expect(rename).toHaveFocus());
+    fireEvent.keyDown(rename, { key: 'ArrowDown' });
+    const archive = screen.getByRole('menuitem', { name: 'Archive Collection 1' });
+    await waitFor(() => expect(archive).toHaveFocus());
+    fireEvent.keyDown(archive, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const reopenedOptions = await screen.findAllByRole('menuitemradio');
+    await waitFor(() => expect(reopenedOptions[0]).toHaveFocus());
+    fireEvent.keyDown(reopenedOptions[0], { key: 'Home' });
+    await waitFor(() => expect(reopenedOptions[0]).toHaveFocus());
+    fireEvent.keyDown(reopenedOptions[0], { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.keyDown(trigger, { key: 'End' });
+    const endpointOptions = await screen.findAllByRole('menuitemradio');
+    await waitFor(() => expect(endpointOptions.at(-1)).toHaveFocus());
+    fireEvent.keyDown(endpointOptions.at(-1)!, { key: ' ' });
 
     expect(onSelectCollection).toHaveBeenCalledWith('collection-13');
     await waitFor(() => expect(trigger).toHaveFocus());
