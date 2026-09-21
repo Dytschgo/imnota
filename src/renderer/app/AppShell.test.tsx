@@ -82,6 +82,40 @@ describe('AppShell navigation', () => {
     expect(screen.getByTestId('search-trigger')).toHaveTextContent('Search');
   });
 
+  it('keeps a refresh control beside About when no update is pending', () => {
+    const onCheck = vi.fn();
+    render(
+      <AppShell
+        searchShortcut="Ctrl+F"
+        onNavigate={vi.fn()}
+        onNewProject={vi.fn()}
+        onOpenProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSearch={vi.fn()}
+        onOpenPromptBundles={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        onAbout={vi.fn()}
+        renderUpdateControl={(placement) => (
+          <FloatingUpdateControl
+            status={{ state: 'idle' }}
+            placement={placement}
+            onCheck={onCheck}
+            onDownload={vi.fn()}
+            onInstall={vi.fn()}
+            onRetry={vi.fn()}
+          />
+        )}
+      >
+        <div>Workbench</div>
+      </AppShell>,
+    );
+    const about = screen.getByRole('button', { name: 'About' });
+    const check = screen.getByRole('button', { name: 'Check for updates' });
+    expect(about.parentElement).toBe(screen.getByTestId('update-indicator').parentElement);
+    fireEvent.click(check);
+    expect(onCheck).toHaveBeenCalledOnce();
+  });
+
   it('shows the update indicator beside About and lower-left while navigation is hidden', () => {
     const onDownload = vi.fn();
     const shell = (

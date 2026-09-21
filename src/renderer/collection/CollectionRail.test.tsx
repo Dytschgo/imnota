@@ -335,7 +335,7 @@ describe('CollectionRail', () => {
     );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     const capture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
-    expect(capture).toHaveTextContent('across the available displays');
+    expect(capture).toHaveTextContent('Capture a region on a chosen display');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
