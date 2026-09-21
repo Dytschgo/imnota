@@ -218,7 +218,10 @@ export default function App() {
       throw new Error('Save the current drawing or text before preparing the prompt.');
     return persistence.getSavedContext(useAppStore.getState().activeCollectionId);
   }, [persistence, contentPersistence]);
-  const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
+  const promptBundles = usePromptBundleController({
+    getSavedContext: getSavedPromptContext,
+    getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+  });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
@@ -1706,6 +1709,7 @@ export default function App() {
             onWorkbenchChange={preferences.saveWorkbench}
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             onNativeCopyChange={preferences.saveNativeCopy}
+            onPromptExportChange={preferences.savePromptExport}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}

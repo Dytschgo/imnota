@@ -113,6 +113,7 @@ describe('collection Markdown generation', () => {
     );
     expect(markdown).not.toContain('/ Marks');
     expect(markdown).not.toContain('/ Note');
+    expect(markdown).not.toContain('### Visible text');
   });
 
   it('includes source pixel size for captured and imported screenshots alike', () => {
@@ -215,6 +216,33 @@ describe('collection Markdown generation', () => {
     });
     expect(redactionOnly).not.toContain('/ Marks');
     expect(redactionOnly).not.toContain('33.0%');
+  });
+
+  it('appends recognised Visible text without writing it into the description', () => {
+    const project = emptyProject('Review', '');
+    project.screenshots = [screenshot('first', 0)];
+    const markdown = generateMarkdown(project, '001-collection', {}, {}, { first: 'Submit order' });
+    expect(markdown).toContain(
+      '## Picture 1 — first.png\n\nPriority for agent: Medium\n\nSource size: 100×100\n\n### Visible text\n\nSubmit order\n',
+    );
+    expect(markdown).not.toContain('Keep the primary action visible.');
+    expect(markdown.indexOf('Source size: 100×100')).toBeLessThan(markdown.indexOf('### Visible text'));
+  });
+
+  it('omits Visible text when a redaction exists even if recognised text is supplied', () => {
+    const project = emptyProject('Review', '');
+    project.screenshots = [screenshot('first', 0)];
+    const markdown = generateMarkdown(
+      project,
+      '001-collection',
+      {
+        first: [{ id: 'secret-blur', kind: 'blur', x: 33, y: 44, width: 55, height: 16, zIndex: 0 }],
+      },
+      {},
+      { first: 'secret token' },
+    );
+    expect(markdown).not.toContain('### Visible text');
+    expect(markdown).not.toContain('secret token');
   });
 
   it('lists remaining visual kinds, negative box bounds, and PNG arrow-point fallbacks', () => {

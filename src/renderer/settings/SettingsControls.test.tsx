@@ -183,4 +183,19 @@ describe('preference controls', () => {
     await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'rich' }));
     expect(select).toHaveValue('files');
   });
+
+  it('defaults Include recognised text in Markdown on and emits a persisted change', async () => {
+    const onPromptExportChange = vi.fn(async () => {});
+    render(
+      <SettingsView
+        activeCategory="Sharing"
+        preferences={DEFAULT_PREFERENCE_SETTINGS}
+        onPromptExportChange={onPromptExportChange}
+      />,
+    );
+    const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: false }));
+  });
 });

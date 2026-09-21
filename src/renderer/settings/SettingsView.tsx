@@ -52,6 +52,7 @@ export interface SettingsViewProps {
   onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   nativeCopyAvailable?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
+  onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -86,6 +87,7 @@ export function SettingsView({
   onWorkbenchChange,
   nativeCopyAvailable = false,
   onNativeCopyChange,
+  onPromptExportChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -343,6 +345,30 @@ export function SettingsView({
         </div>
         {group === 'Sharing' && (
           <>
+            <section className="settings-section" aria-labelledby="prompt-markdown-title">
+              <h2 id="prompt-markdown-title">Prompt Markdown</h2>
+              <label className="settings-switch">
+                <span>
+                  <strong>Include recognised text in Markdown</strong>
+                  <small>
+                    Copy Bundle can append on-device OCR under Visible text. Screenshots with blur or pixelate
+                    marks omit this section. Recognition never leaves this device.
+                  </small>
+                </span>
+                <input
+                  type="checkbox"
+                  aria-label="Include recognised text in Markdown"
+                  checked={preferences.promptExport.includeRecognisedText}
+                  disabled={savingPreferences || !onPromptExportChange}
+                  onChange={(event) => {
+                    const includeRecognisedText = event.target.checked;
+                    void Promise.resolve()
+                      .then(() => onPromptExportChange?.({ includeRecognisedText }))
+                      .catch(() => undefined);
+                  }}
+                />
+              </label>
+            </section>
             {nativeCopyAvailable && (
               <section className="settings-section" aria-labelledby="native-copy-title">
                 <h2 id="native-copy-title">Native copy functions</h2>
