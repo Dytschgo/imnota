@@ -328,6 +328,13 @@ export async function exerciseRegionCapture(
   }
 
   let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'toolbar');
+  const defaultRegion = await overlay.evaluate<boolean>(
+    `document.querySelector('[data-mode="region"]')?.getAttribute('aria-checked') === 'true'`,
+  );
+  if (!defaultRegion) throw new Error('Capture overlay did not default to Region mode.');
+  await overlay.click({ selector: '[data-mode="window"]' });
+  await overlay.waitFor({ selector: '.capture-instruction', text: 'could not identify windows' });
+  await overlay.click({ selector: '[data-mode="region"]' });
   await selectRegion(overlay);
   await overlay.click({ selector: '[data-action="retake"]' });
   await waitForRetake(overlay);
@@ -396,6 +403,16 @@ export async function exerciseRegionCapture(
   })()`);
   const exported = await fs.stat(exportPath);
   if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
+
+  overlay = await startCapture(driver);
+  await overlay.click({ selector: '[data-mode="display"]' });
+  await overlay.waitFor({ selector: '.capture-actions' });
+  const displayOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="save"]' });
+  await waitForClosed(displayOverlay, 'Saved display capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
+  await waitForPaint(driver);
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
 
   return { artifacts, skipped: false };
 }

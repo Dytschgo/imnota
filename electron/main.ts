@@ -149,7 +149,9 @@ import {
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
 import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
-import { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
+import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
   CaptureOverlaySession,
@@ -1045,15 +1047,24 @@ function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverla
   return captureDisplaysHaveStableGeometry(active.displays, relevant);
 }
 
+function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
+  if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  return identifiableCaptureWindows(
+    tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
+    displays,
+  );
+}
+
 async function chooseCaptureRegion(
   captures: readonly CapturedDisplayImage[],
+  windows: readonly CaptureWindowCandidate[] = [],
 ): Promise<CaptureOverlayOutcome> {
   if (captureOverlay) throw new Error('A screen capture is already in progress.');
   if (!captures.length) throw new Error('No display capture is available.');
   const displays = captures.map(({ display }) => display);
   const session = new CaptureOverlaySession();
   const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
-  const selection = new CaptureSelectionCoordinator(displays);
+  const selection = new CaptureSelectionCoordinator(displays, windows);
   const overlays: Array<{ window: BrowserWindow; capture: CapturedDisplayImage; ready: boolean }> = [];
   try {
     for (const capture of captures) {
@@ -1557,6 +1568,21 @@ function registerIpc(): void {
       ? capturePointerGlobalPoint(overlay.capture.display, update.point, () => screen.getCursorScreenPoint())
       : undefined;
     active.selection.update(overlay.capture.display.id, update.phase, update.point, globalPoint);
+    broadcastCaptureSelection();
+  });
+  ipcMain.on('capture-overlay:mode', (event, raw) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    const mode = z.enum(CAPTURE_OVERLAY_MODES).parse(raw);
+    active.selection.setMode(mode);
     broadcastCaptureSelection();
   });
   ipcMain.handle('capture-overlay:save', (event) => {
@@ -2119,7 +2145,10 @@ function registerIpc(): void {
       assertLiveCaptureAdmission(event, admission);
       let outcome: CaptureOverlayOutcome;
       try {
-        outcome = await chooseCaptureRegion(captured);
+        outcome = await chooseCaptureRegion(
+          captured,
+          listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+        );
       } catch (error) {
         if (error instanceof CaptureServiceError)
           throw new NativeWorkflowError(
