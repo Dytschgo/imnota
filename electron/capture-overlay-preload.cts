@@ -10,11 +10,20 @@ interface CaptureSelectionState {
   windowMessage: string | null;
 }
 
+interface CaptureOverlayPayload {
+  displayId: number;
+  displayBounds: CaptureRectangle;
+  imageDataUrl: string;
+  lastRegion: CaptureRectangle | null;
+  lastRegionAvailable: boolean;
+}
+
 contextBridge.exposeInMainWorld('imnotaCapture', {
   ready: () => ipcRenderer.invoke('capture-overlay:ready'),
   pointer: (update: { phase: 'begin' | 'move' | 'end' | 'reset'; point?: { x: number; y: number } }) =>
     ipcRenderer.send('capture-overlay:pointer', update),
   setMode: (mode: CaptureOverlayMode) => ipcRenderer.send('capture-overlay:mode', mode),
+  repeatLastRegion: () => ipcRenderer.send('capture-overlay:repeat-last'),
   save: () => ipcRenderer.invoke('capture-overlay:save'),
   annotate: () => ipcRenderer.invoke('capture-overlay:annotate'),
   copy: () => ipcRenderer.invoke('capture-overlay:copy') as Promise<{ image: boolean }>,
@@ -25,13 +34,8 @@ contextBridge.exposeInMainWorld('imnotaCapture', {
     ipcRenderer.on('capture-overlay:countdown', listener);
     return () => ipcRenderer.removeListener('capture-overlay:countdown', listener);
   },
-  onPayload: (
-    handler: (payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void,
-  ) => {
-    const listener = (
-      _event: Electron.IpcRendererEvent,
-      payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string },
-    ) => handler(payload);
+  onPayload: (handler: (payload: CaptureOverlayPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: CaptureOverlayPayload) => handler(payload);
     ipcRenderer.on('capture-overlay:payload', listener);
     return () => ipcRenderer.removeListener('capture-overlay:payload', listener);
   },

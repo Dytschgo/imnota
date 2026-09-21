@@ -230,6 +230,10 @@ export interface WorkflowBridge {
   }): Promise<
     WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>
   >;
+  repeatLastRegionCapture(input: {
+    projectPath: string;
+    collectionId: string;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;

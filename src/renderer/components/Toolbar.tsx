@@ -351,6 +351,7 @@ export interface ToolbarProps {
   onActualSize?: () => void;
   onCapture?: (delaySeconds?: CaptureDelaySeconds) => void;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
   /** Enables the compact quick palette when supplied. */
@@ -371,6 +372,7 @@ export function Toolbar({
   onActualSize,
   onCapture,
   captureEnabled = false,
+  captureInProgress = false,
   captureShortcut,
   captureDisabledLabel = 'Screen capture is experimental — enable it in Settings',
   onColorSelect,
@@ -634,11 +636,14 @@ export function Toolbar({
           <div className="capture-delay" ref={captureDelayRef}>
             <IconButton
               label={
-                captureEnabled
-                  ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
-                  : captureDisabledLabel
+                captureInProgress
+                  ? 'Capture in progress…'
+                  : captureEnabled
+                    ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                    : captureDisabledLabel
               }
-              disabled={!captureEnabled}
+              disabled={!captureEnabled || captureInProgress}
+              aria-busy={captureInProgress || undefined}
               onClick={() => onCapture()}
             >
               <Camera size={17} />
@@ -646,7 +651,7 @@ export function Toolbar({
             <IconButton
               ref={captureDelayTriggerRef}
               label="Capture delay"
-              disabled={!captureEnabled}
+              disabled={!captureEnabled || captureInProgress}
               aria-expanded={captureDelayOpen}
               aria-haspopup="menu"
               aria-controls={captureDelayMenuId}
@@ -670,6 +675,7 @@ export function Toolbar({
                 <button
                   type="button"
                   role="menuitem"
+                  disabled={captureInProgress}
                   onClick={() => {
                     closeCaptureDelayMenu();
                     onCapture();
@@ -680,6 +686,7 @@ export function Toolbar({
                 <button
                   type="button"
                   role="menuitem"
+                  disabled={captureInProgress}
                   onClick={() => {
                     closeCaptureDelayMenu();
                     onCapture(3);
@@ -690,6 +697,7 @@ export function Toolbar({
                 <button
                   type="button"
                   role="menuitem"
+                  disabled={captureInProgress}
                   onClick={() => {
                     closeCaptureDelayMenu();
                     onCapture(5);

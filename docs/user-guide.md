@@ -59,6 +59,8 @@ The overlay defaults to Region. Drag a rectangle, choose Window and click a wind
 
 While Imnota is running, a tray icon (Windows and Linux) or menu-bar extra (macOS) offers Capture region, Capture window on Windows, Capture display, and Open Imnota. Those actions share capture enablement with the toolbar. Closing or hiding the main window does not unregister the capture shortcut while the tray is still running.
 
+Repeat last region recaptures the same display and DIP rectangle as the last successful region in this session. Use Repeat last captured region (default `Ctrl+Shift+6`, `⌘⇧6` on macOS) while Imnota is focused, or Last region in the capture overlay. If this session has no successful region yet, Imnota explains that and does not start a capture. If that display is no longer connected, Imnota reports the missing display instead of capturing a different screen. Window and full-display captures do not replace the remembered region.
+
 Capture is off by default. It captures one region, window or display, with no video or GIF conversion. macOS requires Screen Recording permission. If capture is unavailable or permission is denied, use the operating system's screenshot tool and Import or Paste. Linux capture is disabled. Retina and mixed-DPI setups still need platform verification.
 
 ## Add text blocks and drawings

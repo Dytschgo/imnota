@@ -1,15 +1,21 @@
-import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
+import type {
+  CaptureDisplay,
+  CaptureOverlayMode,
+  CaptureRectangle,
+  LastCaptureRegion,
+} from '../src/shared/capture.js';
 import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../src/shared/capture.js';
 import {
   captureWindowAtPoint,
   clipRectangleToDisplays,
   type CaptureWindowCandidate,
 } from './capture-windows.js';
+import { resolveLastCaptureRegion } from './last-capture-region.js';
 
 export type CaptureOverlayFailure = 'not-ready' | 'misplaced' | 'display-changed';
 
 export type CaptureOverlayOutcome =
-  | { kind: 'selected'; selection: CaptureRectangle }
+  | { kind: 'selected'; selection: CaptureRectangle; mode: CaptureOverlayMode }
   | { kind: 'cancelled' }
   | { kind: 'failed'; reason: CaptureOverlayFailure };
 
@@ -35,10 +41,10 @@ export class CaptureOverlaySession {
     });
   }
 
-  settle(selection: CaptureRectangle | null): boolean {
+  settle(selection: CaptureRectangle | null, mode: CaptureOverlayMode = 'region'): boolean {
     if (this.finished) return false;
     this.finished = true;
-    this.complete(selection ? { kind: 'selected', selection } : { kind: 'cancelled' });
+    this.complete(selection ? { kind: 'selected', selection, mode } : { kind: 'cancelled' });
     return true;
   }
 
@@ -127,6 +133,21 @@ export class CaptureSelectionCoordinator {
     this.mode = mode;
     if (mode === 'display') return this.restoreDisplaySelection();
     this.clearSelection();
+    return this.current();
+  }
+
+  applyLastRegion(remembered: LastCaptureRegion | null): CaptureSelectionState {
+    if (!remembered) return this.current();
+    const resolved = resolveLastCaptureRegion(remembered, this.displays);
+    if (!resolved.ok) return this.current();
+    this.start = null;
+    this.mode = 'region';
+    this.state = {
+      selection: resolved.selection,
+      complete: true,
+      actionsDisplayId: resolved.display.id,
+      windowTitle: null,
+    };
     return this.current();
   }
 

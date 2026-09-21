@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { CaptureOverlayMode, CaptureRectangle } from '../shared/capture';
-import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../shared/capture';
+import {
+  LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE,
+  WINDOW_CAPTURE_UNAVAILABLE_MESSAGE,
+} from '../shared/capture';
 
 function pointer(
   target: HTMLElement,
@@ -37,9 +40,19 @@ function selectionState(
 
 const STILL = 'data:image/png;base64,cG5n';
 
-async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, height: 600 }) {
+async function setup(
+  displayId = 2,
+  displayBounds = { x: 0, y: 0, width: 800, height: 600 },
+  extra: { lastRegion?: CaptureRectangle | null; lastRegionAvailable?: boolean } = {},
+) {
   let payloadHandler:
-    | ((payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void)
+    | ((payload: {
+        displayId: number;
+        displayBounds: CaptureRectangle;
+        imageDataUrl: string;
+        lastRegion: CaptureRectangle | null;
+        lastRegionAvailable: boolean;
+      }) => void)
     | undefined;
   let selectionHandler: ((state: ReturnType<typeof selectionState>) => void) | undefined;
   window.imnotaCapture.onPayload = vi.fn((handler) => {
@@ -56,7 +69,13 @@ async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, he
   surface.setPointerCapture = vi.fn();
   surface.hasPointerCapture = () => true;
   surface.releasePointerCapture = vi.fn();
-  payloadHandler!({ displayId, displayBounds, imageDataUrl: STILL });
+  payloadHandler!({
+    displayId,
+    displayBounds,
+    imageDataUrl: STILL,
+    lastRegion: extra.lastRegion ?? null,
+    lastRegionAvailable: extra.lastRegionAvailable ?? extra.lastRegion != null,
+  });
   return { surface, selectionHandler: selectionHandler! };
 }
 
@@ -68,6 +87,7 @@ beforeEach(() => {
     ready: vi.fn(async () => {}),
     pointer: vi.fn(),
     setMode: vi.fn(),
+    repeatLastRegion: vi.fn(),
     save: vi.fn(async () => {}),
     annotate: vi.fn(async () => {}),
     copy: vi.fn(async () => ({ image: true })),
@@ -245,6 +265,35 @@ it('selects the full display without a drag and saves once', async () => {
   button.click();
   button.click();
   expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
+});
+
+it('keeps Last region disabled until this session has a region on this display', async () => {
+  await setup();
+  const button = document.querySelector<HTMLButtonElement>('[data-action=last-region]')!;
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe(LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE);
+  button.click();
+  expect(window.imnotaCapture.repeatLastRegion).not.toHaveBeenCalled();
+});
+
+it('applies the last region from the overlay when this display has one', async () => {
+  await setup(
+    2,
+    { x: 0, y: 0, width: 800, height: 600 },
+    {
+      lastRegion: { x: 20, y: 30, width: 200, height: 150 },
+      lastRegionAvailable: true,
+    },
+  );
+  const button = document.querySelector<HTMLButtonElement>('[data-action=last-region]')!;
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  expect(still.getAttribute('src')).toBe(STILL);
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  expect(button.disabled).toBe(false);
+  button.click();
+  expect(window.imnotaCapture.repeatLastRegion).toHaveBeenCalledTimes(1);
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).toHaveBeenCalledOnce();
 });
 
 it('highlights an identified window on hover and does not begin a region drag', async () => {
