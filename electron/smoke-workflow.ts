@@ -2165,17 +2165,13 @@ export async function runSmokeWorkflow(
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
   await driver.press('Home');
-  await driver.evaluate(`new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = () => {
-      const active = document.activeElement;
-      if (active?.getAttribute('role') === 'menuitemradio') return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Collection selection did not receive focus.'));
-      setTimeout(check, 50);
-    };
-    check();
-  })`);
-  await driver.press('ArrowDown');
+  const focusedInitialCollection = await driver.evaluate<boolean>(`(() => {
+    const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
+    option?.focus();
+    return document.activeElement === option;
+  })()`);
+  if (!focusedInitialCollection) throw new Error('Collection picker could not focus its selection.');
+  await driver.press('Down');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
@@ -2214,6 +2210,13 @@ export async function runSmokeWorkflow(
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-collection-picker.png'));
+  const focusedPickerSelection = await driver.evaluate<boolean>(`(() => {
+    const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
+    option?.focus();
+    return document.activeElement === option;
+  })()`);
+  if (!focusedPickerSelection)
+    throw new Error('Collection picker could not focus its selection for keyboard coverage.');
   await driver.press('End');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
@@ -2230,7 +2233,7 @@ export async function runSmokeWorkflow(
     `document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement?.getAttribute('aria-label')?.startsWith('Archive ')`,
   );
   if (!focusedArchive) throw new Error('Collection picker did not focus the archive action with End.');
-  await driver.press('ArrowUp');
+  await driver.press('Up');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
