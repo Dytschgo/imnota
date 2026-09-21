@@ -213,10 +213,12 @@
   border-left: 1px solid var(--line);
 }
 
-/* Icon-only workspace row: Settings and About lead, the update control sits at the end. */
-.side-nav-footer {
+/* Icon-only workspace row: Settings and About lead, the update control sits at the end.
+   Matches the specificity of the generic `.sidebar nav` column rule. */
+.side-nav .side-nav-footer {
   display: flex;
   flex: none;
+  flex-direction: row;
   align-items: center;
   gap: 2px;
   padding: 8px 0 12px;
