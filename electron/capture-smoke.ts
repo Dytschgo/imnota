@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
+import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from './windows-smoke-input.js';
 
 export interface CaptureSmokeHost {
   reopenWindow(): Promise<BrowserWindow>;
@@ -119,6 +120,15 @@ async function enableExperimentalCapture(
     };
     check();
   })`);
+  if (process.platform === 'win32')
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({
+        shortcuts: { bindings: { 'capture.region': ${JSON.stringify(WINDOWS_SMOKE_CAPTURE_SHORTCUT)} } }
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      if (result.value.settings.shortcuts.bindings['capture.region'] !== ${JSON.stringify(WINDOWS_SMOKE_CAPTURE_SHORTCUT)})
+        throw new Error('Windows smoke capture shortcut was not persisted.');
+    })()`);
   const window = await host.reopenWindow();
   const next = new NativeUiDriver(window);
   await waitForPaint(next);
@@ -157,20 +167,66 @@ async function waitForRetake(driver: NativeUiDriver): Promise<void> {
   throw new Error('Retake did not clear the capture selection.');
 }
 
+async function createWindowsHotkeyFocusTarget(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+  const focusTarget = new BrowserWindow({
+    width: 360,
+    height: 180,
+    show: false,
+    title: 'Imnota synthetic hotkey target',
+    backgroundColor: '#12151a',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  await focusTarget.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>Synthetic hotkey target</title><body style="background:#12151a;color:#f4f4f5;font:16px sans-serif">Synthetic keyboard focus target</body>')}`,
+  );
+  mainWindow.minimize();
+  focusTarget.show();
+  focusTarget.focus();
+  const started = Date.now();
+  do {
+    if (mainWindow.isMinimized() && focusTarget.isFocused()) return focusTarget;
+    await delay(50);
+  } while (Date.now() - started < 5_000);
+  focusTarget.destroy();
+  throw new Error('Windows synthetic focus target did not receive focus while Imnota was minimized.');
+}
+
 async function startCapture(
   driver: NativeUiDriver,
-  trigger: 'toolbar' | 'shortcut' = 'toolbar',
+  trigger: 'toolbar' | 'global-shortcut' = 'toolbar',
 ): Promise<NativeUiDriver> {
-  if (trigger === 'shortcut') await driver.press('5', ['control', 'shift']);
-  else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+  let focusTarget: BrowserWindow | null = null;
+  if (trigger === 'global-shortcut') {
+    const registered = await driver.evaluate<boolean>(`(async () => {
+      const result = await window.imnota.getNativeCapabilities();
+      return result.ok && result.value.globalCaptureShortcutRegistered;
+    })()`);
+    if (!registered) throw new Error('Windows global capture shortcut is not registered.');
+    focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
+    sendWindowsSmokeCaptureShortcut();
+  } else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
   if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    try {
+      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    } finally {
+      if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
+      focusTarget = null;
+    }
     const displays = screen.getAllDisplays();
     const primaryId = screen.getPrimaryDisplay().id;
     const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
     await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
   }
-  const overlay = await waitForCaptureOverlay(driver.browserWindow);
+  let overlay: BrowserWindow;
+  try {
+    overlay = await waitForCaptureOverlay(driver.browserWindow);
+  } finally {
+    if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
+  }
   const overlayDriver = new NativeUiDriver(overlay);
   await overlayDriver.waitFor({ selector: '.capture-overlay' });
   const display = screen.getDisplayMatching(overlay.getBounds());
@@ -221,7 +277,7 @@ export async function exerciseRegionCapture(
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
 
-  let overlay = await startCapture(driver);
+  let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'toolbar');
   await selectRegion(overlay);
   await overlay.click({ selector: '[data-action="retake"]' });
   await waitForRetake(overlay);
@@ -242,7 +298,7 @@ export async function exerciseRegionCapture(
   )
     throw new Error('Cancelled capture changed the project screenshot records.');
 
-  overlay = await startCapture(driver, process.platform === 'win32' ? 'shortcut' : 'toolbar');
+  overlay = await startCapture(driver);
   await selectRegion(overlay);
   if (artifactDirectory)
     artifacts.push(await overlay.capture(artifactDirectory, 'capture-overlay-synthetic.png'));
