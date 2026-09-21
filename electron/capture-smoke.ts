@@ -186,6 +186,9 @@ async function startCapture(
 
 async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
   if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+    // A queued tray request can render this dialog in a newly restored window.
+    // Present and focus it before issuing the trusted native click.
+    await waitForPaint(driver);
     await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
     const displays = screen.getAllDisplays();
     const primaryId = screen.getPrimaryDisplay().id;
