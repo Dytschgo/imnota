@@ -51,6 +51,7 @@ export interface SettingsViewProps {
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
   onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   nativeCopyAvailable?: boolean;
+  globalCaptureShortcutRegistered?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
   projects?: ProjectListItem[];
@@ -86,6 +87,7 @@ export function SettingsView({
   onShortcutChange = async () => undefined,
   onWorkbenchChange,
   nativeCopyAvailable = false,
+  globalCaptureShortcutRegistered = false,
   onNativeCopyChange,
   onPromptExportChange,
   projects = [],
@@ -185,7 +187,9 @@ export function SettingsView({
                 <small data-testid="capture-shortcut-summary">
                   Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
                   {captureShortcut
-                    ? ' while Imnota is focused. Change it under Screenshots above.'
+                    ? globalCaptureShortcutRegistered
+                      ? ' even when Imnota is in the background. Change it under Screenshots above.'
+                      : ' while Imnota is focused. The background shortcut is not active. Change it under Screenshots above.'
                     : '. The toolbar camera button and the Add menu still work.'}
                   {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>

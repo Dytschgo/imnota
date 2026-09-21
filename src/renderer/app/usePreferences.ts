@@ -24,7 +24,10 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reducedEffectsRecommended: false,
   reasons: [],
 };
-const UNKNOWN_CAPABILITIES: NativeCapabilities = { windowsFileClipboard: false };
+const UNKNOWN_CAPABILITIES: NativeCapabilities = {
+  windowsFileClipboard: false,
+  globalCaptureShortcutRegistered: false,
+};
 
 export interface PreferenceController {
   result: PreferenceSettingsResult | null;
@@ -89,8 +92,14 @@ export function usePreferences(): PreferenceController {
     setSaving(true);
     setError('');
     try {
-      const next = workflowValue(await getRendererBridge().setPreferenceSettings(update));
+      const bridge = getRendererBridge();
+      const next = workflowValue(await bridge.setPreferenceSettings(update));
       setResult(next);
+      try {
+        setCapabilities(workflowValue(await bridge.getNativeCapabilities()));
+      } catch {
+        /* Keep the last known host capabilities if the follow-up read fails. */
+      }
       return next;
     } catch (reason) {
       setError(

@@ -58,6 +58,8 @@ export interface NativePerformanceProfile {
 export interface NativeCapabilities {
   /** True only when the running desktop host can write native Windows file clipboard entries. */
   windowsFileClipboard: boolean;
+  /** False when capture is off, unsupported, OS-owned, cleared, or register() failed. */
+  globalCaptureShortcutRegistered: boolean;
 }
 
 export interface PromptExportSessionInfo {
@@ -202,17 +204,24 @@ export interface WorkflowBridge {
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
+  raiseMainWindow(): Promise<WorkflowResult<void>>;
   recognizeOnDeviceText(input: {
     pngDataUrl: string;
     crop?: { x: number; y: number; width: number; height: number };
   }): Promise<WorkflowResult<{ text: string }>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
-    projectPath: string;
-    collectionId: string;
+    projectPath?: string;
+    collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
+  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
+  commitBufferedCapture(input: {
+    projectPath: string;
+    collectionId: string;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  onRegionCaptureHotkey(handler: () => void): () => void;
 
   startPromptExport(input: {
     projectPath: string;

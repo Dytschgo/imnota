@@ -2440,7 +2440,7 @@ export async function runSmokeWorkflow(
     artifacts.push(...captureSmoke.artifacts);
     const captureTriggers =
       process.platform === 'win32'
-        ? 'toolbar, native Ctrl+Shift+5, and a display chooser when multiple displays are attached'
+        ? 'toolbar and OS-injected Ctrl+Alt+Shift+F9 while the main window is minimized and a synthetic target is focused; the registered global callback opens the display chooser and overlay'
         : 'toolbar overlay';
     assertions.push(
       `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,

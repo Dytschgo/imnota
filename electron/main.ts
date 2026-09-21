@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   nativeTheme,
@@ -170,6 +171,7 @@ import {
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
+import { CaptureGlobalShortcut, resolveCaptureGlobalShortcut } from './capture-global-shortcut.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -220,7 +222,34 @@ let captureOverlay: {
   disposeDisplayListeners: () => void;
 } | null = null;
 const captureAdmissionGate = new CaptureAdmissionGate();
+const captureGlobalShortcut = new CaptureGlobalShortcut({
+  register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+  unregister: (accelerator) => globalShortcut.unregister(accelerator),
+});
+let pendingCapturePng: Buffer | null = null;
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
+
+function syncCaptureGlobalShortcut(): void {
+  captureGlobalShortcut.sync(
+    resolveCaptureGlobalShortcut({
+      bindings: preferenceSettingsResult.settings.shortcuts.bindings,
+      processPlatform: process.platform,
+      experimentalEnabled: preferenceSettingsResult.settings.capture.experimentalRegionCapture,
+    }),
+    () => {
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+      if (captureAdmissionGate.isOccupied()) return;
+      mainWindow.webContents.send('workflow:capture:region-hotkey');
+    },
+  );
+}
+
+function raiseMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
 
 function assertLiveCaptureAdmission(event: IpcMainInvokeEvent, admission: CaptureAdmission): void {
   if (
@@ -298,6 +327,7 @@ async function persistApplicationSettings(
   };
   if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
   else await persist();
+  syncCaptureGlobalShortcut();
 }
 const projectInput = z.object({
   name: z.string().min(1).max(120),
@@ -1793,7 +1823,14 @@ function registerIpc(): void {
   });
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
-    return { windowsFileClipboard: windowsFileClipboardAvailable() };
+    return {
+      windowsFileClipboard: windowsFileClipboardAvailable(),
+      globalCaptureShortcutRegistered: captureGlobalShortcut.registeredAccelerator !== null,
+    };
+  });
+  handleWorkflow('workflow:window:raise', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    raiseMainWindow();
   });
   handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
     if (!windowsOcrAvailable()) return { text: '' };
@@ -1848,14 +1885,16 @@ function registerIpc(): void {
       .tuple([
         z
           .object({
-            projectPath: pathInput,
-            collectionId: filenameSchema,
+            projectPath: pathInput.optional(),
+            collectionId: filenameSchema.optional(),
             displayId: z.number().int().optional(),
           })
-          .strict(),
+          .strict()
+          .refine((value) => Boolean(value.projectPath) === Boolean(value.collectionId)),
       ])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
+    pendingCapturePng = null;
     if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -1879,11 +1918,17 @@ function registerIpc(): void {
           'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
         );
     }
-    const safeProjectPath = await assertProjectPath(input.projectPath);
-    const beforeCapture = await readProjectMetadata(safeProjectPath);
-    const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-    if (!beforeCollection || beforeCollection.archived)
-      throw new NativeWorkflowError('collection-not-found', 'Choose a current collection before capturing.');
+    let safeProjectPath: string | undefined;
+    if (input.projectPath && input.collectionId) {
+      safeProjectPath = await assertProjectPath(input.projectPath);
+      const beforeCapture = await readProjectMetadata(safeProjectPath);
+      const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
+      if (!beforeCollection || beforeCollection.archived)
+        throw new NativeWorkflowError(
+          'collection-not-found',
+          'Choose a current collection before capturing.',
+        );
+    }
     // The renderer flushes before it invokes this workflow and rechecks its
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
@@ -1992,6 +2037,10 @@ function registerIpc(): void {
         );
       }
       assertLiveCaptureAdmission(event, admission);
+      if (!safeProjectPath || !input.collectionId) {
+        pendingCapturePng = png;
+        return { buffered: true as const };
+      }
       return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
         assertLiveCaptureAdmission(event, admission),
       );
@@ -2002,6 +2051,41 @@ function registerIpc(): void {
       }
     }
   });
+  handleWorkflow(
+    'workflow:capture:commit-buffered',
+    async (event, ...args) => {
+      const [input] = z
+        .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
+        .parse(args);
+      const png = pendingCapturePng;
+      if (!png)
+        throw new NativeWorkflowError(
+          'capture-failed',
+          'The captured screenshot is no longer available. Capture the region again.',
+        );
+      const safeProjectPath = await assertProjectPath(input.projectPath);
+      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
+        if (
+          event.sender.isDestroyed() ||
+          !mainWindow ||
+          mainWindow.isDestroyed() ||
+          mainWindow.webContents !== event.sender
+        )
+          throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+      });
+      pendingCapturePng = null;
+      return inserted;
+    },
+    true,
+  );
+  handleWorkflow(
+    'workflow:capture:discard-buffered',
+    (_event, ...args) => {
+      z.tuple([]).parse(args);
+      pendingCapturePng = null;
+    },
+    true,
+  );
   handleWorkflow('workflow:appearance:desktop', (event, ...args) => {
     const [input] = z.tuple([z.object({ enabled: z.boolean() }).strict()]).parse(args);
     const target = BrowserWindow.fromWebContents(event.sender);
@@ -2896,6 +2980,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const createdWindow = mainWindow;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
+    if (BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
   });
   createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -2969,6 +3054,7 @@ app.whenReady().then(async () => {
   }
   configureAutoUpdates();
   registerIpc();
+  syncCaptureGlobalShortcut();
   let agentAccessStartupError = '';
   if (process.env.IMNOTA_SMOKE !== '1')
     await localMcpServer.sync().catch(async () => {
@@ -3092,13 +3178,16 @@ app.whenReady().then(async () => {
     return;
   }
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    if (BrowserWindow.getAllWindows().length === 0)
+      void createWindow().then(() => syncCaptureGlobalShortcut());
   });
 });
 app.on('window-all-closed', () => {
+  captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('before-quit', () => {
+  captureGlobalShortcut.clear();
   projectWatchManager?.stopAll();
   void localMcpServer?.stop();
 });
