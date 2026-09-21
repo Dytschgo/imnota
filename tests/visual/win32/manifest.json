@@ -79,57 +79,57 @@
     },
     "1280x800-workspace-dark.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     },
     "1280x800-workspace-light.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     },
     "1440x900-workspace-dark.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     },
     "1440x900-workspace-light.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     },
     "backdrop-collapsed.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     },
     "backdrop-workspace.png": {
       "reviewedAt": "2026-09-21",
-      "sourceRevision": "78ed602111e4bc14d2581c0d1d3a43fff65e5abb",
+      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540409984",
-      "review": "Packaged candidate and highlighted difference individually inspected. New-profile capture exposes the toolbar camera and changes Add screenshot to a camera icon; responsive toolbar overflow preserves available controls in light, dark and backdrop layouts. Packaged native smoke passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
+      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
     }
   }
 }
