@@ -63,6 +63,10 @@ export interface CapturePreferences {
   experimentalRegionCapture: boolean;
 }
 
+export function defaultExperimentalRegionCapture(platform = process.platform): boolean {
+  return platform === 'win32' || platform === 'darwin';
+}
+
 export interface OnboardingPreferences {
   completed: boolean;
   completedVersion: number;
@@ -78,10 +82,40 @@ export interface UpdatePreferences {
   whatsNewAcknowledgedVersion?: string;
 }
 
+/** Opt-in local MCP access for coding agents. Default off; never a public listener. */
+export interface AgentAccessPreferences {
+  enabled: boolean;
+}
+
+export const LOCAL_AGENT_ACCESS_HOST = '127.0.0.1';
+export const LOCAL_AGENT_ACCESS_PORT = 17384;
+export const LOCAL_AGENT_ACCESS_PATH = '/mcp';
+
+export function localAgentAccessUrl(port = LOCAL_AGENT_ACCESS_PORT): string {
+  return `http://${LOCAL_AGENT_ACCESS_HOST}:${port}${LOCAL_AGENT_ACCESS_PATH}`;
+}
+
+export function claudeCodeAgentAccessSnippet(url = localAgentAccessUrl()): string {
+  return `${JSON.stringify({ mcpServers: { imnota: { type: 'http', url } } }, null, 2)}\n`;
+}
+
+export function cursorAgentAccessSnippet(url = localAgentAccessUrl()): string {
+  return `${JSON.stringify({ mcpServers: { imnota: { url } } }, null, 2)}\n`;
+}
+
+export function localAgentAccessStdioSnippet(command = '<path-to-Imnota-executable>'): string {
+  return `${JSON.stringify({ mcpServers: { imnota: { command, args: ['--mcp'] } } }, null, 2)}\n`;
+}
+
 export type NativeCopyFunction = 'files' | 'files-rich' | 'rich';
 
 export interface NativeCopyPreferences {
   defaultFunction: NativeCopyFunction;
+}
+
+/** Application export Markdown options. Not stored on project.json. */
+export interface PromptExportPreferences {
+  includeRecognisedText: boolean;
 }
 
 export interface PreferenceSettings {
@@ -92,7 +126,9 @@ export interface PreferenceSettings {
   onboarding: OnboardingPreferences;
   workbench: WorkbenchPreferences;
   nativeCopy: NativeCopyPreferences;
+  promptExport: PromptExportPreferences;
   updates: UpdatePreferences;
+  agentAccess: AgentAccessPreferences;
 }
 
 export interface SettingsProfileProvenance {
@@ -148,6 +184,8 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
 export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
+export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
+export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = { includeRecognisedText: true };
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,
@@ -157,7 +195,9 @@ export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   onboarding: DEFAULT_ONBOARDING,
   workbench: DEFAULT_WORKBENCH,
   nativeCopy: DEFAULT_NATIVE_COPY_PREFERENCES,
+  promptExport: DEFAULT_PROMPT_EXPORT_PREFERENCES,
   updates: DEFAULT_UPDATE_PREFERENCES,
+  agentAccess: DEFAULT_AGENT_ACCESS,
 };
 
 export function shouldShowOnboarding(

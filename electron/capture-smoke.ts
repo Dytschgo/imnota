@@ -2,10 +2,16 @@ import { BrowserWindow, screen } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
+import { nativeClipboard } from './native-clipboard.js';
+import { screenshotPath } from './collections.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
+import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from './windows-smoke-input.js';
 
 export interface CaptureSmokeHost {
   reopenWindow(): Promise<BrowserWindow>;
+  captureFromTray(mode: 'region' | 'window' | 'display'): Promise<BrowserWindow>;
+  trayAvailable(): boolean;
+  globalCaptureShortcutRegistered(): boolean;
   readProject(projectPath: string): Promise<ProjectData>;
 }
 
@@ -52,7 +58,8 @@ function captureOverlayWindows(mainWindow: BrowserWindow): BrowserWindow[] {
     (window) =>
       window !== mainWindow &&
       !window.isDestroyed() &&
-      window.webContents.getURL().includes('capture-overlay.html'),
+      window.webContents.getURL().includes('capture-overlay.html') &&
+      !window.webContents.getURL().includes('countdown=1'),
   );
 }
 
@@ -106,7 +113,13 @@ async function enableExperimentalCapture(
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
-  await driver.click({ selector: '#capture-settings-title + label input[type="checkbox"]' });
+  const captureEnabled = await driver.evaluate<boolean>(`(() => {
+    const checkbox = document.querySelector('#capture-settings-title + label input[type="checkbox"]');
+    if (!(checkbox instanceof HTMLInputElement)) throw new Error('Capture preference checkbox is missing.');
+    return checkbox.checked;
+  })()`);
+  if (!captureEnabled)
+    await driver.click({ selector: '#capture-settings-title + label input[type="checkbox"]' });
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = async () => {
@@ -119,6 +132,15 @@ async function enableExperimentalCapture(
     };
     check();
   })`);
+  if (process.platform === 'win32')
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({
+        shortcuts: { bindings: { 'capture.region': ${JSON.stringify(WINDOWS_SMOKE_CAPTURE_SHORTCUT)} } }
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      if (result.value.settings.shortcuts.bindings['capture.region'] !== ${JSON.stringify(WINDOWS_SMOKE_CAPTURE_SHORTCUT)})
+        throw new Error('Windows smoke capture shortcut was not persisted.');
+    })()`);
   const window = await host.reopenWindow();
   const next = new NativeUiDriver(window);
   await waitForPaint(next);
@@ -157,22 +179,72 @@ async function waitForRetake(driver: NativeUiDriver): Promise<void> {
   throw new Error('Retake did not clear the capture selection.');
 }
 
+async function createWindowsHotkeyFocusTarget(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+  const focusTarget = new BrowserWindow({
+    width: 360,
+    height: 180,
+    show: false,
+    title: 'Imnota synthetic hotkey target',
+    backgroundColor: '#12151a',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  try {
+    await focusTarget.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>Synthetic hotkey target</title><body style="background:#12151a;color:#f4f4f5;font:16px sans-serif">Synthetic keyboard focus target</body>')}`,
+    );
+    mainWindow.minimize();
+    focusTarget.show();
+    focusTarget.focus();
+    const started = Date.now();
+    do {
+      if (mainWindow.isMinimized() && focusTarget.isFocused()) return focusTarget;
+      await delay(50);
+    } while (Date.now() - started < 5_000);
+    throw new Error('Windows synthetic focus target did not receive focus while Imnota was minimized.');
+  } catch (error) {
+    if (!focusTarget.isDestroyed()) focusTarget.destroy();
+    throw error;
+  }
+}
+
 async function startCapture(
   driver: NativeUiDriver,
-  trigger: 'toolbar' | 'shortcut' = 'toolbar',
+  trigger: 'toolbar' | 'global-shortcut' = 'toolbar',
 ): Promise<NativeUiDriver> {
-  if (trigger === 'shortcut') await driver.press('5', ['control', 'shift']);
-  else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
-  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    const displays = screen.getAllDisplays();
-    const primaryId = screen.getPrimaryDisplay().id;
-    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
-    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+  let focusTarget: BrowserWindow | null = null;
+  let overlay: BrowserWindow;
+  try {
+    if (trigger === 'global-shortcut') {
+      const registered = await driver.evaluate<boolean>(`(async () => {
+        const result = await window.imnota.getNativeCapabilities();
+        return result.ok && result.value.globalCaptureShortcutRegistered;
+      })()`);
+      if (!registered) throw new Error('Windows global capture shortcut is not registered.');
+      focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
+      sendWindowsSmokeCaptureShortcut();
+    } else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+    if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+      const displays = screen.getAllDisplays();
+      const primaryId = screen.getPrimaryDisplay().id;
+      const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
+      await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+    }
+    overlay = await waitForCaptureOverlay(driver.browserWindow);
+  } finally {
+    if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
   }
-  const overlay = await waitForCaptureOverlay(driver.browserWindow);
   const overlayDriver = new NativeUiDriver(overlay);
   await overlayDriver.waitFor({ selector: '.capture-overlay' });
+  await overlayDriver.evaluate(`(() => {
+    const still = document.querySelector('.capture-freeze-frame');
+    if (!(still instanceof HTMLImageElement) || !still.src.startsWith('data:image/png'))
+      throw new Error('Capture overlay did not present the captured still.');
+  })()`);
   const display = screen.getDisplayMatching(overlay.getBounds());
   await overlayDriver.evaluate(`new Promise((resolve, reject) => {
     const start = Date.now();
@@ -185,6 +257,16 @@ async function startCapture(
     check();
   })`);
   return overlayDriver;
+}
+
+async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
+  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    const displays = screen.getAllDisplays();
+    const primaryId = screen.getPrimaryDisplay().id;
+    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
+    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+  }
 }
 
 async function waitForScreenshotCount(
@@ -221,8 +303,89 @@ export async function exerciseRegionCapture(
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
 
-  let overlay = await startCapture(driver);
+  if (!host.trayAvailable()) throw new Error('Native smoke did not create the tray icon.');
+  if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
+    throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
+
+  // Exercise the actual countdown window and IPC in packaged Windows/macOS runs.
+  for (const seconds of [3, 5] as const) {
+    for (const cancel of [true, false]) {
+      await driver.click({ selector: 'button[aria-label="Capture delay"]' });
+      const started = Date.now();
+      await driver.click({
+        selector: '[role="menuitem"]',
+        text: `Capture in ${seconds} seconds`,
+        exact: true,
+      });
+      if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+        await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+        await driver.click({ selector: `[data-display-id="${screen.getPrimaryDisplay().id}"]` });
+      }
+      let hud: BrowserWindow | undefined;
+      while (Date.now() - started < 5000) {
+        hud = BrowserWindow.getAllWindows().find(
+          (window) =>
+            !window.isDestroyed() &&
+            window.webContents.getURL().includes('countdown=1') &&
+            window.isVisible(),
+        );
+        if (hud) break;
+        await delay(25);
+      }
+      if (!hud) throw new Error('Capture countdown did not become visible.');
+      const hudDriver = new NativeUiDriver(hud);
+      await hudDriver.waitFor({ selector: '.capture-countdown' });
+      if (captureOverlayWindows(driver.browserWindow).length)
+        throw new Error('Selection opened before the countdown elapsed.');
+      if (cancel) {
+        if (seconds === 3) await hudDriver.click({ selector: '[data-action="cancel"]' });
+        else await hudDriver.press('Escape');
+        await waitForClosed(hud, 'Cancelled countdown');
+      } else {
+        const selectedOverlay = await waitForCaptureOverlay(driver.browserWindow);
+        if (Date.now() - started < seconds * 1000) throw new Error('Capture countdown elapsed too early.');
+        await waitForClosed(hud, 'Elapsed countdown');
+        const selectedDriver = new NativeUiDriver(selectedOverlay);
+        await selectedDriver.press('Escape');
+        await waitForClosed(selectedOverlay, 'Delayed capture selection');
+      }
+      await driver.waitFor({ selector: 'button[aria-label="Capture delay"]' }, { enabled: true });
+      await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Delayed capture cancellation');
+      await waitForScreenshotCount(host, projectPath, baseline.screenshots.length);
+      if ((await screenshotFiles(projectPath)).join('\n') !== baselineFiles.join('\n'))
+        throw new Error('Cancelled delayed capture wrote screenshot files.');
+    }
+  }
+
+  let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'toolbar');
+  const defaultRegion = await overlay.evaluate<boolean>(
+    `document.querySelector('[data-mode="region"]')?.getAttribute('aria-checked') === 'true'`,
+  );
+  if (!defaultRegion) throw new Error('Capture overlay did not default to Region mode.');
+  await overlay.click({ selector: '[data-mode="window"]' });
+  await overlay.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const instruction = document.querySelector('.capture-instruction');
+    const check = () => {
+      if (instruction?.textContent !== 'Drag to select a region') return resolve(true);
+      if (Date.now() - started > 5000) return reject(new Error('Window mode did not receive the native window list.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+  await overlay.click({ selector: '[data-mode="region"]' });
   await selectRegion(overlay);
+  await overlay.click({ selector: '[data-action="copy"]' });
+  await overlay.waitFor({ selector: '.capture-dimensions', text: 'Image copied', exact: true });
+  const copiedImage = await nativeClipboard.readImage();
+  if (copiedImage.isEmpty() || copiedImage.getSize().width < 1 || copiedImage.getSize().height < 1)
+    throw new Error('Copy image did not leave a readable image on the native clipboard.');
+  if (overlay.browserWindow.isDestroyed() || !overlay.browserWindow.isVisible())
+    throw new Error('Copy image closed the capture overlay.');
+  await overlay.evaluate(`(() => {
+    const actions = document.querySelector('.capture-actions');
+    if (!(actions instanceof HTMLElement) || actions.hidden) throw new Error('Copy image hid capture actions.');
+  })()`);
   await overlay.click({ selector: '[data-action="retake"]' });
   await waitForRetake(overlay);
   await selectRegion(overlay);
@@ -242,7 +405,7 @@ export async function exerciseRegionCapture(
   )
     throw new Error('Cancelled capture changed the project screenshot records.');
 
-  overlay = await startCapture(driver, process.platform === 'win32' ? 'shortcut' : 'toolbar');
+  overlay = await startCapture(driver);
   await selectRegion(overlay);
   if (artifactDirectory)
     artifacts.push(await overlay.capture(artifactDirectory, 'capture-overlay-synthetic.png'));
@@ -290,6 +453,78 @@ export async function exerciseRegionCapture(
   })()`);
   const exported = await fs.stat(exportPath);
   if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
+
+  overlay = await startCapture(driver);
+  await selectRegion(overlay);
+  const annotateOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="annotate"]' });
+  await waitForClosed(annotateOverlay, 'Annotated capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Annotated capture');
+  await waitForPaint(driver);
+  const afterAnnotate = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+  const annotated = afterAnnotate.screenshots.find(
+    (screenshot) =>
+      !baseline.screenshots.some((previous) => previous.id === screenshot.id) &&
+      screenshot.id !== captured.id,
+  );
+  if (!annotated) throw new Error('Annotated capture did not create a screenshot record.');
+  await driver.waitFor({
+    selector: '.toast',
+    text: 'Screen capture added — annotate',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: `.shot-item.active [data-testid="screenshot-${annotated.id}"]`,
+  });
+  await driver.waitFor({ selector: '.canvas-meta', text: 'Tool: rectangle' });
+
+  overlay = await startCapture(driver);
+  await overlay.click({ selector: '[data-mode="display"]' });
+  await overlay.waitFor({ selector: '.capture-actions' });
+  const displayOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="save"]' });
+  await waitForClosed(displayOverlay, 'Saved display capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
+  await waitForPaint(driver);
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  await driver.waitFor({ selector: 'button[aria-label^="Capture screen region"]:not(:disabled)' });
+
+  // Full-display capture must not replace the remembered region. Repeat uses the
+  // same source pixels and crop through the normal renderer/native IPC path.
+  await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
+  const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
+  const repeated = afterRepeat.screenshots.at(-1);
+  if (
+    !repeated ||
+    repeated.id === captured.id ||
+    repeated.originalWidth !== captured.originalWidth ||
+    repeated.originalHeight !== captured.originalHeight
+  )
+    throw new Error('Repeat capture did not preserve the original crop dimensions.');
+  const [originalBytes, repeatedBytes] = await Promise.all([
+    fs.readFile(screenshotPath(projectPath, captured)),
+    fs.readFile(screenshotPath(projectPath, repeated)),
+  ]);
+  if (!originalBytes.equals(repeatedBytes))
+    throw new Error('Repeat capture changed the synthetic region pixels.');
+  await driver.waitFor({ selector: `[data-testid="screenshot-${repeated.id}"]` });
+
+  overlay = await startCapture(driver);
+  await overlay.click({ selector: '[data-action="last-region"]' });
+  await overlay.waitFor({ selector: '.capture-actions' });
+  const repeatOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
+
+  const reopenedFromTray = await host.captureFromTray('display');
+  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
+  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
+  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
+  await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
+  await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(trayOverlay, 'Queued tray capture overlay');
+  await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
   return { artifacts, skipped: false };
 }

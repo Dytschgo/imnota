@@ -17,6 +17,32 @@ export interface CaptureDisplayOption extends CaptureDisplay {
   position: string;
 }
 
+/** Seconds the capture start path waits so hover menus and tooltips can appear. */
+export const CAPTURE_DELAY_SECONDS = [3, 5] as const;
+export type CaptureDelaySeconds = (typeof CAPTURE_DELAY_SECONDS)[number];
+
+export const CAPTURE_OVERLAY_MODES = ['region', 'window', 'display'] as const;
+export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
+
+/** Shown when Window mode is selected but the OS did not identify any windows. */
+export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
+  'Imnota could not identify windows on this computer. Use Region to select an area.';
+
+/** Last successful region from this app session. Bounds are DIP, relative to that display. */
+export interface LastCaptureRegion {
+  displayId: number;
+  bounds: CaptureRectangle;
+}
+
+export const LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE =
+  'Capture a region first. Repeat last region uses the last successful region from this session.';
+
+export const LAST_CAPTURE_REGION_DISPLAY_GONE_MESSAGE =
+  'The display used for the last region is no longer connected. Capture a new region, or reconnect that display.';
+
+export const LAST_CAPTURE_REGION_INVALID_MESSAGE =
+  'The last captured region no longer fits that display. Capture a new region.';
+
 export const MAX_CAPTURE_DIMENSION = 16_384;
 /** 8K fits; prohibit decoded images that would require excessive native memory. */
 export const MAX_CAPTURE_PIXELS = 64_000_000;

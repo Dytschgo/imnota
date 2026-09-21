@@ -1,14 +1,39 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImnotaBridge } from '../src/shared/types.js';
 
+const onDeviceOcrAvailable = process.platform === 'win32';
+
 const bridge: ImnotaBridge = {
+  onDeviceOcrAvailable,
   setDesktopGlass: (input) => ipcRenderer.invoke('workflow:appearance:desktop', input),
   getPreferenceSettings: () => ipcRenderer.invoke('workflow:preferences:get'),
   setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
   getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),
   getNativeCapabilities: () => ipcRenderer.invoke('workflow:capabilities:get'),
+  raiseMainWindow: () => ipcRenderer.invoke('workflow:window:raise'),
+  recognizeOnDeviceText: (input) =>
+    onDeviceOcrAvailable
+      ? ipcRenderer.invoke('workflow:ocr:recognize', input)
+      : Promise.resolve({ ok: true, value: { text: '' } }),
   listCaptureDisplays: () => ipcRenderer.invoke('workflow:capture:displays'),
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
+  repeatLastRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:repeat-last-region', input),
+  commitBufferedCapture: (input) => ipcRenderer.invoke('workflow:capture:commit-buffered', input),
+  discardBufferedCapture: () => ipcRenderer.invoke('workflow:capture:discard-buffered'),
+  captureRendererReady: () => ipcRenderer.invoke('workflow:capture:renderer-ready'),
+  onRegionCaptureHotkey: (handler) => {
+    const listener = () => handler();
+    ipcRenderer.on('workflow:capture:region-hotkey', listener);
+    return () => ipcRenderer.removeListener('workflow:capture:region-hotkey', listener);
+  },
+  onCaptureTray: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { mode: 'region' | 'window' | 'display' },
+    ) => handler(payload.mode);
+    ipcRenderer.on('workflow:capture:tray', listener);
+    return () => ipcRenderer.removeListener('workflow:capture:tray', listener);
+  },
   startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
   writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),
   finishPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:finish', input),

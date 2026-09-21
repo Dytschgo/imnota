@@ -1,5 +1,8 @@
-import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
+import { annotationMarkListItems } from './annotation-marks.js';
+import { textAnnotationReferences } from './annotation-order.js';
 import { orderedCollectionItems as orderedContent, type ContentItem } from './content-items.js';
+import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr.js';
+import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
 
 export type CollectionItemKind = 'screenshot' | 'drawing' | 'text';
 
@@ -48,12 +51,18 @@ function priorityLabel(priority: ScreenshotRecord['priority']): string {
   return priority[0].toUpperCase() + priority.slice(1);
 }
 
+/** Source screenshot pixels already stored on the record; not a schema field. */
+export function pictureSourceSizeLine(width: number, height: number): string {
+  return `Source size: ${width}×${height}`;
+}
+
 /** Legacy/package overview Markdown. Prompt bundles use the richer planner. */
 export function generateMarkdown(
   project: ProjectData,
   collectionId: string,
   annotations: Record<string, Annotation[]>,
   markdownByTextItem: Record<string, string> = {},
+  visibleTextByScreenshot: Record<string, string> = {},
 ): string {
   const collection = project.collections.find((item) => item.id === collectionId);
   if (!collection) throw new Error('Collection not found.');
@@ -89,14 +98,18 @@ export function generateMarkdown(
       '',
       `Priority for agent: ${priorityLabel(shot.priority)}`,
       '',
+      pictureSourceSizeLine(shot.originalWidth, shot.originalHeight),
+      '',
     );
     if (shot.description.trim()) out.push(shot.description.trim(), '');
-    const textAnnotations = (annotations[shot.id] ?? []).filter(
-      (annotation) => ['text', 'callout'].includes(annotation.kind) && annotation.text?.trim(),
-    );
-    textAnnotations.forEach((annotation, noteIndex) => {
-      out.push(`### Picture ${visualNumber} / Note ${noteIndex + 1}`, '', annotation.text!.trim(), '');
-    });
+    const shotAnnotations = annotations[shot.id] ?? [];
+    for (const { annotation, noteNumber } of textAnnotationReferences(shotAnnotations)) {
+      out.push(`### Picture ${visualNumber} / Note ${noteNumber}`, '', annotation.text!.trim(), '');
+    }
+    const marks = annotationMarkListItems(shotAnnotations, shot);
+    if (marks.length) out.push(`### Picture ${visualNumber} / Marks`, '', ...marks, '');
+    if (!screenshotHasRedaction(shotAnnotations))
+      out.push(...visibleTextMarkdownLines(visibleTextByScreenshot[shot.id]));
   }
   return `${out.join('\n').replace(/\n+$/g, '')}\n`;
 }

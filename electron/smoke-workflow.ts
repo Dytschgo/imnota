@@ -36,6 +36,10 @@ export interface SmokeWorkflowHost {
   setWorkspace(workspacePath: string): void | Promise<void>;
   /** Replace the app window through the production create/load path and return the ready window. */
   reopenWindow(): Promise<BrowserWindow>;
+  /** Exercise the production tray callback after closing the current window. */
+  captureFromTray(mode: 'region' | 'window' | 'display'): Promise<BrowserWindow>;
+  trayAvailable(): boolean;
+  globalCaptureShortcutRegistered(): boolean;
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */
@@ -333,8 +337,7 @@ async function exerciseOnboarding(
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
   await driver.click({ text: 'Rich copy', exact: true });
-  const combinedStatus = 'Markdown and image are on the clipboard. The test app may paste only one format.';
-  await driver.waitFor({ selector: '[role="status"]', text: combinedStatus, exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Markdown + image prepared', exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
   const candidates = await Promise.all(
@@ -393,9 +396,10 @@ async function exerciseOnboarding(
   if (process.platform === 'win32') {
     await chooseNativeCopyFunction('files', 'Copy files');
     await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
-      selector: '[role="status"]',
-      text: 'Files were confirmed on the clipboard. Paste into the test app to see whether it accepts both attachments.',
+      selector: '[data-testid="onboarding-copy-warning"]',
+      text: 'Files were confirmed on the clipboard. The receiving app still decides whether paste accepts file attachments.',
       exact: true,
     });
     const copiedFiles = await readWindowsClipboardFilesForSmoke(
@@ -410,9 +414,10 @@ async function exerciseOnboarding(
       throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
     await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
     await driver.click({ text: 'Files + rich copy', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
-      selector: '[role="status"]',
-      text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The test app may choose only one representation when you paste.',
+      selector: '[data-testid="onboarding-copy-warning"]',
+      text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The receiving app chooses which of these formats it pastes.',
       exact: true,
     });
     const combinedFiles = await readWindowsClipboardFilesForSmoke(
@@ -456,19 +461,19 @@ async function exerciseOnboarding(
     await assertExactImage('Choosing a native copy default');
   }
 
-  await driver.click({ text: 'Copy Markdown', exact: true });
-  await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied.', exact: true });
+  await driver.click({ text: 'Copy Markdown only', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Markdown copied', exact: true });
   if ((await nativeClipboard.readText()) !== markdown || !(await nativeClipboard.readImage()).isEmpty())
     throw new Error('Onboarding Markdown fallback did not replace the clipboard with exact Markdown.');
 
-  await driver.click({ text: 'Copy image', exact: true });
-  await driver.waitFor({ selector: '[role="status"]', text: 'Image copied.', exact: true });
+  await driver.click({ text: 'Copy image only', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'Image copied', exact: true });
   if (await nativeClipboard.readText())
     throw new Error('Onboarding image fallback retained stale clipboard text.');
   await assertExactImage('Onboarding image fallback');
 
   await driver.click({ text: 'Copy file paths', exact: true });
-  await driver.waitFor({ selector: '[role="status"]', text: 'File paths copied.', exact: true });
+  await driver.waitFor({ selector: '[role="status"]', text: 'File paths copied', exact: true });
   if (
     (await nativeClipboard.readText()) !== [markdownPath, pngPath].join('\n') ||
     !(await nativeClipboard.readImage()).isEmpty()
@@ -2439,10 +2444,10 @@ export async function runSmokeWorkflow(
     artifacts.push(...captureSmoke.artifacts);
     const captureTriggers =
       process.platform === 'win32'
-        ? 'toolbar, native Ctrl+Shift+5, and a display chooser when multiple displays are attached'
+        ? 'toolbar and OS-injected Ctrl+Alt+Shift+F9 while the main window is minimized and a synthetic target is focused; the registered global callback opens the display chooser and overlay'
         : 'toolbar overlay';
     assertions.push(
-      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
+      `synthetic-only capture ${captureTriggers}; Window mode presents availability feedback, Copy reads back while the overlay remains open, Cancel leaves no files, and Save/Annotate select and export the result`,
     );
   }
 

@@ -309,6 +309,20 @@ describe('CollectionRail', () => {
     expect(onCapture).not.toHaveBeenCalled();
   });
 
+  it('disables the Windows capture primary action while a capture is in progress', () => {
+    const onCapture = vi.fn();
+    render(
+      <CollectionRail
+        {...props({ onCapture, capturePrimary: true, captureEnabled: true, captureInProgress: true })}
+      />,
+    );
+    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
+    expect(addScreenshot).toBeDisabled();
+    expect(addScreenshot).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(addScreenshot);
+    expect(onCapture).not.toHaveBeenCalled();
+  });
+
   it('falls back to an enabled import primary action when Windows capture is unavailable', () => {
     const onImport = vi.fn();
     render(
@@ -325,7 +339,7 @@ describe('CollectionRail', () => {
     fireEvent.click(addScreenshot);
     expect(onImport).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByTestId('add-item-trigger'));
-    expect(screen.queryByRole('menuitem', { name: /Take screenshot/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-item-capture')).not.toBeInTheDocument();
   });
 
   it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
@@ -334,10 +348,11 @@ describe('CollectionRail', () => {
       <CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />,
     );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
-    const capture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
+    const capture = await screen.findByTestId('add-item-capture');
     expect(capture).toHaveTextContent('Capture a region on a chosen display');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
+    expect(onCapture).toHaveBeenCalledWith();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 
     rerender(
@@ -352,7 +367,7 @@ describe('CollectionRail', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
-    const disabledCapture = await screen.findByRole('menuitem', { name: /Take screenshot/ });
+    const disabledCapture = await screen.findByTestId('add-item-capture');
     expect(disabledCapture).toHaveAttribute('aria-disabled', 'true');
     expect(disabledCapture).toHaveTextContent('Choose a current collection before capturing');
     fireEvent.click(disabledCapture);
@@ -360,7 +375,18 @@ describe('CollectionRail', () => {
     expect(screen.getByRole('menu')).toBeVisible();
 
     rerender(<CollectionRail {...props({ onAddContent: vi.fn() })} />);
-    expect(screen.queryByRole('menuitem', { name: /Take screenshot/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-item-capture')).not.toBeInTheDocument();
+  });
+
+  it('starts a 3s or 5s capture delay from the Add menu', async () => {
+    const onCapture = vi.fn();
+    render(<CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />);
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(await screen.findByTestId('add-item-capture-delay-3'));
+    expect(onCapture).toHaveBeenCalledWith(3);
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(await screen.findByTestId('add-item-capture-delay-5'));
+    expect(onCapture).toHaveBeenCalledWith(5);
   });
 
   it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {

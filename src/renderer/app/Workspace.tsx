@@ -1,5 +1,6 @@
 import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
 import type {
@@ -55,9 +56,10 @@ export interface WorkspaceProps {
   onRedo(): void;
   onFit(): void;
   onActualSize(): void;
-  onCapture?(): void;
+  onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   capturePrimary?: boolean;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
   onZoom(delta: number): void;
@@ -191,6 +193,7 @@ export function Workspace(props: WorkspaceProps) {
         onCapture={props.onCapture}
         capturePrimary={props.capturePrimary}
         captureEnabled={props.captureEnabled}
+        captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
         onDeleteItem={props.onDeleteItem}
         onDeleteProject={props.onDeleteProject}
@@ -214,6 +217,7 @@ export function Workspace(props: WorkspaceProps) {
               onActualSize={props.onActualSize}
               onCapture={props.onCapture}
               captureEnabled={props.captureEnabled}
+              captureInProgress={props.captureInProgress}
               captureShortcut={props.captureShortcut}
               captureDisabledLabel={props.captureDisabledLabel}
               onColorSelect={props.onColor}
@@ -291,7 +295,7 @@ export function Workspace(props: WorkspaceProps) {
                 <Button
                   variant="primary"
                   data-testid="empty-add-screenshot"
-                  onClick={captureIsPrimary ? props.onCapture : props.onImport}
+                  onClick={captureIsPrimary ? () => props.onCapture?.() : props.onImport}
                 >
                   {captureIsPrimary ? (
                     <Camera size={16} aria-hidden="true" />

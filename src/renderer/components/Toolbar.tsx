@@ -32,6 +32,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { AnnotationKind } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { IconButton } from './ui';
@@ -348,8 +349,9 @@ export interface ToolbarProps {
   onZoom: (delta: number) => void;
   onFit: () => void;
   onActualSize?: () => void;
-  onCapture?: () => void;
+  onCapture?: (delaySeconds?: CaptureDelaySeconds) => void;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
   /** Enables the compact quick palette when supplied. */
@@ -370,6 +372,7 @@ export function Toolbar({
   onActualSize,
   onCapture,
   captureEnabled = false,
+  captureInProgress = false,
   captureShortcut,
   captureDisabledLabel = 'Screen capture is experimental — enable it in Settings',
   onColorSelect,
@@ -391,6 +394,24 @@ export function Toolbar({
   const moreMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const moreMenuId = useId().replace(/:/g, '');
   const moreActive = overflowTools.some((definition) => definition.id === tool);
+  const [captureDelayOpen, setCaptureDelayOpen] = useState(false);
+  const captureDelayRef = useRef<HTMLDivElement>(null);
+  const captureDelayTriggerRef = useRef<HTMLButtonElement>(null);
+  const captureDelayMenuId = useId().replace(/:/g, '');
+
+  const closeCaptureDelayMenu = (restoreFocus = false) => {
+    setCaptureDelayOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => captureDelayTriggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!captureDelayOpen) return;
+    const pointerDown = (event: PointerEvent) => {
+      if (!captureDelayRef.current?.contains(event.target as Node)) closeCaptureDelayMenu();
+    };
+    document.addEventListener('pointerdown', pointerDown);
+    return () => document.removeEventListener('pointerdown', pointerDown);
+  }, [captureDelayOpen]);
 
   const closeMoreMenu = (restoreFocus = false) => {
     if (moreTabCloseFrame.current !== undefined) {
@@ -612,17 +633,81 @@ export function Toolbar({
       <div className="tool-group annotation-view-tools" aria-label="View">
         <span className="toolbar-group-label">View</span>
         {onCapture && (
-          <IconButton
-            label={
-              captureEnabled
-                ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
-                : captureDisabledLabel
-            }
-            disabled={!captureEnabled}
-            onClick={onCapture}
-          >
-            <Camera size={17} />
-          </IconButton>
+          <div className="capture-delay" ref={captureDelayRef}>
+            <IconButton
+              label={
+                captureInProgress
+                  ? 'Capture in progress…'
+                  : captureEnabled
+                    ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                    : captureDisabledLabel
+              }
+              disabled={!captureEnabled || captureInProgress}
+              aria-busy={captureInProgress || undefined}
+              onClick={() => onCapture()}
+            >
+              <Camera size={17} />
+            </IconButton>
+            <IconButton
+              ref={captureDelayTriggerRef}
+              label="Capture delay"
+              disabled={!captureEnabled || captureInProgress}
+              aria-expanded={captureDelayOpen}
+              aria-haspopup="menu"
+              aria-controls={captureDelayMenuId}
+              onClick={() => (captureDelayOpen ? closeCaptureDelayMenu() : setCaptureDelayOpen(true))}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && captureDelayOpen) {
+                  event.preventDefault();
+                  closeCaptureDelayMenu(true);
+                }
+              }}
+            >
+              <ChevronDown size={13} />
+            </IconButton>
+            {captureDelayOpen && (
+              <div
+                className="capture-delay-menu"
+                id={captureDelayMenuId}
+                role="menu"
+                aria-label="Capture delay"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={captureInProgress}
+                  onClick={() => {
+                    closeCaptureDelayMenu();
+                    onCapture();
+                  }}
+                >
+                  Capture now
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={captureInProgress}
+                  onClick={() => {
+                    closeCaptureDelayMenu();
+                    onCapture(3);
+                  }}
+                >
+                  Capture in 3 seconds
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={captureInProgress}
+                  onClick={() => {
+                    closeCaptureDelayMenu();
+                    onCapture(5);
+                  }}
+                >
+                  Capture in 5 seconds
+                </button>
+              </div>
+            )}
+          </div>
         )}
         <IconButton
           label={`Undo${shortcutLabels.undo ? ` (${shortcutLabels.undo})` : ''}`}

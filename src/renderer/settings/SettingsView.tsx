@@ -1,4 +1,4 @@
-import { FolderOpen, ShieldCheck } from 'lucide-react';
+import { Copy, FolderOpen, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -8,7 +8,13 @@ import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
-import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
+import {
+  claudeCodeAgentAccessSnippet,
+  cursorAgentAccessSnippet,
+  DEFAULT_PREFERENCE_SETTINGS,
+  localAgentAccessStdioSnippet,
+  localAgentAccessUrl,
+} from './preferences';
 import { ShortcutSettings } from './ShortcutSettings';
 import {
   describeCommonShortcut,
@@ -45,13 +51,16 @@ export interface SettingsViewProps {
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
   onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   nativeCopyAvailable?: boolean;
+  globalCaptureShortcutRegistered?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
+  onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
   onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
   onBackupRestoreFailed?(): void;
   onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
+  onAgentAccessChange?(value: PreferenceSettings['agentAccess']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
   onInstall?: () => Promise<void>;
@@ -78,13 +87,16 @@ export function SettingsView({
   onShortcutChange = async () => undefined,
   onWorkbenchChange,
   nativeCopyAvailable = false,
+  globalCaptureShortcutRegistered = false,
   onNativeCopyChange,
+  onPromptExportChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
   onBackupRestored,
   onBackupRestoreFailed,
   onCaptureChange = async () => undefined,
+  onAgentAccessChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
   onInstall,
@@ -98,9 +110,9 @@ export function SettingsView({
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
   const shortcutPlatform = detectShortcutPlatform();
-  const captureShortcut = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform)[
-    'capture.region'
-  ];
+  const shortcutBindings = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform);
+  const captureShortcut = shortcutBindings['capture.region'];
+  const repeatLastShortcut = shortcutBindings['capture.repeatLastRegion'];
   const captureShortcutNote = captureShortcut
     ? describeCommonShortcut(captureShortcut, shortcutPlatform)
     : null;
@@ -163,20 +175,45 @@ export function SettingsView({
             disabled={savingPreferences}
           />
           <section className="settings-section" aria-labelledby="capture-settings-title">
-            <h2 id="capture-settings-title">Experimental capture</h2>
+            <h2 id="capture-settings-title">Screen capture</h2>
             <label className="settings-switch">
               <span>
                 <strong>Capture a screen region</strong>
                 <small>
-                  Windows and macOS only while platform validation is in progress. Captures stay local.
-                  Windows lets you choose a display when more than one is attached and captures only that
-                  display; macOS uses the display under the pointer.
+                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
+                  Linux stays Import or Paste. Captures stay local. Windows lets you choose a display when
+                  more than one is attached and captures only that display; macOS uses the display under the
+                  pointer. Capture in 3 or 5 seconds waits after Imnota hides so hover menus and tooltips can
+                  appear. Press Escape during that wait to cancel; no overlay opens and no file is saved.
                 </small>
                 <small data-testid="capture-shortcut-summary">
-                  Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
-                  {captureShortcut
-                    ? ' while Imnota is focused. Change it under Screenshots above.'
-                    : '. The toolbar camera button and the Add menu still work.'}
+                  {captureShortcut ? (
+                    <>
+                      Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd> captures a
+                      region{' '}
+                      {globalCaptureShortcutRegistered
+                        ? 'even when Imnota is in the background'
+                        : 'while Imnota is focused. The background shortcut is not active'}
+                      {repeatLastShortcut ? (
+                        <>
+                          ; <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> recaptures the
+                          last region from this session
+                        </>
+                      ) : null}
+                      . Change these under Screenshots above.
+                    </>
+                  ) : (
+                    <>
+                      Shortcut: not set. The toolbar camera button and the Add menu still work.
+                      {repeatLastShortcut ? (
+                        <>
+                          {' '}
+                          <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> still recaptures
+                          the last region from this session while Imnota is focused.
+                        </>
+                      ) : null}
+                    </>
+                  )}
                   {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>
               </span>
@@ -327,9 +364,38 @@ export function SettingsView({
               </div>
             </div>
           </section>
+          <AgentAccessSettings
+            value={preferences.agentAccess}
+            disabled={savingPreferences}
+            onChange={onAgentAccessChange}
+          />
         </div>
         {group === 'Sharing' && (
           <>
+            <section className="settings-section" aria-labelledby="prompt-markdown-title">
+              <h2 id="prompt-markdown-title">Prompt Markdown</h2>
+              <label className="settings-switch">
+                <span>
+                  <strong>Include recognised text in Markdown</strong>
+                  <small>
+                    Copy Bundle can append on-device OCR under Visible text. Screenshots with blur or pixelate
+                    marks omit this section. Recognition never leaves this device.
+                  </small>
+                </span>
+                <input
+                  type="checkbox"
+                  aria-label="Include recognised text in Markdown"
+                  checked={preferences.promptExport.includeRecognisedText}
+                  disabled={savingPreferences || !onPromptExportChange}
+                  onChange={(event) => {
+                    const includeRecognisedText = event.target.checked;
+                    void Promise.resolve()
+                      .then(() => onPromptExportChange?.({ includeRecognisedText }))
+                      .catch(() => undefined);
+                  }}
+                />
+              </label>
+            </section>
             {nativeCopyAvailable && (
               <section className="settings-section" aria-labelledby="native-copy-title">
                 <h2 id="native-copy-title">Native copy functions</h2>
@@ -362,6 +428,73 @@ export function SettingsView({
           </>
         )}
       </div>
+    </section>
+  );
+}
+
+function AgentAccessSettings({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: PreferenceSettings['agentAccess'];
+  disabled: boolean;
+  onChange(value: PreferenceSettings['agentAccess']): void | Promise<void>;
+}) {
+  const [copied, setCopied] = useState('');
+  const copySnippet = async (label: string, snippet: string) => {
+    try {
+      await window.imnota.copyText(snippet);
+      setCopied(label);
+    } catch {
+      setCopied('');
+    }
+  };
+  return (
+    <section className="settings-section" aria-labelledby="agent-access-title">
+      <h2 id="agent-access-title">Local agent access</h2>
+      <label className="settings-switch">
+        <span>
+          <strong>Allow local agent access</strong>
+          <small>
+            Lets Claude Code or Cursor read prepared prompt bundles from this workspace. Off by default. The
+            listener binds only to {localAgentAccessUrl()} or a spawned <kbd>--mcp</kbd> stdio process. Imnota
+            does not rewrite editor config.
+          </small>
+        </span>
+        <input
+          type="checkbox"
+          checked={value.enabled}
+          disabled={disabled}
+          data-testid="agent-access-toggle"
+          onChange={(event) => void onChange({ enabled: event.target.checked })}
+        />
+      </label>
+      <div className="settings-snippet">
+        <div className="settings-snippet-heading">
+          <strong>Claude Code</strong>
+          <Button variant="ghost" onClick={() => void copySnippet('claude', claudeCodeAgentAccessSnippet())}>
+            <Copy size={14} aria-hidden="true" />
+            {copied === 'claude' ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <pre>{claudeCodeAgentAccessSnippet()}</pre>
+      </div>
+      <div className="settings-snippet">
+        <div className="settings-snippet-heading">
+          <strong>Cursor</strong>
+          <Button variant="ghost" onClick={() => void copySnippet('cursor', cursorAgentAccessSnippet())}>
+            <Copy size={14} aria-hidden="true" />
+            {copied === 'cursor' ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <pre>{cursorAgentAccessSnippet()}</pre>
+      </div>
+      <p className="settings-snippet-note">
+        Stdio alternative: spawn the Imnota executable with <kbd>--mcp</kbd>. Installable skill and rule files
+        are in the documentation; Imnota never writes <code>~/.claude</code> or <code>.cursor</code>.
+      </p>
+      <pre className="settings-snippet-stdio">{localAgentAccessStdioSnippet()}</pre>
     </section>
   );
 }
