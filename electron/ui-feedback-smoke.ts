@@ -85,11 +85,15 @@ async function captureAgentAccess(
     const toggleBox = toggle.getBoundingClientRect();
     const mcp = copy.querySelector('kbd');
     const mcpBox = mcp?.getBoundingClientRect();
+    // At 110% zoom a shared edge can differ by 0.000004 CSS px in DOMRect.
+    // Compare painted edges in device pixels; keep overflow and separation exact.
+    const pixel = value => Math.round(value * devicePixelRatio);
+    const contains = (outer, inner) => pixel(inner.left) >= pixel(outer.left) &&
+      pixel(inner.right) <= pixel(outer.right);
     const separate = copyBox.right <= toggleBox.left ||
       copyBox.bottom <= toggleBox.top || toggleBox.bottom <= copyBox.top;
     return copy.scrollWidth <= copy.clientWidth && copy.scrollHeight <= copy.clientHeight &&
-      copyBox.left >= sectionBox.left && copyBox.right <= sectionBox.right &&
-      toggleBox.left >= sectionBox.left && toggleBox.right <= sectionBox.right && separate &&
+      contains(sectionBox, copyBox) && contains(sectionBox, toggleBox) && separate &&
       !!mcpBox && mcpBox.width > 0 && mcpBox.height > 0 && mcp.getClientRects().length === 1 &&
       mcpBox.left >= copyBox.left && mcpBox.right <= copyBox.right &&
       mcpBox.top >= copyBox.top && mcpBox.bottom <= copyBox.bottom;
@@ -97,8 +101,8 @@ async function captureAgentAccess(
   if (!copyFits) {
     const geometry = await driver.evaluate(`(() => {
       const section = document.querySelector('[aria-labelledby="agent-access-title"]');
-      return Object.fromEntries(['.settings-switch small', '.settings-switch kbd', '[data-testid="agent-access-toggle"]']
-        .map(selector => { const element = section?.querySelector(selector);
+      return Object.fromEntries([':scope', '.settings-switch small', '.settings-switch kbd', '[data-testid="agent-access-toggle"]']
+        .map(selector => { const element = selector === ':scope' ? section : section?.querySelector(selector);
           return [selector, element ? {box: element.getBoundingClientRect().toJSON(),
             client: [element.clientWidth, element.clientHeight], scroll: [element.scrollWidth, element.scrollHeight],
             rects: element.getClientRects().length} : null]; }));
@@ -150,12 +154,13 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
   await driver.click({ selector: '.project-row-main', text: 'Feedback Verification' });
   await driver.waitFor({ selector: '[data-testid="workspace"]' });
-  await driver.resize({ width: 1064, height: 800 });
+  // Linux window decorations add 16px to the production minimum width.
+  await driver.resize({ width: 1080, height: 800 });
   await captureCollectionPicker(
     driver,
     artifactDirectory,
     captures,
-    '1064x800-feedback-normal-collection-picker.png',
+    '1080x800-feedback-normal-collection-picker.png',
     ['Active', 'Archived'],
   );
   const templateProjectPath = await driver.evaluate<string>(`(async () => {
@@ -174,7 +179,7 @@ export async function exerciseUiFeedback(
     driver,
     artifactDirectory,
     captures,
-    '1064x800-feedback-template-collection-picker.png',
+    '1080x800-feedback-template-collection-picker.png',
   );
   const templateProjectExists = await driver.evaluate<boolean>(
     `(async () => (await window.imnota.loadProject(${JSON.stringify(templateProjectPath)})).project.name === 'Feedback Template')()`,
@@ -191,7 +196,7 @@ export async function exerciseUiFeedback(
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   })()`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, '1064x800-feedback-paste-error.png'));
+    captures.push(await driver.capture(artifactDirectory, '1080x800-feedback-paste-error.png'));
   const pasteError = await driver.evaluate<{
     passed: boolean;
     box?: { left: number; top: number; right: number; bottom: number; width: number };
@@ -355,7 +360,7 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
-  await driver.resize({ width: 1064, height: 800 });
+  await driver.resize({ width: 1080, height: 800 });
   await captureAgentAccess(driver, artifactDirectory, captures, 'agent-access-setup-prompt.png');
   await driver.click({
     selector: '[aria-labelledby="agent-access-title"] button',
