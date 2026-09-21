@@ -1,13 +1,20 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImnotaBridge } from '../src/shared/types.js';
 
+const onDeviceOcrAvailable = process.platform === 'win32';
+
 const bridge: ImnotaBridge = {
+  onDeviceOcrAvailable,
   setDesktopGlass: (input) => ipcRenderer.invoke('workflow:appearance:desktop', input),
   getPreferenceSettings: () => ipcRenderer.invoke('workflow:preferences:get'),
   setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
   getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),
   getNativeCapabilities: () => ipcRenderer.invoke('workflow:capabilities:get'),
   raiseMainWindow: () => ipcRenderer.invoke('workflow:window:raise'),
+  recognizeOnDeviceText: (input) =>
+    onDeviceOcrAvailable
+      ? ipcRenderer.invoke('workflow:ocr:recognize', input)
+      : Promise.resolve({ ok: true, value: { text: '' } }),
   listCaptureDisplays: () => ipcRenderer.invoke('workflow:capture:displays'),
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
   commitBufferedCapture: (input) => ipcRenderer.invoke('workflow:capture:commit-buffered', input),

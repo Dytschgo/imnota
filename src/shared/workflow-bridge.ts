@@ -43,7 +43,9 @@ export interface PreferenceSettingsUpdate {
   onboarding?: Partial<PreferenceSettings['onboarding']>;
   workbench?: Partial<PreferenceSettings['workbench']>;
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
+  promptExport?: Partial<PreferenceSettings['promptExport']>;
   updates?: Partial<PreferenceSettings['updates']>;
+  agentAccess?: Partial<PreferenceSettings['agentAccess']>;
 }
 
 export interface NativePerformanceProfile {
@@ -203,6 +205,10 @@ export interface WorkflowBridge {
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
   raiseMainWindow(): Promise<WorkflowResult<void>>;
+  recognizeOnDeviceText(input: {
+    pngDataUrl: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }): Promise<WorkflowResult<{ text: string }>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
     projectPath?: string;
@@ -210,11 +216,20 @@ export interface WorkflowBridge {
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
     overlayMode?: 'region' | 'window' | 'display';
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
+    /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
+    delaySeconds?: 3 | 5;
+  }): Promise<
+    WorkflowResult<
+      | { snapshot: ProjectSnapshot; screenshotId: string; overlayAction: 'save' | 'annotate' }
+      | { buffered: true; overlayAction: 'save' | 'annotate' }
+    >
+  >;
   commitBufferedCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  }): Promise<
+    WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>
+  >;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;

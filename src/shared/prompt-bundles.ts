@@ -1,10 +1,12 @@
+import { annotationMarkListItems } from './annotation-marks';
+import { pictureSourceSizeLine } from './markdown';
+import { textAnnotationReferences } from './annotation-order';
+import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr';
+import type { Annotation } from './types';
+
 export type PromptPriority = 'low' | 'medium' | 'high';
 export type PromptVisualKind = 'screenshot' | 'drawing';
-
-export interface PromptAnnotationInput {
-  kind: string;
-  text?: string;
-}
+export type PromptAnnotationInput = Annotation;
 export interface PromptScreenshotInput {
   id: string;
   position: number;
@@ -17,6 +19,7 @@ export interface PromptScreenshotInput {
   nativeHeight: number;
   contentRevision: string;
   annotations: readonly PromptAnnotationInput[];
+  visibleText?: string;
   kind?: 'screenshot';
 }
 export interface PromptDrawingInput {
@@ -70,11 +73,15 @@ export interface PromptBundlePicture {
   priority: PromptPriority;
   contentRevision: string;
   notes: PromptTextNote[];
+  marks: string[];
+  visibleText?: string;
   sourceFilename?: string;
   estimatedPngCharacters?: number;
   dataUrl?: string;
   width: number;
   height: number;
+  nativeWidth: number;
+  nativeHeight: number;
 }
 export interface PromptBundleText {
   itemId: string;
@@ -187,13 +194,10 @@ function normalized(value: string): string {
 }
 
 export function mapPromptTextNotes(annotations: readonly PromptAnnotationInput[]): PromptTextNote[] {
-  const notes: PromptTextNote[] = [];
-  for (const annotation of annotations) {
-    if (annotation.kind !== 'text' && annotation.kind !== 'callout') continue;
-    const text = annotation.text && normalized(annotation.text);
-    if (text?.trim()) notes.push({ number: notes.length + 1, text });
-  }
-  return notes;
+  return textAnnotationReferences(annotations).map(({ annotation, noteNumber }) => ({
+    number: noteNumber,
+    text: normalized(annotation.text ?? ''),
+  }));
 }
 
 export function calculatePromptBundleLayout(
@@ -289,9 +293,13 @@ function markdownForBundle(
     lines.push(`## ${visualLabel(picture)} — ${cleanHeading(picture.title, picture.originalFilename)}`, '');
     if (picture.kind === 'screenshot') {
       lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
+      lines.push(pictureSourceSizeLine(picture.nativeWidth, picture.nativeHeight), '');
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
+      if (picture.marks.length)
+        lines.push(`### Picture ${picture.pictureNumber} / Marks`, '', ...picture.marks, '');
+      lines.push(...visibleTextMarkdownLines(picture.visibleText));
     } else if (normalized(picture.description).trim()) {
       lines.push(normalized(picture.description), '');
     }
@@ -317,6 +325,14 @@ function orderedItems(collection: PromptCollectionInput): PromptCollectionItemIn
     .sort((a, b) => a.item.position - b.item.position || a.sourceIndex - b.sourceIndex)
     .map(({ item }) => item);
 }
+function screenshotVisibleText(
+  item: Extract<PromptCollectionItemInput, { kind?: 'screenshot' } | { kind: 'drawing' }>,
+): string | undefined {
+  if (item.kind === 'drawing') return undefined;
+  if (screenshotHasRedaction(item.annotations)) return undefined;
+  return normalized(item.visibleText ?? '').trim() || undefined;
+}
+
 function resolveRendered(
   item: Extract<PromptCollectionItemInput, { kind?: 'screenshot' } | { kind: 'drawing' }>,
   number: number,
@@ -345,11 +361,20 @@ function resolveRendered(
     priority: drawing ? 'medium' : item.priority,
     contentRevision: item.contentRevision,
     notes: drawing ? [] : mapPromptTextNotes(item.annotations),
+    marks: drawing
+      ? []
+      : annotationMarkListItems(item.annotations, {
+          originalWidth: item.nativeWidth,
+          originalHeight: item.nativeHeight,
+        }),
+    visibleText: screenshotVisibleText(item),
     sourceFilename: drawing ? item.sourceFilename : undefined,
     estimatedPngCharacters: rendered.estimatedPngCharacters,
     dataUrl: rendered.dataUrl,
     width: rendered.width,
     height: rendered.height,
+    nativeWidth: item.nativeWidth,
+    nativeHeight: item.nativeHeight,
   };
 }
 

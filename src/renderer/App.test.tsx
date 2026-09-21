@@ -1220,6 +1220,125 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
+  it('restores an annotation tool chosen with its keyboard shortcut after Annotate', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const capturedSnapshotRef: { current?: ProjectSnapshot } = {};
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        snapshot: capturedSnapshotRef.current!,
+        screenshotId: 'captured',
+        overlayAction: 'annotate' as const,
+      },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: capturedSnapshotRef.current!, projectRevision: 'project-2' },
+      }),
+      startRegionCapture,
+    });
+    capturedSnapshotRef.current = {
+      ...editingSnapshot,
+      project: {
+        ...editingSnapshot.project,
+        screenshots: [
+          ...editingSnapshot.project.screenshots,
+          { ...editingSnapshot.project.screenshots[0]!, id: 'captured', position: 1 },
+        ],
+      },
+    };
+
+    fireEvent.keyDown(window, { key: 'r', code: 'KeyR' });
+    await waitFor(() =>
+      expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'rectangle' }),
+    );
+    fireEvent.keyDown(window, { key: 'v', code: 'KeyV' });
+    await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'select' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Capture screen region/ }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
+    await screen.findByText('Screen capture added — annotate');
+    await waitFor(() =>
+      expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'rectangle' }),
+    );
+  });
+
+  it('starts a cancellable 3s capture delay from the toolbar menu', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Capture delay' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+        delaySeconds: 3,
+        overlayMode: 'region',
+      }),
+    );
+    expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
+  });
+
+  it('starts a 5s capture delay from the Add menu', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(await screen.findByTestId('add-item-capture-delay-5'));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+        delaySeconds: 5,
+        overlayMode: 'region',
+      }),
+    );
+  });
+
   it('starts capture from the global hotkey IPC', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     let hotkey: (() => void) | undefined;
@@ -1665,7 +1784,10 @@ describe('feedback controls', () => {
 
   it('buffers a capture without a current collection and restores the last-used collection', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const loadProject = vi.fn(async () => snapshot);
     const commitBufferedCapture = vi.fn(async () => ({
       ok: true as const,
@@ -1727,7 +1849,10 @@ describe('feedback controls', () => {
       ...snapshot,
       project: { ...snapshot.project, collections: [archived, snapshot.project.collections[0]!] },
     };
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn();
     const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
     const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
@@ -1762,7 +1887,10 @@ describe('feedback controls', () => {
 
   it('keeps a buffered capture when inserting it fails', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn(async () => ({
       ok: false as const,
       error: { code: 'io-failure' as const, message: 'Disk full', retryable: true },

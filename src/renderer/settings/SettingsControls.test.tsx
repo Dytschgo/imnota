@@ -138,12 +138,13 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ bindings: { 'tool.text': 'Ctrl+Shift+3' } }));
   });
 
-  it('offers replay without mutating completion state itself', () => {
+  it('offers replay without mutating completion state or workspace files', () => {
     const onReplay = vi.fn();
     render(<OnboardingSettings value={{ completed: true, completedVersion: 1 }} onReplay={onReplay} />);
     fireEvent.click(screen.getByRole('button', { name: 'Replay guide' }));
     expect(onReplay).toHaveBeenCalledOnce();
     expect(screen.getByText('Completed with guide version 1')).toBeInTheDocument();
+    expect(screen.getByText(/without changing a workspace/i)).toBeInTheDocument();
   });
 
   it('shows the Windows native copy default and emits a persisted-function change', async () => {
@@ -211,5 +212,20 @@ describe('preference controls', () => {
     expect(screen.getByTestId('capture-shortcut-summary')).toHaveTextContent(
       'even when Imnota is in the background',
     );
+  });
+
+  it('defaults Include recognised text in Markdown on and emits a persisted change', async () => {
+    const onPromptExportChange = vi.fn(async () => {});
+    render(
+      <SettingsView
+        activeCategory="Sharing"
+        preferences={DEFAULT_PREFERENCE_SETTINGS}
+        onPromptExportChange={onPromptExportChange}
+      />,
+    );
+    const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: false }));
   });
 });
