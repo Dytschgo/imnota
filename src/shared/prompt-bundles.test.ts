@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import type { Annotation } from './types';
 import {
   calculatePromptBundleLayout,
   encodedOverflowBreak,
@@ -50,13 +51,30 @@ function rendered(id: string, width = 100, height = 100, characters = 100): Meas
   };
 }
 
+function annotation(id: string, kind: Annotation['kind'], fields: Partial<Annotation> = {}): Annotation {
+  return { id, kind, x: 0, y: 0, zIndex: 0, ...fields };
+}
+
+const pictureMarks: Annotation[] = [
+  annotation('a1', 'arrow', { x: 120, y: 400, points: [0, 0, 595, 12], zIndex: 2 }),
+  annotation('s2', 'step', { x: 700, y: 400, stepNumber: 1, zIndex: 3 }),
+  annotation('t1', 'text', {
+    text: 'Move the primary action.',
+    x: 100,
+    y: 200,
+    width: 200,
+    height: 40,
+    zIndex: 1,
+  }),
+];
+
 describe('prompt note mapping', () => {
   it('uses original array order independent of z-index-like fields', () => {
     const annotations = [
-      { kind: 'text', text: 'Created first', zIndex: 99 },
-      { kind: 'rectangle', text: 'Visual only', zIndex: 0 },
-      { kind: 'callout', text: 'Created second', zIndex: -1 },
-      { kind: 'text', text: '   ', zIndex: 1 },
+      annotation('first', 'text', { text: 'Created first', zIndex: 99 }),
+      annotation('shape', 'rectangle', { text: 'Visual only', zIndex: 0 }),
+      annotation('second', 'callout', { text: 'Created second', zIndex: -1 }),
+      annotation('blank', 'text', { text: '   ', zIndex: 1 }),
     ];
     expect(mapPromptTextNotes(annotations)).toEqual([
       { number: 1, text: 'Created first' },
@@ -70,8 +88,8 @@ describe('prompt bundle planning', () => {
     const input = collection([
       screenshot('third', 30, {
         annotations: [
-          { kind: 'text', text: 'First note' },
-          { kind: 'callout', text: 'Second note' },
+          annotation('n1', 'text', { text: 'First note' }),
+          annotation('n2', 'callout', { text: 'Second note' }),
         ],
       }),
       screenshot('first', 10),
@@ -151,13 +169,35 @@ describe('prompt bundle planning', () => {
     expect(stamped.bundles[0].markdown).toContain(
       'Bundle reference: Checkout Collection - 260907-184205 - 01',
     );
+    expect(stamped.bundles[0].markdown).toContain('Source size: 100×100');
+  });
+
+  it('includes source pixel size from native dimensions, not composed layout size', () => {
+    const input = collection([
+      screenshot('captured', 0, { nativeWidth: 1920, nativeHeight: 1080 }),
+      screenshot('imported', 1, { nativeWidth: 800, nativeHeight: 600 }),
+    ]);
+    const result = planPromptBundles(input, [
+      rendered('captured', 3840, 2160),
+      rendered('imported', 1600, 1200),
+    ]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain(
+      '## Picture 1 — captured title\n\nPriority for agent: Medium\n\nSource size: 1920×1080',
+    );
+    expect(result.bundles[0].markdown).toContain(
+      '## Picture 2 — imported title\n\nPriority for agent: Medium\n\nSource size: 800×600',
+    );
+    expect(result.bundles[0].markdown).not.toContain('Source size: 3840×2160');
+    expect(result.bundles[0].markdown).not.toContain('Source size: 1600×1200');
   });
 
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
     const input = collection([
       screenshot('one', 0, {
         description: 'Description:\r\n\r\n    code()',
-        annotations: [{ kind: 'text', text: '    noteCode()' }],
+        annotations: [annotation('note', 'text', { text: '    noteCode()' })],
       }),
     ]);
     input.overallContext = 'Context:\r\n\r\n    setup()';
@@ -246,6 +286,7 @@ describe('prompt bundle planning', () => {
     );
     if (drawingOnly.kind === 'ready') {
       expect(drawingOnly.bundles[0].markdown).toContain('## Drawing 1 — Architecture');
+      expect(drawingOnly.bundles[0].markdown).not.toContain('Source size:');
       expect(drawingOnly.bundles[0].pictureNumbers).toEqual([1]);
     } else throw new Error(drawingOnly.message);
   });
@@ -266,6 +307,86 @@ describe('prompt bundle planning', () => {
     expect(() =>
       planPromptBundles({ ...collection([]), items: [screenshot('bad', 0)] }, [rendered('bad', 0, 100)]),
     ).toThrow(/width must be a positive integer/);
+  });
+
+  it('describes visual marks in Copy Bundle markdown and omits excluded and redacted geometry', () => {
+    const input = collection([
+      screenshot('first', 0),
+      screenshot('second', 1, {
+        nativeWidth: 1000,
+        nativeHeight: 1000,
+        annotations: pictureMarks,
+      }),
+      screenshot('hidden', 2, {
+        includeInExport: false,
+        nativeWidth: 1000,
+        nativeHeight: 1000,
+        annotations: pictureMarks,
+      }),
+    ]);
+    const result = planPromptBundles(input, [rendered('first'), rendered('second')]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain('### Picture 2 / Note 1\n\nMove the primary action.');
+    expect(result.bundles[0].markdown).toContain(
+      [
+        '### Picture 2 / Marks',
+        '',
+        '- arrow `a1` from 12.0%,40.0% to 71.5%,41.2%',
+        '- step `s2` number 1 at 70.0%,40.0%',
+        '- text `t1` note 1 at 10.0%,20.0% 20.0%×4.0%',
+      ].join('\n'),
+    );
+    expect(result.bundles[0].markdown).toContain('Picture 3 was intentionally excluded');
+    expect(result.bundles[0].markdown).not.toContain('### Picture 3 / Marks');
+    expect(result.bundles[0].markdown).not.toContain('### Picture 1 / Marks');
+
+    const redacted = planPromptBundles(
+      collection([
+        screenshot('secret', 0, {
+          annotations: [
+            annotation('blur', 'blur', { x: 33, y: 44, width: 55, height: 16 }),
+            annotation('pixels', 'pixelate', { x: 12, y: 8, width: 9, height: 7 }),
+            annotation('crop', 'crop', { x: 5, y: 6, width: 70, height: 80 }),
+            annotation('r4', 'rectangle', { x: 10, y: 20, width: 30, height: 15 }),
+          ],
+        }),
+      ]),
+      [rendered('secret')],
+    );
+    expect(redacted.kind).toBe('ready');
+    if (redacted.kind !== 'ready') return;
+    expect(redacted.bundles[0].markdown).toContain(
+      '### Picture 1 / Marks\n\n- rectangle `r4` at 10.0%,20.0% 30.0%×15.0%',
+    );
+    expect(redacted.bundles[0].markdown).not.toContain('blur');
+    expect(redacted.bundles[0].markdown).not.toContain('pixelate');
+    expect(redacted.bundles[0].markdown).not.toContain('33.0%');
+  });
+
+  it('appends Visible text from injected OCR and omits it for redacted screenshots', () => {
+    const result = planPromptBundles(collection([screenshot('first', 0, { visibleText: 'Submit order' })]), [
+      rendered('first'),
+    ]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain('### Visible text\n\nSubmit order\n');
+    expect(result.bundles[0].pictures[0].description).toBe('');
+
+    const redacted = planPromptBundles(
+      collection([
+        screenshot('secret', 0, {
+          visibleText: 'secret token',
+          annotations: [annotation('blur', 'blur', { x: 1, y: 1, width: 8, height: 8 })],
+        }),
+      ]),
+      [rendered('secret')],
+    );
+    expect(redacted.kind).toBe('ready');
+    if (redacted.kind !== 'ready') return;
+    expect(redacted.bundles[0].markdown).not.toContain('### Visible text');
+    expect(redacted.bundles[0].markdown).not.toContain('secret token');
+    expect(redacted.bundles[0].pictures[0].visibleText).toBeUndefined();
   });
 });
 

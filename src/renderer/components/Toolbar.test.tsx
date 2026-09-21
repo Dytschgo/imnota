@@ -32,6 +32,19 @@ describe('annotation toolbar', () => {
     expect(screen.getByRole('button', { name: 'Capture screen region' })).toBeEnabled();
   });
 
+  test('starts immediate capture from the camera and delayed capture from the delay menu', () => {
+    const onCapture = vi.fn();
+    render(<Toolbar {...props({ onCapture, captureEnabled: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Capture screen region' }));
+    expect(onCapture).toHaveBeenCalledWith();
+    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
+    expect(onCapture).toHaveBeenCalledWith(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 5 seconds' }));
+    expect(onCapture).toHaveBeenCalledWith(5);
+  });
+
   test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {
     vi.useFakeTimers();
     const setTool = vi.fn();

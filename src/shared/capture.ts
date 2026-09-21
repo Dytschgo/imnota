@@ -17,6 +17,10 @@ export interface CaptureDisplayOption extends CaptureDisplay {
   position: string;
 }
 
+/** Seconds the capture start path waits so hover menus and tooltips can appear. */
+export const CAPTURE_DELAY_SECONDS = [3, 5] as const;
+export type CaptureDelaySeconds = (typeof CAPTURE_DELAY_SECONDS)[number];
+
 export const MAX_CAPTURE_DIMENSION = 16_384;
 /** 8K fits; prohibit decoded images that would require excessive native memory. */
 export const MAX_CAPTURE_PIXELS = 64_000_000;

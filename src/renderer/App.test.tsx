@@ -102,8 +102,9 @@ describe('feedback controls', () => {
       }),
       getNativeCapabilities: async () => ({
         ok: true,
-        value: { windowsFileClipboard: true },
+        value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
+      raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
       listCaptureDisplays: async () => ({
         ok: true,
         value: [
@@ -116,6 +117,12 @@ describe('feedback controls', () => {
           },
         ],
       }),
+      onRegionCaptureHotkey: () => () => {},
+      commitBufferedCapture: async () => ({
+        ok: true as const,
+        value: { snapshot, screenshotId: 'shot' },
+      }),
+      discardBufferedCapture: async () => ({ ok: true as const, value: undefined }),
       startProjectWatch: async ({ projectPath }: { projectPath: string }) => ({
         ok: true,
         value: { watchId: 'watch', projectPath, projectRevision: 'project-1' },
@@ -1163,6 +1170,9 @@ describe('feedback controls', () => {
     expect(importClick).toHaveBeenCalledOnce();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(startRegionCapture).not.toHaveBeenCalled();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Screen capture is experimental — enable it in Settings',
+    );
   });
 
   it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {
@@ -1190,6 +1200,7 @@ describe('feedback controls', () => {
     const capture = await screen.findByRole('button', { name: /Capture screen region/ });
     fireEvent.click(capture);
     fireEvent.click(capture);
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
     expect(startRegionCapture).toHaveBeenCalledWith({
@@ -1204,6 +1215,106 @@ describe('feedback controls', () => {
       }),
     );
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
+  });
+
+  it('starts a cancellable 3s capture delay from the toolbar menu', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Capture delay' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+        delaySeconds: 3,
+      }),
+    );
+    expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
+  });
+
+  it('starts a 5s capture delay from the Add menu', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(await screen.findByTestId('add-item-capture-delay-5'));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+        delaySeconds: 5,
+      }),
+    );
+  });
+
+  it('starts capture from the global hotkey IPC', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let hotkey: (() => void) | undefined;
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+      onRegionCaptureHotkey: (handler) => {
+        hotkey = handler;
+        return () => {
+          hotkey = undefined;
+        };
+      },
+    });
+    expect(hotkey).toEqual(expect.any(Function));
+    act(() => hotkey?.());
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+      }),
+    );
   });
 
   it('chooses an exact Windows display before toolbar capture', async () => {
@@ -1303,6 +1414,7 @@ describe('feedback controls', () => {
   it('opens the same Windows display chooser from the capture shortcut', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn();
+    const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
     await renderEditingProject({
       getPreferenceSettings: async () => ({
         ok: true,
@@ -1334,10 +1446,12 @@ describe('feedback controls', () => {
         ],
       }),
       startRegionCapture: startRegionCapture as never,
+      raiseMainWindow,
     });
 
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole('dialog', { name: 'Choose a display' })).toBeInTheDocument();
+    expect(raiseMainWindow).toHaveBeenCalled();
     expect(startRegionCapture).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   });
@@ -1488,6 +1602,193 @@ describe('feedback controls', () => {
       }),
     );
     await waitFor(() => expect(startRegionCapture).not.toHaveBeenCalled());
+  });
+
+  it('explains Linux capture unavailability from the shortcut', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+    const startRegionCapture = vi.fn();
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: startRegionCapture as never,
+    });
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Screen capture is unavailable on Linux — use Import or Paste',
+    );
+    expect(startRegionCapture).not.toHaveBeenCalled();
+  });
+
+  it('keeps a macOS permission-denied capture error visible', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: 'capture-permission-denied' as const,
+        message:
+          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+        retryable: false,
+      },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+    });
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', metaKey: true, shiftKey: true });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Allow Screen Recording');
+  });
+
+  it('buffers a capture without a current collection and restores the last-used collection', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const loadProject = vi.fn(async () => snapshot);
+    const commitBufferedCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { snapshot, screenshotId: 'captured' },
+    }));
+    const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    useAppStore.setState({
+      recentCollections: [
+        {
+          projectPath: snapshot.projectPath,
+          collectionId: '001-collection',
+          openedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    renderApp({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject,
+      startRegionCapture,
+      commitBufferedCapture,
+      discardBufferedCapture,
+    });
+    await screen.findByTestId('library-full-search');
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledWith({ displayId: 1 }));
+    await waitFor(() =>
+      expect(commitBufferedCapture).toHaveBeenCalledWith({
+        projectPath: snapshot.projectPath,
+        collectionId: '001-collection',
+      }),
+    );
+    expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath);
+    expect(discardBufferedCapture).not.toHaveBeenCalled();
+  });
+
+  it('discards a buffered capture when the destination prompt is cancelled', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const archived = {
+      id: 'archived',
+      name: 'Old',
+      archived: true,
+      createdAt: snapshot.project.createdAt,
+      updatedAt: snapshot.project.updatedAt,
+      overallContext: '',
+    };
+    const editingSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, collections: [archived, snapshot.project.collections[0]!] },
+    };
+    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const commitBufferedCapture = vi.fn();
+    const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    renderApp({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+      commitBufferedCapture,
+      discardBufferedCapture,
+      raiseMainWindow,
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => {
+      useAppStore.getState().setProject(editingSnapshot);
+      useAppStore.getState().set({ activeCollectionId: 'archived' });
+    });
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Choose a collection' })).toBeInTheDocument();
+    expect(raiseMainWindow).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(discardBufferedCapture).toHaveBeenCalledOnce());
+    expect(commitBufferedCapture).not.toHaveBeenCalled();
+  });
+
+  it('keeps a buffered capture when inserting it fails', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const } }));
+    const commitBufferedCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'io-failure' as const, message: 'Disk full', retryable: true },
+    }));
+    const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    useAppStore.setState({
+      recentCollections: [
+        {
+          projectPath: snapshot.projectPath,
+          collectionId: '001-collection',
+          openedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    renderApp({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      loadProject: async () => snapshot,
+      startRegionCapture,
+      commitBufferedCapture,
+      discardBufferedCapture,
+    });
+    await screen.findByTestId('library-full-search');
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Disk full');
+    expect(commitBufferedCapture).toHaveBeenCalled();
+    expect(discardBufferedCapture).not.toHaveBeenCalled();
   });
 
   it('preserves picker order and activates the last imported screenshot', async () => {

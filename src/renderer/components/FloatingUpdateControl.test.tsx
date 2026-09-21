@@ -19,6 +19,37 @@ it('keeps an accessible update check available when no release is pending', () =
   expect(onCheck).toHaveBeenCalledOnce();
 });
 
+it('treats an up-to-date result as a refresh, not a download', () => {
+  const onCheck = vi.fn();
+  const onDownload = vi.fn();
+  render(
+    <FloatingUpdateControl
+      status={{ state: 'not-available', message: 'You’re on the latest stable version.' }}
+      onCheck={onCheck}
+      onDownload={onDownload}
+      onInstall={vi.fn()}
+      onRetry={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'You’re on the latest version. Check again.' }));
+  expect(onCheck).toHaveBeenCalledOnce();
+  expect(onDownload).not.toHaveBeenCalled();
+});
+
+it('shows disabled download progress while an update is fetching', () => {
+  render(
+    <FloatingUpdateControl
+      status={{ state: 'downloading', percent: 42 }}
+      onCheck={vi.fn()}
+      onDownload={vi.fn()}
+      onInstall={vi.fn()}
+      onRetry={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Downloading update, 42% complete' })).toBeDisabled();
+  expect(screen.getByTestId('update-indicator')).toHaveTextContent('42%');
+});
+
 it('shows a disabled checking control with an accurate label', () => {
   render(
     <FloatingUpdateControl

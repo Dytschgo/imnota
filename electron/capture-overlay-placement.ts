@@ -57,6 +57,20 @@ export function captureOverlayFreezeAppearance(): {
   };
 }
 
+export const CAPTURE_DELAY_HUD_SIZE = { width: 288, height: 72 };
+
+/** Small countdown chip; must not cover the display so hover menus can appear. */
+export function captureDelayHudWindowOptions(displayBounds: CaptureRectangle): CaptureRectangle {
+  const width = Math.min(CAPTURE_DELAY_HUD_SIZE.width, Math.max(Math.round(displayBounds.width), 1));
+  const height = Math.min(CAPTURE_DELAY_HUD_SIZE.height, Math.max(Math.round(displayBounds.height), 1));
+  return {
+    x: Math.round(displayBounds.x + Math.max(0, (displayBounds.width - width) / 2)),
+    y: Math.round(displayBounds.y + Math.min(16, Math.max(0, displayBounds.height - height))),
+    width,
+    height,
+  };
+}
+
 /** The overlay must map its DIP coordinates 1:1 onto the captured display. */
 export function overlayCoversDisplay(actual: CaptureRectangle, expected: CaptureRectangle): boolean {
   return (

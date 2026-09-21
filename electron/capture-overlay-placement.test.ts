@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   captureOverlayFreezeAppearance,
+  captureDelayHudWindowOptions,
   captureOverlayWindowOptions,
   overlayCoversDisplay,
 } from './capture-overlay-placement.js';
@@ -37,6 +38,14 @@ describe('capture overlay placement', () => {
       fullscreenable: true,
       simpleFullscreen: true,
     });
+  });
+
+  it('places a delay countdown on a chip, not a full-display overlay', () => {
+    const hud = captureDelayHudWindowOptions(secondary);
+    expect(hud).toEqual({ x: 3376, y: -164, width: 288, height: 72 });
+    expect(overlayCoversDisplay(hud, secondary)).toBe(false);
+    expect(hud.width).toBeLessThan(secondary.width);
+    expect(hud.height).toBeLessThan(secondary.height);
   });
 
   it('rounds fractional DIP bounds from scaled displays', () => {
