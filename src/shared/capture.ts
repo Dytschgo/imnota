@@ -17,6 +17,13 @@ export interface CaptureDisplayOption extends CaptureDisplay {
   position: string;
 }
 
+export const CAPTURE_OVERLAY_MODES = ['region', 'window', 'display'] as const;
+export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
+
+/** Shown when Window mode is selected but the OS did not identify any windows. */
+export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
+  'Imnota could not identify windows on this computer. Use Region to select an area.';
+
 export const MAX_CAPTURE_DIMENSION = 16_384;
 /** 8K fits; prohibit decoded images that would require excessive native memory. */
 export const MAX_CAPTURE_PIXELS = 64_000_000;
