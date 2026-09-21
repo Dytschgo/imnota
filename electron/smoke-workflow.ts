@@ -2164,7 +2164,30 @@ export async function runSmokeWorkflow(
   // This keeps approved visual captures independent of the temporary workspace name.
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
-  await driver.click({ selector: '[role="menu"][aria-label="Collections"] button[aria-label^="Rename "]' });
+  await driver.press('Home');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitemradio') return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection selection did not receive focus.'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+  await driver.press('ArrowDown');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Rename '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection rename action did not receive focus.'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+  await driver.press('Enter');
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Rename collection' });
   await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
@@ -2189,20 +2212,36 @@ export async function runSmokeWorkflow(
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-collection-picker.png'));
   await driver.press('End');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
-      if (document.activeElement?.getAttribute('role') === 'menuitemradio') return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Collection option did not receive focus'));
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Archive '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection archive action did not receive focus'));
       setTimeout(check, 50);
     };
     check();
   })`);
-  const focusedCollection = await driver.evaluate<boolean>(
-    `document.activeElement?.getAttribute('role') === 'menuitemradio'`,
+  const focusedArchive = await driver.evaluate<boolean>(
+    `document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement?.getAttribute('aria-label')?.startsWith('Archive ')`,
   );
-  if (!focusedCollection) throw new Error('Collection picker did not focus an option with native keys.');
+  if (!focusedArchive) throw new Error('Collection picker did not focus the archive action with End.');
+  await driver.press('ArrowUp');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Rename '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection rename action did not receive focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
   await driver.press('Escape');
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.evaluate(`new Promise((resolve, reject) => {
@@ -2218,7 +2257,9 @@ export async function runSmokeWorkflow(
     `document.activeElement?.getAttribute('data-testid') === 'collection-picker'`,
   );
   if (!pickerFocusRestored) throw new Error('Collection picker did not restore focus after Escape.');
-  assertions.push('native collection picker keyboard focus and Escape restoration');
+  assertions.push(
+    'native collection picker selection/actions keyboard focus, Escape restoration and expanded capture',
+  );
 
   // Keep the native crop/redaction/arrow checks above tied to real pointer input,
   // then replace their gesture-dependent endpoints before recording visual baselines.
