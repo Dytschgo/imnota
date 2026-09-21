@@ -1,5 +1,6 @@
 import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ContentItemContent } from '../../shared/content-items';
 import type Konva from 'konva';
 import type {
@@ -55,7 +56,7 @@ export interface WorkspaceProps {
   onRedo(): void;
   onFit(): void;
   onActualSize(): void;
-  onCapture?(): void;
+  onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   capturePrimary?: boolean;
   captureEnabled?: boolean;
   captureInProgress?: boolean;
@@ -294,7 +295,7 @@ export function Workspace(props: WorkspaceProps) {
                 <Button
                   variant="primary"
                   data-testid="empty-add-screenshot"
-                  onClick={captureIsPrimary ? props.onCapture : props.onImport}
+                  onClick={captureIsPrimary ? () => props.onCapture?.() : props.onImport}
                 >
                   {captureIsPrimary ? (
                     <Camera size={16} aria-hidden="true" />

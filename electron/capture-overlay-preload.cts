@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('imnotaCapture', {
   repeatLastRegion: () => ipcRenderer.send('capture-overlay:repeat-last'),
   save: () => ipcRenderer.invoke('capture-overlay:save'),
   cancel: () => ipcRenderer.invoke('capture-overlay:cancel'),
+  onCountdown: (handler: (payload: { remainingSeconds: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { remainingSeconds: number }) =>
+      handler(payload);
+    ipcRenderer.on('capture-overlay:countdown', listener);
+    return () => ipcRenderer.removeListener('capture-overlay:countdown', listener);
+  },
   onPayload: (handler: (payload: CaptureOverlayPayload) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: CaptureOverlayPayload) => handler(payload);
     ipcRenderer.on('capture-overlay:payload', listener);

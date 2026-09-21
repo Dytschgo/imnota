@@ -1,4 +1,4 @@
-import type { Annotation } from './types';
+import type { Annotation } from './types.js';
 
 export interface TextAnnotationReference {
   annotation: Annotation;

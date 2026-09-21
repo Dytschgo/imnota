@@ -183,4 +183,49 @@ describe('preference controls', () => {
     await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'rich' }));
     expect(select).toHaveValue('files');
   });
+
+  it('explains when the background capture shortcut could not be registered', () => {
+    render(
+      <SettingsView
+        activeCategory="Shortcuts"
+        preferences={{
+          ...DEFAULT_PREFERENCE_SETTINGS,
+          capture: { experimentalRegionCapture: true },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('capture-shortcut-summary')).toHaveTextContent(
+      'The background shortcut is not active',
+    );
+
+    cleanup();
+    render(
+      <SettingsView
+        activeCategory="Shortcuts"
+        preferences={{
+          ...DEFAULT_PREFERENCE_SETTINGS,
+          capture: { experimentalRegionCapture: true },
+        }}
+        globalCaptureShortcutRegistered
+      />,
+    );
+    expect(screen.getByTestId('capture-shortcut-summary')).toHaveTextContent(
+      'even when Imnota is in the background',
+    );
+  });
+
+  it('defaults Include recognised text in Markdown on and emits a persisted change', async () => {
+    const onPromptExportChange = vi.fn(async () => {});
+    render(
+      <SettingsView
+        activeCategory="Sharing"
+        preferences={DEFAULT_PREFERENCE_SETTINGS}
+        onPromptExportChange={onPromptExportChange}
+      />,
+    );
+    const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: false }));
+  });
 });

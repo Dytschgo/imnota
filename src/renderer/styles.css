@@ -2065,6 +2065,47 @@ button.icon-button.new-collection-button svg {
   color: var(--danger);
   font-size: 12px;
 }
+.settings-snippet {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--input);
+}
+.settings-snippet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.settings-snippet-heading strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.settings-snippet pre,
+.settings-snippet-stdio {
+  margin: 0;
+  overflow: auto;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.settings-snippet-stdio {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--input);
+}
+.settings-snippet-note {
+  margin: 12px 0 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .workspace-path {
   display: flex;
   align-items: flex-start;

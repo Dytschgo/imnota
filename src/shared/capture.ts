@@ -17,6 +17,10 @@ export interface CaptureDisplayOption extends CaptureDisplay {
   position: string;
 }
 
+/** Seconds the capture start path waits so hover menus and tooltips can appear. */
+export const CAPTURE_DELAY_SECONDS = [3, 5] as const;
+export type CaptureDelaySeconds = (typeof CAPTURE_DELAY_SECONDS)[number];
+
 export const CAPTURE_OVERLAY_MODES = ['region', 'window', 'display'] as const;
 export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
 

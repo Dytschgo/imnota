@@ -10,12 +10,14 @@ import {
   FileText,
   PanelLeft,
   MoreHorizontal,
+  Timer,
   Trash2,
   Pencil,
   Plus,
   Upload,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
+import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import { orderedCollectionItems } from '../../shared/content-items';
 import { nowIso } from '../../shared/utils';
@@ -38,7 +40,7 @@ export interface CollectionRailProps {
   /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
   screenshotFirstAdd?: boolean;
   /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
-  onCapture?(): void;
+  onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
   capturePrimary?: boolean;
   captureEnabled?: boolean;
@@ -395,7 +397,27 @@ export function CollectionRail({
               ? 'Capture a region on a chosen display'
               : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
             icon: Camera,
-            run: onCapture,
+            run: () => onCapture(),
+            disabled: !captureEnabled || captureInProgress,
+          },
+          {
+            id: 'capture-delay-3',
+            label: 'Take screenshot in 3 seconds',
+            description: captureEnabled
+              ? 'Wait so hover menus and tooltips can appear'
+              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+            icon: Timer,
+            run: () => onCapture(3),
+            disabled: !captureEnabled || captureInProgress,
+          },
+          {
+            id: 'capture-delay-5',
+            label: 'Take screenshot in 5 seconds',
+            description: captureEnabled
+              ? 'Wait so hover menus and tooltips can appear'
+              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+            icon: Timer,
+            run: () => onCapture(5),
             disabled: !captureEnabled || captureInProgress,
           },
         ]
@@ -678,7 +700,7 @@ export function CollectionRail({
                         ? 'Choose a current collection before adding screenshots'
                         : undefined
                     }
-                    onClick={captureIsPrimary ? onCapture : onImport}
+                    onClick={captureIsPrimary ? () => onCapture?.() : onImport}
                   >
                     {captureIsPrimary ? (
                       <Camera size={15} aria-hidden="true" />
