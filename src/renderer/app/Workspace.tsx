@@ -77,7 +77,6 @@ export interface WorkspaceProps {
   onUndoDescription(): void;
   onDuplicate(): void | Promise<void>;
   onDeleteItem(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
-  onDeleteProject(): void;
 }
 
 export function Workspace(props: WorkspaceProps) {
@@ -196,7 +195,6 @@ export function Workspace(props: WorkspaceProps) {
         captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
         onDeleteItem={props.onDeleteItem}
-        onDeleteProject={props.onDeleteProject}
       />
       <div className="canvas-column">
         <div className="workspace-toolbar">

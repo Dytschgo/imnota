@@ -10,7 +10,6 @@ import {
   FileImage,
   FileText,
   PanelLeft,
-  MoreHorizontal,
   Timer,
   Trash2,
   Pencil,
@@ -37,7 +36,6 @@ export interface CollectionRailProps {
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
-  onDeleteProject?(): void;
   /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
   screenshotFirstAdd?: boolean;
   /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
@@ -434,7 +432,6 @@ export function CollectionRail({
   onSnapshot,
   onAddContent,
   onDeleteItem,
-  onDeleteProject,
   screenshotFirstAdd = true,
   onCapture,
   capturePrimary = false,
@@ -627,25 +624,6 @@ export function CollectionRail({
           <div>
             <strong>{project?.name}</strong>
           </div>
-        )}
-        {store.leftPanelOpen && onDeleteProject && (
-          <details className="project-actions">
-            <summary aria-label="Project actions" title="Project actions">
-              <MoreHorizontal size={16} aria-hidden="true" />
-            </summary>
-            <Button
-              variant="ghost"
-              onClick={(event) => {
-                const menu = event.currentTarget.closest('details');
-                menu?.removeAttribute('open');
-                menu?.querySelector('summary')?.focus();
-                onDeleteProject();
-              }}
-            >
-              <Trash2 size={15} aria-hidden="true" />
-              Delete project
-            </Button>
-          </details>
         )}
         <IconButton
           label={store.leftPanelOpen ? 'Collapse collections panel' : 'Expand collections panel'}

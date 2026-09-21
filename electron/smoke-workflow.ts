@@ -48,6 +48,8 @@ export interface SmokeWorkflowHost {
   readSettings(): Promise<WorkspaceSettings>;
   /** One-use native confirmation for an exact project inside this disposable fixture. */
   approveNextBackupRestore(projectPath: string): Promise<void>;
+  /** One-use native confirmation for deleting an exact project inside this disposable fixture. */
+  approveNextProjectDeletion(projectPath: string): Promise<void>;
 }
 
 export interface SmokeWorkflowOptions {
@@ -2469,10 +2471,11 @@ export async function runSmokeWorkflow(
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
   );
-  artifacts.push(...(await exerciseUiFeedback(driver, artifactDirectory)));
+  artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
+  assertions.push('library project deletion cancel and exact synthetic folder move to system trash');
   await checkpoint(
     'mixed content and global search checks complete; starting templates and clipboard fallbacks',
   );
