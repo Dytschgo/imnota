@@ -223,7 +223,7 @@ export async function exerciseRegionCapture(
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
   const artifacts: SmokeCapture[] = [];
-  let driver = await enableExperimentalCapture(initialDriver, host);
+  const driver = await enableExperimentalCapture(initialDriver, host);
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
