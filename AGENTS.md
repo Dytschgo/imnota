@@ -1,6 +1,8 @@
 # Working in Imnota
 
-Keep changes easy to review, verify, release, and recover. This file describes the working agreement; [the improvement plan](docs/improvement-plan.md) tracks proposed engineering work. A backlog item is not authorization to execute it.
+Keep changes easy to review, verify, release, and recover. [The improvement plan](docs/improvement-plan.md) tracks proposed engineering work. A backlog item is not authorization to execute it. For reported user-visible work, use the [feedback delivery contract](docs/feedback-delivery-contract.md).
+
+For repository orientation, start with the [documentation map](docs/README.md). Use the [current implementation status](docs/implementation-plan.md) for shipped behaviour and open verification work, [development](docs/development.md) for local checks, and [release readiness](docs/release-readiness.md) before publication. Documents under [docs/history](docs/history/README.md) are records, not current requirements.
 
 ## Scope and safety
 
@@ -51,5 +53,7 @@ Keep regression tests with the code they protect. Prefer observable outcomes and
 3. Inspect the final diff and run relevant checks. Review UI changes visually and record evidence. Obtain independent review for consequential changes and when practical for substantial behavior changes.
 4. Describe the user problem, resulting behavior, tests actually run and their platform, and material risks or deferred work. Update living documentation when behavior changes. Distinguish pending checks from passed checks.
 5. When merging or publishing is authorized, finish it after verifying the current reviewed revision and required gates, then verify the result. Remove only the task's merged branch after checking its identity; preserve local work. Otherwise leave a reviewable PR and state what remains.
+
+For reported user-visible work, include the requested outcome and its direct postcondition in the PR description. Before calling it delivered, connect that postcondition to the reviewed revision; after an integrated merge, repeat it when the integration changed the tested path. For nightly publication, record the exact dispatch SHA, candidate tag and manifest, packaged-candidate application version, and the outcome evidence for that candidate. Compare an installed application's version only when diagnosing the build a user is running.
 
 See [development](docs/development.md), [release readiness](docs/release-readiness.md), and [nightly verification audit](docs/nightly-verification-audit.md) for supporting details. Workflow files and branch protections determine the checks currently enforced.
