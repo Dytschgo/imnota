@@ -277,4 +277,40 @@ describe('AppShell navigation', () => {
 
     expect(document.getElementById('favourite-projects')).toHaveAttribute('hidden');
   });
+
+  it('renders the workspace footer as icon-only Settings, About, and update controls', () => {
+    const onNavigate = vi.fn();
+    const onAbout = vi.fn();
+    render(
+      <SideNav
+        activeCollectionId=""
+        navigationOpen
+        projects={projects}
+        recentCollections={[]}
+        view="settings"
+        onAbout={onAbout}
+        onNavigate={onNavigate}
+        onNewProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSetNavigationOpen={vi.fn()}
+        updateControl={<button type="button">Check for updates</button>}
+      />,
+    );
+    const footer = screen.getByRole('navigation', { name: 'Workspace' });
+    expect(within(footer).queryByRole('heading')).toBeNull();
+    const settings = within(footer).getByRole('button', { name: 'Settings' });
+    const about = within(footer).getByRole('button', { name: 'About' });
+    expect(settings).toHaveTextContent('');
+    expect(about).toHaveTextContent('');
+    expect(settings).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(footer)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label') ?? button.textContent),
+    ).toEqual(['Settings', 'About', 'Check for updates']);
+    fireEvent.click(settings);
+    expect(onNavigate).toHaveBeenCalledWith('settings');
+    fireEvent.click(about);
+    expect(onAbout).toHaveBeenCalledOnce();
+  });
 });
