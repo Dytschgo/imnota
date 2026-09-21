@@ -2083,8 +2083,7 @@ button.icon-button.new-collection-button svg {
   color: var(--ink);
   font-size: 12px;
 }
-.settings-snippet pre,
-.settings-snippet-stdio {
+.settings-snippet pre {
   margin: 0;
   overflow: auto;
   color: var(--ink-2);
@@ -2093,12 +2092,8 @@ button.icon-button.new-collection-button svg {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.settings-snippet-stdio {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--input);
+.settings-snippet .settings-snippet-note {
+  margin: 0 0 8px;
 }
 .settings-snippet-note {
   margin: 12px 0 0;

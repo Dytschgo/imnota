@@ -1,12 +1,12 @@
 # Local agent access
 
-Optional, off by default. When enabled, Claude Code or Cursor can read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota does not upload, call a hosted model, or start capture over this interface.
+Optional, off by default. When enabled, any MCP-capable coding agent can read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota does not upload, call a hosted model, or start capture over this interface.
 
 ## Turn it on
 
 1. Open **Settings → Workspace**.
 2. Enable **Allow local agent access**.
-3. Copy the Claude Code or Cursor snippet from that page into the editor's MCP config.
+3. Choose **Copy prompt** and paste the setup prompt into your agent. The prompt names the server, both transports, and the tool list, and instructs the agent to write its own MCP configuration and report which file it changed. A **Configuration reference** disclosure holds generic `mcpServers` entries for HTTP and stdio if you prefer to edit the file yourself.
 4. Keep Imnota running, or spawn the Imnota executable with `--mcp` for stdio.
 
 Until the toggle is on, Imnota starts no listener and a `--mcp` process exits immediately.
@@ -31,7 +31,7 @@ Paths outside the selected workspace are rejected with the same validators as th
 
 ## Install a skill or rule
 
-Imnota never writes `~/.claude` or `.cursor`. Copy these files yourself if you want the editor to prefer MCP over guessing from chat images:
+Imnota never writes agent or editor configuration. The setup prompt already tells the agent to prefer these tools over guessing from chat images; copy one of these files yourself if your agent supports installable skills or rules:
 
 - [Claude Code skill](claude-code-imnota-skill.md)
 - [Cursor rule](cursor-imnota-rule.md)
