@@ -2,7 +2,6 @@ import {
   Archive,
   ArchiveRestore,
   Camera,
-  Check,
   ChevronDown,
   Clipboard,
   Eye,
@@ -45,23 +44,6 @@ export interface CollectionRailProps {
   captureEnabled?: boolean;
   captureInProgress?: boolean;
   captureDisabledLabel?: string;
-}
-
-/** Filled when archived, outlined while active. Rows name their state through the option instead. */
-function CollectionStatus({ archived, decorative = false }: { archived: boolean; decorative?: boolean }) {
-  const label = archived ? 'Status: archived' : 'Status: active';
-  return (
-    <Archive
-      className={`collection-status ${archived ? 'collection-status-archived' : ''}`}
-      size={12}
-      fill={archived ? 'currentColor' : 'none'}
-      role={decorative ? undefined : 'img'}
-      aria-hidden={decorative ? 'true' : undefined}
-      aria-label={decorative ? undefined : label}
-    >
-      <title>{label}</title>
-    </Archive>
-  );
 }
 
 export function CollectionControls({
@@ -246,6 +228,9 @@ export function CollectionControls({
           type="button"
           className="collection-picker-trigger"
           aria-label="Collection"
+          aria-description={
+            current.archived ? 'Current collection is archived' : 'Current collection is active'
+          }
           aria-haspopup="menu"
           aria-expanded={pickerOpen}
           aria-controls={pickerId}
@@ -271,7 +256,6 @@ export function CollectionControls({
           }}
         >
           <span>{current.name}</span>
-          <CollectionStatus archived={current.archived} />
           <ChevronDown size={14} aria-hidden="true" />
         </button>
         {pickerOpen && (
@@ -309,10 +293,6 @@ export function CollectionControls({
                     }}
                   >
                     <span>{collection.name}</span>
-                    <CollectionStatus archived={collection.archived} decorative />
-                    {collection.id === current.id && (
-                      <Check className="collection-picker-check" size={13} aria-hidden="true" />
-                    )}
                   </button>
                   <IconButton
                     ref={(element) => {

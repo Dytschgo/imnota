@@ -1157,6 +1157,26 @@ describe('feedback controls', () => {
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
   });
 
+  it('shows clipboard failures as a compact notification without Electron IPC wrappers', async () => {
+    await renderEditingProject({
+      pasteImage: vi.fn(async () => {
+        throw new Error(
+          "Error invoking remote method 'screenshots:paste': Error. The clipboard does not contain an image. Copy a screenshot and try again.",
+        );
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    const notification = await screen.findByTestId('error-toast');
+    expect(notification).toHaveAttribute('role', 'alert');
+    expect(notification).toHaveClass('toast', 'error-toast');
+    expect(notification).toHaveTextContent(
+      'The clipboard does not contain an image. Copy a screenshot and try again.',
+    );
+    expect(notification).not.toHaveTextContent('Error invoking remote method');
+    expect(document.querySelector('.error-banner')).toBeNull();
+  });
+
   it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn();

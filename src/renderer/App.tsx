@@ -3,6 +3,7 @@ import type Konva from 'konva';
 import {
   Archive,
   ArchiveRestore,
+  CircleAlert,
   Check,
   FolderOpen,
   FolderPlus,
@@ -10,7 +11,6 @@ import {
   Pencil,
   Plus,
   Search,
-  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react';
@@ -96,6 +96,16 @@ type PendingDeletion = {
   title: string;
 };
 
+type ToastNotification = {
+  message: string;
+  action?: { label: string; run(): void };
+};
+
+export function userFacingErrorMessage(message: string): string {
+  const withoutIpcWrapper = message.replace(/^Error invoking remote method '[^']+':\s*/i, '');
+  return withoutIpcWrapper.replace(/^(?:Error(?:[.:]\s*|\s+))+/i, '') || 'Something went wrong. Try again.';
+}
+
 export default function App() {
   const store = useAppStore();
   const preferences = usePreferences();
@@ -120,9 +130,8 @@ export default function App() {
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
-  const [toast, setToast] = useState<{ message: string; action?: { label: string; run(): void } } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<ToastNotification | null>(null);
+  const toastTimer = useRef<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -261,9 +270,19 @@ export default function App() {
     [promptBundles],
   );
 
-  const showToast = useCallback((message: string) => {
-    setToast({ message });
-    window.setTimeout(() => setToast(null), 3500);
+  useEffect(
+    () => () => {
+      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+  const showToast = useCallback((message: string, action?: ToastNotification['action']) => {
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    setToast({ message, action });
+    toastTimer.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, 3500);
   }, []);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
@@ -1151,13 +1170,10 @@ export default function App() {
       } else {
         const result = await window.imnota.deleteContentItem(input);
         if (!(await persistence.acceptMutationSnapshot(result.snapshot, undefined, token))) return;
-        setToast({
-          message: `${item.kind === 'drawing' ? 'Drawing' : 'Text block'} moved to trash.`,
-          action: {
-            label: 'Undo',
-            run: () => {
-              void undoContent(input.projectPath, result.undoToken, item.id);
-            },
+        showToast(`${item.kind === 'drawing' ? 'Drawing' : 'Text block'} moved to trash.`, {
+          label: 'Undo',
+          run: () => {
+            void undoContent(input.projectPath, result.undoToken, item.id);
           },
         });
       }
@@ -1379,12 +1395,9 @@ export default function App() {
       });
       if (!(await persistence.acceptMutationSnapshot(result.snapshot, undefined, nativeMutationToken)))
         return;
-      setToast({
-        message: 'Screenshot moved to trash.',
-        action: {
-          label: 'Undo',
-          run: () => void undoDeletedScreenshot(current.snapshot!.projectPath, result.undoToken, shot.id),
-        },
+      showToast('Screenshot moved to trash.', {
+        label: 'Undo',
+        run: () => void undoDeletedScreenshot(current.snapshot!.projectPath, result.undoToken, shot.id),
       });
     } catch (reason) {
       await persistence.cancelNativeMutation(nativeMutationToken);
@@ -1551,15 +1564,14 @@ export default function App() {
       }
       await refreshProjects();
       if (identity !== navigationIdentity.current) return;
-      showToast(archived ? 'Project archived' : 'Project restored');
-      if (archived && result.projectRevision)
-        setToast({
-          message: 'Project archived',
-          action: {
-            label: 'Undo',
-            run: () => void setProjectArchived(projectPath, false, result.projectRevision),
-          },
+      if (archived && result.projectRevision) {
+        showToast('Project archived', {
+          label: 'Undo',
+          run: () => void setProjectArchived(projectPath, false, result.projectRevision),
         });
+      } else {
+        showToast('Project restored');
+      }
     } catch (reason) {
       if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
       if (identity === navigationIdentity.current)
@@ -1856,22 +1868,6 @@ export default function App() {
           />
         )}
       >
-        {visibleError && (
-          <div className="error-banner" role="alert">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <span>{visibleError}</span>
-            <IconButton
-              label="Dismiss error"
-              onClick={() => {
-                setError('');
-                persistence.clearError();
-                preferences.clearError();
-              }}
-            >
-              <X size={16} aria-hidden="true" />
-            </IconButton>
-          </div>
-        )}
         {persistence.warning && (
           <div className="update-banner" role="status">
             <span>{persistence.warning}</span>
@@ -2148,7 +2144,7 @@ export default function App() {
           }}
         />
       </AppShell>
-      {toast && (
+      {toast && !visibleError && (
         <div className="toast" role="status">
           <Check size={16} aria-hidden="true" />
           <span>{toast.message}</span>
@@ -2157,6 +2153,22 @@ export default function App() {
               {toast.action.label}
             </button>
           )}
+        </div>
+      )}
+      {visibleError && (
+        <div className="toast error-toast" role="alert" data-testid="error-toast">
+          <CircleAlert size={16} aria-hidden="true" />
+          <span>{userFacingErrorMessage(visibleError)}</span>
+          <IconButton
+            label="Dismiss error"
+            onClick={() => {
+              setError('');
+              persistence.clearError();
+              preferences.clearError();
+            }}
+          >
+            <X size={16} aria-hidden="true" />
+          </IconButton>
         </div>
       )}
       <AppDialogs

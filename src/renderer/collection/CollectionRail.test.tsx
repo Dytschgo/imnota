@@ -504,12 +504,15 @@ describe('CollectionRail', () => {
 
     expect(screen.queryByRole('button', { name: /^Archive / })).toBeNull();
     const trigger = screen.getByTestId('collection-picker');
-    expect(within(trigger).getByRole('img', { name: 'Status: active' })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-description', 'Current collection is active');
+    expect(trigger.querySelectorAll('svg')).toHaveLength(1);
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
     const menu = await screen.findByRole('menu', { name: 'Collections' });
     expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2);
     const collectionOption = within(menu).getByRole('menuitemradio', { name: 'Collection A' });
+    expect(collectionOption).toHaveAttribute('aria-description', 'Active');
+    expect(collectionOption.querySelector('svg')).toBeNull();
     await waitFor(() => expect(collectionOption).toHaveFocus());
     fireEvent.keyDown(collectionOption, { key: 'ArrowDown' });
     const rename = within(menu).getByRole('menuitem', { name: 'Rename Collection A' });
@@ -520,7 +523,7 @@ describe('CollectionRail', () => {
     fireEvent.keyDown(archive, { key: 'Enter' });
 
     await within(menu).findByRole('menuitem', { name: 'Restore Collection A' });
-    expect(within(trigger).getByRole('img', { name: 'Status: archived' })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-description', 'Current collection is archived');
     expect(within(menu).getByRole('menuitem', { name: 'Archive Collection B' })).toBeInTheDocument();
     expect(editCollection).toHaveBeenNthCalledWith(1, {
       projectPath: '/workspace/project',
@@ -541,7 +544,7 @@ describe('CollectionRail', () => {
     await waitFor(() =>
       expect(within(menu).getByRole('menuitem', { name: 'Archive Collection A' })).toBeEnabled(),
     );
-    expect(within(trigger).getByRole('img', { name: 'Status: active' })).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-description', 'Current collection is active');
     expect(editCollection).toHaveBeenNthCalledWith(2, {
       projectPath: '/workspace/project',
       collectionId: 'collection-a',
