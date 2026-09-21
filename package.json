@@ -92,6 +92,7 @@
     "asar": true,
     "files": [
       "scripts/update-macos.sh",
+      "build/icon.png",
       "dist/**/*",
       "dist-electron/electron/**/*",
       "dist-electron/src/shared/**/*",

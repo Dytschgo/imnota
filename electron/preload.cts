@@ -20,10 +20,19 @@ const bridge: ImnotaBridge = {
   repeatLastRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:repeat-last-region', input),
   commitBufferedCapture: (input) => ipcRenderer.invoke('workflow:capture:commit-buffered', input),
   discardBufferedCapture: () => ipcRenderer.invoke('workflow:capture:discard-buffered'),
+  captureRendererReady: () => ipcRenderer.invoke('workflow:capture:renderer-ready'),
   onRegionCaptureHotkey: (handler) => {
     const listener = () => handler();
     ipcRenderer.on('workflow:capture:region-hotkey', listener);
     return () => ipcRenderer.removeListener('workflow:capture:region-hotkey', listener);
+  },
+  onCaptureTray: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { mode: 'region' | 'window' | 'display' },
+    ) => handler(payload.mode);
+    ipcRenderer.on('workflow:capture:tray', listener);
+    return () => ipcRenderer.removeListener('workflow:capture:tray', listener);
   },
   startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
   writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),

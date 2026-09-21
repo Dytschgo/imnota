@@ -925,7 +925,11 @@ export default function App() {
       throw reason;
     }
   }
-  async function captureRegion(delaySeconds?: CaptureDelaySeconds, repeatLast = false) {
+  async function captureRegion(
+    delaySeconds?: CaptureDelaySeconds,
+    repeatLast = false,
+    overlayMode: 'region' | 'window' | 'display' = 'region',
+  ) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     setCapturing(true);
@@ -1036,6 +1040,7 @@ export default function App() {
             projectPath: target.projectPath,
             collectionId: target.collectionId,
             displayId,
+            overlayMode,
             ...(delaySeconds ? { delaySeconds } : {}),
           }),
         );
@@ -1057,7 +1062,11 @@ export default function App() {
         return;
       }
       const result = workflowValue(
-        await window.imnota.startRegionCapture({ displayId, ...(delaySeconds ? { delaySeconds } : {}) }),
+        await window.imnota.startRegionCapture({
+          displayId,
+          overlayMode,
+          ...(delaySeconds ? { delaySeconds } : {}),
+        }),
       );
       if (!('buffered' in result)) return;
       pendingOverlayAction.current = result.overlayAction;
@@ -1737,6 +1746,16 @@ export default function App() {
       }),
     [],
   );
+  useEffect(() => {
+    const unsubscribe = window.imnota.onCaptureTray((mode) => {
+      void captureRegionRef.current(undefined, false, mode);
+    });
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    if (booting || preferences.loading) return;
+    void window.imnota.captureRendererReady();
+  }, [booting, preferences.loading]);
 
   if (booting || preferences.loading)
     return (

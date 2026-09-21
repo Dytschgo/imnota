@@ -215,6 +215,7 @@ export interface WorkflowBridge {
     collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
+    overlayMode?: 'region' | 'window' | 'display';
     /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
     delaySeconds?: 3 | 5;
   }): Promise<
@@ -234,7 +235,9 @@ export interface WorkflowBridge {
     collectionId: string;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
+  captureRendererReady(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
+  onCaptureTray(handler: (mode: 'region' | 'window' | 'display') => void): () => void;
 
   startPromptExport(input: {
     projectPath: string;

@@ -9,6 +9,9 @@ import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from 
 
 export interface CaptureSmokeHost {
   reopenWindow(): Promise<BrowserWindow>;
+  captureFromTray(mode: 'region' | 'window' | 'display'): Promise<BrowserWindow>;
+  trayAvailable(): boolean;
+  globalCaptureShortcutRegistered(): boolean;
   readProject(projectPath: string): Promise<ProjectData>;
 }
 
@@ -250,6 +253,16 @@ async function startCapture(
   return overlayDriver;
 }
 
+async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
+  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+    const displays = screen.getAllDisplays();
+    const primaryId = screen.getPrimaryDisplay().id;
+    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
+    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+  }
+}
+
 async function waitForScreenshotCount(
   host: CaptureSmokeHost,
   projectPath: string,
@@ -283,6 +296,10 @@ export async function exerciseRegionCapture(
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
+
+  if (!host.trayAvailable()) throw new Error('Native smoke did not create the tray icon.');
+  if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
+    throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
 
   // Exercise the actual countdown window and IPC in packaged Windows/macOS runs.
   for (const seconds of [3, 5] as const) {
@@ -493,6 +510,15 @@ export async function exerciseRegionCapture(
   await overlay.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
+
+  const reopenedFromTray = await host.captureFromTray('display');
+  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
+  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
+  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
+  await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
+  await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(trayOverlay, 'Queued tray capture overlay');
+  await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
   return { artifacts, skipped: false };
 }

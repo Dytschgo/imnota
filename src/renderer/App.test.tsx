@@ -118,6 +118,8 @@ describe('feedback controls', () => {
         ],
       }),
       onRegionCaptureHotkey: () => () => {},
+      onCaptureTray: () => () => {},
+      captureRendererReady: async () => ({ ok: true as const, value: undefined }),
       commitBufferedCapture: async () => ({
         ok: true as const,
         value: { snapshot, screenshotId: 'shot' },
@@ -1209,6 +1211,7 @@ describe('feedback controls', () => {
       projectPath: '/workspace/project',
       collectionId: '001-collection',
       displayId: 1,
+      overlayMode: 'region',
     });
     await act(async () =>
       resolveCapture({
@@ -1357,6 +1360,7 @@ describe('feedback controls', () => {
         collectionId: '001-collection',
         displayId: 1,
         delaySeconds: 3,
+        overlayMode: 'region',
       }),
     );
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
@@ -1389,6 +1393,7 @@ describe('feedback controls', () => {
         collectionId: '001-collection',
         displayId: 1,
         delaySeconds: 5,
+        overlayMode: 'region',
       }),
     );
   });
@@ -1418,6 +1423,7 @@ describe('feedback controls', () => {
           hotkey = undefined;
         };
       },
+      onCaptureTray: () => () => {},
     });
     expect(hotkey).toEqual(expect.any(Function));
     act(() => hotkey?.());
@@ -1426,8 +1432,72 @@ describe('feedback controls', () => {
         projectPath: '/workspace/project',
         collectionId: '001-collection',
         displayId: 1,
+        overlayMode: 'region',
       }),
     );
+  });
+
+  it('acknowledges the renderer after subscribing and preserves the tray capture mode', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let trayCapture: ((mode: 'region' | 'window' | 'display') => void) | undefined;
+    const captureRendererReady = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture,
+      onCaptureTray: (handler) => {
+        trayCapture = handler;
+        return () => {
+          trayCapture = undefined;
+        };
+      },
+      captureRendererReady,
+    });
+    expect(trayCapture).toEqual(expect.any(Function));
+    expect(captureRendererReady).toHaveBeenCalledOnce();
+    act(() => trayCapture?.('display'));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        collectionId: '001-collection',
+        displayId: 1,
+        overlayMode: 'display',
+      }),
+    );
+  });
+
+  it('does not acknowledge tray capture until deferred startup has restored state', async () => {
+    let resolveSettings!: (settings: Awaited<ReturnType<ImnotaBridge['getSettings']>>) => void;
+    const captureRendererReady = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    renderApp({
+      getSettings: () =>
+        new Promise<Awaited<ReturnType<ImnotaBridge['getSettings']>>>((resolve) => {
+          resolveSettings = resolve;
+        }),
+      captureRendererReady,
+    });
+    expect(await screen.findByText('Preparing your workspace…')).toBeInTheDocument();
+    expect(captureRendererReady).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveSettings({
+        ...useAppStore.getState().settings,
+        workspacePath: null,
+        openRecentOnLaunch: false,
+      }),
+    );
+    await waitFor(() => expect(captureRendererReady).toHaveBeenCalledOnce());
   });
 
   it('chooses an exact Windows display before toolbar capture', async () => {
@@ -1476,6 +1546,7 @@ describe('feedback controls', () => {
         projectPath: '/workspace/project',
         collectionId: '001-collection',
         displayId: 2,
+        overlayMode: 'region',
       }),
     );
   });
@@ -1641,6 +1712,7 @@ describe('feedback controls', () => {
         projectPath: '/workspace/project',
         collectionId: '001-collection',
         displayId: 1,
+        overlayMode: 'region',
       }),
     );
   });
@@ -1673,6 +1745,7 @@ describe('feedback controls', () => {
         projectPath: '/workspace/project',
         collectionId: '001-collection',
         displayId: 1,
+        overlayMode: 'region',
       }),
     );
   });
@@ -1869,7 +1942,9 @@ describe('feedback controls', () => {
     });
     await screen.findByTestId('library-full-search');
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
-    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledWith({ displayId: 1 }));
+    await waitFor(() =>
+      expect(startRegionCapture).toHaveBeenCalledWith({ displayId: 1, overlayMode: 'region' }),
+    );
     await waitFor(() =>
       expect(commitBufferedCapture).toHaveBeenCalledWith({
         projectPath: snapshot.projectPath,
