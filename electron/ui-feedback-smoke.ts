@@ -94,7 +94,19 @@ async function captureAgentAccess(
       mcpBox.left >= copyBox.left && mcpBox.right <= copyBox.right &&
       mcpBox.top >= copyBox.top && mcpBox.bottom <= copyBox.bottom;
   })()`);
-  if (!copyFits) throw new Error(`Local agent access text or --mcp token clipped or overlapped: ${filename}`);
+  if (!copyFits) {
+    const geometry = await driver.evaluate(`(() => {
+      const section = document.querySelector('[aria-labelledby="agent-access-title"]');
+      return Object.fromEntries(['.settings-switch small', '.settings-switch kbd', '[data-testid="agent-access-toggle"]']
+        .map(selector => { const element = section?.querySelector(selector);
+          return [selector, element ? {box: element.getBoundingClientRect().toJSON(),
+            client: [element.clientWidth, element.clientHeight], scroll: [element.scrollWidth, element.scrollHeight],
+            rects: element.getClientRects().length} : null]; }));
+    })()`);
+    throw new Error(
+      `Local agent access text or --mcp token clipped or overlapped: ${filename}: ${JSON.stringify(geometry)}`,
+    );
+  }
 }
 
 /** Verify search targets and project lifecycle through the real preload and native UI. */

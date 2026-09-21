@@ -1985,6 +1985,7 @@ button.icon-button.new-collection-button svg {
   overflow-wrap: anywhere;
 }
 .settings-switch kbd {
+  display: inline-block;
   white-space: nowrap;
 }
 .settings-switch input {
