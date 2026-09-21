@@ -102,16 +102,6 @@ When a screenshot has visual annotations, Markdown lists them under `### Picture
 - step `s2` number 1 at 70.0%,40.0%
 ```
 
-When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks are omitted:
-
-```md
-### Picture 2 / Marks
-
-- arrow `a1` from 12.0%,40.0% to 71.5%,41.2%
-- rectangle `r4` at 68.0%,38.0% 18.0%×10.0%
-- step `s2` number 1 at 70.0%,40.0%
-```
-
 On Windows the green primary button is **Copy files** by default (the generated `.md` and `.png` as two files). Change it to **Rich copy** or **Files + rich copy** from the copy menu or Settings → Sharing. On macOS the primary action is **Rich copy**. **Rich copy** writes Markdown, HTML and a prompt PNG to the clipboard in one operation, then reads the clipboard back and names the formats the operating system actually kept. The card says **Markdown + image prepared** only when both text and image are confirmed. If a format is missing, the card names it and points to **Copy Markdown only**, **Copy image only** or **Open files**. Windows in particular may keep only one format. Imnota cannot promise that both formats will arrive in the receiving app; some apps paste only text or only the image even when both are present on the clipboard. Use **Copy Markdown only**, **Copy image only**, **Open files**, **Copy file paths** or **Open export folder** when a target accepts only one format. Text-only bundles copy Markdown without an image. The button turns gray after copying and remains available to copy again.
 
 Markdown copy works without generating an image first. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what the clipboard held after the write, not whether another app accepted it.
