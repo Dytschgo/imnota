@@ -2,6 +2,7 @@ import { nativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
+import { agentAccessSetupPrompt } from '../src/shared/preferences.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 
 async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
@@ -184,6 +185,25 @@ export async function exerciseUiFeedback(
   }
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
+  await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
+  await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
+  await driver.evaluate(
+    `document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'})`,
+  );
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'agent-access-setup-prompt.png'));
+  await driver.click({
+    selector: '[aria-labelledby="agent-access-title"] button',
+    text: 'Copy prompt',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: '[aria-labelledby="agent-access-title"] button',
+    text: 'Copied',
+    exact: true,
+  });
+  if ((await nativeClipboard.readText()) !== agentAccessSetupPrompt())
+    throw new Error('Local agent setup did not copy the complete prompt to the native clipboard.');
   await driver.click({ text: 'Appearance', exact: true });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });

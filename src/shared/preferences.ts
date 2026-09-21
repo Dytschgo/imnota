@@ -95,16 +95,46 @@ export function localAgentAccessUrl(port = LOCAL_AGENT_ACCESS_PORT): string {
   return `http://${LOCAL_AGENT_ACCESS_HOST}:${port}${LOCAL_AGENT_ACCESS_PATH}`;
 }
 
-export function claudeCodeAgentAccessSnippet(url = localAgentAccessUrl()): string {
+export const AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER = '<path-to-Imnota-executable>';
+
+/** Generic `mcpServers` entry for the loopback HTTP transport; most agents accept this shape. */
+export function localAgentAccessHttpSnippet(url = localAgentAccessUrl()): string {
   return `${JSON.stringify({ mcpServers: { imnota: { type: 'http', url } } }, null, 2)}\n`;
 }
 
-export function cursorAgentAccessSnippet(url = localAgentAccessUrl()): string {
-  return `${JSON.stringify({ mcpServers: { imnota: { url } } }, null, 2)}\n`;
+export function localAgentAccessStdioSnippet(command = AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER): string {
+  return `${JSON.stringify({ mcpServers: { imnota: { command, args: ['--mcp'] } } }, null, 2)}\n`;
 }
 
-export function localAgentAccessStdioSnippet(command = '<path-to-Imnota-executable>'): string {
-  return `${JSON.stringify({ mcpServers: { imnota: { command, args: ['--mcp'] } } }, null, 2)}\n`;
+/**
+ * One prompt for any coding agent: it carries everything the agent needs to register the
+ * Imnota MCP server in its own configuration, so Imnota never has to name or write editor files.
+ */
+export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
+  return [
+    'Register the Imnota MCP server in your own MCP configuration and connect to it.',
+    '',
+    'Server name: imnota',
+    `Transport (preferred): Streamable HTTP at ${url}. Loopback only, no authentication, no CORS.`,
+    `Transport (alternative, if you cannot use HTTP): stdio. Run the Imnota executable with the argument --mcp (for example "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}" --mcp).`,
+    '',
+    'Do the setup yourself using the config file and format this agent normally uses. If your format is a JSON "mcpServers" map, the entries are:',
+    `  HTTP:  { "imnota": { "type": "http", "url": "${url}" } }`,
+    `  stdio: { "imnota": { "command": "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}", "args": ["--mcp"] } }`,
+    'Tell me which file you changed. Do not ask me to paste configuration.',
+    '',
+    'Requirements: Imnota must be running with "Allow local agent access" enabled in Settings → Workspace; otherwise the connection is refused. Nothing is uploaded and no hosted model is called.',
+    '',
+    'Tools the server exposes (all read-only):',
+    '- list_projects: active projects in the selected workspace (path, name, updated time).',
+    '- list_collection_items: ordered items of a collection (id, kind, title, includeInExport, priority).',
+    '- get_latest_bundle: the latest prepared export as Markdown text plus PNG paths. Returns "bundle not prepared" when Copy Bundle has not been run; it never generates an export.',
+    '- get_item: one item as Markdown plus its image path for screenshots and drawings.',
+    '- search_saved_text: search saved descriptions, annotation text, Markdown blocks and drawing text.',
+    '',
+    'When I ask about screenshots, feedback or bundles from Imnota, call these tools instead of guessing from chat images or asking me to paste again.',
+    '',
+  ].join('\n');
 }
 
 export type NativeCopyFunction = 'files' | 'files-rich' | 'rich';
