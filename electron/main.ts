@@ -167,6 +167,7 @@ import {
 import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
 import {
   captureDelayHudWindowOptions,
+  captureOverlayFreezeAppearance,
   captureOverlayWindowOptions,
   overlayCoversDisplay,
 } from './capture-overlay-placement.js';
@@ -1076,18 +1077,16 @@ async function chooseCaptureRegion(
       const placement = captureOverlayWindowOptions(displayBounds, process.platform);
       const window = new BrowserWindow({
         ...placement,
+        ...captureOverlayFreezeAppearance(),
         useContentSize: true,
         show: false,
         frame: false,
-        transparent: true,
         resizable: false,
         movable: false,
         minimizable: false,
         maximizable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
-        hasShadow: false,
-        backgroundColor: '#00000000',
         webPreferences: {
           preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
           contextIsolation: true,

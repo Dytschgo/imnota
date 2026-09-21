@@ -17,6 +17,8 @@ function pointer(
   target.dispatchEvent(event);
 }
 
+const STILL = 'data:image/png;base64,cG5n';
+
 function selectionState(
   partial: Partial<{
     selection: CaptureRectangle | null;
@@ -70,7 +72,7 @@ async function setup(
   payloadHandler!({
     displayId,
     displayBounds,
-    imageDataUrl: 'data:image/png;base64,cG5n',
+    imageDataUrl: STILL,
     lastRegion: extra.lastRegion ?? null,
     lastRegionAvailable: extra.lastRegionAvailable ?? extra.lastRegion != null,
   });
@@ -92,6 +94,24 @@ beforeEach(() => {
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
   };
+});
+
+it('paints the captured still and only then marks the overlay ready', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  expect(still.getAttribute('src')).toBe(STILL);
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).toHaveBeenCalledOnce();
+});
+
+it('does not become ready when the captured still fails to load', async () => {
+  await setup();
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  still.dispatchEvent(new Event('error'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
 });
 
 it('shows a delay countdown without the region overlay', async () => {
@@ -244,9 +264,14 @@ it('applies the last region from the overlay when this display has one', async (
     },
   );
   const button = document.querySelector<HTMLButtonElement>('[data-action=last-region]')!;
+  const still = document.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
+  expect(still.getAttribute('src')).toBe(STILL);
+  expect(window.imnotaCapture.ready).not.toHaveBeenCalled();
   expect(button.disabled).toBe(false);
   button.click();
   expect(window.imnotaCapture.repeatLastRegion).toHaveBeenCalledTimes(1);
+  still.dispatchEvent(new Event('load'));
+  expect(window.imnotaCapture.ready).toHaveBeenCalledOnce();
 });
 
 it('highlights an identified window on hover and does not begin a region drag', async () => {

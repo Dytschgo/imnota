@@ -41,6 +41,22 @@ export function captureOverlayWindowOptions(
   return { ...bounds, fullscreen: true, fullscreenable: true, simpleFullscreen: platform === 'darwin' };
 }
 
+/**
+ * The overlay paints the already-captured still. A transparent window would
+ * show the live desktop after hover menus collapse under the overlay.
+ */
+export function captureOverlayFreezeAppearance(): {
+  transparent: false;
+  hasShadow: false;
+  backgroundColor: '#05080d';
+} {
+  return {
+    transparent: false,
+    hasShadow: false,
+    backgroundColor: '#05080d',
+  };
+}
+
 export const CAPTURE_DELAY_HUD_SIZE = { width: 288, height: 72 };
 
 /** Small countdown chip; must not cover the display so hover menus can appear. */

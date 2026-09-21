@@ -230,6 +230,11 @@ async function startCapture(
   }
   const overlayDriver = new NativeUiDriver(overlay);
   await overlayDriver.waitFor({ selector: '.capture-overlay' });
+  await overlayDriver.evaluate(`(() => {
+    const still = document.querySelector('.capture-freeze-frame');
+    if (!(still instanceof HTMLImageElement) || !still.src.startsWith('data:image/png'))
+      throw new Error('Capture overlay did not present the captured still.');
+  })()`);
   const display = screen.getDisplayMatching(overlay.getBounds());
   await overlayDriver.evaluate(`new Promise((resolve, reject) => {
     const start = Date.now();
