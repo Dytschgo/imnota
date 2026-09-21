@@ -9,7 +9,7 @@ This document covers both feedback bundles in full:
 - `Feedback after UI Changes - 260909-010456 - 01`: Pictures 1–8, including Picture 4 / Note 1.
 - `Feedback after UI Changes - 260909-010547 - 02`: Pictures 9–14, including Drawing 11.
 
-All supplied feedback has Medium priority. The sequence below follows dependencies and review boundaries, rather than implying different user priorities. This feedback supersedes conflicting proposals in `appUIoverhaul.md`, such as adding inclusion labels, an Annotate heading, and a Danger zone.
+All supplied feedback has Medium priority. The sequence below follows dependencies and review boundaries, rather than implying different user priorities. This feedback supersedes conflicting proposals in `ui-overhaul-plan-20260908.md`, such as adding inclusion labels, an Annotate heading, and a Danger zone.
 
 **Confirmed clarification:** the screenshots show the current nightly, not stable. The current workspace is an older feature checkout (`feature/mixed-content-implementation`, `5070dc0`). For planning, `origin/main` was fetched and inspected at `6215c64`; it contains the reported UI. The nightly workflow builds an immutable commit from `main`. This is a source baseline, not a claim that `6215c64` is the exact installed nightly. Before implementation, record the installed nightly version and its source SHA when available, then reproduce on current main. Do not port these fixes onto the older feature checkout.
 
@@ -172,7 +172,7 @@ All supplied feedback has Medium priority. The sequence below follows dependenci
 4. Inspect every generated image on its own and behind the actual light/dark app chrome. Revise assets that compete with text or vanish behind the glass treatment.
 5. Save project assets inside the repository with new descriptive identifiers. Preserve existing graphite/indigo/emerald/amber girl artwork, preset IDs, and saved selections. Present clear Generic and Characters groupings in the picker; keep uploads and No image available.
 6. Keep selection explicit: adding new presets must not automatically replace someone's existing image. Light artwork should be offered as actual separate presets, not a filter over the girl images.
-7. Check decoded dimensions, packaged size, load behavior, and supported preference values. Use the existing asset pipeline and file formats where practical. Include source/provenance, exact prompts, and final paths in `docs/backdrop-artwork.md`.
+7. Check decoded dimensions, packaged size, load behavior, and supported preference values. Use the existing asset pipeline and file formats where practical. Include source/provenance, exact prompts, and final paths in `../backdrop-artwork.md`.
 
 **Acceptance:** four distinct generic assets available locally, at least two designed for light mode; all existing girl choices remain functional after upgrade/restart; uploads still work; assets load in the packaged app; no backdrop appears in exports. Each asset is visibly checked under PR 7's glass surfaces.
 
@@ -226,15 +226,15 @@ The Windows CI visual baselines were reviewed capture by capture alongside their
 
 CI also exposed an obsolete Linux smoke expectation that Solid must suppress a light-mode backdrop. The corrected native workflow verifies automatic light glass (including actual accessibility/performance fallbacks), then separately verifies dark Solid suppression. The correction passed local Windows typecheck, build and native smoke (17 assertion groups) and was propagated from PR #50 to #51. Updated PR-head CI is still required; these baseline approvals do not claim every final CI check has passed.
 
-The artwork originals are 1672x941 PNGs, approximately 16:9, totaling 6.06 MiB. The built-in ImageGen tool returned this size; no upscaling or pixel edits were applied. Exact prompts and asset paths are in [generic backdrop prompts](docs/generic-backdrop-prompts.md) and [backdrop provenance](docs/backdrop-artwork.md).
+The artwork originals are 1672x941 PNGs, approximately 16:9, totaling 6.06 MiB. The built-in ImageGen tool returned this size; no upscaling or pixel edits were applied. Exact prompts and asset paths are in [generic backdrop prompts](../generic-backdrop-prompts.md) and [backdrop provenance](../backdrop-artwork.md).
 
 Representative captures below show the combined candidate and the isolated preview fixture. They use synthetic verification content, not personal project files.
 
-![Combined dark editor with compact header, row trash and simplified inspector](docs/ui-feedback/combined-dark.png)
+![Combined dark editor with compact header, row trash and simplified inspector](../ui-feedback/combined-dark.png)
 
-![Light theme with the generated Mist background visible through app surfaces](docs/ui-feedback/light-backdrop.png)
+![Light theme with the generated Mist background visible through app surfaces](../ui-feedback/light-backdrop.png)
 
-![Full-space tall bundle preview fitted without cropping](docs/ui-feedback/full-preview.png)
+![Full-space tall bundle preview fitted without cropping](../ui-feedback/full-preview.png)
 
 ### Integration review corrections
 
@@ -247,7 +247,7 @@ Grok's September 9 review was resolved before final integration:
 
 The initial UI integration rehearsal at `40d6e4c` passed the Windows native walkthrough with 18 assertion groups. After the drawing corrections below, cumulative candidate `44c3661` matches integration source `373bf15` exactly across application code, assets, dependencies, scripts and workflows. Independent review accepted source reconciliation and real-app settings, sharing and compact-inspector captures. Glass-specific fixtures also checked representative rename/share modal contents; these fixtures are not a claim of full hosted-service workflow verification.
 
-The authorized merge and nightly procedure is recorded in [Nightly-UI-Merge-Plan.md](Nightly-UI-Merge-Plan.md). The dependency migration PRs and the later hosted-sharing draft #52 are outside this release scope.
+The authorized merge and nightly procedure is recorded in [the nightly UI merge plan](nightly-ui-merge-plan-20260909.md). The dependency migration PRs and the later hosted-sharing draft #52 are outside this release scope.
 
 A subsequent macOS native run failed the broad connector assertion despite an earlier pass with identical application source. Investigation found an early drawing-tool click could arrive before the engine API existed, and unrounded tools could lose their pressed indicator. PR #49 disables controls until readiness, normalizes the selection state and adds a delayed-engine regression test. The native walkthrough now waits for saved rectangle counts, verifies initial endpoint bindings, and confirms actual movement with the same connector attached. The corrected Windows walkthrough passed all 18 assertion groups. These findings explain concrete defects; the original failed run lacked scene evidence to prove its precise cause. Final cross-platform runs retain all checks.
 

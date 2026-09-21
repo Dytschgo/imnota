@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8
+
+- Added local workflow templates, broader project search, local history, clipboard fallbacks and screenshot-first add flows.
+- Improved Windows capture across displays, shortcut recording, capture entry points and capture-overlay placement.
+- Added clipboard read-back diagnostics and Windows copy preferences so the UI reports which formats were retained.
+- Added background update discovery, an always-visible update control and What's New guidance.
+- Improved prompt-bundle handoff, export preparation and smoke-fixture reliability.
+
 ## 0.2.7
 
 - Updated React and React Konva, Tailwind CSS, Zod, Vitest, the React Hooks lint plugin, and Electron. Existing projects keep their current format.
