@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
 
@@ -7,6 +8,17 @@ describe('capture overlay placement', () => {
   it('places the Windows overlay on the captured display without fullscreen', () => {
     expect(captureOverlayWindowOptions(secondary, 'win32')).toEqual({
       ...secondary,
+      fullscreen: false,
+      fullscreenable: false,
+      simpleFullscreen: false,
+      roundedCorners: false,
+    });
+  });
+
+  it('places a left-of-primary 125% display at its DIP origin instead of the primary', () => {
+    const left = { x: -3072, y: -216, width: 3072, height: 1728 };
+    expect(captureOverlayWindowOptions(left, 'win32')).toEqual({
+      ...left,
       fullscreen: false,
       fullscreenable: false,
       simpleFullscreen: false,

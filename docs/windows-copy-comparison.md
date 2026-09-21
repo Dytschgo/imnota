@@ -29,15 +29,15 @@ After choosing a favorite, repeat that option with a disposable project called *
 
 Open **Copy Bundle**, then use the copy choices on the image bundle. The interactive guide offers the same choices on its copy step if you prefer a disposable sample.
 
-| Option                         | What it puts on the clipboard                                       | What to compare                                                 |
-| ------------------------------ | ------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Rich copy                      | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
-| Copy files                     | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
-| Files + rich copy              | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
-| Copy Markdown, then Copy image | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
-| Copy file paths                | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
+| Option                                   | What it puts on the clipboard                                       | What to compare                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Rich copy                                | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
+| Copy files                               | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
+| Files + rich copy                        | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
+| Copy Markdown only, then Copy image only | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
+| Copy file paths                          | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
 
-The guide labels the separate actions **Copy Markdown** and **Copy image**; export cards add **only** to those labels. The primary button uses your saved copy format, initially **Copy files** on Windows. Choose another format from its dropdown or **Settings → Sharing → Native copy functions**. Changing the selection saves your preference without copying anything. For each option, use this same procedure:
+The guide and export cards label the separate actions **Copy Markdown only** and **Copy image only**. The primary button uses your saved copy format, initially **Copy files** on Windows. Choose another format from its dropdown or **Settings → Sharing → Native copy functions**. Changing the selection saves your preference without copying anything. For each option, use this same procedure:
 
 1. Return to Imnota, select the variant from the dropdown, then click the primary copy button. Wait for its result message.
 2. Record what Imnota says it placed on the clipboard. This confirms clipboard contents, not what the receiving app will accept.
@@ -85,8 +85,8 @@ Duplicate these rows for each copy option. **1** means frustrating or unusable; 
 
 ## Check the fallbacks once
 
-- [ ] Copy Markdown: complete explanation arrives as text.
-- [ ] Copy image: the annotated image arrives.
+- [ ] Copy Markdown only: complete explanation arrives as text.
+- [ ] Copy image only: the annotated image arrives.
 - [ ] Copy file paths: two usable paths arrive as text.
 - [ ] Open files: the generated Markdown and image are accessible.
 - [ ] Open export folder: the destination is accessible.

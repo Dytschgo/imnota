@@ -14,6 +14,7 @@ const bridge: ImnotaBridge = {
     onDeviceOcrAvailable
       ? ipcRenderer.invoke('workflow:ocr:recognize', input)
       : Promise.resolve({ ok: true, value: { text: '' } }),
+  listCaptureDisplays: () => ipcRenderer.invoke('workflow:capture:displays'),
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
   startPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:start', input),
   writePromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:write', input),

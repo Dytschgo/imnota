@@ -171,8 +171,8 @@ export function SettingsView({
                 <strong>Capture a screen region</strong>
                 <small>
                   Windows and macOS only while platform validation is in progress. Captures stay local.
-                  Windows covers every display and supports dragging across display boundaries; macOS uses the
-                  display under the pointer.
+                  Windows lets you choose a display when more than one is attached and captures only that
+                  display; macOS uses the display under the pointer.
                 </small>
                 <small data-testid="capture-shortcut-summary">
                   Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>

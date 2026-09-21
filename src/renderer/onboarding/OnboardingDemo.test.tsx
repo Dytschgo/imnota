@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
-import { OnboardingDemo } from './OnboardingDemo';
+import { OnboardingDemo, type OnboardingDemoProps } from './OnboardingDemo';
 
 vi.mock('../components/AnnotationCanvas', () => ({ AnnotationCanvas: () => <div>Interactive canvas</div> }));
 vi.mock('../export-image', () => ({
@@ -34,15 +34,41 @@ vi.mock('./sampleScreenshot', async () => {
 
 afterEach(cleanup);
 
+const grant = {
+  sessionId: '00000000-0000-4000-8000-000000000001',
+  filenames: ['component-search.md', 'component-search.png'] as const,
+};
+
+async function reachCopyStep(overrides: Partial<OnboardingDemoProps> = {}) {
+  const props: OnboardingDemoProps = {
+    fileClipboardAvailable: true,
+    onMarkCompleted: vi.fn(async () => {}),
+    onCreateFirstProject: vi.fn(async () => {}),
+    onPrepareHandoff: vi.fn(async () => grant),
+    ...overrides,
+  };
+  const view = render(<OnboardingDemo {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+  await screen.findByRole('heading', { name: 'Copy the matching bundle' });
+  return { props, ...view };
+}
+
 describe('OnboardingDemo', () => {
   it('marks a dismissal complete without touching a workspace', async () => {
     const onMarkCompleted = vi.fn(async () => {});
     const onDismiss = vi.fn();
+    const onCreateFirstProject = vi.fn();
+    const onPrepareHandoff = vi.fn();
+    const onCopyHandoff = vi.fn();
     render(
       <OnboardingDemo
         fileClipboardAvailable
         onMarkCompleted={onMarkCompleted}
-        onCreateFirstProject={vi.fn()}
+        onCreateFirstProject={onCreateFirstProject}
+        onPrepareHandoff={onPrepareHandoff}
+        onCopyHandoff={onCopyHandoff}
         onDismiss={onDismiss}
       />,
     );
@@ -51,41 +77,45 @@ describe('OnboardingDemo', () => {
       expect(onMarkCompleted).toHaveBeenCalledWith({ completed: true, completedVersion: 1 }, 'dismissed'),
     );
     expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onCreateFirstProject).not.toHaveBeenCalled();
+    expect(onPrepareHandoff).not.toHaveBeenCalled();
+    expect(onCopyHandoff).not.toHaveBeenCalled();
   });
 
-  it('walks through a real annotation bundle before project creation', async () => {
+  it('skips from Escape without preparing workspace files', async () => {
     const onMarkCompleted = vi.fn(async () => {});
-    const onCreateFirstProject = vi.fn(async () => {});
-    const onPrepareHandoff = vi.fn(async () => ({
-      sessionId: '00000000-0000-4000-8000-000000000001',
-      filenames: ['component-search.md', 'component-search.png'] as const,
-    }));
-    const onCopyHandoff = vi.fn(async () => ({
-      text: false,
-      html: false,
-      image: false,
-      files: true,
-    }));
+    const onCreateFirstProject = vi.fn();
+    const onPrepareHandoff = vi.fn();
     render(
       <OnboardingDemo
         fileClipboardAvailable
         onMarkCompleted={onMarkCompleted}
         onCreateFirstProject={onCreateFirstProject}
         onPrepareHandoff={onPrepareHandoff}
-        onCopyHandoff={onCopyHandoff}
       />,
     );
+    fireEvent.keyDown(screen.getByTestId('onboarding-dialog'), { key: 'Escape' });
+    await waitFor(() => expect(onMarkCompleted).toHaveBeenCalledOnce());
+    expect(onCreateFirstProject).not.toHaveBeenCalled();
+    expect(onPrepareHandoff).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy files' });
+  it('walks through a real annotation bundle before project creation', async () => {
+    const onCopyHandoff = vi.fn(async () => ({
+      text: false,
+      html: false,
+      image: false,
+      files: true,
+    }));
+    const { props } = await reachCopyStep({ onCopyHandoff });
     fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
-    await screen.findByText(/files were confirmed/i);
+    expect(await screen.findByRole('status')).toHaveTextContent('Files ready');
+    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(/files were confirmed/i);
+    expect(props.onCreateFirstProject).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
-    await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
-    expect(onPrepareHandoff).toHaveBeenCalledWith(
+    await waitFor(() => expect(props.onCreateFirstProject).toHaveBeenCalledOnce());
+    expect(props.onPrepareHandoff).toHaveBeenCalledWith(
       expect.objectContaining({
         filename: 'component-search.png',
         markdownFilename: 'component-search.md',
@@ -93,49 +123,29 @@ describe('OnboardingDemo', () => {
       }),
     );
     expect(onCopyHandoff).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: '00000000-0000-4000-8000-000000000001' }),
+      expect.objectContaining({ sessionId: grant.sessionId }),
       'files',
     );
-    expect(onMarkCompleted).toHaveBeenLastCalledWith({ completed: true, completedVersion: 1 }, 'finished');
+    expect(props.onMarkCompleted).toHaveBeenLastCalledWith(
+      { completed: true, completedVersion: 1 },
+      'finished',
+    );
   });
 
   it('allows project creation when combined clipboard access is unavailable', async () => {
-    const onMarkCompleted = vi.fn(async () => {});
-    const onCreateFirstProject = vi.fn(async () => {});
-    const onPrepareHandoff = vi.fn(async () => ({
-      sessionId: '00000000-0000-4000-8000-000000000001',
-      filenames: ['component-search.md', 'component-search.png'] as const,
-    }));
     const onCopyHandoff = vi.fn(async () => {
       throw new Error('Clipboard unavailable');
     });
-    render(
-      <OnboardingDemo
-        fileClipboardAvailable
-        onMarkCompleted={onMarkCompleted}
-        onCreateFirstProject={onCreateFirstProject}
-        onPrepareHandoff={onPrepareHandoff}
-        onCopyHandoff={onCopyHandoff}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy files' });
+    const { props } = await reachCopyStep({ onCopyHandoff });
     fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Try copying again, or continue');
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
-    await waitFor(() => expect(onCreateFirstProject).toHaveBeenCalledOnce());
-    expect(onMarkCompleted).toHaveBeenCalledWith({ completed: true, completedVersion: 1 }, 'finished');
+    await waitFor(() => expect(props.onCreateFirstProject).toHaveBeenCalledOnce());
+    expect(props.onMarkCompleted).toHaveBeenCalledWith({ completed: true, completedVersion: 1 }, 'finished');
   });
 
   it('reports the verified file handoff and exposes every explicit fallback', async () => {
-    const grant = {
-      sessionId: '00000000-0000-4000-8000-000000000001',
-      filenames: ['component-search.md', 'component-search.png'] as const,
-    };
     const onCopyHandoff = vi.fn(async () => ({
       text: false,
       html: false,
@@ -143,45 +153,56 @@ describe('OnboardingDemo', () => {
       files: true,
     }));
     const onOpenHandoff = vi.fn(async () => {});
-    render(
-      <OnboardingDemo
-        fileClipboardAvailable
-        onMarkCompleted={vi.fn()}
-        onCreateFirstProject={vi.fn()}
-        onPrepareHandoff={vi.fn(async () => grant)}
-        onCopyHandoff={onCopyHandoff}
-        onOpenHandoff={onOpenHandoff}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown explanation' }), {
-      target: { value: 'Keep filters visible while reviewing results.' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    await reachCopyStep({ onCopyHandoff, onOpenHandoff });
     fireEvent.click(await screen.findByRole('button', { name: 'Copy files' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/files were confirmed.*attachments/i);
-    for (const name of ['Copy Markdown', 'Copy image', 'Open files', 'Copy file paths', 'Open export folder'])
+    expect(await screen.findByRole('status')).toHaveTextContent('Files ready');
+    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(/receiving app still decides/i);
+    for (const name of [
+      'Copy Markdown only',
+      'Copy image only',
+      'Open files',
+      'Copy file paths',
+      'Open export folder',
+    ])
       expect(screen.getByRole('button', { name })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Open files' }));
     await waitFor(() => expect(onOpenHandoff).toHaveBeenCalledWith(grant, 'files'));
+    expect(screen.getByRole('status')).toHaveTextContent('Generated files opened.');
+  });
+
+  it('does not claim Markdown + image when Windows keeps only the image', async () => {
+    const onCopyHandoff = vi.fn(async () => ({
+      text: false,
+      html: false,
+      image: true,
+      files: false,
+    }));
+    await reachCopyStep({
+      defaultCopyVariant: 'rich',
+      onCopyHandoff,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Image copied');
+    expect(screen.queryByText(/markdown \+ image prepared/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(
+      /Markdown was not confirmed.*Copy Markdown only or Open files/i,
+    );
+    expect(screen.getByRole('button', { name: 'Copy Markdown only' })).toBeEnabled();
+  });
+
+  it('does not claim combined copy when read-back cannot confirm a format', async () => {
+    const onCopyHandoff = vi.fn(async () => undefined);
+    await reachCopyStep({ defaultCopyVariant: 'rich', onCopyHandoff });
+    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/could not be confirmed/i);
+    expect(screen.queryByText(/markdown \+ image prepared/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /Copy Markdown only, Copy image only, or Open files/,
+    );
   });
 
   it('keeps onboarding rich copy available when native file clipboard support is absent', async () => {
-    render(
-      <OnboardingDemo
-        onMarkCompleted={vi.fn()}
-        onCreateFirstProject={vi.fn()}
-        onPrepareHandoff={vi.fn(async () => ({
-          sessionId: '00000000-0000-4000-8000-000000000001',
-          filenames: ['component-search.md', 'component-search.png'] as const,
-        }))}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    await reachCopyStep({ fileClipboardAvailable: false });
     expect(await screen.findByRole('button', { name: 'Rich copy' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Copy files' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Files + rich copy' })).not.toBeInTheDocument();
@@ -190,22 +211,11 @@ describe('OnboardingDemo', () => {
   it('saves a dropdown choice without copying until the primary action is clicked', async () => {
     const onDefaultCopyVariantChange = vi.fn(async () => {});
     const onCopyHandoff = vi.fn(async () => ({ text: true, html: true, image: true, files: true }));
-    const props = {
-      fileClipboardAvailable: true,
-      onMarkCompleted: vi.fn(),
-      onCreateFirstProject: vi.fn(),
-      onPrepareHandoff: vi.fn(async () => ({
-        sessionId: '00000000-0000-4000-8000-000000000001',
-        filenames: ['component-search.md', 'component-search.png'] as const,
-      })),
+    const { props, rerender } = await reachCopyStep({
+      defaultCopyVariant: 'files',
       onCopyHandoff,
       onDefaultCopyVariantChange,
-    };
-    const { rerender } = render(<OnboardingDemo {...props} defaultCopyVariant="files" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy files' });
+    });
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
       target: { value: 'rich' },
@@ -216,26 +226,14 @@ describe('OnboardingDemo', () => {
     rerender(<OnboardingDemo {...props} defaultCopyVariant="rich" />);
     fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
     await waitFor(() => expect(onCopyHandoff).toHaveBeenCalledWith(expect.anything(), 'rich'));
+    expect(await screen.findByRole('status')).toHaveTextContent('Markdown + image prepared');
   });
 
   it('keeps the previous primary action when saving a dropdown choice fails', async () => {
-    render(
-      <OnboardingDemo
-        fileClipboardAvailable
-        defaultCopyVariant="files"
-        onDefaultCopyVariantChange={vi.fn(async () => Promise.reject(new Error('disk full')))}
-        onMarkCompleted={vi.fn()}
-        onCreateFirstProject={vi.fn()}
-        onPrepareHandoff={vi.fn(async () => ({
-          sessionId: '00000000-0000-4000-8000-000000000001',
-          filenames: ['component-search.md', 'component-search.png'] as const,
-        }))}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-    await screen.findByRole('button', { name: 'Copy files' });
+    await reachCopyStep({
+      defaultCopyVariant: 'files',
+      onDefaultCopyVariantChange: vi.fn(async () => Promise.reject(new Error('disk full'))),
+    });
     fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
       target: { value: 'rich' },
     });
