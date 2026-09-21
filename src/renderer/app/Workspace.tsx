@@ -59,6 +59,7 @@ export interface WorkspaceProps {
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   capturePrimary?: boolean;
   captureEnabled?: boolean;
+  captureInProgress?: boolean;
   captureShortcut?: string;
   captureDisabledLabel?: string;
   onZoom(delta: number): void;
@@ -192,6 +193,7 @@ export function Workspace(props: WorkspaceProps) {
         onCapture={props.onCapture}
         capturePrimary={props.capturePrimary}
         captureEnabled={props.captureEnabled}
+        captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
         onDeleteItem={props.onDeleteItem}
         onDeleteProject={props.onDeleteProject}
@@ -215,6 +217,7 @@ export function Workspace(props: WorkspaceProps) {
               onActualSize={props.onActualSize}
               onCapture={props.onCapture}
               captureEnabled={props.captureEnabled}
+              captureInProgress={props.captureInProgress}
               captureShortcut={props.captureShortcut}
               captureDisabledLabel={props.captureDisabledLabel}
               onColorSelect={props.onColor}

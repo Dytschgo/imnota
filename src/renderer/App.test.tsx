@@ -1170,6 +1170,8 @@ describe('feedback controls', () => {
     expect(importClick).toHaveBeenCalledOnce();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(startRegionCapture).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    expect(startRegionCapture).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Screen capture is experimental — enable it in Settings',
     );
@@ -1269,6 +1271,63 @@ describe('feedback controls', () => {
     await waitFor(() =>
       expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'rectangle' }),
     );
+  });
+
+  it('keeps capture disabled until the native snapshot and project refresh are accepted', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    let holdRefresh = false;
+    let releaseProjects!: (projects: never[]) => void;
+    const listProjects = vi.fn(() =>
+      holdRefresh ? new Promise<never[]>((resolve) => (releaseProjects = resolve)) : Promise.resolve([]),
+    );
+    const repeatLastRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
+    }));
+    let resolveCapture!: (value: unknown) => void;
+    const startRegionCapture = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    const { editingSnapshot } = await renderEditingProject({
+      listProjects,
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: startRegionCapture as never,
+      repeatLastRegionCapture: repeatLastRegionCapture as never,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
+    const progress = screen.getByRole('button', { name: 'Capture in progress…' });
+    expect(progress).toBeDisabled();
+    expect(progress).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('button', { name: 'Capture delay' })).toBeDisabled();
+
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    expect(repeatLastRegionCapture).not.toHaveBeenCalled();
+
+    holdRefresh = true;
+    await act(async () =>
+      resolveCapture({ ok: true, value: { snapshot: editingSnapshot, screenshotId: 'shot' } }),
+    );
+    await waitFor(() => expect(releaseProjects).toBeTypeOf('function'));
+    expect(screen.getByRole('button', { name: 'Capture in progress…' })).toBeDisabled();
+    await act(async () => releaseProjects([]));
+    const ready = await screen.findByRole('button', { name: /Capture screen region/ });
+    expect(ready).toBeEnabled();
+    expect(ready).not.toHaveAttribute('aria-busy');
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledOnce());
   });
 
   it('starts a cancellable 3s capture delay from the toolbar menu', async () => {
@@ -1658,6 +1717,65 @@ describe('feedback controls', () => {
     await waitFor(() => expect(startRegionCapture).not.toHaveBeenCalled());
   });
 
+  it('repeats the last region without a display chooser and explains when this session has none', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    const startRegionCapture = vi.fn();
+    const repeatLastRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: 'capture-unavailable' as const,
+        message:
+          'Capture a region first. Repeat last region uses the last successful region from this session.',
+        retryable: false,
+      },
+    }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      listCaptureDisplays: async () => ({
+        ok: true,
+        value: [
+          {
+            id: 1,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            position: 'Primary display',
+          },
+          {
+            id: 2,
+            bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+            position: 'Left of primary',
+          },
+        ],
+      }),
+      startRegionCapture: startRegionCapture as never,
+      repeatLastRegionCapture: repeatLastRegionCapture as never,
+    });
+
+    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledTimes(1));
+    expect(repeatLastRegionCapture).toHaveBeenCalledWith({
+      projectPath: '/workspace/project',
+      collectionId: '001-collection',
+    });
+    expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
+    expect(startRegionCapture).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        'Capture a region first. Repeat last region uses the last successful region from this session.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('explains Linux capture unavailability from the shortcut', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
     const startRegionCapture = vi.fn();
@@ -1711,7 +1829,10 @@ describe('feedback controls', () => {
 
   it('buffers a capture without a current collection and restores the last-used collection', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const, overlayAction: 'save' as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const loadProject = vi.fn(async () => snapshot);
     const commitBufferedCapture = vi.fn(async () => ({
       ok: true as const,
@@ -1771,7 +1892,10 @@ describe('feedback controls', () => {
       ...snapshot,
       project: { ...snapshot.project, collections: [archived, snapshot.project.collections[0]!] },
     };
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const, overlayAction: 'save' as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn();
     const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
     const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
@@ -1806,7 +1930,10 @@ describe('feedback controls', () => {
 
   it('keeps a buffered capture when inserting it fails', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({ ok: true as const, value: { buffered: true as const, overlayAction: 'save' as const } }));
+    const startRegionCapture = vi.fn(async () => ({
+      ok: true as const,
+      value: { buffered: true as const, overlayAction: 'save' as const },
+    }));
     const commitBufferedCapture = vi.fn(async () => ({
       ok: false as const,
       error: { code: 'io-failure' as const, message: 'Disk full', retryable: true },

@@ -101,6 +101,23 @@ button {
   background: #c7d2fe;
   font-weight: 700;
 }
+.capture-toolbar [data-action='last-region'] {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e5e7eb;
+  background: rgb(255 255 255 / 0.08);
+  cursor: pointer;
+}
+.capture-toolbar [data-action='last-region']:hover,
+.capture-toolbar [data-action='last-region']:focus-visible {
+  background: rgb(255 255 255 / 0.12);
+  outline: none;
+}
+.capture-toolbar [data-action='last-region']:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 .capture-instruction {
   max-width: 420px;
 }
