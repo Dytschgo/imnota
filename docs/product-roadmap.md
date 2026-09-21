@@ -12,6 +12,12 @@ The roadmap is ordered by user value and implementation risk. The mixed-content 
 
 ## Now: validate the shipped foundation
 
+### Approved scope: optional local agent access
+
+The September 21 PR review and nightly request includes the optional local MCP interface in PR #104. Its scope is read-only access to the selected local workspace and already prepared bundles, enabled explicitly in Settings. It adds no hosted model calls, account, upload, telemetry, capture command, or editor configuration changes. Browser-origin and non-loopback requests are rejected; workspace containment, links, recovery files and sharing secrets remain guarded. A busy port must leave access disabled with an actionable error. Users can turn access off to close the listener; existing workspace files and exports remain unchanged.
+
+External agent skill installation is outside this delivery. The app does not insert installation instructions into exported prompts. Acceptance requires independent security review, real loopback failure/recovery tests and the existing supported-platform package checks.
+
 ### 1. Broaden mixed-content acceptance
 
 Screenshots, Markdown text blocks and drawings are implemented in one ordered collection, with migration, autosave, reorder, duplicate, delete/Undo and export coverage. The README, user guide and data-format docs now describe schema 4. Before adding more types, broaden real-workload verification:

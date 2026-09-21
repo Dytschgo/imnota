@@ -106,6 +106,14 @@ On Windows the green primary button is **Copy files** by default (the generated 
 
 Markdown copy works without generating an image first. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what the clipboard held after the write, not whether another app accepted it.
 
+## Local agent access
+
+Off by default. **Settings → Workspace → Allow local agent access** lets Claude Code or Cursor read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota starts no listener until the toggle is on, and the listener binds only to `127.0.0.1` (or a spawned `--mcp` stdio process). There is no public HTTP server, account, or hosted model call.
+
+Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
+
+Copy the Claude Code or Cursor snippet from Settings. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not rewrite `~/.claude` or `.cursor`. See [Local agent access](agent-access.md).
+
 ## Share a hosted link
 
 Choose **Share online**, check the bundle, and optionally enter your name. Imnota remembers the name on this device; you can edit or clear it in **Settings → Sharing**. New links expire after **1 day** by default; 7, 14 and 30 days are also available. Every new desktop share includes a downloadable ZIP. Turn on **I understand** to confirm that everyone with the link can open the bundle. This acknowledgement resets for each share.

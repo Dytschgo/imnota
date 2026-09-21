@@ -1765,6 +1765,7 @@ export default function App() {
               );
             }}
             onCaptureChange={preferences.saveCapture}
+            onAgentAccessChange={preferences.saveAgentAccess}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
             updateStatus={updateStatus}

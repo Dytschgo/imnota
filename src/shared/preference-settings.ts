@@ -20,6 +20,7 @@ const promptExportPreferencesSchema = z.object({ includeRecognisedText: z.boolea
 const updatePreferencesSchema = z
   .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
   .strict();
+const agentAccessPreferencesSchema = z.object({ enabled: z.boolean() }).strict();
 const shortcutActionIds = new Set<string>(SHORTCUT_ACTIONS.map((action) => action.id));
 const shortcutBindingsSchema = z.record(z.string(), shortcutValueSchema).superRefine((bindings, context) => {
   for (const actionId of Object.keys(bindings))
@@ -76,6 +77,7 @@ export const preferenceSettingsSchema = z
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     promptExport: promptExportPreferencesSchema.default({ includeRecognisedText: true }),
     updates: updatePreferencesSchema.default({}),
+    agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),
   })
   .strict();
 
@@ -107,6 +109,7 @@ export const preferenceSettingsUpdateSchema = z
     nativeCopy: nativeCopyPreferencesSchema.partial().strict().optional(),
     promptExport: promptExportPreferencesSchema.partial().strict().optional(),
     updates: updatePreferencesSchema.partial().strict().optional(),
+    agentAccess: agentAccessPreferencesSchema.partial().strict().optional(),
   })
   .strict();
 
@@ -121,6 +124,7 @@ function cloneDefaults(): PreferenceSettings {
     nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },
     promptExport: { ...DEFAULT_PREFERENCE_SETTINGS.promptExport },
     updates: { ...DEFAULT_PREFERENCE_SETTINGS.updates },
+    agentAccess: { ...DEFAULT_PREFERENCE_SETTINGS.agentAccess },
   };
 }
 
@@ -211,6 +215,7 @@ export function mergePreferenceSettings(
     nativeCopy: { ...current.nativeCopy, ...update.nativeCopy },
     promptExport: { ...current.promptExport, ...update.promptExport },
     updates: { ...current.updates, ...update.updates },
+    agentAccess: { ...current.agentAccess, ...update.agentAccess },
   });
 }
 

@@ -45,6 +45,7 @@ export interface PreferenceSettingsUpdate {
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
   promptExport?: Partial<PreferenceSettings['promptExport']>;
   updates?: Partial<PreferenceSettings['updates']>;
+  agentAccess?: Partial<PreferenceSettings['agentAccess']>;
 }
 
 export interface NativePerformanceProfile {
