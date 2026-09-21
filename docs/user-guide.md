@@ -65,7 +65,7 @@ The mixed collection order is authoritative for Markdown and visual export. Text
 
 Select / Move is the default tool. Drag empty screenshot space to pan; drag an annotation to move only that annotation. The primary toolbar contains Select / Move, Text, Arrow, Rectangle, Highlight and Note / Step. Less common tools are under More tools, and tooltips show their purpose and shortcut.
 
-Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual-only marks remain visible in the PNG but are not converted to Markdown geometry.
+Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual marks such as arrows, boxes and steps also appear under `Picture N / Marks` with kind, id and position as percentages of the source image. Crop stays an image operation, and redaction marks are omitted so Markdown does not outline secrets.
 
 The application selects semantic annotation colors for the active theme; a compact palette allows overrides. This affects the live canvas. Prompt PNG rendering separately corrects contrast for a white export background without modifying the source screenshot or saved annotation intent.
 
@@ -88,11 +88,31 @@ An excluded screenshot is omitted from every prompt PNG but noted in Markdown, f
 Picture 3 was intentionally excluded from this prompt bundle.
 ```
 
-A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
+A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number, priority and source pixel width × height.
+
+When **Settings → Sharing → Include recognised text in Markdown** is on (the default), Copy Bundle also runs on-device OCR and appends a `### Visible text` section when text is found. Recognition stays on this device; it is not written into descriptions or `project.json`. A crop is honoured so only the exported region is read. Screenshots with blur or pixelate marks omit Visible text so redacted pixels are not transcribed. OCR failure never blocks Copy Bundle. Windows uses the system OCR engine (`Windows.Media.Ocr`), downscales captures that exceed that engine’s size limit, and bounds each recognition so Copy Bundle is not blocked for long. Encoded screenshots larger than 20 MB skip Visible text. Linux and other platforms skip OCR without sending screenshot pixels.
+
+When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks are omitted:
+
+```md
+### Picture 2 / Marks
+
+- arrow `a1` from 12.0%,40.0% to 71.5%,41.2%
+- rectangle `r4` at 68.0%,38.0% 18.0%×10.0%
+- step `s2` number 1 at 70.0%,40.0%
+```
 
 On Windows the green primary button is **Copy files** by default (the generated `.md` and `.png` as two files). Change it to **Rich copy** or **Files + rich copy** from the copy menu or Settings → Sharing. On macOS the primary action is **Rich copy**. **Rich copy** writes Markdown, HTML and a prompt PNG to the clipboard in one operation, then reads the clipboard back and names the formats the operating system actually kept. The card says **Markdown + image prepared** only when both text and image are confirmed. If a format is missing, the card names it and points to **Copy Markdown only**, **Copy image only** or **Open files**. Windows in particular may keep only one format. Imnota cannot promise that both formats will arrive in the receiving app; some apps paste only text or only the image even when both are present on the clipboard. Use **Copy Markdown only**, **Copy image only**, **Open files**, **Copy file paths** or **Open export folder** when a target accepts only one format. Text-only bundles copy Markdown without an image. The button turns gray after copying and remains available to copy again.
 
 Markdown copy works without generating an image first. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using them. Imnota reports what the clipboard held after the write, not whether another app accepted it.
+
+## Local agent access
+
+Off by default. **Settings → Workspace → Allow local agent access** lets Claude Code or Cursor read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota starts no listener until the toggle is on, and the listener binds only to `127.0.0.1` (or a spawned `--mcp` stdio process). There is no public HTTP server, account, or hosted model call.
+
+Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
+
+Copy the Claude Code or Cursor snippet from Settings. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not rewrite `~/.claude` or `.cursor`. See [Local agent access](agent-access.md).
 
 ## Share a hosted link
 

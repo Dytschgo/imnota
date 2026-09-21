@@ -43,7 +43,9 @@ export interface PreferenceSettingsUpdate {
   onboarding?: Partial<PreferenceSettings['onboarding']>;
   workbench?: Partial<PreferenceSettings['workbench']>;
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
+  promptExport?: Partial<PreferenceSettings['promptExport']>;
   updates?: Partial<PreferenceSettings['updates']>;
+  agentAccess?: Partial<PreferenceSettings['agentAccess']>;
 }
 
 export interface NativePerformanceProfile {
@@ -203,6 +205,10 @@ export interface WorkflowBridge {
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
   getNativeCapabilities(): Promise<WorkflowResult<NativeCapabilities>>;
   raiseMainWindow(): Promise<WorkflowResult<void>>;
+  recognizeOnDeviceText(input: {
+    pngDataUrl: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }): Promise<WorkflowResult<{ text: string }>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
     projectPath?: string;

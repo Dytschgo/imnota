@@ -115,12 +115,20 @@ import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { windowsFileClipboardAvailable } from './windows-clipboard.js';
+import {
+  MAX_OCR_DATA_URL_CHARACTERS,
+  recognizeOnDevicePngDataUrl,
+  windowsOcrAvailable,
+  type OcrCropRect,
+} from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
+import { WorkspaceContentSearch } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
+import { LocalMcpServer } from './mcp-server.js';
+import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
@@ -190,6 +198,7 @@ let onboardingHandoffWorkflow: OnboardingHandoffWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
+let localMcpServer: LocalMcpServer | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -305,15 +314,19 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
-  if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
   const persisted = preferenceSettingsEnvelope(
     nextSettings as unknown as Record<string, unknown>,
     nextPreferences,
     preferenceSettingsResult.profile,
   );
-  await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
-  settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
-  preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  const persist = async () => {
+    await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
+    if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
+    settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
+    preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  };
+  if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
+  else await persist();
   syncCaptureGlobalShortcut();
 }
 const projectInput = z.object({
@@ -330,34 +343,7 @@ function workspaceOrThrow(): string {
 }
 
 async function assertProjectPath(projectPath: string): Promise<string> {
-  pathInput.parse(projectPath);
-  const workspace = workspaceOrThrow();
-  const resolved = path.resolve(projectPath);
-  if (isReservedProjectPath(resolved))
-    throw new Error(
-      'Backup and recovery folders cannot be opened as active projects. Restore a snapshot first.',
-    );
-  await assertNoLinks(resolved);
-  if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
-    throw new Error('Project path is outside the selected workspace.');
-  const stat = await fs.stat(resolved).catch(() => null);
-  if (!stat?.isDirectory()) throw new Error('The selected project folder is unavailable.');
-  for (const name of [
-    'project.json',
-    'screenshots',
-    'annotations',
-    'notes',
-    'exports',
-    'rounds',
-    'collections',
-    '.imnota-undo',
-    '.imnota-transactions',
-    '.imnota-content-undo',
-    '.imnota-recovery.json',
-    '.imnota-recovery-backup.json',
-  ])
-    await assertNoLinks(path.join(resolved, name));
-  return resolved;
+  return authorizeProjectPath(settings.workspacePath, projectPath);
 }
 
 async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
@@ -811,6 +797,14 @@ async function copyTextToClipboard(text: string): Promise<void> {
   if (typeof text !== 'string' || text.length > 2_000_000)
     throw new Error('Context is too large to copy. Export the Markdown file instead.');
   await nativeClipboard.writeText(text);
+}
+
+function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
+  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+  if (image.isEmpty()) return png;
+  const cropped = image.crop(crop);
+  if (cropped.isEmpty()) return png;
+  return cropped.toPNG();
 }
 
 function clipboardImage(imageDataUrl: string) {
@@ -1837,6 +1831,33 @@ function registerIpc(): void {
   handleWorkflow('workflow:window:raise', (_event, ...args) => {
     z.tuple([]).parse(args);
     raiseMainWindow();
+  });
+  handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
+    if (!windowsOcrAvailable()) return { text: '' };
+    const [input] = z
+      .tuple([
+        z
+          .object({
+            pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS),
+            crop: z
+              .object({
+                x: z.number().int().nonnegative(),
+                y: z.number().int().nonnegative(),
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    return {
+      text: await recognizeOnDevicePngDataUrl(input.pngDataUrl, {
+        crop: input.crop,
+        cropPng: cropPngForOcr,
+      }),
+    };
   });
   handleWorkflow('workflow:capture:displays', (_event, ...args) => {
     z.tuple([]).parse(args);
@@ -3015,10 +3036,39 @@ app.whenReady().then(async () => {
       },
     });
   });
+  localMcpServer = new LocalMcpServer({
+    enabled: () => preferenceSettingsResult.settings.agentAccess.enabled,
+    workspacePath: () => settings.workspacePath,
+    appVersion: () => app.getVersion(),
+    search: (input) => contentSearch.search(input),
+  });
+  if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
+    const started = await localMcpServer.startStdio();
+    if (!started) {
+      process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
+      app.exit(1);
+      return;
+    }
+    app.exit(0);
+    return;
+  }
   configureAutoUpdates();
   registerIpc();
   syncCaptureGlobalShortcut();
+  let agentAccessStartupError = '';
+  if (process.env.IMNOTA_SMOKE !== '1')
+    await localMcpServer.sync().catch(async () => {
+      agentAccessStartupError =
+        'Local agent access could not start. Port 17384 may be in use. Access is off; free the port and enable it again in Settings → Workspace.';
+      const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
+      // Fail closed for this process even if storing the disabled preference also fails.
+      preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
+      await persistApplicationSettings(settings, next).catch(() => {
+        agentAccessStartupError += ' The disabled preference could not be saved.';
+      });
+    });
   await createWindow();
+  if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));
@@ -3139,4 +3189,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   captureGlobalShortcut.clear();
   projectWatchManager?.stopAll();
+  void localMcpServer?.stop();
 });
