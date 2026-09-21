@@ -132,7 +132,9 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
     };
     const executable = packagedExecutable ?? electron;
     const args = packagedExecutable ? [] : ['.'];
-    const timeoutMs = mode === 'stress' ? 15 * 60_000 : 3 * 60_000;
+    // The full walkthrough includes responsive feedback captures and recovery.
+    // Keep each native operation bounded while allowing the complete sequence.
+    const timeoutMs = mode === 'stress' ? 15 * 60_000 : 4 * 60_000;
     const result = await runChild(executable, args, env, timeoutMs);
     let report;
     try {

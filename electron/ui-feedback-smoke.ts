@@ -95,8 +95,8 @@ async function captureAgentAccess(
     return copy.scrollWidth <= copy.clientWidth && copy.scrollHeight <= copy.clientHeight &&
       contains(sectionBox, copyBox) && contains(sectionBox, toggleBox) && separate &&
       !!mcpBox && mcpBox.width > 0 && mcpBox.height > 0 && mcp.getClientRects().length === 1 &&
-      mcpBox.left >= copyBox.left && mcpBox.right <= copyBox.right &&
-      mcpBox.top >= copyBox.top && mcpBox.bottom <= copyBox.bottom;
+      contains(copyBox, mcpBox) &&
+      pixel(mcpBox.top) >= pixel(copyBox.top) && pixel(mcpBox.bottom) <= pixel(copyBox.bottom);
   })()`);
   if (!copyFits) {
     const geometry = await driver.evaluate(`(() => {
