@@ -231,16 +231,6 @@ export async function exerciseRegionCapture(
   if (!host.trayAvailable()) throw new Error('Native smoke did not create the tray icon.');
   if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
     throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
-  const reopenedFromTray = await host.captureFromTray('display');
-  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
-  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
-  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
-  await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
-  await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
-  await waitForClosed(trayOverlay, 'Queued tray capture overlay');
-  await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
-  driver = new NativeUiDriver(reopenedFromTray);
-  await waitForPaint(driver);
 
   let overlay = await startCapture(driver);
   const defaultRegion = await overlay.evaluate<boolean>(
@@ -328,6 +318,15 @@ export async function exerciseRegionCapture(
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+
+  const reopenedFromTray = await host.captureFromTray('display');
+  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
+  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
+  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
+  await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
+  await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
+  await waitForClosed(trayOverlay, 'Queued tray capture overlay');
+  await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
   return { artifacts, skipped: false };
 }
