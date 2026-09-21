@@ -481,7 +481,7 @@ describe('feedback controls', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Delete screenshot:/ }));
     expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus());
     fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(deleteScreenshot).not.toHaveBeenCalled();
 
