@@ -2162,7 +2162,10 @@ export async function runSmokeWorkflow(
     assertions.push('eligible nightly What’s new, replay, Later and guided handoff');
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
-  await driver.click({ selector: 'button[aria-label="Rename"]' });
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
+  await driver.click({ selector: '[role="menu"][aria-label="Collections"] button[aria-label^="Rename "]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Rename collection' });
   await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
   await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
@@ -2185,23 +2188,23 @@ export async function runSmokeWorkflow(
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
-  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
   await driver.press('End');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
-      if (document.activeElement?.getAttribute('role') === 'option') return resolve(true);
+      if (document.activeElement?.getAttribute('role') === 'menuitemradio') return resolve(true);
       if (Date.now() - started > 10000) return reject(new Error('Collection option did not receive focus'));
       setTimeout(check, 50);
     };
     check();
   })`);
   const focusedCollection = await driver.evaluate<boolean>(
-    `document.activeElement?.getAttribute('role') === 'option'`,
+    `document.activeElement?.getAttribute('role') === 'menuitemradio'`,
   );
   if (!focusedCollection) throw new Error('Collection picker did not focus an option with native keys.');
   await driver.press('Escape');
-  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' }, { absent: true });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
