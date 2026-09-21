@@ -1,5 +1,7 @@
-import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
+import { annotationMarkListItems } from './annotation-marks.js';
+import { textAnnotationReferences } from './annotation-order.js';
 import { orderedCollectionItems as orderedContent, type ContentItem } from './content-items.js';
+import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
 
 export type CollectionItemKind = 'screenshot' | 'drawing' | 'text';
 
@@ -91,12 +93,12 @@ export function generateMarkdown(
       '',
     );
     if (shot.description.trim()) out.push(shot.description.trim(), '');
-    const textAnnotations = (annotations[shot.id] ?? []).filter(
-      (annotation) => ['text', 'callout'].includes(annotation.kind) && annotation.text?.trim(),
-    );
-    textAnnotations.forEach((annotation, noteIndex) => {
-      out.push(`### Picture ${visualNumber} / Note ${noteIndex + 1}`, '', annotation.text!.trim(), '');
-    });
+    const shotAnnotations = annotations[shot.id] ?? [];
+    for (const { annotation, noteNumber } of textAnnotationReferences(shotAnnotations)) {
+      out.push(`### Picture ${visualNumber} / Note ${noteNumber}`, '', annotation.text!.trim(), '');
+    }
+    const marks = annotationMarkListItems(shotAnnotations, shot);
+    if (marks.length) out.push(`### Picture ${visualNumber} / Marks`, '', ...marks, '');
   }
   return `${out.join('\n').replace(/\n+$/g, '')}\n`;
 }

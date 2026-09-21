@@ -1,10 +1,10 @@
+import { annotationMarkListItems } from './annotation-marks';
+import { textAnnotationReferences } from './annotation-order';
+import type { Annotation } from './types';
+
 export type PromptPriority = 'low' | 'medium' | 'high';
 export type PromptVisualKind = 'screenshot' | 'drawing';
-
-export interface PromptAnnotationInput {
-  kind: string;
-  text?: string;
-}
+export type PromptAnnotationInput = Annotation;
 export interface PromptScreenshotInput {
   id: string;
   position: number;
@@ -70,6 +70,7 @@ export interface PromptBundlePicture {
   priority: PromptPriority;
   contentRevision: string;
   notes: PromptTextNote[];
+  marks: string[];
   sourceFilename?: string;
   estimatedPngCharacters?: number;
   dataUrl?: string;
@@ -187,13 +188,10 @@ function normalized(value: string): string {
 }
 
 export function mapPromptTextNotes(annotations: readonly PromptAnnotationInput[]): PromptTextNote[] {
-  const notes: PromptTextNote[] = [];
-  for (const annotation of annotations) {
-    if (annotation.kind !== 'text' && annotation.kind !== 'callout') continue;
-    const text = annotation.text && normalized(annotation.text);
-    if (text?.trim()) notes.push({ number: notes.length + 1, text });
-  }
-  return notes;
+  return textAnnotationReferences(annotations).map(({ annotation, noteNumber }) => ({
+    number: noteNumber,
+    text: normalized(annotation.text ?? ''),
+  }));
 }
 
 export function calculatePromptBundleLayout(
@@ -292,6 +290,8 @@ function markdownForBundle(
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
+      if (picture.marks.length)
+        lines.push(`### Picture ${picture.pictureNumber} / Marks`, '', ...picture.marks, '');
     } else if (normalized(picture.description).trim()) {
       lines.push(normalized(picture.description), '');
     }
@@ -345,6 +345,12 @@ function resolveRendered(
     priority: drawing ? 'medium' : item.priority,
     contentRevision: item.contentRevision,
     notes: drawing ? [] : mapPromptTextNotes(item.annotations),
+    marks: drawing
+      ? []
+      : annotationMarkListItems(item.annotations, {
+          originalWidth: item.nativeWidth,
+          originalHeight: item.nativeHeight,
+        }),
     sourceFilename: drawing ? item.sourceFilename : undefined,
     estimatedPngCharacters: rendered.estimatedPngCharacters,
     dataUrl: rendered.dataUrl,
