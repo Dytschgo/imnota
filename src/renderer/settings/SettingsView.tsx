@@ -9,9 +9,9 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
 import {
-  claudeCodeAgentAccessSnippet,
-  cursorAgentAccessSnippet,
+  agentAccessSetupPrompt,
   DEFAULT_PREFERENCE_SETTINGS,
+  localAgentAccessHttpSnippet,
   localAgentAccessStdioSnippet,
   localAgentAccessUrl,
 } from './preferences';
@@ -457,9 +457,9 @@ function AgentAccessSettings({
         <span>
           <strong>Allow local agent access</strong>
           <small>
-            Lets Claude Code or Cursor read prepared prompt bundles from this workspace. Off by default. The
+            Lets a coding agent read prepared prompt bundles from this workspace over MCP. Off by default. The
             listener binds only to {localAgentAccessUrl()} or a spawned <kbd>--mcp</kbd> stdio process. Imnota
-            does not rewrite editor config.
+            does not write any editor or agent configuration.
           </small>
         </span>
         <input
@@ -472,29 +472,48 @@ function AgentAccessSettings({
       </label>
       <div className="settings-snippet">
         <div className="settings-snippet-heading">
-          <strong>Claude Code</strong>
-          <Button variant="ghost" onClick={() => void copySnippet('claude', claudeCodeAgentAccessSnippet())}>
+          <strong>Setup prompt for any agent</strong>
+          <Button variant="ghost" onClick={() => void copySnippet('prompt', agentAccessSetupPrompt())}>
             <Copy size={14} aria-hidden="true" />
-            {copied === 'claude' ? 'Copied' : 'Copy'}
+            {copied === 'prompt' ? 'Copied' : 'Copy prompt'}
           </Button>
         </div>
-        <pre>{claudeCodeAgentAccessSnippet()}</pre>
+        <p className="settings-snippet-note">
+          Paste this into whichever agent you use. It contains the transport, the tool list, and the
+          instruction to write its own MCP configuration.
+        </p>
+        <pre data-testid="agent-access-prompt">{agentAccessSetupPrompt()}</pre>
       </div>
-      <div className="settings-snippet">
-        <div className="settings-snippet-heading">
-          <strong>Cursor</strong>
-          <Button variant="ghost" onClick={() => void copySnippet('cursor', cursorAgentAccessSnippet())}>
-            <Copy size={14} aria-hidden="true" />
-            {copied === 'cursor' ? 'Copied' : 'Copy'}
-          </Button>
+      <details className="settings-disclosure">
+        <summary>Configuration reference</summary>
+        <p className="settings-snippet-note">
+          Generic <code>mcpServers</code> entries, if you prefer to edit the configuration yourself.
+        </p>
+        <div className="settings-snippet">
+          <div className="settings-snippet-heading">
+            <strong>HTTP</strong>
+            <Button variant="ghost" onClick={() => void copySnippet('http', localAgentAccessHttpSnippet())}>
+              <Copy size={14} aria-hidden="true" />
+              {copied === 'http' ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <pre>{localAgentAccessHttpSnippet()}</pre>
         </div>
-        <pre>{cursorAgentAccessSnippet()}</pre>
-      </div>
-      <p className="settings-snippet-note">
-        Stdio alternative: spawn the Imnota executable with <kbd>--mcp</kbd>. Installable skill and rule files
-        are in the documentation; Imnota never writes <code>~/.claude</code> or <code>.cursor</code>.
-      </p>
-      <pre className="settings-snippet-stdio">{localAgentAccessStdioSnippet()}</pre>
+        <div className="settings-snippet">
+          <div className="settings-snippet-heading">
+            <strong>Stdio</strong>
+            <Button variant="ghost" onClick={() => void copySnippet('stdio', localAgentAccessStdioSnippet())}>
+              <Copy size={14} aria-hidden="true" />
+              {copied === 'stdio' ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <pre>{localAgentAccessStdioSnippet()}</pre>
+        </div>
+        <p className="settings-snippet-note">
+          Optional skill and rule files are in the documentation. Imnota never writes agent configuration for
+          you.
+        </p>
+      </details>
     </section>
   );
 }

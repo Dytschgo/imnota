@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
@@ -2333,12 +2333,41 @@ describe('feedback controls', () => {
     expect(setProjectArchived).not.toHaveBeenCalled();
   });
 
+  it('deletes a project from the library row after confirmation', async () => {
+    const deleteProject = vi.fn(async () => {});
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      deleteProject,
+    });
+    const deleteButton = await screen.findByTestId('project-delete-project-id');
+    expect(deleteButton).toHaveAccessibleName(`Delete ${snapshot.project.name}`);
+    expect(deleteButton).toHaveTextContent('');
+    expect(screen.getByTestId('project-edit-project-id')).toHaveTextContent('');
+    expect(screen.getByTestId('project-archive-project-id')).toHaveTextContent('');
+    expect(screen.queryByRole('button', { name: 'Project actions' })).toBeNull();
+
+    fireEvent.click(deleteButton);
+    const dialog = await screen.findByRole('dialog', { name: `Delete ${snapshot.project.name}?` });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep project' }));
+    expect(deleteProject).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    fireEvent.click(screen.getByTestId('project-delete-project-id'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledExactlyOnceWith(snapshot.projectPath));
+    expect(await screen.findByText('Project moved to the system trash')).toBeInTheDocument();
+  });
+
   it('keeps a newer project open when deletion of the previous project finishes later', async () => {
     let resolveDelete!: () => void;
+    let deleted = false;
     const deleteProject = vi.fn(
       () =>
         new Promise<void>((resolve) => {
-          resolveDelete = resolve;
+          resolveDelete = () => {
+            deleted = true;
+            resolve();
+          };
         }),
     );
     const nextSnapshot = {
@@ -2347,18 +2376,22 @@ describe('feedback controls', () => {
       projectRevision: 'next-1',
       project: { ...snapshot.project, id: 'next-project', name: 'Next project' },
     };
-    await renderEditingProject({
+    renderApp({
+      listProjects: async () => (deleted ? [] : [{ ...snapshot.project, projectPath: snapshot.projectPath }]),
       deleteProject,
       openProjectDialog: async () => nextSnapshot,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }));
+    fireEvent.click(await screen.findByTestId('project-delete-project-id'));
     fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
-    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledExactlyOnceWith(snapshot.projectPath));
     fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
     await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(nextSnapshot.projectPath));
     await act(async () => resolveDelete());
 
     expect(useAppStore.getState().snapshot?.projectPath).toBe(nextSnapshot.projectPath);
+    expect(screen.queryByRole('dialog', { name: `Delete ${snapshot.project.name}?` })).toBeNull();
+    expect(useAppStore.getState().projects).toEqual([]);
+    expect(deleteProject).toHaveBeenCalledTimes(1);
   });
 
   it('lets screenshot selection supersede an older delayed project open', async () => {

@@ -315,8 +315,6 @@ button.icon-button.new-collection-button svg {
 .collection-picker {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px;
 }
 .collection-picker-trigger {
   min-width: 0;
@@ -343,25 +341,20 @@ button.icon-button.new-collection-button svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.collection-picker-trigger small,
-.collection-picker-option small {
-  color: var(--ink-3);
-  font-size: 10px;
-  white-space: nowrap;
-}
 .collection-picker-trigger svg {
   flex: none;
-  margin-left: auto;
   color: var(--ink-3);
 }
-.collection-picker-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.collection-picker-trigger > svg:last-child {
+  margin-left: auto;
 }
-.collection-picker-actions .icon-button {
-  width: 34px;
-  height: 34px;
+/* Same glyph everywhere: outlined while active, filled once archived. */
+.collection-status {
+  flex: none;
+  color: var(--ink-3);
+}
+.collection-status-archived {
+  color: var(--ink-2);
 }
 .collection-picker-menu {
   position: absolute;
@@ -381,6 +374,23 @@ button.icon-button.new-collection-button svg {
   background: var(--surface-2);
   box-shadow: var(--shadow);
 }
+.collection-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 1px;
+}
+.collection-picker-row .icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--ink-3);
+}
+.collection-picker-row .icon-button:hover:not(:disabled),
+.collection-picker-row .icon-button:focus-visible {
+  background: var(--surface);
+  color: var(--ink);
+}
 .collection-picker-option {
   min-height: 30px;
   display: grid;
@@ -396,7 +406,7 @@ button.icon-button.new-collection-button svg {
   text-align: left;
 }
 .collection-picker-option:hover,
-.collection-picker-option[aria-selected='true'] {
+.collection-picker-option[aria-checked='true'] {
   background: var(--imnota-accent-soft);
   color: var(--ink);
 }
@@ -2060,8 +2070,7 @@ button.icon-button.new-collection-button svg {
   color: var(--ink);
   font-size: 12px;
 }
-.settings-snippet pre,
-.settings-snippet-stdio {
+.settings-snippet pre {
   margin: 0;
   overflow: auto;
   color: var(--ink-2);
@@ -2070,12 +2079,8 @@ button.icon-button.new-collection-button svg {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.settings-snippet-stdio {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--input);
+.settings-snippet .settings-snippet-note {
+  margin: 0 0 8px;
 }
 .settings-snippet-note {
   margin: 12px 0 0;
@@ -3045,31 +3050,4 @@ kbd {
 }
 .shot-delete:hover {
   color: var(--danger);
-}
-.project-actions {
-  position: relative;
-  flex: none;
-  margin-left: auto;
-}
-.project-actions > summary {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  cursor: pointer;
-  list-style: none;
-  border-radius: 5px;
-}
-.project-actions > summary::-webkit-details-marker {
-  display: none;
-}
-.project-actions > .btn {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 5;
-  white-space: nowrap;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
 }

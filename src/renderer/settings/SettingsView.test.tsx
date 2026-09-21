@@ -39,6 +39,32 @@ describe('SettingsView category navigation', () => {
     expect(onAgentAccessChange).toHaveBeenCalledWith({ enabled: true });
   });
 
+  it('offers one agent-agnostic MCP setup prompt instead of editor-specific snippets', async () => {
+    const copyText = vi.fn(async () => {});
+    window.imnota = { copyText } as unknown as typeof window.imnota;
+    render(<SettingsView activeCategory="Workspace" />);
+    const section = screen.getByRole('region', { name: 'Local agent access' });
+    expect(section).not.toHaveTextContent(/Claude|Cursor/);
+    const prompt = screen.getByTestId('agent-access-prompt').textContent ?? '';
+    expect(prompt).toContain('http://127.0.0.1:17384/mcp');
+    expect(prompt).toContain('--mcp');
+    expect(prompt).toContain('mcpServers');
+    for (const tool of [
+      'list_projects',
+      'list_collection_items',
+      'get_latest_bundle',
+      'get_item',
+      'search_saved_text',
+    ])
+      expect(prompt).toContain(tool);
+    expect(prompt).toContain('Allow local agent access');
+    expect(prompt).not.toMatch(/Claude|Cursor/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
+    await screen.findByRole('button', { name: 'Copied' });
+    expect(copyText).toHaveBeenCalledExactlyOnceWith(prompt);
+  });
+
   it('replays what’s new from Updates & about', () => {
     const onReplayWhatsNew = vi.fn();
     render(

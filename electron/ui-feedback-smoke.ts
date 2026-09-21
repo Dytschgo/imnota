@@ -1,5 +1,8 @@
 import { nativeImage } from 'electron';
+import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
+import type { SmokeWorkflowHost } from './smoke-workflow.js';
+import { agentAccessSetupPrompt } from '../src/shared/preferences.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
 
 async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
@@ -23,6 +26,7 @@ async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
 /** Verify search targets and project lifecycle through the real preload and native UI. */
 export async function exerciseUiFeedback(
   driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
   artifactDirectory?: string,
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
@@ -146,8 +150,60 @@ export async function exerciseUiFeedback(
     const restored=await window.imnota.searchProjects({query:'quartzmarkdownprobe',scope:'active'});
     if(!restored.results.some(result=>result.target.projectPath===projectPath)) throw new Error('Restored project was missing from search.');
   })()`);
+  // Direct bridge mutations do not update the renderer's cached library list.
+  // Re-entering the library performs the production refresh before row actions.
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Archived', exact: true });
+  await driver.waitFor({
+    selector: '.side-nav-primary .nav-item[aria-current="page"]',
+    text: 'Archived',
+    exact: true,
+  });
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed' });
+  await driver.click({ selector: `[data-testid="project-delete-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' });
+  await driver.click({ text: 'Keep project', exact: true });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' }, { absent: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed' });
+  await fs.access(fixture.projectPath);
+  await fs.access(`${fixture.projectPath}/project.json`);
+
+  await driver.click({ selector: `[data-testid="project-delete-${fixture.projectId}"]` });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' });
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-project-delete-confirm.png'));
+  await host.approveNextProjectDeletion(fixture.projectPath);
+  await driver.click({ text: 'Move to trash', exact: true });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' }, { absent: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Renamed' }, { absent: true });
+  await driver.waitFor({ selector: '.toast', text: 'Project moved to the system trash', exact: true });
+  try {
+    await fs.access(fixture.projectPath);
+    throw new Error('Deleted feedback fixture remained in the synthetic workspace.');
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
+  await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
+  await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
+  await driver.evaluate(
+    `document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'})`,
+  );
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'agent-access-setup-prompt.png'));
+  await driver.click({
+    selector: '[aria-labelledby="agent-access-title"] button',
+    text: 'Copy prompt',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: '[aria-labelledby="agent-access-title"] button',
+    text: 'Copied',
+    exact: true,
+  });
+  if ((await nativeClipboard.readText()) !== agentAccessSetupPrompt())
+    throw new Error('Local agent setup did not copy the complete prompt to the native clipboard.');
   await driver.click({ text: 'Appearance', exact: true });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });

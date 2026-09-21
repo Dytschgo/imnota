@@ -48,6 +48,8 @@ export interface SmokeWorkflowHost {
   readSettings(): Promise<WorkspaceSettings>;
   /** One-use native confirmation for an exact project inside this disposable fixture. */
   approveNextBackupRestore(projectPath: string): Promise<void>;
+  /** One-use native confirmation for deleting an exact project inside this disposable fixture. */
+  approveNextProjectDeletion(projectPath: string): Promise<void>;
 }
 
 export interface SmokeWorkflowOptions {
@@ -2162,7 +2164,29 @@ export async function runSmokeWorkflow(
     assertions.push('eligible nightly What’s new, replay, Later and guided handoff');
   // Use a stable user-facing name while retaining random, isolated filesystem paths.
   // This keeps approved visual captures independent of the temporary workspace name.
-  await driver.click({ selector: 'button[aria-label="Rename"]' });
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
+  await driver.press('Home');
+  const focusedInitialCollection = await driver.evaluate<boolean>(`(() => {
+    const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
+    option?.focus();
+    return document.activeElement === option;
+  })()`);
+  if (!focusedInitialCollection) throw new Error('Collection picker could not focus its selection.');
+  await driver.press('Down');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Rename '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection rename action did not receive focus.'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
+  await driver.press('Enter');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Rename collection' });
   await driver.fill({ selector: '[role="dialog"] input' }, 'Verification collection');
   await driver.click({ selector: '[role="dialog"] button[type="submit"]' });
@@ -2185,23 +2209,46 @@ export async function runSmokeWorkflow(
   assertions.push('eye-row exclusion with stable pre-filter Picture number');
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
-  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-collection-picker.png'));
+  const focusedPickerSelection = await driver.evaluate<boolean>(`(() => {
+    const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
+    option?.focus();
+    return document.activeElement === option;
+  })()`);
+  if (!focusedPickerSelection)
+    throw new Error('Collection picker could not focus its selection for keyboard coverage.');
   await driver.press('End');
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
-      if (document.activeElement?.getAttribute('role') === 'option') return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Collection option did not receive focus'));
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Archive '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection archive action did not receive focus'));
       setTimeout(check, 50);
     };
     check();
   })`);
-  const focusedCollection = await driver.evaluate<boolean>(
-    `document.activeElement?.getAttribute('role') === 'option'`,
+  const focusedArchive = await driver.evaluate<boolean>(
+    `document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement?.getAttribute('aria-label')?.startsWith('Archive ')`,
   );
-  if (!focusedCollection) throw new Error('Collection picker did not focus an option with native keys.');
+  if (!focusedArchive) throw new Error('Collection picker did not focus the archive action with End.');
+  await driver.press('Up');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const active = document.activeElement;
+      if (active?.getAttribute('role') === 'menuitem' && active.getAttribute('aria-label')?.startsWith('Rename '))
+        return resolve(true);
+      if (Date.now() - started > 10000) return reject(new Error('Collection rename action did not receive focus'));
+      setTimeout(check, 50);
+    };
+    check();
+  })`);
   await driver.press('Escape');
-  await driver.waitFor({ selector: '[role="listbox"][aria-label="Collections"]' }, { absent: true });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = () => {
@@ -2215,7 +2262,9 @@ export async function runSmokeWorkflow(
     `document.activeElement?.getAttribute('data-testid') === 'collection-picker'`,
   );
   if (!pickerFocusRestored) throw new Error('Collection picker did not restore focus after Escape.');
-  assertions.push('native collection picker keyboard focus and Escape restoration');
+  assertions.push(
+    'native collection picker selection/actions keyboard focus, Escape restoration and expanded capture',
+  );
 
   // Keep the native crop/redaction/arrow checks above tied to real pointer input,
   // then replace their gesture-dependent endpoints before recording visual baselines.
@@ -2422,10 +2471,11 @@ export async function runSmokeWorkflow(
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
   );
-  artifacts.push(...(await exerciseUiFeedback(driver, artifactDirectory)));
+  artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
   assertions.push(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
+  assertions.push('library project deletion cancel and exact synthetic folder move to system trash');
   await checkpoint(
     'mixed content and global search checks complete; starting templates and clipboard fallbacks',
   );

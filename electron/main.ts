@@ -204,6 +204,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 // Main-process-only, one-use approval for the disposable native smoke fixture.
 let smokeBackupRestorePath: string | null = null;
+let smokeProjectDeletionPath: string | null = null;
 let updateController: UpdateController;
 let projectWatchManager: ProjectWatchManager | undefined;
 const contentSearch = new WorkspaceContentSearch();
@@ -3146,14 +3147,18 @@ function registerIpc(): void {
   });
   handle('projects:delete', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
-    const answer = await dialog.showMessageBox(mainWindow!, {
-      type: 'warning',
-      buttons: ['Cancel', 'Move to trash'],
-      defaultId: 0,
-      cancelId: 0,
-      message: 'Delete this project?',
-      detail: `All project files in ${safePath} will be moved to the system trash.`,
-    });
+    const smokeApproved = process.env.IMNOTA_SMOKE === '1' && smokeProjectDeletionPath === safePath;
+    smokeProjectDeletionPath = null;
+    const answer = smokeApproved
+      ? { response: 1 }
+      : await dialog.showMessageBox(mainWindow!, {
+          type: 'warning',
+          buttons: ['Cancel', 'Move to trash'],
+          defaultId: 0,
+          cancelId: 0,
+          message: 'Delete this project?',
+          detail: `All project files in ${safePath} will be moved to the system trash.`,
+        });
     if (answer.response !== 1) throw new Error('Project deletion cancelled.');
     if (preferenceSettingsResult.settings.backups.enabled)
       await backupService!.createSnapshot(safePath, 'destructive-operation');
@@ -3525,6 +3530,12 @@ app.whenReady().then(async () => {
               if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
                 throw new Error('Smoke restore approval must name a real disposable fixture project.');
               smokeBackupRestorePath = real;
+            },
+            async approveNextProjectDeletion(projectPath) {
+              const real = await fs.realpath(projectPath);
+              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
+                throw new Error('Smoke deletion approval must name a real disposable fixture project.');
+              smokeProjectDeletionPath = real;
             },
           },
           {
