@@ -2476,6 +2476,11 @@ export async function runSmokeWorkflow(
     'full Markdown and annotation search targets, project icon/edit CAS, archive scope isolation and restore',
   );
   assertions.push('library project deletion cancel and exact synthetic folder move to system trash');
+  assertions.push('active, archived and template collection picker labels without redundant status icons');
+  assertions.push(
+    'empty clipboard paste shows exact clean error text in a visible bottom-right notification',
+  );
+  assertions.push('local agent access text and --mcp token fit at minimum width and narrow zoom stress');
   await checkpoint(
     'mixed content and global search checks complete; starting templates and clipboard fallbacks',
   );

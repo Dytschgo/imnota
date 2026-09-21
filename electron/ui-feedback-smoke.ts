@@ -1,4 +1,4 @@
-import { nativeImage } from 'electron';
+import { clipboard, nativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
@@ -23,6 +23,96 @@ async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
   })`);
 }
 
+async function captureCollectionPicker(
+  driver: NativeUiDriver,
+  artifactDirectory: string | undefined,
+  captures: SmokeCapture[],
+  filename: string,
+  expectedStates: readonly string[] = ['Active'],
+): Promise<void> {
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
+  const validPicker = await driver.evaluate<boolean>(`(() => {
+    const trigger = document.querySelector('[data-testid="collection-picker"]');
+    const menu = document.querySelector('[role="menu"][aria-label="Collections"]');
+    const options = [...document.querySelectorAll('[role="menuitemradio"]')];
+    const actions = [...document.querySelectorAll('[role="menuitem"]')];
+    const expectedStates = ${JSON.stringify(expectedStates)};
+    if (!trigger || !menu || options.length !== expectedStates.length || actions.length !== options.length * 2) return false;
+    const triggerBox = trigger.getBoundingClientRect();
+    const menuBox = menu.getBoundingClientRect();
+    return trigger.querySelectorAll('svg').length === 1 &&
+      options.every(option => option.querySelectorAll('svg').length === 0) &&
+      options.every(option => {
+        const label = option.querySelector('span');
+        const labelBox = label?.getBoundingClientRect();
+        const optionBox = option.getBoundingClientRect();
+        const actionBoxes = [...option.parentElement.querySelectorAll('[role="menuitem"]')]
+          .map(action => action.getBoundingClientRect());
+        return labelBox && labelBox.left >= optionBox.left && labelBox.right <= optionBox.right &&
+          actionBoxes.every(box => box.left >= optionBox.right);
+      }) &&
+      JSON.stringify(options.map(option => option.getAttribute('aria-description')).sort()) === JSON.stringify(expectedStates.sort()) &&
+      trigger.getAttribute('aria-description') === 'Current collection is active' &&
+      menu.scrollWidth <= menu.clientWidth &&
+      menuBox.left >= 0 && menuBox.right <= innerWidth && menuBox.top >= triggerBox.bottom;
+  })()`);
+  if (!validPicker)
+    throw new Error('Collection picker retained decorative status icons or overflowed its visible bounds.');
+  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename));
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
+}
+
+async function captureAgentAccess(
+  driver: NativeUiDriver,
+  artifactDirectory: string | undefined,
+  captures: SmokeCapture[],
+  filename: string,
+): Promise<void> {
+  await driver.evaluate(`(async () => {
+    document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'});
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  })()`);
+  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename));
+  const copyFits = await driver.evaluate<boolean>(`(() => {
+    const section = document.querySelector('[aria-labelledby="agent-access-title"]');
+    const copy = section?.querySelector('.settings-switch small');
+    const toggle = section?.querySelector('[data-testid="agent-access-toggle"]');
+    if (!section || !copy || !toggle) return false;
+    const sectionBox = section.getBoundingClientRect();
+    const copyBox = copy.getBoundingClientRect();
+    const toggleBox = toggle.getBoundingClientRect();
+    const mcp = copy.querySelector('kbd');
+    const mcpBox = mcp?.getBoundingClientRect();
+    // At 110% zoom a shared edge can differ by 0.000004 CSS px in DOMRect.
+    // Compare painted edges in device pixels; keep overflow and separation exact.
+    const pixel = value => Math.round(value * devicePixelRatio);
+    const contains = (outer, inner) => pixel(inner.left) >= pixel(outer.left) &&
+      pixel(inner.right) <= pixel(outer.right);
+    const separate = copyBox.right <= toggleBox.left ||
+      copyBox.bottom <= toggleBox.top || toggleBox.bottom <= copyBox.top;
+    return copy.scrollWidth <= copy.clientWidth && copy.scrollHeight <= copy.clientHeight &&
+      contains(sectionBox, copyBox) && contains(sectionBox, toggleBox) && separate &&
+      !!mcpBox && mcpBox.width > 0 && mcpBox.height > 0 && mcp.getClientRects().length === 1 &&
+      contains(copyBox, mcpBox) &&
+      pixel(mcpBox.top) >= pixel(copyBox.top) && pixel(mcpBox.bottom) <= pixel(copyBox.bottom);
+  })()`);
+  if (!copyFits) {
+    const geometry = await driver.evaluate(`(() => {
+      const section = document.querySelector('[aria-labelledby="agent-access-title"]');
+      return Object.fromEntries([':scope', '.settings-switch small', '.settings-switch kbd', '[data-testid="agent-access-toggle"]']
+        .map(selector => { const element = selector === ':scope' ? section : section?.querySelector(selector);
+          return [selector, element ? {box: element.getBoundingClientRect().toJSON(),
+            client: [element.clientWidth, element.clientHeight], scroll: [element.scrollWidth, element.scrollHeight],
+            rects: element.getClientRects().length} : null]; }));
+    })()`);
+    throw new Error(
+      `Local agent access text or --mcp token clipped or overlapped: ${filename}: ${JSON.stringify(geometry)}`,
+    );
+  }
+}
+
 /** Verify search targets and project lifecycle through the real preload and native UI. */
 export async function exerciseUiFeedback(
   driver: NativeUiDriver,
@@ -30,6 +120,7 @@ export async function exerciseUiFeedback(
   artifactDirectory?: string,
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
+  const minimumWindowSize = driver.browserWindow.getMinimumSize();
   const image = nativeImage.createFromBitmap(Buffer.alloc(64 * 64 * 4, 180), { width: 64, height: 64 });
   await nativeClipboard.writeImage(image);
   const fixture = await driver.evaluate<{
@@ -49,8 +140,90 @@ export async function exerciseUiFeedback(
     const text = await window.imnota.loadContentItem({projectPath,itemId:item.id});
     await window.imnota.saveContentItem({projectPath,itemId:item.id,contentRevision:text.contentRevision,
       markdown:'# Search fixture\\n\\n' + 'Ordinary content. '.repeat(600) + '\\nquartzmarkdownprobe'});
+    const additional = await window.imnota.editCollection({projectPath,action:'create'});
+    const archived = additional.project.collections.find(collection => collection.id !== screenshot.collectionId);
+    if (!archived) throw new Error('Archived collection fixture was not created.');
+    await window.imnota.editCollection({projectPath,action:'rename',collectionId:archived.id,name:'Archived feedback'});
+    await window.imnota.editCollection({projectPath,action:'archive',collectionId:archived.id});
+    await window.imnota.editCollection({projectPath,action:'restore',collectionId:screenshot.collectionId});
+    await window.imnota.editCollection({projectPath,action:'rename',collectionId:screenshot.collectionId,
+      name:'Current feedback collection with a deliberately long name'});
     return {projectPath,projectId:snapshot.project.id,itemId:item.id};
   })()`);
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
+  await driver.click({ selector: '.project-row-main', text: 'Feedback Verification' });
+  await driver.waitFor({ selector: '[data-testid="workspace"]' });
+  // Linux window decorations add 16px to the production minimum width.
+  await driver.resize({ width: 1080, height: 800 });
+  await captureCollectionPicker(
+    driver,
+    artifactDirectory,
+    captures,
+    '1080x800-feedback-normal-collection-picker.png',
+    ['Active', 'Archived'],
+  );
+  const templateProjectPath = await driver.evaluate<string>(`(async () => {
+    const snapshot = await window.imnota.createProject({
+      name: 'Feedback Template',
+      description: 'Template collection picker verification',
+      templateId: 'bug-report',
+    });
+    return snapshot.projectPath;
+  })()`);
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Template' });
+  await driver.click({ selector: '.project-row-main', text: 'Feedback Template' });
+  await driver.waitFor({ selector: '[data-testid="workspace"]' });
+  await captureCollectionPicker(
+    driver,
+    artifactDirectory,
+    captures,
+    '1080x800-feedback-template-collection-picker.png',
+  );
+  const templateProjectExists = await driver.evaluate<boolean>(
+    `(async () => (await window.imnota.loadProject(${JSON.stringify(templateProjectPath)})).project.name === 'Feedback Template')()`,
+  );
+  if (!templateProjectExists)
+    throw new Error('Template picker verification did not retain its template project.');
+  clipboard.clear();
+  await driver.click({ text: 'Paste from clipboard', exact: true });
+  await driver.waitFor({ selector: '[data-testid="error-toast"]' });
+  await driver.evaluate(`(async () => {
+    const error = document.querySelector('[data-testid="error-toast"]');
+    if (!error) throw new Error('Clipboard error disappeared before layout verification.');
+    await Promise.all(error.getAnimations().map(animation => animation.finished));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  })()`);
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, '1080x800-feedback-paste-error.png'));
+  const pasteError = await driver.evaluate<{
+    passed: boolean;
+    box?: { left: number; top: number; right: number; bottom: number; width: number };
+    viewport?: { width: number; height: number };
+    text?: string;
+    position?: string;
+  }>(`(() => {
+    const error = document.querySelector('[data-testid="error-toast"]');
+    const success = document.querySelector('.toast:not(.error-toast)');
+    if (!error || success) return {passed:false};
+    const box = error.getBoundingClientRect();
+    const text = error.querySelector('span')?.textContent;
+    const position = getComputedStyle(error).position;
+    return {
+      passed: error.getAttribute('role') === 'alert' && position === 'fixed' &&
+        text === 'The clipboard does not contain an image. Copy a screenshot and try again.' &&
+        box.left >= 0 && box.top >= 0 && box.right <= innerWidth - 20 &&
+        box.bottom <= innerHeight - 18 && box.width < innerWidth / 2,
+      box: {left:box.left,top:box.top,right:box.right,bottom:box.bottom,width:box.width},
+      viewport: {width:innerWidth,height:innerHeight},text,position,
+    };
+  })()`);
+  if (!pasteError.passed)
+    throw new Error(`Clipboard notification postcondition failed: ${JSON.stringify(pasteError)}`);
+  await driver.click({ selector: '[data-testid="error-toast"] button[aria-label="Dismiss error"]' });
+  await driver.waitFor({ selector: '[data-testid="error-toast"]' }, { absent: true });
+  await driver.resize({ width: 1280, height: 800 });
   await driver.click({ selector: '[data-testid="search-trigger"]' });
   await waitForEmptySearch(driver);
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzmarkdownprobe');
@@ -187,11 +360,8 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
-  await driver.evaluate(
-    `document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'})`,
-  );
-  if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'agent-access-setup-prompt.png'));
+  await driver.resize({ width: 1080, height: 800 });
+  await captureAgentAccess(driver, artifactDirectory, captures, 'agent-access-setup-prompt.png');
   await driver.click({
     selector: '[aria-labelledby="agent-access-title"] button',
     text: 'Copy prompt',
@@ -204,6 +374,17 @@ export async function exerciseUiFeedback(
   });
   if ((await nativeClipboard.readText()) !== agentAccessSetupPrompt())
     throw new Error('Local agent setup did not copy the complete prompt to the native clipboard.');
+  // Stress wrapping below the ordinary minimum in this disposable smoke window only.
+  try {
+    driver.browserWindow.setMinimumSize(800, 680);
+    await driver.resize({ width: 900, height: 800 });
+    driver.browserWindow.webContents.setZoomFactor(1.1);
+    await captureAgentAccess(driver, artifactDirectory, captures, '900x800-110pct-feedback-agent-access.png');
+  } finally {
+    driver.browserWindow.webContents.setZoomFactor(1);
+    await driver.resize({ width: 1280, height: 800 });
+    driver.browserWindow.setMinimumSize(minimumWindowSize[0], minimumWindowSize[1]);
+  }
   await driver.click({ text: 'Appearance', exact: true });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });

@@ -6,7 +6,7 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, matchesProjectSearch, SettingsView } from './App';
+import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -225,7 +225,7 @@ describe('feedback controls', () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
     renderApp({
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' }],
       loadProject,
     });
     await screen.findByTestId('library-full-search');
@@ -503,11 +503,32 @@ describe('feedback controls', () => {
       snapshot,
       undoToken: 'undo',
     }));
-    await renderEditingProject({ deleteScreenshot });
-
-    fireEvent.click(await screen.findByRole('button', { name: /^Delete screenshot:/ }));
-    await waitFor(() => expect(deleteScreenshot).toHaveBeenCalled());
-    expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+    await renderEditingProject({ deleteScreenshot, undoDeleteScreenshot });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(deleteScreenshot).toHaveBeenCalled();
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(3501));
+      expect(undo).toBeInTheDocument();
+      fireEvent.click(undo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        undoToken: 'undo',
+      });
+      expect(screen.queryByRole('dialog', { name: 'Delete this screenshot?' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
     useAppStore.setState((state) => ({
       settings: { ...state.settings, confirmBeforeDeletion: true },
     }));
@@ -1155,6 +1176,58 @@ describe('feedback controls', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
+  });
+
+  it('keeps the newest transient notification after an earlier notification deadline passes', async () => {
+    const state: { editingSnapshot?: ProjectSnapshot } = {};
+    const pasteImage = vi.fn(async () => state.editingSnapshot!);
+    state.editingSnapshot = (await renderEditingProject({ pasteImage })).editingSnapshot;
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
+
+      act(() => vi.advanceTimersByTime(3000));
+      fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      act(() => vi.advanceTimersByTime(501));
+      expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
+      expect(pasteImage).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows clipboard failures as a compact notification without Electron IPC wrappers', async () => {
+    await renderEditingProject({
+      pasteImage: vi.fn(async () => {
+        throw new Error(
+          "Error invoking remote method 'screenshots:paste': Error. The clipboard does not contain an image. Copy a screenshot and try again.",
+        );
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    const notification = await screen.findByTestId('error-toast');
+    expect(notification).toHaveAttribute('role', 'alert');
+    expect(notification).toHaveClass('toast', 'error-toast');
+    expect(notification).toHaveTextContent(
+      'The clipboard does not contain an image. Copy a screenshot and try again.',
+    );
+    expect(notification).not.toHaveTextContent('Error invoking remote method');
+    expect(document.querySelector('.error-banner')).toBeNull();
+  });
+
+  it('only removes a real Error prefix from renderer error messages', () => {
+    expect(userFacingErrorMessage('Error. Clipboard unavailable')).toBe('Clipboard unavailable');
+    expect(userFacingErrorMessage('Errorless settings name')).toBe('Errorless settings name');
   });
 
   it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
@@ -2474,10 +2547,26 @@ describe('feedback controls', () => {
       setProjectArchived,
     });
     expect((await screen.findAllByTestId('project-icon-target')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByTestId('project-archive-project-id'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByTestId('project-archive-project-id'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(3501));
+      expect(undo).toBeInTheDocument();
+      fireEvent.click(undo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
-    await waitFor(() => expect(setProjectArchived).toHaveBeenCalledTimes(2));
+    expect(setProjectArchived).toHaveBeenCalledTimes(2);
     expect(setProjectArchived.mock.calls[0]?.[0]).toEqual({
       projectPath: snapshot.projectPath,
       expectedRevision: 'project-1',
@@ -2489,6 +2578,29 @@ describe('feedback controls', () => {
       archived: false,
     });
     expect(await screen.findByTestId('project-archive-project-id')).toBeInTheDocument();
+  });
+
+  it('reports an archive without an Undo action when the backend returns no revision', async () => {
+    const listProjects = vi.fn(async () => [
+      {
+        ...snapshot.project,
+        projectPath: snapshot.projectPath,
+        status: 'active' as const,
+        icon: 'target' as const,
+      },
+    ]);
+    renderApp({
+      listProjects,
+      loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+      setProjectArchived: async () => ({
+        ...snapshot,
+        project: { ...snapshot.project, status: 'archived' },
+      }),
+    });
+    expect((await screen.findAllByTestId('project-icon-target')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('project-archive-project-id'));
+    expect(await screen.findByRole('status')).toHaveTextContent('Project archived');
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
   it('reveals the annotation selected from full-content library search', async () => {
