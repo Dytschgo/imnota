@@ -93,7 +93,7 @@ export function PromptSharingDialog({
     <Modal
       hidden={hidden}
       title="Share bundles"
-      description="Copy the latest bundle, or choose a single format. Generated files and paths are verified against the current collection."
+      description="Copy a bundle to your clipboard, or pick a single format from its menu."
       onClose={onClose}
       closeTestId="prompt-sharing-close"
     >
