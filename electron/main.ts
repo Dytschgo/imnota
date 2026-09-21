@@ -1525,6 +1525,7 @@ function registerIpc(): void {
         }
       }
     }
+    broadcastCaptureSelection();
     const pointerDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const focused = active.overlays.find(({ capture }) => capture.display.id === pointerDisplay.id);
     (focused ?? active.overlays[0])?.window.focus();
