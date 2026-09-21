@@ -1416,10 +1416,12 @@ export default function App() {
     setDialogBusy(true);
     try {
       await window.imnota.deleteProject(target.projectPath);
-      if (identity !== navigationIdentity.current) return;
-      setDialog(null);
+      setDialog((current) => (current === 'delete-project' ? null : current));
       setProjectToDelete(null);
-      if (useAppStore.getState().snapshot?.projectPath === target.projectPath)
+      if (
+        identity === navigationIdentity.current &&
+        useAppStore.getState().snapshot?.projectPath === target.projectPath
+      )
         useAppStore.getState().setProject(null);
       await refreshProjects();
       if (identity !== navigationIdentity.current) return;

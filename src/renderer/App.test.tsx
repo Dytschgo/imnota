@@ -2360,10 +2360,14 @@ describe('feedback controls', () => {
 
   it('keeps a newer project open when deletion of the previous project finishes later', async () => {
     let resolveDelete!: () => void;
+    let deleted = false;
     const deleteProject = vi.fn(
       () =>
         new Promise<void>((resolve) => {
-          resolveDelete = resolve;
+          resolveDelete = () => {
+            deleted = true;
+            resolve();
+          };
         }),
     );
     const nextSnapshot = {
@@ -2373,7 +2377,7 @@ describe('feedback controls', () => {
       project: { ...snapshot.project, id: 'next-project', name: 'Next project' },
     };
     renderApp({
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      listProjects: async () => (deleted ? [] : [{ ...snapshot.project, projectPath: snapshot.projectPath }]),
       deleteProject,
       openProjectDialog: async () => nextSnapshot,
     });
@@ -2385,6 +2389,9 @@ describe('feedback controls', () => {
     await act(async () => resolveDelete());
 
     expect(useAppStore.getState().snapshot?.projectPath).toBe(nextSnapshot.projectPath);
+    expect(screen.queryByRole('dialog', { name: `Delete ${snapshot.project.name}?` })).toBeNull();
+    expect(useAppStore.getState().projects).toEqual([]);
+    expect(deleteProject).toHaveBeenCalledTimes(1);
   });
 
   it('lets screenshot selection supersede an older delayed project open', async () => {
