@@ -1,10 +1,13 @@
-import type { CaptureRectangle } from '../shared/capture';
+import type { CaptureOverlayMode, CaptureRectangle } from '../shared/capture';
 import './style.css';
 
 interface CaptureSelectionState {
   selection: CaptureRectangle | null;
   complete: boolean;
   actionsDisplayId: number | null;
+  mode: CaptureOverlayMode;
+  windowTitle: string | null;
+  windowMessage: string | null;
 }
 
 declare global {
@@ -12,6 +15,7 @@ declare global {
     imnotaCapture: {
       ready(): Promise<void>;
       pointer(update: { phase: 'begin' | 'move' | 'end' | 'reset'; point?: { x: number; y: number } }): void;
+      setMode(mode: CaptureOverlayMode): void;
       save(): Promise<void>;
       cancel(): Promise<void>;
       onCountdown(handler: (payload: { remainingSeconds: number }) => void): () => void;
@@ -28,7 +32,6 @@ declare global {
 }
 
 const root = document.querySelector<HTMLDivElement>('#root')!;
-
 if (new URLSearchParams(location.search).has('countdown')) setupCaptureDelayCountdown();
 else setupRegionSelection();
 
@@ -47,18 +50,20 @@ function setupCaptureDelayCountdown() {
 }
 
 function setupRegionSelection() {
-  root.innerHTML = `<main class="capture-overlay" aria-label="Select a screen region"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><strong>Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
+  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
 
   const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
   const freezeFrame = root.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
   const selectionElement = root.querySelector<HTMLElement>('.capture-selection')!;
   const actions = root.querySelector<HTMLElement>('.capture-actions')!;
+  const instruction = root.querySelector<HTMLElement>('.capture-instruction')!;
   const dimensions = root.querySelector<HTMLElement>('.capture-dimensions')!;
   let displayId: number | null = null;
   let displayBounds: CaptureRectangle | null = null;
   let dragging = false;
   let completedSelection = false;
   let saving = false;
+  let mode: CaptureOverlayMode = 'region';
 
   function localPoint(event: PointerEvent, clampToSurface: boolean) {
     const bounds = surface.getBoundingClientRect();
@@ -83,7 +88,20 @@ function setupRegionSelection() {
       : null;
   }
 
+  function instructionFor(state: CaptureSelectionState): string {
+    if (state.mode === 'window') {
+      if (state.windowMessage) return state.windowMessage;
+      if (state.windowTitle) return state.windowTitle;
+      return 'Click a window';
+    }
+    if (state.mode === 'display') return 'Capture this entire display';
+    return 'Drag to select a region';
+  }
+
   function draw(state: CaptureSelectionState) {
+    mode = state.mode;
+    surface.classList.remove('mode-region', 'mode-window', 'mode-display');
+    surface.classList.add(`mode-${state.mode}`);
     completedSelection = state.complete && Boolean(state.selection);
     const local = state.selection ? intersectSelection(state.selection) : null;
     if (local) {
@@ -94,29 +112,45 @@ function setupRegionSelection() {
       selectionElement.hidden = true;
     }
     actions.hidden = !state.complete || state.actionsDisplayId !== displayId;
+    instruction.textContent = instructionFor(state);
     dimensions.textContent = state.selection
       ? `${Math.round(state.selection.width)} × ${Math.round(state.selection.height)} points`
       : 'Press Escape to cancel';
+    for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]'))
+      button.setAttribute('aria-checked', button.dataset.mode === state.mode ? 'true' : 'false');
+  }
+
+  function ignoreChrome(event: Event): boolean {
+    return Boolean((event.target as HTMLElement).closest('.capture-actions, .capture-toolbar'));
   }
 
   surface.addEventListener('pointerdown', (event) => {
-    if (saving || (event.target as HTMLElement).closest('.capture-actions, .capture-toolbar')) return;
+    if (saving || ignoreChrome(event)) return;
+    if (mode !== 'region') return;
     dragging = true;
     surface.setPointerCapture(event.pointerId);
     window.imnotaCapture.pointer({ phase: 'begin', point: localPoint(event, true) });
   });
   surface.addEventListener('pointermove', (event) => {
+    if (mode === 'window') {
+      window.imnotaCapture.pointer({ phase: 'move', point: localPoint(event, false) });
+      return;
+    }
     // Some Windows configurations retain pointer capture in the origin window;
     // others route the pressed pointer into the next display window. Support both.
-    if (dragging || event.buttons === 1)
+    if (mode === 'region' && (dragging || event.buttons === 1))
       window.imnotaCapture.pointer({ phase: 'move', point: localPoint(event, false) });
   });
   surface.addEventListener('pointerup', (event) => {
-    if (
-      !dragging &&
-      (event.button !== 0 || (event.target as HTMLElement).closest('.capture-actions, .capture-toolbar'))
-    )
+    if (saving || ignoreChrome(event)) {
+      if (mode === 'region' && dragging) dragging = false;
       return;
+    }
+    if (mode === 'window' || mode === 'display') {
+      window.imnotaCapture.pointer({ phase: 'end', point: localPoint(event, false) });
+      return;
+    }
+    if (!dragging && event.button !== 0) return;
     dragging = false;
     window.imnotaCapture.pointer({ phase: 'end', point: localPoint(event, false) });
     if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
@@ -139,6 +173,12 @@ function setupRegionSelection() {
       saving = false;
     });
   });
+  for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]')) {
+    button.addEventListener('click', () => {
+      const next = button.dataset.mode;
+      if (next === 'region' || next === 'window' || next === 'display') window.imnotaCapture.setMode(next);
+    });
+  }
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') void window.imnotaCapture.cancel();
   });
