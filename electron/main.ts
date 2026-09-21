@@ -2921,11 +2921,14 @@ app.whenReady().then(async () => {
       /* Keep in-memory safe defaults; do not overwrite corrupt preferences before user action. */
     }
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const developmentScriptPolicy = process.env.VITE_DEV_SERVER_URL
+      ? "script-src 'self' 'unsafe-inline';"
+      : "script-src 'self';";
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://127.0.0.1:5173 ws://127.0.0.1:5173; font-src 'self' data:;",
+          `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; ${developmentScriptPolicy} connect-src 'self' http://127.0.0.1:5173 ws://127.0.0.1:5173; font-src 'self' data:;`,
         ],
       },
     });
