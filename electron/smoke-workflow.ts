@@ -2443,7 +2443,7 @@ export async function runSmokeWorkflow(
         ? 'toolbar and OS-injected Ctrl+Alt+Shift+F9 while the main window is minimized and a synthetic target is focused; the registered global callback opens the display chooser and overlay'
         : 'toolbar overlay';
     assertions.push(
-      `synthetic-only region capture ${captureTriggers}; cancel leaves no files; save selects, annotates, and exports the result`,
+      `synthetic-only capture ${captureTriggers}; Window mode presents availability feedback, Copy reads back while the overlay remains open, Cancel leaves no files, and Save/Annotate select and export the result`,
     );
   }
 

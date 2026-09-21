@@ -17,8 +17,6 @@ function pointer(
   target.dispatchEvent(event);
 }
 
-const STILL = 'data:image/png;base64,cG5n';
-
 function selectionState(
   partial: Partial<{
     selection: CaptureRectangle | null;
@@ -39,6 +37,8 @@ function selectionState(
     ...partial,
   };
 }
+
+const STILL = 'data:image/png;base64,cG5n';
 
 async function setup(
   displayId = 2,
@@ -89,6 +89,8 @@ beforeEach(() => {
     setMode: vi.fn(),
     repeatLastRegion: vi.fn(),
     save: vi.fn(async () => {}),
+    annotate: vi.fn(async () => {}),
+    copy: vi.fn(async () => ({ image: true })),
     cancel: vi.fn(async () => {}),
     onCountdown: vi.fn(() => () => {}),
     onPayload: vi.fn(() => () => {}),
@@ -180,6 +182,26 @@ it('draws only this display intersection and saves the coordinated selection onc
   button.click();
   expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
   expect(window.imnotaCapture.save).toHaveBeenCalledWith();
+});
+
+it('copies the image without saving and can annotate instead of save', async () => {
+  const { selectionHandler } = await setup(2, { x: 0, y: 0, width: 800, height: 600 });
+  selectionHandler(
+    selectionState({
+      selection: { x: 10, y: 10, width: 40, height: 40 },
+      complete: true,
+      actionsDisplayId: 2,
+    }),
+  );
+  const copy = document.querySelector<HTMLButtonElement>('[data-action=copy]')!;
+  copy.click();
+  copy.click();
+  await Promise.resolve();
+  expect(window.imnotaCapture.copy).toHaveBeenCalledOnce();
+  expect(document.querySelector('.capture-overlay')).not.toBeNull();
+  expect(window.imnotaCapture.save).not.toHaveBeenCalled();
+  document.querySelector<HTMLButtonElement>('[data-action=annotate]')!.click();
+  expect(window.imnotaCapture.annotate).toHaveBeenCalledOnce();
 });
 
 it('retake clears every overlay through the coordinator and cancellation remains global', async () => {

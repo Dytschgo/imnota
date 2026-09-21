@@ -228,6 +228,7 @@ let captureOverlay: {
   selection: CaptureSelectionCoordinator;
   readiness: ReturnType<typeof createOverlayReadinessGuard>;
   displays: CaptureDisplay[];
+  overlayCommit: 'save' | 'annotate';
   disposeDisplayListeners: () => void;
 } | null = null;
 let captureDelaySession: CaptureDelaySession | null = null;
@@ -239,6 +240,7 @@ const captureGlobalShortcut = new CaptureGlobalShortcut({
   unregister: (accelerator) => globalShortcut.unregister(accelerator),
 });
 let pendingCapturePng: Buffer | null = null;
+let lastOverlayCommit: 'save' | 'annotate' = 'save';
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
 
 function syncCaptureGlobalShortcut(): void {
@@ -907,6 +909,7 @@ function captureService(): CaptureService {
 }
 
 async function smokeDesktopCaptureCapability(): Promise<{
+  windowCandidateCount: number;
   displays: Array<{
     displayId: number;
     bounds: CaptureRectangle;
@@ -925,7 +928,8 @@ async function smokeDesktopCaptureCapability(): Promise<{
       'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
     );
   const service = captureService();
-  return probeCaptureDisplays(screen.getAllDisplays(), {
+  const displays = screen.getAllDisplays();
+  const capability = await probeCaptureDisplays(displays, {
     capture: (display) =>
       captureDisplayWithStableGeometry(
         display,
@@ -936,6 +940,7 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
+  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
 }
 
 function cancelCaptureDelay(): void {
@@ -1144,6 +1149,7 @@ async function chooseCaptureRegion(
     selection,
     readiness,
     displays,
+    overlayCommit: 'save',
     disposeDisplayListeners: () => {
       screen.off('display-added', failForDisplayChange);
       screen.off('display-removed', failForDisplayChange);
@@ -1589,7 +1595,9 @@ function registerIpc(): void {
     active.selection.setMode(mode);
     broadcastCaptureSelection();
   });
-  ipcMain.handle('capture-overlay:save', (event) => {
+  function assertTrustedCaptureOverlay(
+    event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+  ): NonNullable<typeof captureOverlay> {
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
@@ -1600,6 +1608,12 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay;
     if (!active) throw new Error('Capture overlay is no longer available.');
+    return active;
+  }
+  function commitCaptureOverlay(
+    active: NonNullable<typeof captureOverlay>,
+    action: 'save' | 'annotate',
+  ): void {
     if (!captureOverlayGeometryIsStable(active)) {
       failCaptureOverlay('display-changed');
       return;
@@ -1612,7 +1626,38 @@ function registerIpc(): void {
     }
     const state = active.selection.current();
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
+    active.overlayCommit = action;
+    lastOverlayCommit = action;
     settleCaptureOverlay(state.selection, state.mode);
+  }
+  ipcMain.handle('capture-overlay:save', (event) => {
+    commitCaptureOverlay(assertTrustedCaptureOverlay(event), 'save');
+  });
+  ipcMain.handle('capture-overlay:annotate', (event) => {
+    commitCaptureOverlay(assertTrustedCaptureOverlay(event), 'annotate');
+  });
+  ipcMain.handle('capture-overlay:copy', async (event) => {
+    const active = assertTrustedCaptureOverlay(event);
+    if (!captureOverlayGeometryIsStable(active)) {
+      failCaptureOverlay('display-changed');
+      return { image: false };
+    }
+    for (const overlay of active.overlays) {
+      if (!overlayCoversDisplay(overlay.window.getContentBounds(), overlay.capture.display.bounds)) {
+        failCaptureOverlay('misplaced');
+        return { image: false };
+      }
+    }
+    const state = active.selection.current();
+    if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
+    const png = captureService().compose(
+      active.overlays.map((overlay) => overlay.capture),
+      state.selection,
+    );
+    const image = nativeImage.createFromBuffer(png);
+    await nativeClipboard.writeImage(image);
+    const kept = await nativeClipboard.readImage();
+    return { image: !kept.isEmpty() };
   });
   ipcMain.on('capture-overlay:repeat-last', (event) => {
     if (
@@ -2215,11 +2260,12 @@ function registerIpc(): void {
       assertLiveCaptureAdmission(event, admission);
       if (!safeProjectPath || !input.collectionId) {
         pendingCapturePng = png;
-        return { buffered: true as const };
+        return { buffered: true as const, overlayAction: lastOverlayCommit };
       }
-      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
+      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
         assertLiveCaptureAdmission(event, admission),
       );
+      return { ...inserted, overlayAction: lastOverlayCommit };
     } finally {
       if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
@@ -3360,50 +3406,51 @@ app.whenReady().then(async () => {
     let exitCode = 0;
     let result: unknown;
     try {
-      result = await runSmokeWorkflow(
-        {
-          setWorkspace(workspacePath) {
-            settings = { ...settings, workspacePath };
-          },
-          async reopenWindow() {
-            const previousWindow = mainWindow;
-            const nextWindow = await createWindow();
-            if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
-              previousWindow.destroy();
-            return nextWindow;
-          },
-          readProject,
-          async restoreRecovery(projectPath) {
-            return (await openWithRecovery(projectPath, 'restore')).project;
-          },
-          async readSettings() {
-            return structuredClone(settings);
-          },
-          async approveNextBackupRestore(projectPath) {
-            const real = await fs.realpath(projectPath);
-            if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
-              throw new Error('Smoke restore approval must name a real disposable fixture project.');
-            smokeBackupRestorePath = real;
-          },
-        },
-        {
-          fixtureRoot: fixture,
-          artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-          version: app.getVersion(),
-          expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
-          mode: process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke',
-        },
-      );
+      const mode = process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke';
       if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
-        const capability = await smokeDesktopCaptureCapability();
         result = {
-          ...(result as Record<string, unknown>),
-          captureCapability: capability,
-          assertions: [
-            ...((result as { assertions?: string[] }).assertions ?? []),
-            'exact desktopCapturer source and in-memory crop dimensions for every real display',
-          ],
+          passed: true,
+          version: app.getVersion(),
+          mode,
+          artifacts: [],
+          captureCapability: await smokeDesktopCaptureCapability(),
+          assertions: ['exact desktopCapturer source and in-memory crop dimensions for every real display'],
         };
+      } else {
+        result = await runSmokeWorkflow(
+          {
+            setWorkspace(workspacePath) {
+              settings = { ...settings, workspacePath };
+            },
+            async reopenWindow() {
+              const previousWindow = mainWindow;
+              const nextWindow = await createWindow();
+              if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
+                previousWindow.destroy();
+              return nextWindow;
+            },
+            readProject,
+            async restoreRecovery(projectPath) {
+              return (await openWithRecovery(projectPath, 'restore')).project;
+            },
+            async readSettings() {
+              return structuredClone(settings);
+            },
+            async approveNextBackupRestore(projectPath) {
+              const real = await fs.realpath(projectPath);
+              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
+                throw new Error('Smoke restore approval must name a real disposable fixture project.');
+              smokeBackupRestorePath = real;
+            },
+          },
+          {
+            fixtureRoot: fixture,
+            artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+            version: app.getVersion(),
+            expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
+            mode,
+          },
+        );
       }
     } catch (error) {
       exitCode = 1;

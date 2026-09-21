@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
+import { nativeClipboard } from './native-clipboard.js';
 import { screenshotPath } from './collections.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from './windows-smoke-input.js';
@@ -339,9 +340,29 @@ export async function exerciseRegionCapture(
   );
   if (!defaultRegion) throw new Error('Capture overlay did not default to Region mode.');
   await overlay.click({ selector: '[data-mode="window"]' });
-  await overlay.waitFor({ selector: '.capture-instruction', text: 'could not identify windows' });
+  await overlay.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const instruction = document.querySelector('.capture-instruction');
+    const check = () => {
+      if (instruction?.textContent !== 'Drag to select a region') return resolve(true);
+      if (Date.now() - started > 5000) return reject(new Error('Window mode did not receive the native window list.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
   await overlay.click({ selector: '[data-mode="region"]' });
   await selectRegion(overlay);
+  await overlay.click({ selector: '[data-action="copy"]' });
+  await overlay.waitFor({ selector: '.capture-dimensions', text: 'Image copied', exact: true });
+  const copiedImage = await nativeClipboard.readImage();
+  if (copiedImage.isEmpty() || copiedImage.getSize().width < 1 || copiedImage.getSize().height < 1)
+    throw new Error('Copy image did not leave a readable image on the native clipboard.');
+  if (overlay.browserWindow.isDestroyed() || !overlay.browserWindow.isVisible())
+    throw new Error('Copy image closed the capture overlay.');
+  await overlay.evaluate(`(() => {
+    const actions = document.querySelector('.capture-actions');
+    if (!(actions instanceof HTMLElement) || actions.hidden) throw new Error('Copy image hid capture actions.');
+  })()`);
   await overlay.click({ selector: '[data-action="retake"]' });
   await waitForRetake(overlay);
   await selectRegion(overlay);
@@ -411,6 +432,30 @@ export async function exerciseRegionCapture(
   if (exported.size === 0) throw new Error('Synthetic capture annotation export is empty.');
 
   overlay = await startCapture(driver);
+  await selectRegion(overlay);
+  const annotateOverlay = overlay.browserWindow;
+  await overlay.click({ selector: '[data-action="annotate"]' });
+  await waitForClosed(annotateOverlay, 'Annotated capture overlay');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Annotated capture');
+  await waitForPaint(driver);
+  const afterAnnotate = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+  const annotated = afterAnnotate.screenshots.find(
+    (screenshot) =>
+      !baseline.screenshots.some((previous) => previous.id === screenshot.id) &&
+      screenshot.id !== captured.id,
+  );
+  if (!annotated) throw new Error('Annotated capture did not create a screenshot record.');
+  await driver.waitFor({
+    selector: '.toast',
+    text: 'Screen capture added — annotate',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: `.shot-item.active [data-testid="screenshot-${annotated.id}"]`,
+  });
+  await driver.waitFor({ selector: '.canvas-meta', text: 'Tool: rectangle' });
+
+  overlay = await startCapture(driver);
   await overlay.click({ selector: '[data-mode="display"]' });
   await overlay.waitFor({ selector: '.capture-actions' });
   const displayOverlay = overlay.browserWindow;
@@ -418,13 +463,13 @@ export async function exerciseRegionCapture(
   await waitForClosed(displayOverlay, 'Saved display capture overlay');
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
-  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 2);
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
   await driver.waitFor({ selector: 'button[aria-label^="Capture screen region"]:not(:disabled)' });
 
   // Full-display capture must not replace the remembered region. Repeat uses the
   // same source pixels and crop through the normal renderer/native IPC path.
   await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
-  const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  const afterRepeat = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
   const repeated = afterRepeat.screenshots.at(-1);
   if (
     !repeated ||
@@ -447,7 +492,7 @@ export async function exerciseRegionCapture(
   const repeatOverlay = overlay.browserWindow;
   await overlay.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
-  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
 
   return { artifacts, skipped: false };
 }

@@ -217,11 +217,18 @@ export interface WorkflowBridge {
     displayId?: number;
     /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
     delaySeconds?: 3 | 5;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
+  }): Promise<
+    WorkflowResult<
+      | { snapshot: ProjectSnapshot; screenshotId: string; overlayAction: 'save' | 'annotate' }
+      | { buffered: true; overlayAction: 'save' | 'annotate' }
+    >
+  >;
   commitBufferedCapture(input: {
     projectPath: string;
     collectionId: string;
-  }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
+  }): Promise<
+    WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string; overlayAction?: 'save' | 'annotate' }>
+  >;
   repeatLastRegionCapture(input: {
     projectPath: string;
     collectionId: string;

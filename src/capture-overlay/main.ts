@@ -19,6 +19,8 @@ declare global {
       setMode(mode: CaptureOverlayMode): void;
       repeatLastRegion(): void;
       save(): Promise<void>;
+      annotate(): Promise<void>;
+      copy(): Promise<{ image: boolean }>;
       cancel(): Promise<void>;
       onCountdown(handler: (payload: { remainingSeconds: number }) => void): () => void;
       onPayload(
@@ -54,7 +56,7 @@ function setupCaptureDelayCountdown() {
 }
 
 function setupRegionSelection() {
-  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><button type="button" data-action="last-region" disabled>Last region</button><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="save" class="primary">Save & annotate</button></div></main>`;
+  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><button type="button" data-action="last-region" disabled>Last region</button><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
 
   const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
   const freezeFrame = root.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
@@ -68,6 +70,7 @@ function setupRegionSelection() {
   let dragging = false;
   let completedSelection = false;
   let saving = false;
+  let copying = false;
   let mode: CaptureOverlayMode = 'region';
 
   setLastRegionAvailability(null, false);
@@ -188,6 +191,25 @@ function setupRegionSelection() {
     void window.imnotaCapture.save().catch(() => {
       saving = false;
     });
+  });
+  root.querySelector<HTMLButtonElement>('[data-action="annotate"]')!.addEventListener('click', () => {
+    if (!completedSelection || saving) return;
+    saving = true;
+    void window.imnotaCapture.annotate().catch(() => {
+      saving = false;
+    });
+  });
+  root.querySelector<HTMLButtonElement>('[data-action="copy"]')!.addEventListener('click', () => {
+    if (!completedSelection || saving || copying) return;
+    copying = true;
+    void window.imnotaCapture
+      .copy()
+      .then((report) => {
+        dimensions.textContent = report.image ? 'Image copied' : 'Image was not kept on the clipboard';
+      })
+      .finally(() => {
+        copying = false;
+      });
   });
   for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]')) {
     button.addEventListener('click', () => {

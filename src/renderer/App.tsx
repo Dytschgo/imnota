@@ -98,6 +98,8 @@ export default function App() {
   const [dialogBusy, setDialogBusy] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
+  const lastAnnotateTool = useRef<ToolChoice>('arrow');
+  const pendingOverlayAction = useRef<'save' | 'annotate'>('save');
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [history, setHistory] = useState<Annotation[][]>([]);
@@ -874,11 +876,14 @@ export default function App() {
     snapshot: ProjectSnapshot,
     screenshotId: string,
     nativeMutationToken: number,
+    overlayAction: 'save' | 'annotate' = 'save',
   ): Promise<boolean> {
     const accepted = await persistence.acceptMutationSnapshot(snapshot, screenshotId, nativeMutationToken);
     if (!accepted) return false;
     await refreshProjects();
-    showToast('Screen capture added');
+    useAppStore.getState().set({ activeScreenshotId: screenshotId });
+    showToast(overlayAction === 'annotate' ? 'Screen capture added — annotate' : 'Screen capture added');
+    if (overlayAction === 'annotate') setTool(lastAnnotateTool.current);
     window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());
     return true;
   }
@@ -909,7 +914,12 @@ export default function App() {
     const nativeMutationToken = persistence.beginNativeMutation();
     try {
       const committed = workflowValue(await window.imnota.commitBufferedCapture(destination));
-      await finishCapturedScreenshot(committed.snapshot, committed.screenshotId, nativeMutationToken);
+      await finishCapturedScreenshot(
+        committed.snapshot,
+        committed.screenshotId,
+        nativeMutationToken,
+        pendingOverlayAction.current,
+      );
     } catch (reason) {
       await persistence.cancelNativeMutation(nativeMutationToken);
       throw reason;
@@ -1030,6 +1040,7 @@ export default function App() {
           }),
         );
         if ('buffered' in result) {
+          pendingOverlayAction.current = result.overlayAction;
           await persistence.cancelNativeMutation(nativeMutationToken);
           nativeMutationToken = null;
           await settleBufferedCapture();
@@ -1039,6 +1050,7 @@ export default function App() {
           result.snapshot,
           result.screenshotId,
           nativeMutationToken,
+          result.overlayAction,
         );
         nativeMutationToken = null;
         if (!accepted) return;
@@ -1048,6 +1060,7 @@ export default function App() {
         await window.imnota.startRegionCapture({ displayId, ...(delaySeconds ? { delaySeconds } : {}) }),
       );
       if (!('buffered' in result)) return;
+      pendingOverlayAction.current = result.overlayAction;
       await settleBufferedCapture();
     } catch (reason) {
       if (nativeMutationToken !== null) {
@@ -1639,6 +1652,10 @@ export default function App() {
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
   );
+  function selectTool(next: ToolChoice): void {
+    setTool(next);
+    if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
+  }
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
     'project.open': () => void openProjectDialog(),
@@ -1680,12 +1697,12 @@ export default function App() {
         setSelectedAnnotationId(null);
       }
     },
-    'tool.select': () => setTool('select'),
-    'tool.text': () => setTool('text'),
-    'tool.arrow': () => setTool('arrow'),
-    'tool.rectangle': () => setTool('rectangle'),
-    'tool.highlight': () => setTool('highlight'),
-    'tool.step': () => setTool('step'),
+    'tool.select': () => selectTool('select'),
+    'tool.text': () => selectTool('text'),
+    'tool.arrow': () => selectTool('arrow'),
+    'tool.rectangle': () => selectTool('rectangle'),
+    'tool.highlight': () => selectTool('highlight'),
+    'tool.step': () => selectTool('step'),
     'screenshot.previous': () => {
       const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
       if (index > 0) void selectShot(orderedShots[index - 1]!.id);
@@ -2014,7 +2031,7 @@ export default function App() {
               fit: shortcutLabel('canvas.fit'),
               actualSize: shortcutLabel('canvas.actualSize'),
             }}
-            onTool={setTool}
+            onTool={selectTool}
             onColor={(color) => {
               setToolColors((current) => ({
                 ...current,
