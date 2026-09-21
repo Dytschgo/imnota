@@ -62,6 +62,8 @@ describe('shortcut normalization', () => {
     ).toBeNull();
     expect(getDefaultShortcut('capture.region', 'windows')).toBe('Ctrl+Shift+5');
     expect(getDefaultShortcut('capture.region', 'mac')).toBe('Meta+Shift+5');
+    expect(getDefaultShortcut('capture.repeatLastRegion', 'windows')).toBe('Ctrl+Shift+6');
+    expect(getDefaultShortcut('capture.repeatLastRegion', 'mac')).toBe('Meta+Shift+6');
   });
 
   it('formats compact macOS labels', () => {
