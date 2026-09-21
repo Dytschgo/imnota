@@ -385,7 +385,8 @@ button.icon-button.new-collection-button svg {
 }
 .collection-picker-option {
   min-height: 30px;
-  display: block;
+  display: flex;
+  align-items: center;
   gap: 8px;
   padding: 0 7px;
   border: 0;
@@ -401,6 +402,8 @@ button.icon-button.new-collection-button svg {
   color: var(--ink);
 }
 .collection-picker-option > span:first-child {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

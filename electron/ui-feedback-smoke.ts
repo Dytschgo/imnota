@@ -43,6 +43,15 @@ async function captureCollectionPicker(
     const menuBox = menu.getBoundingClientRect();
     return trigger.querySelectorAll('svg').length === 1 &&
       options.every(option => option.querySelectorAll('svg').length === 0) &&
+      options.every(option => {
+        const label = option.querySelector('span');
+        const labelBox = label?.getBoundingClientRect();
+        const optionBox = option.getBoundingClientRect();
+        const actionBoxes = [...option.parentElement.querySelectorAll('[role="menuitem"]')]
+          .map(action => action.getBoundingClientRect());
+        return labelBox && labelBox.left >= optionBox.left && labelBox.right <= optionBox.right &&
+          actionBoxes.every(box => box.left >= optionBox.right);
+      }) &&
       JSON.stringify(options.map(option => option.getAttribute('aria-description')).sort()) === JSON.stringify(expectedStates.sort()) &&
       trigger.getAttribute('aria-description') === 'Current collection is active' &&
       menu.scrollWidth <= menu.clientWidth &&
@@ -120,6 +129,9 @@ export async function exerciseUiFeedback(
     if (!archived) throw new Error('Archived collection fixture was not created.');
     await window.imnota.editCollection({projectPath,action:'rename',collectionId:archived.id,name:'Archived feedback'});
     await window.imnota.editCollection({projectPath,action:'archive',collectionId:archived.id});
+    await window.imnota.editCollection({projectPath,action:'restore',collectionId:screenshot.collectionId});
+    await window.imnota.editCollection({projectPath,action:'rename',collectionId:screenshot.collectionId,
+      name:'Current feedback collection with a deliberately long name'});
     return {projectPath,projectId:snapshot.project.id,itemId:item.id};
   })()`);
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
