@@ -19,8 +19,7 @@
 }
 
 .side-nav-primary,
-.side-nav-section,
-.side-nav-footer {
+.side-nav-section {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -214,14 +213,25 @@
   border-left: 1px solid var(--line);
 }
 
-.side-nav-footer {
+/* Icon-only workspace row: Settings and About lead, the update control sits at the end.
+   Matches the specificity of the generic `.sidebar nav` column rule. */
+.side-nav .side-nav-footer {
+  display: flex;
   flex: none;
-  padding: 10px 0 14px;
-  border-top: 1px solid var(--line);
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 12px;
 }
 
-.side-nav-footer .sidebar-footer {
-  margin-top: 8px;
+.side-nav-footer .floating-update {
+  margin-left: auto;
+}
+
+.side-nav-footer-button.active {
+  color: var(--ink);
+  background: var(--imnota-accent-soft);
+  box-shadow: inset 0 -2px 0 var(--imnota-accent);
 }
 
 .side-nav-empty-collections {
@@ -272,10 +282,5 @@
     gap: 10px;
     padding: 0 10px;
     font-size: 14px;
-  }
-
-  .side-nav .sidebar-footer {
-    flex-direction: row;
-    padding-inline: 0;
   }
 }

@@ -260,17 +260,6 @@ button:disabled {
 .platform-mac.navigation-hidden .topbar {
   padding-left: var(--window-controls-inset);
 }
-.sidebar-footer {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-.sidebar-footer .nav-item {
-  flex: 1;
-}
 .sidebar-toggle {
   flex: none;
 }
@@ -293,18 +282,6 @@ button:disabled {
 .sidebar-collapsed .sidebar-top {
   padding: 3px 0 12px;
   flex-direction: column;
-}
-.sidebar-collapsed .sidebar-footer {
-  flex-direction: column;
-  margin-top: auto;
-  padding-top: 8px;
-}
-.sidebar-collapsed .sidebar-footer .nav-item {
-  justify-content: center;
-  padding: 0;
-}
-.sidebar-collapsed .sidebar-footer .nav-item span {
-  display: none;
 }
 .round-controls {
   padding: 12px 12px 10px;
@@ -2669,10 +2646,6 @@ kbd {
   }
 }
 @media (max-width: 950px) {
-  .sidebar-footer {
-    flex-direction: column;
-    padding-inline: 0;
-  }
   .sidebar {
     width: 60px;
     flex-basis: 60px;
