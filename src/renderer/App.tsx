@@ -53,6 +53,14 @@ import './app/project-management.css';
 import { ContentSearchResults } from './search/ContentSearchResults';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
 import { CaptureDisplayDialog } from './capture/CaptureDisplayDialog';
+import { CaptureDestinationDialog } from './capture/CaptureDestinationDialog';
+import {
+  captureDestinationChoices,
+  currentCaptureDestination,
+  lastUsedCurrentDestination,
+  type CaptureDestination,
+  type CaptureDestinationChoice,
+} from './capture/capture-destination';
 import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
 
@@ -126,13 +134,19 @@ export default function App() {
   } | null>(null);
   const captureBusyRef = useRef(false);
   const captureDisplayResolver = useRef<((displayId: number | null) => void) | null>(null);
+  const captureDestinationResolver = useRef<((destination: CaptureDestination | null) => void) | null>(null);
   const [captureDisplayChoices, setCaptureDisplayChoices] = useState<readonly CaptureDisplayOption[] | null>(
     null,
   );
+  const [captureDestinationOptions, setCaptureDestinationOptions] = useState<
+    readonly CaptureDestinationChoice[] | null
+  >(null);
   useEffect(
     () => () => {
       captureDisplayResolver.current?.(null);
       captureDisplayResolver.current = null;
+      captureDestinationResolver.current?.(null);
+      captureDestinationResolver.current = null;
     },
     [],
   );
@@ -218,7 +232,10 @@ export default function App() {
       throw new Error('Save the current drawing or text before preparing the prompt.');
     return persistence.getSavedContext(useAppStore.getState().activeCollectionId);
   }, [persistence, contentPersistence]);
-  const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
+  const promptBundles = usePromptBundleController({
+    getSavedContext: getSavedPromptContext,
+    getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+  });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
@@ -806,94 +823,184 @@ export default function App() {
     setCaptureDisplayChoices(null);
     resolve?.(displayId);
   }
+  function settleCaptureDestinationChoice(destination: CaptureDestination | null) {
+    const resolve = captureDestinationResolver.current;
+    captureDestinationResolver.current = null;
+    setCaptureDestinationOptions(null);
+    resolve?.(destination);
+  }
   async function chooseCaptureDisplay(): Promise<number | null | undefined> {
     if (detectShortcutPlatform() !== 'windows') return undefined;
     const displays = workflowValue(await window.imnota.listCaptureDisplays());
     if (displays.length === 0) throw new Error('Windows did not report an available display to capture.');
     if (displays.length === 1) return displays[0]!.id;
+    workflowValue(await window.imnota.raiseMainWindow());
     return new Promise<number | null>((resolve) => {
       captureDisplayResolver.current = resolve;
       setCaptureDisplayChoices(displays);
     });
   }
+  async function chooseCaptureDestination(
+    choices: readonly CaptureDestinationChoice[],
+  ): Promise<CaptureDestination | null> {
+    workflowValue(await window.imnota.raiseMainWindow());
+    return new Promise((resolve) => {
+      captureDestinationResolver.current = resolve;
+      setCaptureDestinationOptions(choices);
+    });
+  }
+  async function adoptCaptureDestination(destination: CaptureDestination): Promise<boolean> {
+    const current = useAppStore.getState();
+    if (current.snapshot?.projectPath !== destination.projectPath) {
+      try {
+        adoptSnapshot(await window.imnota.loadProject(destination.projectPath));
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'The collection could not be opened.');
+        return false;
+      }
+    }
+    const snapshot = useAppStore.getState().snapshot;
+    const collection = snapshot?.project.collections.find((item) => item.id === destination.collectionId);
+    if (!snapshot || snapshot.projectPath !== destination.projectPath || !collection || collection.archived) {
+      setError('Choose a current collection before capturing.');
+      return false;
+    }
+    if (useAppStore.getState().activeCollectionId !== destination.collectionId)
+      useAppStore.getState().setActiveCollection(destination.collectionId);
+    return true;
+  }
+  async function finishCapturedScreenshot(
+    snapshot: ProjectSnapshot,
+    screenshotId: string,
+    nativeMutationToken: number,
+  ): Promise<boolean> {
+    const accepted = await persistence.acceptMutationSnapshot(snapshot, screenshotId, nativeMutationToken);
+    if (!accepted) return false;
+    await refreshProjects();
+    showToast('Screen capture added');
+    window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());
+    return true;
+  }
+  async function settleBufferedCapture(): Promise<void> {
+    const state = useAppStore.getState();
+    let destination = lastUsedCurrentDestination(state.projects, state.recentCollections);
+    if (!destination) {
+      const choices = captureDestinationChoices(state.projects, state.recentCollections, state.snapshot);
+      if (choices.length === 0) {
+        setError(
+          state.snapshot
+            ? 'Choose a current collection before capturing.'
+            : 'Open a project and choose a current collection before capturing.',
+        );
+        await window.imnota.discardBufferedCapture();
+        return;
+      }
+      destination = await chooseCaptureDestination(choices);
+      if (!destination) {
+        await window.imnota.discardBufferedCapture();
+        return;
+      }
+    }
+    if (!(await adoptCaptureDestination(destination))) {
+      await window.imnota.discardBufferedCapture();
+      return;
+    }
+    const nativeMutationToken = persistence.beginNativeMutation();
+    try {
+      const committed = workflowValue(await window.imnota.commitBufferedCapture(destination));
+      await finishCapturedScreenshot(committed.snapshot, committed.screenshotId, nativeMutationToken);
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      throw reason;
+    }
+  }
   async function captureRegion(delaySeconds?: CaptureDelaySeconds) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
-    const current = useAppStore.getState();
     try {
-      if (!current.snapshot) {
-        setError('Open a project and choose a current collection before capturing.');
+      if (detectShortcutPlatform() === 'linux') {
+        setError('Screen capture is unavailable on Linux — use Import or Paste');
         return;
       }
-      const collection = current.snapshot.project.collections.find(
-        (item) => item.id === current.activeCollectionId,
-      );
-      if (!collection || collection.archived) {
-        setError('Choose a current collection before capturing.');
+      if (!preferences.settings.capture.experimentalRegionCapture) {
+        setError('Screen capture is experimental — enable it in Settings');
         return;
       }
-      const target = {
-        projectPath: current.snapshot.projectPath,
-        projectId: current.snapshot.project.id,
-        collectionId: collection.id,
-        navigationIdentity: navigationIdentity.current,
-      };
+      const current = useAppStore.getState();
+      const destination = currentCaptureDestination(current.snapshot, current.activeCollectionId);
       const displayId = await chooseCaptureDisplay();
       if (displayId === null) return;
-      const afterChoice = useAppStore.getState();
-      const chosenSnapshot = afterChoice.snapshot;
-      const chosenCollection = chosenSnapshot?.project.collections.find(
-        (item) => item.id === target.collectionId,
-      );
-      if (
-        navigationIdentity.current !== target.navigationIdentity ||
-        !chosenSnapshot ||
-        chosenSnapshot.projectPath !== target.projectPath ||
-        chosenSnapshot.project.id !== target.projectId ||
-        afterChoice.activeCollectionId !== target.collectionId ||
-        !chosenCollection ||
-        chosenCollection.archived
-      )
-        return;
-      nativeMutationToken = await beginCurrentProjectMutation();
-      if (nativeMutationToken === null) return;
-      const afterFlush = useAppStore.getState();
-      const afterSnapshot = afterFlush.snapshot;
-      const activeCollection = afterSnapshot?.project.collections.find(
-        (item) => item.id === target.collectionId,
-      );
-      if (
-        navigationIdentity.current !== target.navigationIdentity ||
-        !afterSnapshot ||
-        afterSnapshot.projectPath !== target.projectPath ||
-        afterSnapshot.project.id !== target.projectId ||
-        afterFlush.activeCollectionId !== target.collectionId ||
-        !activeCollection ||
-        activeCollection.archived
-      ) {
-        await persistence.cancelNativeMutation(nativeMutationToken);
+      if (destination && current.snapshot) {
+        const target = {
+          projectPath: destination.projectPath,
+          projectId: current.snapshot.project.id,
+          collectionId: destination.collectionId,
+          navigationIdentity: navigationIdentity.current,
+        };
+        const afterChoice = useAppStore.getState();
+        const chosenSnapshot = afterChoice.snapshot;
+        const chosenCollection = chosenSnapshot?.project.collections.find(
+          (item) => item.id === target.collectionId,
+        );
+        if (
+          navigationIdentity.current !== target.navigationIdentity ||
+          !chosenSnapshot ||
+          chosenSnapshot.projectPath !== target.projectPath ||
+          chosenSnapshot.project.id !== target.projectId ||
+          afterChoice.activeCollectionId !== target.collectionId ||
+          !chosenCollection ||
+          chosenCollection.archived
+        )
+          return;
+        nativeMutationToken = await beginCurrentProjectMutation();
+        if (nativeMutationToken === null) return;
+        const afterFlush = useAppStore.getState();
+        const afterSnapshot = afterFlush.snapshot;
+        const activeCollection = afterSnapshot?.project.collections.find(
+          (item) => item.id === target.collectionId,
+        );
+        if (
+          navigationIdentity.current !== target.navigationIdentity ||
+          !afterSnapshot ||
+          afterSnapshot.projectPath !== target.projectPath ||
+          afterSnapshot.project.id !== target.projectId ||
+          afterFlush.activeCollectionId !== target.collectionId ||
+          !activeCollection ||
+          activeCollection.archived
+        ) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
+        const result = workflowValue(
+          await window.imnota.startRegionCapture({
+            projectPath: target.projectPath,
+            collectionId: target.collectionId,
+            displayId,
+            ...(delaySeconds ? { delaySeconds } : {}),
+          }),
+        );
+        if ('buffered' in result) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          await settleBufferedCapture();
+          return;
+        }
+        const accepted = await finishCapturedScreenshot(
+          result.snapshot,
+          result.screenshotId,
+          nativeMutationToken,
+        );
         nativeMutationToken = null;
+        if (!accepted) return;
         return;
       }
       const result = workflowValue(
-        await window.imnota.startRegionCapture({
-          projectPath: target.projectPath,
-          collectionId: target.collectionId,
-          displayId,
-          ...(delaySeconds ? { delaySeconds } : {}),
-        }),
+        await window.imnota.startRegionCapture({ displayId, ...(delaySeconds ? { delaySeconds } : {}) }),
       );
-      const accepted = await persistence.acceptMutationSnapshot(
-        result.snapshot,
-        result.screenshotId,
-        nativeMutationToken,
-      );
-      nativeMutationToken = null;
-      if (!accepted) return;
-      await refreshProjects();
-      showToast('Screen capture added');
-      window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.annotation-canvas')?.focus());
+      if (!('buffered' in result)) return;
+      await settleBufferedCapture();
     } catch (reason) {
       if (nativeMutationToken !== null) {
         await persistence.cancelNativeMutation(nativeMutationToken);
@@ -1513,7 +1620,7 @@ export default function App() {
       } else void pasteImage();
     },
     'capture.region': () => {
-      if (captureEnabled) void captureRegion();
+      void captureRegion();
     },
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {
@@ -1552,6 +1659,15 @@ export default function App() {
   };
   // The drawing editor owns its canvas shortcuts; global navigation remains available elsewhere.
   useKeyboardShortcuts({ bindings: preferences.settings.shortcuts.bindings, handlers });
+  const captureRegionRef = useRef(captureRegion);
+  captureRegionRef.current = captureRegion;
+  useEffect(
+    () =>
+      window.imnota.onRegionCaptureHotkey(() => {
+        void captureRegionRef.current();
+      }),
+    [],
+  );
 
   if (booting || preferences.loading)
     return (
@@ -1706,7 +1822,9 @@ export default function App() {
             onShortcutChange={preferences.saveShortcuts}
             onWorkbenchChange={preferences.saveWorkbench}
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
+            globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
+            onPromptExportChange={preferences.savePromptExport}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -1762,6 +1880,7 @@ export default function App() {
               );
             }}
             onCaptureChange={preferences.saveCapture}
+            onAgentAccessChange={preferences.saveAgentAccess}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
             updateStatus={updateStatus}
@@ -1948,6 +2067,13 @@ export default function App() {
           displays={captureDisplayChoices}
           onSelect={(displayId) => settleCaptureDisplayChoice(displayId)}
           onCancel={() => settleCaptureDisplayChoice(null)}
+        />
+      )}
+      {captureDestinationOptions && (
+        <CaptureDestinationDialog
+          choices={captureDestinationOptions}
+          onSelect={(destination) => settleCaptureDestinationChoice(destination)}
+          onCancel={() => settleCaptureDestinationChoice(null)}
         />
       )}
       {pendingDeletion && (
