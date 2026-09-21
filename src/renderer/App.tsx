@@ -133,6 +133,7 @@ export default function App() {
     query: string;
   } | null>(null);
   const captureBusyRef = useRef(false);
+  const [capturing, setCapturing] = useState(false);
   const captureDisplayResolver = useRef<((displayId: number | null) => void) | null>(null);
   const captureDestinationResolver = useRef<((destination: CaptureDestination | null) => void) | null>(null);
   const [captureDisplayChoices, setCaptureDisplayChoices] = useState<readonly CaptureDisplayOption[] | null>(
@@ -914,9 +915,10 @@ export default function App() {
       throw reason;
     }
   }
-  async function captureRegion(delaySeconds?: CaptureDelaySeconds) {
+  async function captureRegion(delaySeconds?: CaptureDelaySeconds, repeatLast = false) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
+    setCapturing(true);
     let nativeMutationToken: number | null = null;
     try {
       if (detectShortcutPlatform() === 'linux') {
@@ -929,6 +931,52 @@ export default function App() {
       }
       const current = useAppStore.getState();
       const destination = currentCaptureDestination(current.snapshot, current.activeCollectionId);
+      if (repeatLast) {
+        if (!destination || !current.snapshot) {
+          setError('Open a project and choose a current collection before repeating a capture.');
+          return;
+        }
+        const target = {
+          projectPath: destination.projectPath,
+          projectId: current.snapshot.project.id,
+          collectionId: destination.collectionId,
+          navigationIdentity: navigationIdentity.current,
+        };
+        nativeMutationToken = await beginCurrentProjectMutation();
+        if (nativeMutationToken === null) return;
+        const afterFlush = useAppStore.getState();
+        const afterSnapshot = afterFlush.snapshot;
+        const activeCollection = afterSnapshot?.project.collections.find(
+          (item) => item.id === target.collectionId,
+        );
+        if (
+          navigationIdentity.current !== target.navigationIdentity ||
+          !afterSnapshot ||
+          afterSnapshot.projectPath !== target.projectPath ||
+          afterSnapshot.project.id !== target.projectId ||
+          afterFlush.activeCollectionId !== target.collectionId ||
+          !activeCollection ||
+          activeCollection.archived
+        ) {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+          return;
+        }
+        const result = workflowValue(
+          await window.imnota.repeatLastRegionCapture({
+            projectPath: target.projectPath,
+            collectionId: target.collectionId,
+          }),
+        );
+        const accepted = await finishCapturedScreenshot(
+          result.snapshot,
+          result.screenshotId,
+          nativeMutationToken,
+        );
+        nativeMutationToken = null;
+        if (!accepted) return;
+        return;
+      }
       const displayId = await chooseCaptureDisplay();
       if (displayId === null) return;
       if (destination && current.snapshot) {
@@ -1010,6 +1058,7 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
     } finally {
       captureBusyRef.current = false;
+      setCapturing(false);
     }
   }
   async function selectShot(id: string) {
@@ -1622,6 +1671,9 @@ export default function App() {
     'capture.region': () => {
       void captureRegion();
     },
+    'capture.repeatLastRegion': () => {
+      if (captureEnabled) void captureRegion(undefined, true);
+    },
     'edit.deleteAnnotation': () => {
       if (selectedAnnotationId) {
         changeAnnotations(persistence.annotations.filter((item) => item.id !== selectedAnnotationId));
@@ -1992,6 +2044,7 @@ export default function App() {
             onCapture={captureEnabled ? (delaySeconds) => void captureRegion(delaySeconds) : undefined}
             capturePrimary={platform === 'windows'}
             captureEnabled={captureEnabled}
+            captureInProgress={capturing}
             captureShortcut={
               resolvedShortcuts['capture.region'] ? shortcutLabel('capture.region') : undefined
             }

@@ -205,6 +205,35 @@ describe('capture overlay session', () => {
     });
   });
 
+  it('applies a remembered region on the matching display and ignores a missing display', () => {
+    const coordinator = new CaptureSelectionCoordinator([
+      { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },
+      { id: 2, bounds: { x: -1920, y: -200, width: 1920, height: 1080 }, scaleFactor: 1.5 },
+    ]);
+    expect(
+      coordinator.applyLastRegion({
+        displayId: 2,
+        bounds: { x: 200, y: 120, width: 400, height: 250 },
+      }),
+    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+    expect(
+      coordinator.applyLastRegion({
+        displayId: 9,
+        bounds: { x: 10, y: 10, width: 40, height: 40 },
+      }),
+    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+  });
+
+  it('records the overlay mode with a selected region', async () => {
+    const session = new CaptureOverlaySession();
+    expect(session.settle({ x: 1, y: 2, width: 3, height: 4 }, 'window')).toBe(true);
+    await expect(session.result).resolves.toEqual({
+      kind: 'selected',
+      selection: { x: 1, y: 2, width: 3, height: 4 },
+      mode: 'window',
+    });
+  });
+
   it('keeps cancellation from becoming a delayed save', async () => {
     const session = new CaptureOverlaySession();
     expect(session.settle(null)).toBe(true);

@@ -110,9 +110,9 @@ export function SettingsView({
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
   const shortcutPlatform = detectShortcutPlatform();
-  const captureShortcut = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform)[
-    'capture.region'
-  ];
+  const shortcutBindings = resolveShortcutBindings(preferences.shortcuts.bindings, shortcutPlatform);
+  const captureShortcut = shortcutBindings['capture.region'];
+  const repeatLastShortcut = shortcutBindings['capture.repeatLastRegion'];
   const captureShortcutNote = captureShortcut
     ? describeCommonShortcut(captureShortcut, shortcutPlatform)
     : null;
@@ -187,12 +187,33 @@ export function SettingsView({
                   cancel; no overlay opens and no file is saved.
                 </small>
                 <small data-testid="capture-shortcut-summary">
-                  Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>
-                  {captureShortcut
-                    ? globalCaptureShortcutRegistered
-                      ? ' even when Imnota is in the background. Change it under Screenshots above.'
-                      : ' while Imnota is focused. The background shortcut is not active. Change it under Screenshots above.'
-                    : '. The toolbar camera button and the Add menu still work.'}
+                  {captureShortcut ? (
+                    <>
+                      Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd> captures a
+                      region{' '}
+                      {globalCaptureShortcutRegistered
+                        ? 'even when Imnota is in the background'
+                        : 'while Imnota is focused. The background shortcut is not active'}
+                      {repeatLastShortcut ? (
+                        <>
+                          ; <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> recaptures the
+                          last region from this session
+                        </>
+                      ) : null}
+                      . Change these under Screenshots above.
+                    </>
+                  ) : (
+                    <>
+                      Shortcut: not set. The toolbar camera button and the Add menu still work.
+                      {repeatLastShortcut ? (
+                        <>
+                          {' '}
+                          <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> still recaptures
+                          the last region from this session while Imnota is focused.
+                        </>
+                      ) : null}
+                    </>
+                  )}
                   {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
                 </small>
               </span>
