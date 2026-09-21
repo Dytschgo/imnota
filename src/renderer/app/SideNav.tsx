@@ -403,26 +403,20 @@ export function SideNav({
           </div>
         </section>
       </div>
-      <nav className="side-nav-footer" aria-labelledby="workspace-navigation-heading">
-        <h2 className="nav-label" id="workspace-navigation-heading">
-          Workspace
-        </h2>
-        <button
+      <nav className="side-nav-footer" aria-label="Workspace">
+        <IconButton
           data-testid="settings-button"
-          className={`nav-item ${view === 'settings' ? 'active' : ''}`}
+          className={`side-nav-footer-button ${view === 'settings' ? 'active' : ''}`}
+          label="Settings"
           aria-current={view === 'settings' ? 'page' : undefined}
           onClick={() => void onNavigate('settings')}
         >
           <Settings2 size={16} aria-hidden="true" />
-          <span>Settings</span>
-        </button>
-        <div className="sidebar-footer">
-          <button className="nav-item" aria-label="About" title="About" onClick={onAbout}>
-            <Info size={16} aria-hidden="true" />
-            <span>About</span>
-          </button>
-          {updateControl}
-        </div>
+        </IconButton>
+        <IconButton className="side-nav-footer-button" label="About" onClick={onAbout}>
+          <Info size={16} aria-hidden="true" />
+        </IconButton>
+        {updateControl}
       </nav>
     </aside>
   );
