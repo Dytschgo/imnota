@@ -6,7 +6,7 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, matchesProjectSearch, SettingsView } from './App';
+import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -225,7 +225,7 @@ describe('feedback controls', () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
     renderApp({
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' }],
       loadProject,
     });
     await screen.findByTestId('library-full-search');
@@ -1175,6 +1175,11 @@ describe('feedback controls', () => {
     );
     expect(notification).not.toHaveTextContent('Error invoking remote method');
     expect(document.querySelector('.error-banner')).toBeNull();
+  });
+
+  it('only removes a real Error prefix from renderer error messages', () => {
+    expect(userFacingErrorMessage('Error. Clipboard unavailable')).toBe('Clipboard unavailable');
+    expect(userFacingErrorMessage('Errorless settings name')).toBe('Errorless settings name');
   });
 
   it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
@@ -2495,7 +2500,15 @@ describe('feedback controls', () => {
     });
     expect((await screen.findAllByTestId('project-icon-target')).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByTestId('project-archive-project-id'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    const undo = await screen.findByRole('button', { name: 'Undo' });
+    vi.useFakeTimers();
+    try {
+      act(() => vi.advanceTimersByTime(3501));
+      expect(undo).toBeInTheDocument();
+      fireEvent.click(undo);
+    } finally {
+      vi.useRealTimers();
+    }
 
     await waitFor(() => expect(setProjectArchived).toHaveBeenCalledTimes(2));
     expect(setProjectArchived.mock.calls[0]?.[0]).toEqual({

@@ -279,6 +279,10 @@ export default function App() {
   const showToast = useCallback((message: string, action?: ToastNotification['action']) => {
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     setToast({ message, action });
+    if (action) {
+      toastTimer.current = null;
+      return;
+    }
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
       toastTimer.current = null;
@@ -1564,11 +1568,16 @@ export default function App() {
       }
       await refreshProjects();
       if (identity !== navigationIdentity.current) return;
-      if (archived && result.projectRevision) {
-        showToast('Project archived', {
-          label: 'Undo',
-          run: () => void setProjectArchived(projectPath, false, result.projectRevision),
-        });
+      if (archived) {
+        showToast(
+          'Project archived',
+          result.projectRevision
+            ? {
+                label: 'Undo',
+                run: () => void setProjectArchived(projectPath, false, result.projectRevision!),
+              }
+            : undefined,
+        );
       } else {
         showToast('Project restored');
       }
