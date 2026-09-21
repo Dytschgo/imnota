@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('imnotaCapture', {
   annotate: () => ipcRenderer.invoke('capture-overlay:annotate'),
   copy: () => ipcRenderer.invoke('capture-overlay:copy') as Promise<{ image: boolean }>,
   cancel: () => ipcRenderer.invoke('capture-overlay:cancel'),
+  onCountdown: (handler: (payload: { remainingSeconds: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { remainingSeconds: number }) =>
+      handler(payload);
+    ipcRenderer.on('capture-overlay:countdown', listener);
+    return () => ipcRenderer.removeListener('capture-overlay:countdown', listener);
+  },
   onPayload: (
     handler: (payload: { displayId: number; displayBounds: CaptureRectangle; imageDataUrl: string }) => void,
   ) => {

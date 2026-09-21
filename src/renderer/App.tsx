@@ -17,7 +17,7 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { CaptureDisplayOption } from '../shared/capture';
+import type { CaptureDelaySeconds, CaptureDisplayOption } from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -234,7 +234,10 @@ export default function App() {
       throw new Error('Save the current drawing or text before preparing the prompt.');
     return persistence.getSavedContext(useAppStore.getState().activeCollectionId);
   }, [persistence, contentPersistence]);
-  const promptBundles = usePromptBundleController({ getSavedContext: getSavedPromptContext });
+  const promptBundles = usePromptBundleController({
+    getSavedContext: getSavedPromptContext,
+    getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+  });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
@@ -921,7 +924,7 @@ export default function App() {
       throw reason;
     }
   }
-  async function captureRegion() {
+  async function captureRegion(delaySeconds?: CaptureDelaySeconds) {
     if (captureBusyRef.current) return;
     captureBusyRef.current = true;
     let nativeMutationToken: number | null = null;
@@ -985,6 +988,7 @@ export default function App() {
             projectPath: target.projectPath,
             collectionId: target.collectionId,
             displayId,
+            ...(delaySeconds ? { delaySeconds } : {}),
           }),
         );
         if ('buffered' in result) {
@@ -1004,7 +1008,9 @@ export default function App() {
         if (!accepted) return;
         return;
       }
-      const result = workflowValue(await window.imnota.startRegionCapture({ displayId }));
+      const result = workflowValue(
+        await window.imnota.startRegionCapture({ displayId, ...(delaySeconds ? { delaySeconds } : {}) }),
+      );
       if (!('buffered' in result)) return;
       pendingOverlayAction.current = result.overlayAction;
       await settleBufferedCapture();
@@ -1835,6 +1841,7 @@ export default function App() {
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
+            onPromptExportChange={preferences.savePromptExport}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -1890,6 +1897,7 @@ export default function App() {
               );
             }}
             onCaptureChange={preferences.saveCapture}
+            onAgentAccessChange={preferences.saveAgentAccess}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
             updateStatus={updateStatus}
@@ -1998,7 +2006,7 @@ export default function App() {
             onRedo={redoAnnotations}
             onFit={() => dispatchCanvasCommand(stageRef.current, 'fit')}
             onActualSize={() => dispatchCanvasCommand(stageRef.current, 'actual-size')}
-            onCapture={captureEnabled ? () => void captureRegion() : undefined}
+            onCapture={captureEnabled ? (delaySeconds) => void captureRegion(delaySeconds) : undefined}
             capturePrimary={platform === 'windows'}
             captureEnabled={captureEnabled}
             captureShortcut={

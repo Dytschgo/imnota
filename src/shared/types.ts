@@ -204,6 +204,8 @@ export interface DeleteScreenshotResult {
 }
 
 export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridge {
+  /** Sync preload flag so the renderer can skip OCR IPC on unsupported platforms. */
+  onDeviceOcrAvailable?: boolean;
   getSettings(): Promise<WorkspaceSettings>;
   chooseWorkspace(): Promise<WorkspaceSettings | null>;
   setSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings>;

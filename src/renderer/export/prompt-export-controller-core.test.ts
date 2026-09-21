@@ -87,6 +87,11 @@ interface FakeBridgeOptions {
   /** Clipboard read-back for combined copies; defaults to every format present. */
   placed?: { text: boolean; html: boolean; image: boolean; files: boolean };
   failFinish?: boolean;
+  recognizeScreenshotText?: (input: {
+    pngDataUrl: string;
+    screenshotId: string;
+    crop?: { x: number; y: number; width: number; height: number };
+  }) => Promise<string>;
 }
 
 function fakeBridge(options: FakeBridgeOptions = {}) {
@@ -249,6 +254,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
       opens.push(structuredClone(input));
       return ok(undefined);
     },
+    recognizeScreenshotText: options.recognizeScreenshotText,
   };
   return { bridge, starts, writes, copies, opens, finishes, cancellations, loadCounts };
 }
@@ -340,8 +346,9 @@ function engine(
   getSavedContext: () => Promise<SavedPromptExportContext>,
   bridge: PromptBundleControllerBridge,
   rendering: PromptBundleControllerRendering,
+  extra: { getIncludeRecognisedText?: () => boolean } = {},
 ) {
-  return new PromptBundleControllerEngine({ getSavedContext, bridge, rendering });
+  return new PromptBundleControllerEngine({ getSavedContext, bridge, rendering, ...extra });
 }
 
 describe('prompt export controller orchestration', () => {
@@ -350,8 +357,10 @@ describe('prompt export controller orchestration', () => {
     const annotations: Record<string, Annotation[]> = {
       'shot-1': [
         { id: 'first', kind: 'text', x: 0, y: 0, text: 'First note', zIndex: 99 },
-        { id: 'shape', kind: 'rectangle', x: 0, y: 0, zIndex: 2 },
+        { id: 'shape', kind: 'rectangle', x: 10, y: 8, width: 20, height: 16, zIndex: 2 },
         { id: 'blank', kind: 'text', x: 0, y: 0, text: '   ', zIndex: 1 },
+        { id: 'a1', kind: 'arrow', x: 12, y: 32, points: [0, 0, 38, 8], zIndex: 3 },
+        { id: 's2', kind: 'step', x: 70, y: 40, stepNumber: 1, zIndex: 4 },
         { id: 'second', kind: 'callout', x: 0, y: 0, text: 'Second note', zIndex: 0 },
       ],
     };
@@ -369,11 +378,134 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown.indexOf('Picture 1 / Note 1')).toBeLessThan(
       native.writes[0].markdown.indexOf('Picture 1 / Note 2'),
     );
+    expect(native.writes[0].markdown).toContain(
+      [
+        '### Picture 1 / Marks',
+        '',
+        '- text `first` note 1 at 0.0%,0.0% 0.0%×0.0%',
+        '- rectangle `shape` at 10.0%,10.0% 20.0%×20.0%',
+        '- arrow `a1` from 12.0%,40.0% to 50.0%,50.0%',
+        '- step `s2` number 1 at 70.0%,50.0%',
+        '- callout `second` note 2 at 0.0%,0.0% 0.0%×0.0%',
+      ].join('\n'),
+    );
     expect(native.writes[0].markdown).not.toContain('Note 3');
     expect(native.writes[0].markdown).not.toContain('opaque-project-grant');
     expect(native.finishes[0].masterMarkdown).toContain('Picture 2 — Picture title 2');
     expect(native.finishes[0].masterMarkdown).toContain('Keep the checkout accessible.');
     expect(native.finishes[0].masterMarkdown).not.toContain('opaque-project-grant');
+  });
+
+  test('appends on-device Visible text from an injected recognizer', async () => {
+    const recognizer = vi.fn(async () => 'Submit order');
+    const native = fakeBridge({ recognizeScreenshotText: recognizer });
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    const result = await controller.prepareFreshFiles();
+
+    expect(result.ok).toBe(true);
+    expect(recognizer).toHaveBeenCalledWith({ pngDataUrl: PNG, screenshotId: 'shot-1' });
+    expect(native.writes[0].markdown).toContain('### Visible text\n\nSubmit order\n');
+    expect(native.writes[0].markdown).toContain('Description 1');
+    expect(native.writes[0].markdown.indexOf('Description 1')).toBeLessThan(
+      native.writes[0].markdown.indexOf('### Visible text'),
+    );
+  });
+
+  test('OCRs cropped source pixels when a crop mark exists', async () => {
+    const recognizer = vi.fn(async () => 'Cropped label');
+    const native = fakeBridge({
+      annotations: {
+        'shot-1': [{ id: 'crop', kind: 'crop', x: 10, y: 8, width: 40, height: 24, zIndex: 0 }],
+      },
+      recognizeScreenshotText: recognizer,
+    });
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(recognizer).toHaveBeenCalledWith({
+      pngDataUrl: PNG,
+      screenshotId: 'shot-1',
+      crop: { x: 10, y: 8, width: 40, height: 24 },
+    });
+    expect(native.writes[0].markdown).toContain('### Visible text\n\nCropped label\n');
+  });
+
+  test('omits Visible text for redacted screenshots and when the recognizer throws', async () => {
+    const redacted = fakeBridge({
+      annotations: {
+        'shot-1': [{ id: 'secret', kind: 'blur', x: 4, y: 4, width: 12, height: 8, zIndex: 0 }],
+      },
+      recognizeScreenshotText: vi.fn(async () => 'secret token'),
+    });
+    const redactedController = engine(
+      async () => savedContext([screenshot(0)]),
+      redacted.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await redactedController.prepareFreshFiles()).ok).toBe(true);
+    expect(redacted.bridge.recognizeScreenshotText).not.toHaveBeenCalled();
+    expect(redacted.writes[0].markdown).not.toContain('### Visible text');
+    expect(redacted.writes[0].markdown).not.toContain('secret token');
+
+    const throwing = fakeBridge({
+      recognizeScreenshotText: vi.fn(async () => {
+        throw new Error('OCR engine failed');
+      }),
+    });
+    const throwingController = engine(
+      async () => savedContext([screenshot(0)]),
+      throwing.bridge,
+      fakeRendering().rendering,
+    );
+    const thrown = await throwingController.prepareFreshFiles();
+    expect(thrown.ok).toBe(true);
+    expect(throwing.writes[0].markdown).not.toContain('### Visible text');
+    expect(throwing.writes[0].markdown).toContain('## Picture 1 — Picture title 1');
+
+    const disabled = fakeBridge({
+      recognizeScreenshotText: vi.fn(async () => 'should not appear'),
+    });
+    const disabledController = engine(
+      async () => savedContext([screenshot(0)]),
+      disabled.bridge,
+      fakeRendering().rendering,
+      { getIncludeRecognisedText: () => false },
+    );
+    expect((await disabledController.prepareFreshFiles()).ok).toBe(true);
+    expect(disabled.bridge.recognizeScreenshotText).not.toHaveBeenCalled();
+    expect(disabled.writes[0].markdown).not.toContain('### Visible text');
+  });
+
+  test('uses one bounded OCR wait for the whole export and still writes Markdown when OCR never returns', async () => {
+    vi.useFakeTimers();
+    try {
+      const recognizer = vi.fn(() => new Promise<string>(() => undefined));
+      const native = fakeBridge({ recognizeScreenshotText: recognizer });
+      const controller = engine(
+        async () => savedContext([screenshot(0), screenshot(1)]),
+        native.bridge,
+        fakeRendering().rendering,
+      );
+
+      const result = controller.prepareFreshFiles();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await result).toEqual({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
+      expect(recognizer).toHaveBeenCalledTimes(1);
+      expect(native.writes).toHaveLength(1);
+      expect(native.writes[0].markdown).not.toContain('### Visible text');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('preserves indented Markdown in master context and descriptions while normalizing line endings', async () => {
@@ -612,11 +744,39 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({
       state: 'copied',
       outcome: 'markdown',
-      warning: expect.stringContaining('Copy image'),
+      warning: expect.stringMatching(/Image was not confirmed.*Copy image only or Open files/),
     });
     const image = await controller.copyImage(controller.getState().cards[0]);
     expect(image.ok).toBe(true);
     expect(controller.getState().cards[0]).toMatchObject({ outcome: 'image', warning: undefined });
+  });
+
+  test('reports image-only Windows retention without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: true, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      outcome: 'image',
+      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown only or Open files/),
+    });
+  });
+
+  test('reports an unverified clipboard read-back without claiming Markdown + image', async () => {
+    const native = fakeBridge({ placed: { text: false, html: false, image: false, files: false } });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    const copy = await controller.copyFresh(1);
+    expect(copy.ok).toBe(true);
+    expect(controller.getState().cards[0].outcome).toBeUndefined();
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'copied',
+      warning: expect.stringMatching(
+        /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
+      ),
+    });
   });
 
   test('exposes same-session fallbacks when combined clipboard copy fails', async () => {

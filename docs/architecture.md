@@ -49,3 +49,7 @@ The service canonicalizes bounded PNGs, sanitizes Markdown, stores artifacts out
 Workspace-independent settings store panel collapse state, appearance, shortcuts and onboarding completion in the local application profile. They are not written into projects. The default appearance follows the operating system; optional presets and Glass remain cosmetic and must preserve accessibility fallbacks.
 
 Imnota has no account, hosted AI call, cloud sync or background telemetry in this architecture.
+
+## Local agent access
+
+An optional MCP server can expose read-only workspace tools to a local editor. It is off by default. When enabled from Settings, the main process may listen on `127.0.0.1` or serve stdio after a `--mcp` spawn; it never binds a public address. Tools reuse the IPC project-path validators, read already-prepared exports, and omit recovery journals, backup archives, and hosted-share secrets. See [Local agent access](agent-access.md).
