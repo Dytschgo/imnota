@@ -1921,22 +1921,24 @@ describe('feedback controls', () => {
         },
       ],
     });
-    renderApp({
-      getPreferenceSettings: async () => ({
-        ok: true,
-        value: {
-          settings: {
-            ...DEFAULT_PREFERENCE_SETTINGS,
-            capture: { experimentalRegionCapture: true },
+    await act(async () => {
+      renderApp({
+        getPreferenceSettings: async () => ({
+          ok: true,
+          value: {
+            settings: {
+              ...DEFAULT_PREFERENCE_SETTINGS,
+              capture: { experimentalRegionCapture: true },
+            },
+            profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
           },
-          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
-        },
-      }),
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
-      loadProject,
-      startRegionCapture,
-      commitBufferedCapture,
-      discardBufferedCapture,
+        }),
+        listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+        loadProject,
+        startRegionCapture,
+        commitBufferedCapture,
+        discardBufferedCapture,
+      });
     });
     await screen.findByTestId('library-full-search');
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
@@ -1974,21 +1976,23 @@ describe('feedback controls', () => {
     const commitBufferedCapture = vi.fn();
     const discardBufferedCapture = vi.fn(async () => ({ ok: true as const, value: undefined }));
     const raiseMainWindow = vi.fn(async () => ({ ok: true as const, value: undefined }));
-    renderApp({
-      getPreferenceSettings: async () => ({
-        ok: true,
-        value: {
-          settings: {
-            ...DEFAULT_PREFERENCE_SETTINGS,
-            capture: { experimentalRegionCapture: true },
+    await act(async () => {
+      renderApp({
+        getPreferenceSettings: async () => ({
+          ok: true,
+          value: {
+            settings: {
+              ...DEFAULT_PREFERENCE_SETTINGS,
+              capture: { experimentalRegionCapture: true },
+            },
+            profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
           },
-          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
-        },
-      }),
-      startRegionCapture,
-      commitBufferedCapture,
-      discardBufferedCapture,
-      raiseMainWindow,
+        }),
+        startRegionCapture,
+        commitBufferedCapture,
+        discardBufferedCapture,
+        raiseMainWindow,
+      });
     });
     await screen.findByTestId('library-full-search');
     act(() => {
@@ -2023,22 +2027,24 @@ describe('feedback controls', () => {
         },
       ],
     });
-    renderApp({
-      getPreferenceSettings: async () => ({
-        ok: true,
-        value: {
-          settings: {
-            ...DEFAULT_PREFERENCE_SETTINGS,
-            capture: { experimentalRegionCapture: true },
+    await act(async () => {
+      renderApp({
+        getPreferenceSettings: async () => ({
+          ok: true,
+          value: {
+            settings: {
+              ...DEFAULT_PREFERENCE_SETTINGS,
+              capture: { experimentalRegionCapture: true },
+            },
+            profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
           },
-          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
-        },
-      }),
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
-      loadProject: async () => snapshot,
-      startRegionCapture,
-      commitBufferedCapture,
-      discardBufferedCapture,
+        }),
+        listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath }],
+        loadProject: async () => snapshot,
+        startRegionCapture,
+        commitBufferedCapture,
+        discardBufferedCapture,
+      });
     });
     await screen.findByTestId('library-full-search');
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
@@ -2526,9 +2532,14 @@ describe('feedback controls', () => {
       }),
     });
     fireEvent.click(await screen.findByTestId('library-full-search'));
-    fireEvent.change(await screen.findByTestId('global-search-input'), {
-      target: { value: 'button' },
-    });
+    const searchInput = await screen.findByTestId('global-search-input');
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(searchInput, { target: { value: 'button' } });
+      await act(async () => vi.advanceTimersByTime(180));
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(await screen.findByRole('option', { name: /Button label/ }));
 
     await waitFor(() =>
