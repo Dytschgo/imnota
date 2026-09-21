@@ -8,6 +8,7 @@ import {
   type PreferenceSettingsResult,
   type ShortcutPreferences,
   type WorkbenchPreferences,
+  type AgentAccessPreferences,
 } from '../../shared/preferences';
 import type { BackupPreferences } from '../../shared/backups';
 import type {
@@ -23,7 +24,10 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reducedEffectsRecommended: false,
   reasons: [],
 };
-const UNKNOWN_CAPABILITIES: NativeCapabilities = { windowsFileClipboard: false };
+const UNKNOWN_CAPABILITIES: NativeCapabilities = {
+  windowsFileClipboard: false,
+  globalCaptureShortcutRegistered: false,
+};
 
 export interface PreferenceController {
   result: PreferenceSettingsResult | null;
@@ -41,7 +45,9 @@ export interface PreferenceController {
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
   saveWorkbench(value: WorkbenchPreferences): Promise<void>;
   saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
+  savePromptExport(value: PreferenceSettings['promptExport']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
+  saveAgentAccess(value: AgentAccessPreferences): Promise<void>;
   clearError(): void;
 }
 
@@ -86,8 +92,14 @@ export function usePreferences(): PreferenceController {
     setSaving(true);
     setError('');
     try {
-      const next = workflowValue(await getRendererBridge().setPreferenceSettings(update));
+      const bridge = getRendererBridge();
+      const next = workflowValue(await bridge.setPreferenceSettings(update));
       setResult(next);
+      try {
+        setCapabilities(workflowValue(await bridge.getNativeCapabilities()));
+      } catch {
+        /* Keep the last known host capabilities if the follow-up read fails. */
+      }
       return next;
     } catch (reason) {
       setError(
@@ -129,8 +141,14 @@ export function usePreferences(): PreferenceController {
     saveNativeCopy: async (nativeCopy) => {
       await save({ nativeCopy });
     },
+    savePromptExport: async (promptExport) => {
+      await save({ promptExport });
+    },
     saveUpdates: async (updates) => {
       await save({ updates });
+    },
+    saveAgentAccess: async (agentAccess) => {
+      await save({ agentAccess });
     },
     clearError: () => setError(''),
   };
