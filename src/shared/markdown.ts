@@ -50,6 +50,11 @@ function priorityLabel(priority: ScreenshotRecord['priority']): string {
   return priority[0].toUpperCase() + priority.slice(1);
 }
 
+/** Source screenshot pixels already stored on the record; not a schema field. */
+export function pictureSourceSizeLine(width: number, height: number): string {
+  return `Source size: ${width}×${height}`;
+}
+
 /** Legacy/package overview Markdown. Prompt bundles use the richer planner. */
 export function generateMarkdown(
   project: ProjectData,
@@ -90,6 +95,8 @@ export function generateMarkdown(
       `## Picture ${visualNumber} — ${shot.title || shot.originalFilename}`,
       '',
       `Priority for agent: ${priorityLabel(shot.priority)}`,
+      '',
+      pictureSourceSizeLine(shot.originalWidth, shot.originalHeight),
       '',
     );
     if (shot.description.trim()) out.push(shot.description.trim(), '');

@@ -169,6 +169,28 @@ describe('prompt bundle planning', () => {
     expect(stamped.bundles[0].markdown).toContain(
       'Bundle reference: Checkout Collection - 260907-184205 - 01',
     );
+    expect(stamped.bundles[0].markdown).toContain('Source size: 100×100');
+  });
+
+  it('includes source pixel size from native dimensions, not composed layout size', () => {
+    const input = collection([
+      screenshot('captured', 0, { nativeWidth: 1920, nativeHeight: 1080 }),
+      screenshot('imported', 1, { nativeWidth: 800, nativeHeight: 600 }),
+    ]);
+    const result = planPromptBundles(input, [
+      rendered('captured', 3840, 2160),
+      rendered('imported', 1600, 1200),
+    ]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    expect(result.bundles[0].markdown).toContain(
+      '## Picture 1 — captured title\n\nPriority for agent: Medium\n\nSource size: 1920×1080',
+    );
+    expect(result.bundles[0].markdown).toContain(
+      '## Picture 2 — imported title\n\nPriority for agent: Medium\n\nSource size: 800×600',
+    );
+    expect(result.bundles[0].markdown).not.toContain('Source size: 3840×2160');
+    expect(result.bundles[0].markdown).not.toContain('Source size: 1600×1200');
   });
 
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
@@ -264,6 +286,7 @@ describe('prompt bundle planning', () => {
     );
     if (drawingOnly.kind === 'ready') {
       expect(drawingOnly.bundles[0].markdown).toContain('## Drawing 1 — Architecture');
+      expect(drawingOnly.bundles[0].markdown).not.toContain('Source size:');
       expect(drawingOnly.bundles[0].pictureNumbers).toEqual([1]);
     } else throw new Error(drawingOnly.message);
   });

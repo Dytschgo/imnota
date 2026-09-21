@@ -1,4 +1,5 @@
 import { annotationMarkListItems } from './annotation-marks';
+import { pictureSourceSizeLine } from './markdown';
 import { textAnnotationReferences } from './annotation-order';
 import type { Annotation } from './types';
 
@@ -76,6 +77,8 @@ export interface PromptBundlePicture {
   dataUrl?: string;
   width: number;
   height: number;
+  nativeWidth: number;
+  nativeHeight: number;
 }
 export interface PromptBundleText {
   itemId: string;
@@ -287,6 +290,7 @@ function markdownForBundle(
     lines.push(`## ${visualLabel(picture)} — ${cleanHeading(picture.title, picture.originalFilename)}`, '');
     if (picture.kind === 'screenshot') {
       lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
+      lines.push(pictureSourceSizeLine(picture.nativeWidth, picture.nativeHeight), '');
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
@@ -356,6 +360,8 @@ function resolveRendered(
     dataUrl: rendered.dataUrl,
     width: rendered.width,
     height: rendered.height,
+    nativeWidth: item.nativeWidth,
+    nativeHeight: item.nativeHeight,
   };
 }
 

@@ -88,7 +88,17 @@ An excluded screenshot is omitted from every prompt PNG but noted in Markdown, f
 Picture 3 was intentionally excluded from this prompt bundle.
 ```
 
-A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number and priority.
+A screenshot needs neither a description nor an annotation. Its minimal Markdown still includes its title, Picture number, priority and source pixel width × height.
+
+When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks are omitted:
+
+```md
+### Picture 2 / Marks
+
+- arrow `a1` from 12.0%,40.0% to 71.5%,41.2%
+- rectangle `r4` at 68.0%,38.0% 18.0%×10.0%
+- step `s2` number 1 at 70.0%,40.0%
+```
 
 When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks are omitted:
 
