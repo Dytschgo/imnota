@@ -235,10 +235,7 @@ export async function exerciseRegionCapture(
   await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
   const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
   const trayOverlayDriver = new NativeUiDriver(trayOverlay);
-  const trayMode = await trayOverlayDriver.evaluate<boolean>(
-    `document.querySelector('[data-mode="display"]')?.getAttribute('aria-checked') === 'true'`,
-  );
-  if (!trayMode) throw new Error('Queued tray capture did not preserve Display mode after reopening.');
+  await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
   await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
