@@ -12,6 +12,16 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      name: 'development-content-security-policy',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html, context) {
+          if (!context.server) return html;
+          return html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';");
+        },
+      },
+    },
+    {
       name: 'local-drawing-fonts',
       configureServer(server) {
         server.middlewares.use('/excalidraw/fonts', async (req, res, next) => {
