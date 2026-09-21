@@ -1,5 +1,6 @@
 import {
   Archive,
+  ArchiveRestore,
   Camera,
   Check,
   ChevronDown,
@@ -48,6 +49,23 @@ export interface CollectionRailProps {
   captureDisabledLabel?: string;
 }
 
+/** Filled when archived, outlined while active. Rows name their state through the option instead. */
+function CollectionStatus({ archived, decorative = false }: { archived: boolean; decorative?: boolean }) {
+  const label = archived ? 'Status: archived' : 'Status: active';
+  return (
+    <Archive
+      className={`collection-status ${archived ? 'collection-status-archived' : ''}`}
+      size={12}
+      fill={archived ? 'currentColor' : 'none'}
+      role={decorative ? undefined : 'img'}
+      aria-hidden={decorative ? 'true' : undefined}
+      aria-label={decorative ? undefined : label}
+    >
+      <title>{label}</title>
+    </Archive>
+  );
+}
+
 export function CollectionControls({
   onFlush,
   onSelectCollection,
@@ -64,8 +82,8 @@ export function CollectionControls({
   const store = useAppStore();
   const project = store.snapshot?.project;
   const current = project?.collections.find((collection) => collection.id === store.activeCollectionId);
-  const [renaming, setRenaming] = useState(false);
-  const [name, setName] = useState(current?.name ?? '');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const operationPending = useRef(false);
   const [error, setError] = useState('');
@@ -82,7 +100,6 @@ export function CollectionControls({
     collections.findIndex((collection) => collection.id === current?.id),
   );
 
-  useEffect(() => setName(current?.name ?? ''), [current?.id, current?.name]);
   useEffect(() => {
     if (!pickerOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
@@ -125,7 +142,14 @@ export function CollectionControls({
     setFocusedIndex(Math.min(Math.max(nextIndex, 0), collections.length - 1));
   };
 
-  async function apply(action: 'create' | 'rename' | 'archive' | 'restore') {
+  const renaming = renamingId ? collections.find((collection) => collection.id === renamingId) : undefined;
+  const beginRename = (collection: (typeof collections)[number]) => {
+    closePicker();
+    setName(collection.name);
+    setRenamingId(collection.id);
+  };
+
+  async function apply(action: 'create' | 'rename' | 'archive' | 'restore', collectionId = current!.id) {
     if (operationPending.current || (action === 'rename' && !name.trim())) return;
     operationPending.current = true;
     setBusy(true);
@@ -134,7 +158,7 @@ export function CollectionControls({
       if ((await onFlush()) === false) return;
       const snapshot = await window.imnota.editCollection({
         projectPath: store.snapshot!.projectPath,
-        collectionId: current!.id,
+        collectionId,
         action,
         name: action === 'rename' ? name : undefined,
       });
@@ -144,7 +168,7 @@ export function CollectionControls({
         createdId ? undefined : (store.activeScreenshotId ?? undefined),
       );
       if (createdId) await (onSelectCollection ?? ((id) => store.setActiveCollection(id)))(createdId);
-      setRenaming(false);
+      setRenamingId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The collection could not be saved.');
     } finally {
@@ -186,7 +210,7 @@ export function CollectionControls({
           type="button"
           className="collection-picker-trigger"
           aria-label="Collection"
-          aria-haspopup="listbox"
+          aria-haspopup="menu"
           aria-expanded={pickerOpen}
           aria-controls={pickerId}
           data-testid="collection-picker"
@@ -211,72 +235,85 @@ export function CollectionControls({
           }}
         >
           <span>{current.name}</span>
-          {current.archived && <small>Archived</small>}
+          <CollectionStatus archived={current.archived} />
           <ChevronDown size={14} aria-hidden="true" />
         </button>
-        <div className="collection-picker-actions">
-          <IconButton label="Rename" disabled={busy} onClick={() => setRenaming(true)}>
-            <Pencil size={14} aria-hidden="true" />
-          </IconButton>
-          <IconButton
-            label={current.archived ? 'Restore' : 'Archive'}
-            disabled={busy}
-            onClick={() => void apply(current.archived ? 'restore' : 'archive')}
-          >
-            <Archive size={14} aria-hidden="true" />
-          </IconButton>
-        </div>
         {pickerOpen && (
           <div
             ref={pickerMenuRef}
             id={pickerId}
             className="collection-picker-menu"
-            role="listbox"
+            role="menu"
             aria-label="Collections"
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) closePicker();
             }}
           >
             {collections.map((collection, index) => (
-              <button
-                ref={(element) => {
-                  pickerOptionRefs.current[index] = element;
-                }}
-                type="button"
-                role="option"
-                aria-selected={collection.id === current.id}
-                tabIndex={index === focusedIndex ? 0 : -1}
-                className="collection-picker-option"
-                key={collection.id}
-                onClick={() => chooseCollection(collection.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault();
-                    moveFocus(index + 1);
-                  } else if (event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    moveFocus(index - 1);
-                  } else if (event.key === 'Home') {
-                    event.preventDefault();
-                    moveFocus(0);
-                  } else if (event.key === 'End') {
-                    event.preventDefault();
-                    moveFocus(collections.length - 1);
-                  } else if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    chooseCollection(collection.id);
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closePicker(true);
-                  }
-                }}
-              >
-                <span>{collection.name}</span>
-                {collection.archived && <small>Archived</small>}
-                {collection.id === current.id && (
-                  <Check className="collection-picker-check" size={13} aria-hidden="true" />
-                )}
-              </button>
+              <div className="collection-picker-row" key={collection.id}>
+                <button
+                  ref={(element) => {
+                    pickerOptionRefs.current[index] = element;
+                  }}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={collection.id === current.id}
+                  aria-label={collection.name}
+                  aria-description={collection.archived ? 'Archived' : 'Active'}
+                  tabIndex={index === focusedIndex ? 0 : -1}
+                  className="collection-picker-option"
+                  onClick={() => chooseCollection(collection.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      moveFocus(index + 1);
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      moveFocus(index - 1);
+                    } else if (event.key === 'Home') {
+                      event.preventDefault();
+                      moveFocus(0);
+                    } else if (event.key === 'End') {
+                      event.preventDefault();
+                      moveFocus(collections.length - 1);
+                    } else if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      chooseCollection(collection.id);
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closePicker(true);
+                    }
+                  }}
+                >
+                  <span>{collection.name}</span>
+                  <CollectionStatus archived={collection.archived} decorative />
+                  {collection.id === current.id && (
+                    <Check className="collection-picker-check" size={13} aria-hidden="true" />
+                  )}
+                </button>
+                <IconButton
+                  role="menuitem"
+                  tabIndex={-1}
+                  label={`Rename ${collection.name}`}
+                  disabled={busy}
+                  onClick={() => beginRename(collection)}
+                >
+                  <Pencil size={13} aria-hidden="true" />
+                </IconButton>
+                <IconButton
+                  role="menuitem"
+                  tabIndex={-1}
+                  label={`${collection.archived ? 'Restore' : 'Archive'} ${collection.name}`}
+                  disabled={busy}
+                  onClick={() => void apply(collection.archived ? 'restore' : 'archive', collection.id)}
+                >
+                  {collection.archived ? (
+                    <ArchiveRestore size={13} aria-hidden="true" />
+                  ) : (
+                    <Archive size={13} aria-hidden="true" />
+                  )}
+                </IconButton>
+              </div>
             ))}
           </div>
         )}
@@ -310,13 +347,13 @@ export function CollectionControls({
         <Modal
           title="Rename collection"
           description="Screenshot files and the internal collection ID stay unchanged."
-          onClose={() => !busy && setRenaming(false)}
+          onClose={() => !busy && setRenamingId(null)}
         >
           <form
             className="modal-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void apply('rename');
+              void apply('rename', renaming.id);
             }}
           >
             <TextInput
@@ -327,7 +364,7 @@ export function CollectionControls({
               onChange={(event) => setName(event.target.value)}
             />
             <div className="modal-actions">
-              <Button type="button" variant="ghost" disabled={busy} onClick={() => setRenaming(false)}>
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setRenamingId(null)}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>

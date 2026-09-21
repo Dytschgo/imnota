@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import { useAppStore } from '../store';
@@ -424,17 +424,17 @@ describe('CollectionRail', () => {
     async (shiftKey) => {
       render(<CollectionRail {...props()} />);
       const destination = screen.getByRole('button', { name: /Paste from clipboard/i });
-      for (const [trigger, role] of [
-        [screen.getByRole('button', { name: 'Collection' }), 'listbox'],
-        [screen.getByTestId('add-item-trigger'), 'menu'],
+      for (const [trigger, name] of [
+        [screen.getByRole('button', { name: 'Collection' }), 'Collections'],
+        [screen.getByTestId('add-item-trigger'), 'Add item'],
       ] as const) {
         fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-        const popup = await screen.findByRole(role);
+        const popup = await screen.findByRole('menu', { name });
         await waitFor(() => expect(popup.contains(document.activeElement)).toBe(true));
         fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey });
         // jsdom does not perform browser Tab traversal: model the resulting focus move.
         act(() => destination.focus());
-        expect(screen.queryByRole(role)).not.toBeInTheDocument();
+        expect(screen.queryByRole('menu', { name })).not.toBeInTheDocument();
         expect(trigger).toHaveAttribute('aria-expanded', 'false');
         expect(destination).toHaveFocus();
       }
@@ -450,7 +450,7 @@ describe('CollectionRail', () => {
       ['ArrowUp', 'Collection B'],
     ] as const) {
       fireEvent.keyDown(trigger, { key });
-      await waitFor(() => expect(screen.getByRole('option', { name })).toHaveFocus());
+      await waitFor(() => expect(screen.getByRole('menuitemradio', { name })).toHaveFocus());
       fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
       await waitFor(() => expect(trigger).toHaveFocus());
     }
@@ -502,9 +502,17 @@ describe('CollectionRail', () => {
     const railProps = props({ onSnapshot });
     render(<CollectionRail {...railProps} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    expect(screen.queryByRole('button', { name: /^Archive / })).toBeNull();
+    const trigger = screen.getByTestId('collection-picker');
+    expect(within(trigger).getByRole('img', { name: 'Status: active' })).toBeInTheDocument();
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole('menu', { name: 'Collections' });
+    expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Archive Collection A' }));
 
-    await screen.findByRole('button', { name: 'Restore' });
+    await within(menu).findByRole('menuitem', { name: 'Restore Collection A' });
+    expect(within(trigger).getByRole('img', { name: 'Status: archived' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Archive Collection B' })).toBeInTheDocument();
     expect(editCollection).toHaveBeenNthCalledWith(1, {
       projectPath: '/workspace/project',
       collectionId: 'collection-a',
@@ -517,9 +525,12 @@ describe('CollectionRail', () => {
     expect(screen.getByTestId('add-item-trigger')).toBeDisabled();
     expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Restore Collection A' }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive' })).toBeEnabled());
+    await waitFor(() =>
+      expect(within(menu).getByRole('menuitem', { name: 'Archive Collection A' })).toBeEnabled(),
+    );
+    expect(within(trigger).getByRole('img', { name: 'Status: active' })).toBeInTheDocument();
     expect(editCollection).toHaveBeenNthCalledWith(2, {
       projectPath: '/workspace/project',
       collectionId: 'collection-a',
@@ -531,6 +542,47 @@ describe('CollectionRail', () => {
     expect(restored.collections[0].archived).toBe(false);
     expect(restored.collections.map((collection) => collection.id)).toEqual(['collection-a', 'collection-b']);
     expect(restored.screenshots.map((item) => item.id)).toEqual(['alpha', 'beta', 'gamma', 'outside']);
+  });
+
+  it('renames any collection from its picker row without changing the selection', async () => {
+    const editCollection = vi.fn<ImnotaBridge['editCollection']>(async (input) => {
+      const current = useAppStore.getState().snapshot!;
+      return {
+        ...current,
+        projectRevision: 'project-2',
+        project: {
+          ...current.project,
+          collections: current.project.collections.map((collection) =>
+            collection.id === input.collectionId
+              ? { ...collection, name: input.name ?? collection.name }
+              : collection,
+          ),
+        },
+      };
+    });
+    window.imnota = { editCollection } as unknown as ImnotaBridge;
+    const onSelectCollection = vi.fn();
+    render(<CollectionRail {...props({ onSelectCollection })} />);
+
+    fireEvent.click(screen.getByTestId('collection-picker'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename Collection B' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Rename collection' });
+    expect(screen.queryByRole('menu', { name: 'Collections' })).toBeNull();
+    const input = within(dialog).getByLabelText('Collection name');
+    expect(input).toHaveValue('Collection B');
+    fireEvent.change(input, { target: { value: 'Review round' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rename collection' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename collection' })).toBeNull());
+    expect(editCollection).toHaveBeenCalledExactlyOnceWith({
+      projectPath: '/workspace/project',
+      collectionId: 'collection-b',
+      action: 'rename',
+      name: 'Review round',
+    });
+    expect(onSelectCollection).not.toHaveBeenCalled();
+    expect(screen.getByTestId('collection-picker')).toHaveTextContent('Collection A');
+    expect(useAppStore.getState().snapshot?.project.collections[1].name).toBe('Review round');
   });
 
   it('keeps the selected collection focused through complete picker keyboard navigation', async () => {
@@ -550,7 +602,7 @@ describe('CollectionRail', () => {
     const trigger = screen.getByTestId('collection-picker');
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    const options = await screen.findAllByRole('option');
+    const options = await screen.findAllByRole('menuitemradio');
     await waitFor(() => expect(options[0]).toHaveFocus());
 
     fireEvent.keyDown(options[0], { key: 'ArrowDown' });
@@ -566,7 +618,7 @@ describe('CollectionRail', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.keyDown(trigger, { key: 'Enter' });
-    await screen.findAllByRole('option');
+    await screen.findAllByRole('menuitemradio');
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(trigger).toHaveFocus());
   });

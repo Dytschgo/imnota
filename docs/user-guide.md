@@ -8,7 +8,7 @@ Choose a workspace folder, then create or open a project. Collections replace th
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
-- Creating a newer collection archives the previous one. Archived collections remain available in the chooser and can be restored.
+- Creating a newer collection archives the previous one. Archived collections remain available in the chooser and can be restored. Each row of the chooser carries a status icon (outlined while active, filled once archived) and its own rename and archive or restore buttons.
 - Renaming a collection changes its visible name, not its internal identity or folder references.
 - Imnota restores the last-opened collection when the project is reopened and selects its first screenshot.
 
