@@ -1,6 +1,6 @@
 # Imnota product roadmap
 
-Reviewed 2026-09-08 against the published mixed-content and hosted-sharing nightly. This consolidates the earlier local roadmap draft. The [implementation plan](../implementation%20plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
+Reviewed 2026-09-21 against the v0.2.8 stable release and nightly `v0.2.9-nightly.20260921.35645731983` from `bf8d24e`. This consolidates the earlier local roadmap draft. The [implementation status](implementation-plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
 
 This roadmap builds on the existing local-first workflow:
 
@@ -8,7 +8,7 @@ This roadmap builds on the existing local-first workflow:
 Capture or import evidence -> explain it -> arrange context -> export a portable handoff
 ```
 
-The roadmap is ordered by user value and implementation risk. The mixed-content model is the foundation for the items below.
+The roadmap is ordered by user value and implementation risk. The mixed-content model and the shipped capture workflow are the foundation for the items below. Capture validation remains an acceptance task, not an unimplemented feature.
 
 ## Now: validate the shipped foundation
 
@@ -29,9 +29,9 @@ Screenshots, Markdown text blocks and drawings are implemented in one ordered co
 
 Acceptance: a project containing text -> drawing -> screenshot -> text survives close/reopen, reorder, hide, duplicate, delete/Undo and export without losing identity or order.
 
-### Decision: optional on-device OCR stays export-scoped
+### Decision: on-device OCR stays export-scoped
 
-Copy Bundle may offer optional recognised text when the operating system provides a local OCR engine. Recognition runs only while creating that Markdown, reads only the pixels being exported, and does not persist recognised text in the project. Unsupported platforms, redacted screenshots, failures and the export-wide time budget simply omit the section while the export still succeeds. This is not a commitment to an OCR suite, background indexing, cloud recognition or a new product surface.
+Copy Bundle includes recognised text when enabled and the operating system provides a local OCR engine. Recognition runs only while creating that Markdown, reads only the pixels being exported, and does not persist recognised text in the project. Unsupported platforms, redacted screenshots, failures and the export-wide time budget simply omit the section while the export still succeeds. This is not a commitment to an OCR suite, background indexing, cloud recognition or a new product surface.
 
 ### 2. Validate the existing import-to-copy workflow
 
@@ -103,9 +103,9 @@ Replace the single default export preference with named local presets. A preset 
 
 Do not add arbitrary template scripting in the first version.
 
-### 8. Workflow templates
+### 8. Refine workflow templates
 
-Offer local templates for common handoffs:
+The shipped local templates cover common handoffs:
 
 - bug report;
 - UI review;
@@ -113,24 +113,11 @@ Offer local templates for common handoffs:
 - design-to-code brief;
 - architecture handoff.
 
-A template should create a collection structure and text prompts, not lock users into a cloud service or AI provider. Users should be able to edit and duplicate templates.
+Future work may refine these templates from observed feedback. They create local collections and text prompts, do not lock users into a cloud service or AI provider, and remain editable after creation.
 
-## Later: capture and interchange
+## Later: export and interchange
 
-### 9. Built-in screen capture
-
-Add capture only after the import workflow is validated. The first version should be deliberately narrow:
-
-- rectangular region capture;
-- window capture where supported;
-- delayed capture and repeat-last-region;
-- privacy-conscious confirmation before saving;
-- direct insertion into the active collection;
-- platform-specific permission and failure states.
-
-Avoid building a full recording, OCR or image-editing suite. Preserve the original capture and use the existing annotation tools.
-
-### 10. PDF export
+### 9. PDF export
 
 PDF should be a presentation/export format, not the canonical project format. Define a stable print layout first:
 
@@ -143,7 +130,7 @@ PDF should be a presentation/export format, not the canonical project format. De
 
 Test fonts, long text, large images, page breaks and redaction privacy on all supported desktop platforms. Keep PDF export separate from prompt-bundle export so each format can optimise for its recipient.
 
-### 11. Rich Markdown formatting controls
+### 10. Rich Markdown formatting controls
 
 Add lightweight controls only where they reduce Markdown friction. The source Markdown remains authoritative.
 
@@ -157,7 +144,7 @@ Candidate controls:
 
 Do not turn text blocks into a rich-text proprietary format. Provide a Markdown source/preview toggle, keyboard shortcuts, sanitised preview and a plain-text escape hatch.
 
-### 12. Full Excalidraw compatibility
+### 11. Full Excalidraw compatibility
 
 The current drawing editor uses Excalidraw technology and an Excalidraw-compatible direction, but the first version intentionally restricts tools and source data. Full compatibility is a separate milestone:
 

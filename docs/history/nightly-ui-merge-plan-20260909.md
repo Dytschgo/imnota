@@ -6,7 +6,7 @@ Status at final PR preparation: execution authorized on 2026-09-09; #44 through 
 
 Land the eight UI-feedback PRs separately, resolve the integration findings, and publish one verified nightly from the final immutable main commit. Preserve the original girl backgrounds alongside the four generic backgrounds. Keep stable publication, dependency upgrades and data-format changes outside this work.
 
-The source review is Grok's `grok-review-24d3e61d.md`, supplied from `C:/Users/DYLANF~1/AppData/Local/Temp/grok-DylanFerraro/`. The original feedback and implementation evidence remain in [UI-Improvemnts.md](UI-Improvemnts.md).
+The source review is Grok's `grok-review-24d3e61d.md`, supplied from `C:/Users/DYLANF~1/AppData/Local/Temp/grok-DylanFerraro/`. The original feedback and implementation evidence remain in [the UI improvements record](ui-improvements-20260909.md).
 
 ## Current evidence
 
@@ -93,7 +93,7 @@ After #51 lands, fetch main and record the full 40-character candidate SHA. Conf
 - Inspect compact, laptop and wide layouts; open/collapsed navigation; header save status; adjacent history buttons; row delete targeting and pending saves; immediate working undo; tooltips; full-space previews; drawing/screenshot canvas consistency.
 - Cover light/dark, no image, generated and existing character backgrounds, settings/library/editor, portaled dialogs and transparency fallbacks. Verify existing selections persist and exports remain neutral.
 - Use synthetic projects and copies of representative legacy fixtures. These UI PRs must not add a new project migration or alter recovery formats.
-- Update UI-Improvemnts.md with resolved Grok findings, merged SHAs and actual combined evidence. Any release documentation change to main must land before selecting the final release SHA.
+- Update `ui-improvements-20260909.md` with resolved Grok findings, merged SHAs and actual combined evidence. Any release documentation change to main must land before selecting the final release SHA.
 
 ### D. Publish one nightly and verify it
 
@@ -137,7 +137,7 @@ All seven merges below passed their complete cumulative quality, security and pl
 | #50 | `ab87f730f1063799c6b145f74a7a1e78bc88750e` |
 | #51 | Final candidate prepared; merge pending    |
 
-- All six Grok findings have dispositions in [UI-Improvemnts.md](UI-Improvemnts.md). The header and collection cleanup, two-column heading, common outer glass coverage and deliberate modal/tooltip exceptions were independently reviewed.
+- All six Grok findings have dispositions in [the UI improvements record](ui-improvements-20260909.md). The header and collection cleanup, two-column heading, common outer glass coverage and deliberate modal/tooltip exceptions were independently reviewed.
 - Cumulative Windows baseline updates were reviewed against exact packaged runner captures and differences. Strict tolerances and all 14 captures remain unchanged. Source integration preserved the reviewed cumulative images rather than reverting to older partial-UI snapshots.
 - The actual rename and sharing components were checked over active wallpaper in both themes, including body portals, viewport bounds and close-to-opener focus. Fixtures used synthetic data without saving or uploading.
 - Drawing verification exposed early engine input, selected-tool state and initial canvas geometry problems. PR #49 includes the readiness/selection fixes and bounded native state/layout checkpoints. Real gestures and connector persistence assertions remain intact; there are no gesture retries or skipped gates. The corrected local Windows walkthrough passed all 18 assertion groups.

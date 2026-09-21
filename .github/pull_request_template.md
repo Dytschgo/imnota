@@ -14,9 +14,10 @@
 
 ## Feature acceptance
 
-- Expected user behaviour and unchanged behaviour:
-- Preview build / commit tested:
-- Observed result and regression test:
+- Requested outcome and unchanged behaviour:
+- Implementation paths (code, test, docs):
+- Direct postcondition observed (not only general checks):
+- Revision tested and retained evidence (artifact or CI link):
 - Persistence, export and recovery checks (if affected):
 - Known limitations and recovery approach:
 

@@ -1,6 +1,6 @@
 # Engineering follow-up plan — 2026-09-18
 
-Status: proposal only. Nothing here is authorized; each phase needs its own decision and its own PR. It complements [the feedback follow-up plan](follow-up-plan-20260918.md), which covers product-facing items that came out of the feedback round. This document covers the codebase itself: structure, tests, evidence and housekeeping.
+Status: Phase 0 housekeeping is complete in this repository. Phases 1–3 remain proposal-only; each item needs its own decision and its own PR. This document complements [the feedback follow-up plan](follow-up-plan-20260918.md), which covers product-facing items from the feedback round. It covers the codebase itself: structure, tests, evidence and housekeeping.
 
 Historical baseline for measurements below: `main` at `36ff189` (2026-09-18), when PRs #72–#76 were open. It is not a statement about the current branch.
 
@@ -10,27 +10,15 @@ Principles, taken from [AGENTS.md](../AGENTS.md):
 - No refactor as a prerequisite for a fix. Extract when the next fix in that area needs the boundary.
 - Persistence, recovery, migration and release paths are consequential: they get independent review and are not touched by mechanical moves in this plan.
 
-## Phase 0 — Housekeeping (this week, before more parallel agent work)
+## Phase 0 — Housekeeping (completed)
 
-### 0.1 Move finished root-level plans into `docs/`
+### 0.1 Move finished root-level plans into `docs/` — completed
 
 Why: 11 Markdown files sit in the repository root. Five are dated execution plans (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`) that may belong with historical records once their delivery and release status are verified. Every agent session pays context cost for them; filenames with spaces require quoting in shell commands.
 
-What:
+Outcome: the four completed execution records now live under [`docs/history`](history/README.md), with corrected descriptive filenames. The living status document is [`docs/implementation-plan.md`](implementation-plan.md), not history, because it contains current release status and open acceptance work. Root-level policy, contribution, security and release files remain in place.
 
-```text
-git mv "implementation plan.md"        docs/history/implementation-plan-20260908.md
-git mv appUIoverhaul.md                docs/history/ui-overhaul-plan-20260908.md
-git mv UI-Improvemnts.md               docs/history/ui-improvements-20260909.md
-git mv Nightly-UI-Merge-Plan.md        docs/history/nightly-ui-merge-plan-20260909.md
-git mv Dependency-Migration-Plan.md    docs/history/dependency-migration-plan-20260916.md
-```
-
-Keep `AGENTS.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` in the root. Add `docs/history/README.md` with one line per file saying what it was and which PRs delivered it, when that can be verified. Before and after the move, use `rg` to check links to all five old names and all five destination names, including links between the moved documents and links from `README.md` and `docs/`.
-
-When: first, in one docs-only PR. It conflicts with nothing.
-
-Verification: documentation tier — `prettier --check` on moved files and an `rg` link search.
+Verification: documentation tier — Prettier and link checks cover the moved files and current references.
 
 ### 0.2 Keep local worktree maintenance out of this plan
 
@@ -48,13 +36,9 @@ For each proposed worktree, first confirm its absolute path and branch identity 
 
 When: not scheduled by this plan.
 
-### 0.3 Add `docs/README.md` as the index
+### 0.3 Add `docs/README.md` as the index — completed
 
-Why: 38 files in `docs/` with no map. New agents cannot tell `improvement-plan.md` (live backlog) from `pr-review-2026-09-05.md` (history).
-
-What: a short index with three groups — **living documents** (architecture, development, user guide, data format, release readiness, receiver matrix, roadmap, improvement plan), **plans in progress** (the two 2026-09-18 plans), **history** (dated reviews and finished plans). One line each.
-
-When: same PR as 0.1.
+The index now separates living guidance, proposal-only plans, historical records and the separately deployed sharing service, so agents can identify the authoritative document before acting.
 
 ## Phase 1 — Evidence for the things users actually reported (next nightly)
 
@@ -296,7 +280,7 @@ What: nothing until a report; note it in `docs/troubleshooting.md` under shortcu
 
 | When                                | Item                                                                    | Type                     |
 | ----------------------------------- | ----------------------------------------------------------------------- | ------------------------ |
-| This week                           | 0.1 move root plans, 0.3 docs index                                     | docs PR                  |
+| Completed                           | 0.1 move root plans, 0.3 docs index                                     | docs housekeeping        |
 | When separately authorized          | 0.2 per-worktree maintenance                                            | local, no PR             |
 | Next nightly (carrying #72 and #76) | 1.1 capture matrix + probe, 1.2 receiver matrix                         | native evidence          |
 | After #72 merges and 1.1 has run    | 2.1 capture workflow extraction                                         | mechanical PR            |

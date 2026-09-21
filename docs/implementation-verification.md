@@ -1,8 +1,8 @@
 # Implementation verification
 
-Historical verification of the schema-3 implementation at `5a1e734`. The counts, bundle sizes and platform limits below describe that revision. Current mixed-content and hosted-sharing release status is recorded in the [implementation plan](../implementation%20plan.md), the [September 8 repository review](repository-review-2026-09-08.md) and [sharing deployment evidence](../share-service/docs/deployment-verification.md).
+Historical verification of the schema-3 implementation at `5a1e734`. The counts, bundle sizes and platform limits below describe that revision. Current mixed-content and hosted-sharing release status is recorded in the [implementation status](implementation-plan.md), the [September 8 repository review](repository-review-2026-09-08.md) and [sharing deployment evidence](../share-service/docs/deployment-verification.md).
 
-The implementation follows [implementation plan.md](../implementation%20plan.md). Work is committed locally on `feature/imnota-implementation`; no release, push, cloud service, AI integration, or user recruitment was performed.
+The implementation follows the historical [implementation status](implementation-plan.md). Work is committed locally on `feature/imnota-implementation`; no release, push, cloud service, AI integration, or user recruitment was performed.
 
 ## Implemented areas
 

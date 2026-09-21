@@ -85,7 +85,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-Stable [v0.2.6](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6) remains the default download. The [September 9 nightly](https://github.com/Dytschgo/imnota/releases/tag/v0.2.7-nightly.20260909.34358152858) contains the dependency migrations, including React 19, Tailwind 4 and Electron 44. Windows, macOS and Linux package checks passed, and all public assets and update manifests were verified. See the [migration record](Dependency-Migration-Plan.md) for PRs, verification and suggested testing, and the [implementation plan](implementation%20plan.md) for broader status and remaining manual QA.
+Stable [v0.2.8](https://github.com/Dytschgo/imnota/releases/tag/v0.2.8) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
 
 Quality checks:
 
@@ -127,10 +127,12 @@ Branch and pull request builds never publish releases. Nightly publication uses 
 electron/                 Secure main process and preload bridge
 src/shared/               Shared types, validation helpers and Markdown generation
 src/renderer/             React application shell, workbench and Konva canvas
-docs/                     Architecture, data format and troubleshooting
+docs/                     Documentation, architecture and verification guides
 examples/example-project/ Example metadata-only project
 .github/                  Issue templates, workflows and Dependabot
 ```
+
+Use the [documentation map](docs/README.md) to find the current guide.
 
 ## User data format
 
@@ -167,7 +169,7 @@ Hosted links are accessible to anyone who has the URL until revoked or expired. 
 
 ## Roadmap
 
-The [implementation plan](implementation%20plan.md) records shipped work and remaining acceptance checks. The [product roadmap](docs/product-roadmap.md) contains future proposals, including screen capture, PDF export and full Excalidraw interchange. These are separate from the current release.
+The [implementation status](docs/implementation-plan.md) records shipped work and remaining acceptance checks. Screen capture is implemented on the current capture line; its platform and receiver validation remains explicit follow-up work. The [product roadmap](docs/product-roadmap.md) contains later proposals such as PDF export, richer Markdown controls and full Excalidraw interchange.
 
 ## Contributing
 
