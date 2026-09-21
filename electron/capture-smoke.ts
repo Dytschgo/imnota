@@ -184,17 +184,9 @@ async function startCapture(
   return overlayDriver;
 }
 
-async function chooseCaptureDisplay(driver: NativeUiDriver, confirmFocused = false): Promise<void> {
+async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
   if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    // A queued tray request can render this dialog in a newly restored window.
-    // Present and focus it before issuing the trusted native click.
-    await waitForPaint(driver);
     await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    if (confirmFocused) {
-      await driver.press('ENTER');
-      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' }, { absent: true });
-      return;
-    }
     const displays = screen.getAllDisplays();
     const primaryId = screen.getPrimaryDisplay().id;
     const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
@@ -240,7 +232,7 @@ export async function exerciseRegionCapture(
   if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
     throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
   const reopenedFromTray = await host.captureFromTray('display');
-  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray), true);
+  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
   const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
   const trayOverlayDriver = new NativeUiDriver(trayOverlay);
   const trayMode = await trayOverlayDriver.evaluate<boolean>(
