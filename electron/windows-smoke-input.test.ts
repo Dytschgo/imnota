@@ -39,8 +39,14 @@ describe('Windows native smoke input', () => {
   });
 
   it('reports partial native injection with the Windows error', () => {
-    const sendInput = vi.fn<(count: number, inputs: Buffer, inputSize: number) => number>(() => 0);
-    const api: WindowsSendInputApi = { sendInput, getLastError: () => 5 };
+    let nativeError = 5;
+    let sendCount = 0;
+    const sendInput = vi.fn<(count: number, inputs: Buffer, inputSize: number) => number>(() => {
+      sendCount += 1;
+      if (sendCount === 2) nativeError = 87;
+      return 0;
+    });
+    const api: WindowsSendInputApi = { sendInput, getLastError: () => nativeError };
     expect(() => sendWindowsSmokeCaptureShortcut(api)).toThrow(
       'Windows SendInput inserted 0 of 8 capture shortcut events (error 5).',
     );

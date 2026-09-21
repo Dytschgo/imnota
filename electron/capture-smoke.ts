@@ -180,19 +180,23 @@ async function createWindowsHotkeyFocusTarget(mainWindow: BrowserWindow): Promis
       sandbox: true,
     },
   });
-  await focusTarget.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>Synthetic hotkey target</title><body style="background:#12151a;color:#f4f4f5;font:16px sans-serif">Synthetic keyboard focus target</body>')}`,
-  );
-  mainWindow.minimize();
-  focusTarget.show();
-  focusTarget.focus();
-  const started = Date.now();
-  do {
-    if (mainWindow.isMinimized() && focusTarget.isFocused()) return focusTarget;
-    await delay(50);
-  } while (Date.now() - started < 5_000);
-  focusTarget.destroy();
-  throw new Error('Windows synthetic focus target did not receive focus while Imnota was minimized.');
+  try {
+    await focusTarget.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>Synthetic hotkey target</title><body style="background:#12151a;color:#f4f4f5;font:16px sans-serif">Synthetic keyboard focus target</body>')}`,
+    );
+    mainWindow.minimize();
+    focusTarget.show();
+    focusTarget.focus();
+    const started = Date.now();
+    do {
+      if (mainWindow.isMinimized() && focusTarget.isFocused()) return focusTarget;
+      await delay(50);
+    } while (Date.now() - started < 5_000);
+    throw new Error('Windows synthetic focus target did not receive focus while Imnota was minimized.');
+  } catch (error) {
+    if (!focusTarget.isDestroyed()) focusTarget.destroy();
+    throw error;
+  }
 }
 
 async function startCapture(
@@ -200,29 +204,24 @@ async function startCapture(
   trigger: 'toolbar' | 'global-shortcut' = 'toolbar',
 ): Promise<NativeUiDriver> {
   let focusTarget: BrowserWindow | null = null;
-  if (trigger === 'global-shortcut') {
-    const registered = await driver.evaluate<boolean>(`(async () => {
-      const result = await window.imnota.getNativeCapabilities();
-      return result.ok && result.value.globalCaptureShortcutRegistered;
-    })()`);
-    if (!registered) throw new Error('Windows global capture shortcut is not registered.');
-    focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
-    sendWindowsSmokeCaptureShortcut();
-  } else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
-  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    try {
-      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    } finally {
-      if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
-      focusTarget = null;
-    }
-    const displays = screen.getAllDisplays();
-    const primaryId = screen.getPrimaryDisplay().id;
-    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
-    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
-  }
   let overlay: BrowserWindow;
   try {
+    if (trigger === 'global-shortcut') {
+      const registered = await driver.evaluate<boolean>(`(async () => {
+        const result = await window.imnota.getNativeCapabilities();
+        return result.ok && result.value.globalCaptureShortcutRegistered;
+      })()`);
+      if (!registered) throw new Error('Windows global capture shortcut is not registered.');
+      focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
+      sendWindowsSmokeCaptureShortcut();
+    } else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+    if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
+      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
+      const displays = screen.getAllDisplays();
+      const primaryId = screen.getPrimaryDisplay().id;
+      const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
+      await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+    }
     overlay = await waitForCaptureOverlay(driver.browserWindow);
   } finally {
     if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();

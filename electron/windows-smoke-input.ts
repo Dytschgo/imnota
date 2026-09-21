@@ -87,6 +87,7 @@ export function sendWindowsSmokeCaptureShortcut(api: WindowsSendInputApi = loadW
   ]);
   const inserted = api.sendInput(inputs.count, inputs.buffer, inputs.inputSize);
   if (inserted !== inputs.count) {
+    const error = api.getLastError();
     const releases = windowsKeyboardInputs([
       { virtualKey: VK_F9, keyUp: true },
       { virtualKey: VK_SHIFT, keyUp: true },
@@ -95,7 +96,7 @@ export function sendWindowsSmokeCaptureShortcut(api: WindowsSendInputApi = loadW
     ]);
     api.sendInput(releases.count, releases.buffer, releases.inputSize);
     throw new Error(
-      `Windows SendInput inserted ${inserted} of ${inputs.count} capture shortcut events (error ${api.getLastError()}).`,
+      `Windows SendInput inserted ${inserted} of ${inputs.count} capture shortcut events (error ${error}).`,
     );
   }
 }
