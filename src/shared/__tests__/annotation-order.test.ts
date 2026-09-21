@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, test } from 'vitest';
 import type { Annotation } from '../types';
 import { textAnnotationNoteNumbers, textAnnotationReferences } from '../annotation-order';

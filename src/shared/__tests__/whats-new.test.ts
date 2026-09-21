@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
   compareWhatsNewVersions,
@@ -40,6 +41,8 @@ describe('what’s new releases', () => {
     expect(shouldShowWhatsNew('0.2.8', '0.2.9', release)).toBe(false);
     expect(shouldShowWhatsNew('0.2.9', '0.2.8', release)).toBe(true);
     expect(shouldShowWhatsNew('0.2.8', 'not-a-version', release)).toBe(true);
+    expect(shouldShowWhatsNew('0.2.8', undefined, undefined)).toBe(false);
+    expect(shouldShowWhatsNew(undefined, undefined, release)).toBe(false);
   });
 
   it('keeps the published nightly content until the comparison nightly is installed', () => {
@@ -48,7 +51,7 @@ describe('what’s new releases', () => {
     expect(next?.features.map((feature) => feature.id)).toEqual([
       'update-hover',
       'copy-variants',
-      'capture-all-displays',
+      'capture-choose-display',
     ]);
     expect(findWhatsNewRelease('0.2.8')?.features[0]?.id).toBe('updates');
   });

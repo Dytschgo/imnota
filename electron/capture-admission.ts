@@ -26,4 +26,8 @@ export class CaptureAdmissionGate {
   release(admission: CaptureAdmission): void {
     if (this.active === admission) this.active = null;
   }
+
+  isOccupied(): boolean {
+    return this.active !== null;
+  }
 }

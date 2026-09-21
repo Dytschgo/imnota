@@ -3,7 +3,9 @@ import {
   BrowserWindow,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
+  Menu,
   nativeImage,
   nativeTheme,
   net,
@@ -11,9 +13,11 @@ import {
   session,
   screen,
   systemPreferences,
+  Tray,
 } from 'electron';
 import os from 'node:os';
 import { nativeClipboard } from './native-clipboard.js';
+import { captureTrayTemplate } from './app-tray.js';
 import {
   onboardingHandoffRoot,
   OnboardingHandoffWorkflow,
@@ -114,12 +118,20 @@ import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
 import { nativePerformanceProfile } from './native-performance.js';
 import { windowsFileClipboardAvailable } from './windows-clipboard.js';
+import {
+  MAX_OCR_DATA_URL_CHARACTERS,
+  recognizeOnDevicePngDataUrl,
+  windowsOcrAvailable,
+  type OcrCropRect,
+} from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
+import { WorkspaceContentSearch } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
+import { LocalMcpServer } from './mcp-server.js';
+import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
@@ -139,8 +151,10 @@ import {
   restoreBackupInputSchema,
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
-import { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
+import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
+import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
   CaptureOverlaySession,
@@ -152,14 +166,25 @@ import {
   type CaptureOverlayFailure,
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
-import { captureOverlayWindowOptions, overlayCoversDisplay } from './capture-overlay-placement.js';
+import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
 import {
+  captureDelayHudWindowOptions,
+  captureOverlayFreezeAppearance,
+  captureOverlayWindowOptions,
+  overlayCoversDisplay,
+} from './capture-overlay-placement.js';
+import {
+  captureDisplayOptions,
+  captureDisplayMetricsInvalidateSelection,
   captureDisplaysHaveStableGeometry,
-  captureDisplaysWithStableGeometry,
   captureDisplayWithStableGeometry,
+  selectedCaptureDisplay,
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
+import { CaptureGlobalShortcut, resolveCaptureGlobalShortcut } from './capture-global-shortcut.js';
+import { onSuccessfulQuit, teardownTrayAfterSuccessfulQuit } from './tray-quit-lifecycle.js';
+import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -186,6 +211,7 @@ let onboardingHandoffWorkflow: OnboardingHandoffWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
+let localMcpServer: LocalMcpServer | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
   theme: 'system',
@@ -206,10 +232,94 @@ let captureOverlay: {
   selection: CaptureSelectionCoordinator;
   readiness: ReturnType<typeof createOverlayReadinessGuard>;
   displays: CaptureDisplay[];
+  overlayCommit: 'save' | 'annotate';
   disposeDisplayListeners: () => void;
 } | null = null;
+let captureDelaySession: CaptureDelaySession | null = null;
+let captureDelayHud: BrowserWindow | null = null;
 const captureAdmissionGate = new CaptureAdmissionGate();
+const captureGlobalShortcut = new CaptureGlobalShortcut({
+  register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+  unregister: (accelerator) => globalShortcut.unregister(accelerator),
+});
+const captureRequests = new CaptureRequestQueue();
+let pendingCapturePng: Buffer | null = null;
+let appTray: Tray | null = null;
+let lastOverlayCommit: 'save' | 'annotate' = 'save';
 const CAPTURE_OVERLAY_READY_TIMEOUT_MS = 15_000;
+
+function syncCaptureGlobalShortcut(): void {
+  captureGlobalShortcut.sync(
+    resolveCaptureGlobalShortcut({
+      bindings: preferenceSettingsResult.settings.shortcuts.bindings,
+      processPlatform: process.platform,
+      experimentalEnabled: preferenceSettingsResult.settings.capture.experimentalRegionCapture,
+    }),
+    () => {
+      if (captureAdmissionGate.isOccupied()) return;
+      requestCapture({ source: 'hotkey' });
+    },
+  );
+}
+
+function raiseMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function trayIcon(): Electron.NativeImage {
+  const candidates = [
+    path.join(app.getAppPath(), 'build', 'icon.png'),
+    path.join(process.resourcesPath, 'icon.png'),
+    path.join(__dirname, '../../build/icon.png'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return nativeImage.createFromPath(candidate);
+  }
+  return nativeImage.createEmpty();
+}
+
+function sendCaptureRequest(request: CaptureRequest): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  if (request.source === 'hotkey') mainWindow.webContents.send('workflow:capture:region-hotkey');
+  else mainWindow.webContents.send('workflow:capture:tray', { mode: request.mode });
+}
+
+function requestCapture(request: CaptureRequest): void {
+  const pending = captureRequests.request(request);
+  if (pending) {
+    sendCaptureRequest(pending);
+    return;
+  }
+  if (!mainWindow || mainWindow.isDestroyed())
+    void createWindow()
+      .then(() => syncCaptureGlobalShortcut())
+      .catch(console.error);
+}
+
+function createAppTray(): void {
+  if (appTray) return;
+  const image = trayIcon();
+  if (image.isEmpty()) return;
+  appTray = new Tray(image);
+  appTray.setToolTip('Imnota');
+  appTray.setContextMenu(
+    Menu.buildFromTemplate(
+      captureTrayTemplate({
+        windowCapture: process.platform === 'win32',
+        onCapture: (mode) => requestCapture({ source: 'tray', mode }),
+        onOpen: () => {
+          if (!mainWindow || mainWindow.isDestroyed())
+            void createWindow().then(() => syncCaptureGlobalShortcut());
+          else raiseMainWindow();
+        },
+        onQuit: () => app.quit(),
+      }),
+    ),
+  );
+}
 
 function assertLiveCaptureAdmission(event: IpcMainInvokeEvent, admission: CaptureAdmission): void {
   if (
@@ -274,15 +384,20 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
-  if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
   const persisted = preferenceSettingsEnvelope(
     nextSettings as unknown as Record<string, unknown>,
     nextPreferences,
     preferenceSettingsResult.profile,
   );
-  await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
-  settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
-  preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  const persist = async () => {
+    await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
+    if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
+    settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
+    preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
+  };
+  if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
+  else await persist();
+  syncCaptureGlobalShortcut();
 }
 const projectInput = z.object({
   name: z.string().min(1).max(120),
@@ -298,34 +413,7 @@ function workspaceOrThrow(): string {
 }
 
 async function assertProjectPath(projectPath: string): Promise<string> {
-  pathInput.parse(projectPath);
-  const workspace = workspaceOrThrow();
-  const resolved = path.resolve(projectPath);
-  if (isReservedProjectPath(resolved))
-    throw new Error(
-      'Backup and recovery folders cannot be opened as active projects. Restore a snapshot first.',
-    );
-  await assertNoLinks(resolved);
-  if (!isWithin(workspace, resolved) || resolved === path.resolve(workspace))
-    throw new Error('Project path is outside the selected workspace.');
-  const stat = await fs.stat(resolved).catch(() => null);
-  if (!stat?.isDirectory()) throw new Error('The selected project folder is unavailable.');
-  for (const name of [
-    'project.json',
-    'screenshots',
-    'annotations',
-    'notes',
-    'exports',
-    'rounds',
-    'collections',
-    '.imnota-undo',
-    '.imnota-transactions',
-    '.imnota-content-undo',
-    '.imnota-recovery.json',
-    '.imnota-recovery-backup.json',
-  ])
-    await assertNoLinks(path.join(resolved, name));
-  return resolved;
+  return authorizeProjectPath(settings.workspacePath, projectPath);
 }
 
 async function readProjectMetadata(projectPath: string): Promise<ProjectData> {
@@ -781,6 +869,14 @@ async function copyTextToClipboard(text: string): Promise<void> {
   await nativeClipboard.writeText(text);
 }
 
+function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
+  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+  if (image.isEmpty()) return png;
+  const cropped = image.crop(crop);
+  if (cropped.isEmpty()) return png;
+  return cropped.toPNG();
+}
+
 function clipboardImage(imageDataUrl: string) {
   const size = clipboardPngDimensions(imageDataUrl);
   const image = nativeImage.createFromDataURL(imageDataUrl);
@@ -869,6 +965,7 @@ function captureService(): CaptureService {
 }
 
 async function smokeDesktopCaptureCapability(): Promise<{
+  windowCandidateCount: number;
   displays: Array<{
     displayId: number;
     bounds: CaptureRectangle;
@@ -887,7 +984,8 @@ async function smokeDesktopCaptureCapability(): Promise<{
       'The real capture capability probe requires the isolated smoke profile and explicit opt-in.',
     );
   const service = captureService();
-  return probeCaptureDisplays(screen.getAllDisplays(), {
+  const displays = screen.getAllDisplays();
+  const capability = await probeCaptureDisplays(displays, {
     capture: (display) =>
       captureDisplayWithStableGeometry(
         display,
@@ -898,6 +996,81 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
+  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
+}
+
+function cancelCaptureDelay(): void {
+  captureDelaySession?.cancel();
+}
+
+async function closeCaptureDelayHud(): Promise<void> {
+  const hud = captureDelayHud;
+  captureDelayHud = null;
+  if (!hud || hud.isDestroyed()) return;
+  await new Promise<void>((resolve) => {
+    if (hud.isDestroyed()) {
+      resolve();
+      return;
+    }
+    hud.once('closed', () => resolve());
+    hud.close();
+  });
+}
+
+function isCaptureDelayHudSender(event: IpcMainInvokeEvent): boolean {
+  return Boolean(
+    captureDelayHud &&
+    !captureDelayHud.isDestroyed() &&
+    event.sender.id === captureDelayHud.webContents.id &&
+    event.senderFrame === event.sender.mainFrame,
+  );
+}
+
+async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<BrowserWindow | null> {
+  await closeCaptureDelayHud();
+  try {
+    const placement = captureDelayHudWindowOptions(displayBounds);
+    const window = new BrowserWindow({
+      ...placement,
+      useContentSize: true,
+      show: false,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      focusable: true,
+      hasShadow: true,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+      },
+    });
+    window.setAlwaysOnTop(true, 'status');
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('will-navigate', (navigation) => navigation.preventDefault());
+    captureDelayHud = window;
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl) await window.loadURL(new URL('capture-overlay.html?countdown=1', `${devUrl}/`).toString());
+    else
+      await window.loadFile(path.join(__dirname, '../../dist/capture-overlay.html'), {
+        query: { countdown: '1' },
+      });
+    if (captureDelayHud !== window || window.isDestroyed()) return null;
+    window.showInactive();
+    return window;
+  } catch {
+    await closeCaptureDelayHud();
+    return null;
+  }
 }
 
 function settleCaptureOverlay(selection: CaptureRectangle | null): void {
@@ -932,22 +1105,32 @@ function captureOverlayIds(): number[] | undefined {
 
 function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverlay>): boolean {
   const current = screen.getAllDisplays();
-  const relevant =
-    process.platform === 'win32'
-      ? current
-      : current.filter((display) => active.displays.some((captured) => captured.id === display.id));
+  const relevant = current.filter((display) =>
+    active.displays.some((captured) => captured.id === display.id),
+  );
   return captureDisplaysHaveStableGeometry(active.displays, relevant);
+}
+
+function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
+  if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  return identifiableCaptureWindows(
+    tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
+    displays,
+  );
 }
 
 async function chooseCaptureRegion(
   captures: readonly CapturedDisplayImage[],
+  windows: readonly CaptureWindowCandidate[] = [],
+  initialMode: CaptureOverlayMode = 'region',
 ): Promise<CaptureOverlayOutcome> {
   if (captureOverlay) throw new Error('A screen capture is already in progress.');
   if (!captures.length) throw new Error('No display capture is available.');
   const displays = captures.map(({ display }) => display);
   const session = new CaptureOverlaySession();
   const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
-  const selection = new CaptureSelectionCoordinator(displays);
+  const selection = new CaptureSelectionCoordinator(displays, windows);
+  if (initialMode !== 'region') selection.setMode(initialMode);
   const overlays: Array<{ window: BrowserWindow; capture: CapturedDisplayImage; ready: boolean }> = [];
   try {
     for (const capture of captures) {
@@ -957,18 +1140,16 @@ async function chooseCaptureRegion(
       const placement = captureOverlayWindowOptions(displayBounds, process.platform);
       const window = new BrowserWindow({
         ...placement,
+        ...captureOverlayFreezeAppearance(),
         useContentSize: true,
         show: false,
         frame: false,
-        transparent: true,
         resizable: false,
         movable: false,
         minimizable: false,
         maximizable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
-        hasShadow: false,
-        backgroundColor: '#00000000',
         webPreferences: {
           preload: path.join(__dirname, 'capture-overlay-preload.cjs'),
           contextIsolation: true,
@@ -1007,19 +1188,27 @@ async function chooseCaptureRegion(
     );
   }
   const failForDisplayChange = () => failCaptureOverlay('display-changed');
+  const failForDisplayMetricsChange = (
+    _event: Electron.Event,
+    _display: Electron.Display,
+    changedMetrics: string[],
+  ) => {
+    if (captureDisplayMetricsInvalidateSelection(changedMetrics)) failForDisplayChange();
+  };
   screen.on('display-added', failForDisplayChange);
   screen.on('display-removed', failForDisplayChange);
-  screen.on('display-metrics-changed', failForDisplayChange);
+  screen.on('display-metrics-changed', failForDisplayMetricsChange);
   captureOverlay = {
     overlays,
     session,
     selection,
     readiness,
     displays,
+    overlayCommit: 'save',
     disposeDisplayListeners: () => {
       screen.off('display-added', failForDisplayChange);
       screen.off('display-removed', failForDisplayChange);
-      screen.off('display-metrics-changed', failForDisplayChange);
+      screen.off('display-metrics-changed', failForDisplayMetricsChange);
     },
   };
   try {
@@ -1446,7 +1635,7 @@ function registerIpc(): void {
     active.selection.update(overlay.capture.display.id, update.phase, update.point, globalPoint);
     broadcastCaptureSelection();
   });
-  ipcMain.handle('capture-overlay:save', (event) => {
+  ipcMain.on('capture-overlay:mode', (event, raw) => {
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
@@ -1457,6 +1646,29 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay;
     if (!active) throw new Error('Capture overlay is no longer available.');
+    const mode = z.enum(CAPTURE_OVERLAY_MODES).parse(raw);
+    active.selection.setMode(mode);
+    broadcastCaptureSelection();
+  });
+  function assertTrustedCaptureOverlay(
+    event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+  ): NonNullable<typeof captureOverlay> {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    const active = captureOverlay;
+    if (!active) throw new Error('Capture overlay is no longer available.');
+    return active;
+  }
+  function commitCaptureOverlay(
+    active: NonNullable<typeof captureOverlay>,
+    action: 'save' | 'annotate',
+  ): void {
     if (!captureOverlayGeometryIsStable(active)) {
       failCaptureOverlay('display-changed');
       return;
@@ -1469,9 +1681,44 @@ function registerIpc(): void {
     }
     const state = active.selection.current();
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
+    active.overlayCommit = action;
+    lastOverlayCommit = action;
     settleCaptureOverlay(state.selection);
+  }
+  ipcMain.handle('capture-overlay:save', (event) => {
+    commitCaptureOverlay(assertTrustedCaptureOverlay(event), 'save');
+  });
+  ipcMain.handle('capture-overlay:annotate', (event) => {
+    commitCaptureOverlay(assertTrustedCaptureOverlay(event), 'annotate');
+  });
+  ipcMain.handle('capture-overlay:copy', async (event) => {
+    const active = assertTrustedCaptureOverlay(event);
+    if (!captureOverlayGeometryIsStable(active)) {
+      failCaptureOverlay('display-changed');
+      return { image: false };
+    }
+    for (const overlay of active.overlays) {
+      if (!overlayCoversDisplay(overlay.window.getContentBounds(), overlay.capture.display.bounds)) {
+        failCaptureOverlay('misplaced');
+        return { image: false };
+      }
+    }
+    const state = active.selection.current();
+    if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
+    const png = captureService().compose(
+      active.overlays.map((overlay) => overlay.capture),
+      state.selection,
+    );
+    const image = nativeImage.createFromBuffer(png);
+    await nativeClipboard.writeImage(image);
+    const kept = await nativeClipboard.readImage();
+    return { image: !kept.isEmpty() };
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
+    if (isCaptureDelayHudSender(event)) {
+      cancelCaptureDelay();
+      return;
+    }
     if (
       !isCaptureOverlaySender(
         captureOverlayIds(),
@@ -1523,6 +1770,10 @@ function registerIpc(): void {
       }),
     );
   };
+  handleWorkflow('workflow:capture:renderer-ready', (event) => {
+    const request = captureRequests.rendererReady(event.sender);
+    if (request) sendCaptureRequest(request);
+  });
   // Acquire before this request joins the shared IPC queue. Otherwise two rapid
   // toolbar/shortcut invocations can each wait for a previous operation and
   // subsequently create separate overlays.
@@ -1546,6 +1797,7 @@ function registerIpc(): void {
           );
         const revoke = () => {
           captureAdmissionGate.revoke(admission);
+          cancelCaptureDelay();
           settleCaptureOverlay(null);
         };
         event.sender.once('destroyed', revoke);
@@ -1791,20 +2043,80 @@ function registerIpc(): void {
   });
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
-    return { windowsFileClipboard: windowsFileClipboardAvailable() };
+    return {
+      windowsFileClipboard: windowsFileClipboardAvailable(),
+      globalCaptureShortcutRegistered: captureGlobalShortcut.registeredAccelerator !== null,
+    };
+  });
+  handleWorkflow('workflow:window:raise', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    raiseMainWindow();
+  });
+  handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
+    if (!windowsOcrAvailable()) return { text: '' };
+    const [input] = z
+      .tuple([
+        z
+          .object({
+            pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS),
+            crop: z
+              .object({
+                x: z.number().int().nonnegative(),
+                y: z.number().int().nonnegative(),
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    return {
+      text: await recognizeOnDevicePngDataUrl(input.pngDataUrl, {
+        crop: input.crop,
+        cropPng: cropPngForOcr,
+      }),
+    };
+  });
+  handleWorkflow('workflow:capture:displays', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
+      );
+    if (process.platform !== 'win32')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Display selection is only available for Windows capture.',
+      );
+    const displays = captureDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+    if (displays.length === 0)
+      throw new NativeWorkflowError(
+        'capture-sources-unavailable',
+        'Windows did not report an available display to capture. Use Import or Paste instead.',
+        true,
+      );
+    return displays;
   });
   handleCaptureWorkflow(async (event, admission, ...args) => {
     const [input] = z
       .tuple([
         z
           .object({
-            projectPath: pathInput,
-            collectionId: filenameSchema,
+            projectPath: pathInput.optional(),
+            collectionId: filenameSchema.optional(),
+            displayId: z.number().int().optional(),
+            overlayMode: z.enum(CAPTURE_OVERLAY_MODES).optional(),
+            delaySeconds: z.union([z.literal(3), z.literal(5)]).optional(),
           })
-          .strict(),
+          .strict()
+          .refine((value) => Boolean(value.projectPath) === Boolean(value.collectionId)),
       ])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
+    pendingCapturePng = null;
     if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -1828,23 +2140,31 @@ function registerIpc(): void {
           'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
         );
     }
-    const safeProjectPath = await assertProjectPath(input.projectPath);
-    const beforeCapture = await readProjectMetadata(safeProjectPath);
-    const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-    if (!beforeCollection || beforeCollection.archived)
-      throw new NativeWorkflowError('collection-not-found', 'Choose a current collection before capturing.');
+    let safeProjectPath: string | undefined;
+    if (input.projectPath && input.collectionId) {
+      safeProjectPath = await assertProjectPath(input.projectPath);
+      const beforeCapture = await readProjectMetadata(safeProjectPath);
+      const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
+      if (!beforeCollection || beforeCollection.archived)
+        throw new NativeWorkflowError(
+          'collection-not-found',
+          'Choose a current collection before capturing.',
+        );
+    }
     // The renderer flushes before it invokes this workflow and rechecks its
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
     assertLiveCaptureAdmission(event, admission);
-    const selectedDisplays =
+    const selectedDisplay =
       process.platform === 'win32'
-        ? screen.getAllDisplays()
-        : [screen.getDisplayNearestPoint(screen.getCursorScreenPoint())];
-    if (selectedDisplays.length === 0)
+        ? selectedCaptureDisplay(screen.getAllDisplays(), input.displayId)
+        : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (!selectedDisplay)
       throw new NativeWorkflowError(
         'capture-sources-unavailable',
-        'The operating system did not report an available display. Use Import or Paste instead.',
+        input.displayId === undefined
+          ? 'Choose a display before selecting a region.'
+          : 'The selected display is no longer available. Choose an available display and try again.',
         true,
       );
     assertLiveCaptureAdmission(event, admission);
@@ -1854,28 +2174,63 @@ function registerIpc(): void {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
       if (wasVisible) mainWindow?.hide();
+      if (input.delaySeconds) {
+        let remainingSeconds: number = input.delaySeconds;
+        const sendTick = (seconds: number) => {
+          remainingSeconds = seconds;
+          if (captureDelayHud && !captureDelayHud.isDestroyed())
+            captureDelayHud.webContents.send('capture-overlay:countdown', { remainingSeconds: seconds });
+        };
+        const delay = new CaptureDelaySession(input.delaySeconds, undefined, sendTick);
+        captureDelaySession = delay;
+        const unbindDelayCancel = bindCaptureDelayCancel(
+          (accelerator, callback) => globalShortcut.register(accelerator, callback),
+          (accelerator) => {
+            globalShortcut.unregister(accelerator);
+          },
+          () => delay.cancel(),
+        );
+        void openCaptureDelayHud({
+          x: selectedDisplay.bounds.x,
+          y: selectedDisplay.bounds.y,
+          width: selectedDisplay.bounds.width,
+          height: selectedDisplay.bounds.height,
+        })
+          .then((hud) => {
+            if (hud && !hud.isDestroyed()) {
+              hud.once('closed', () => delay.cancel());
+              sendTick(remainingSeconds);
+            }
+          })
+          .catch(() => undefined);
+        try {
+          if (!captureAdmissionGate.isActive(admission)) delay.cancel();
+          if ((await delay.result) === 'cancelled')
+            throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+        } finally {
+          unbindDelayCancel();
+          if (captureDelaySession === delay) captureDelaySession = null;
+          await closeCaptureDelayHud();
+        }
+        assertLiveCaptureAdmission(event, admission);
+      }
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
-        const stableCapture =
-          process.platform === 'win32'
-            ? await captureDisplaysWithStableGeometry(
-                selectedDisplays,
-                (displays) => service.captureDisplays(displays),
-                () => screen.getAllDisplays(),
-              )
-            : await captureDisplayWithStableGeometry(
-                selectedDisplays[0]!,
-                (display) => service.captureDisplay(display),
-                () => screen.getAllDisplays(),
-              ).then((capture) => (capture ? [capture] : null));
+        const stableCapture = await captureDisplayWithStableGeometry(
+          selectedDisplay,
+          (display) => service.captureDisplay(display),
+          () => screen.getAllDisplays(),
+        );
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            'The display layout changed while capture was being prepared. Try again after the displays settle.',
+            process.platform === 'win32'
+              ? 'The selected display changed while the capture was being prepared. Choose an available display and try again.'
+              : 'The display layout changed while capture was being prepared. Try again after the displays settle.',
             true,
           );
-        captured = stableCapture;
+        captured = [stableCapture];
       } catch (error) {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
@@ -1899,7 +2254,11 @@ function registerIpc(): void {
       assertLiveCaptureAdmission(event, admission);
       let outcome: CaptureOverlayOutcome;
       try {
-        outcome = await chooseCaptureRegion(captured);
+        outcome = await chooseCaptureRegion(
+          captured,
+          listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+          input.overlayMode ?? 'region',
+        );
       } catch (error) {
         if (error instanceof CaptureServiceError)
           throw new NativeWorkflowError(
@@ -1920,10 +2279,10 @@ function registerIpc(): void {
         throw new NativeWorkflowError(
           'capture-failed',
           outcome.reason === 'misplaced'
-            ? 'A selection window could not cover its display. Use Import or Paste instead.'
+            ? 'The selection window could not cover the selected display. Choose the display again, or use Import or Paste instead.'
             : outcome.reason === 'display-changed'
               ? 'The display layout changed during capture. Try again after the displays settle.'
-              : 'The screen selection windows stopped before they were ready. Use Import or Paste instead.',
+              : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
           true,
         );
       const selection = outcome.selection;
@@ -1944,9 +2303,14 @@ function registerIpc(): void {
         );
       }
       assertLiveCaptureAdmission(event, admission);
-      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
+      if (!safeProjectPath || !input.collectionId) {
+        pendingCapturePng = png;
+        return { buffered: true as const, overlayAction: lastOverlayCommit };
+      }
+      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
         assertLiveCaptureAdmission(event, admission),
       );
+      return { ...inserted, overlayAction: lastOverlayCommit };
     } finally {
       if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
@@ -1954,6 +2318,41 @@ function registerIpc(): void {
       }
     }
   });
+  handleWorkflow(
+    'workflow:capture:commit-buffered',
+    async (event, ...args) => {
+      const [input] = z
+        .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
+        .parse(args);
+      const png = pendingCapturePng;
+      if (!png)
+        throw new NativeWorkflowError(
+          'capture-failed',
+          'The captured screenshot is no longer available. Capture the region again.',
+        );
+      const safeProjectPath = await assertProjectPath(input.projectPath);
+      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
+        if (
+          event.sender.isDestroyed() ||
+          !mainWindow ||
+          mainWindow.isDestroyed() ||
+          mainWindow.webContents !== event.sender
+        )
+          throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+      });
+      pendingCapturePng = null;
+      return inserted;
+    },
+    true,
+  );
+  handleWorkflow(
+    'workflow:capture:discard-buffered',
+    (_event, ...args) => {
+      z.tuple([]).parse(args);
+      pendingCapturePng = null;
+    },
+    true,
+  );
   handleWorkflow('workflow:appearance:desktop', (event, ...args) => {
     const [input] = z.tuple([z.object({ enabled: z.boolean() }).strict()]).parse(args);
     const target = BrowserWindow.fromWebContents(event.sender);
@@ -2846,8 +3245,11 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
   const createdWindow = mainWindow;
+  const createdWebContents = createdWindow.webContents;
   createdWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
+    captureRequests.windowClosed(createdWebContents);
+    if (!appTray && BrowserWindow.getAllWindows().length === 0) captureGlobalShortcut.clear();
   });
   createdWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -2903,59 +3305,105 @@ app.whenReady().then(async () => {
       },
     });
   });
+  localMcpServer = new LocalMcpServer({
+    enabled: () => preferenceSettingsResult.settings.agentAccess.enabled,
+    workspacePath: () => settings.workspacePath,
+    appVersion: () => app.getVersion(),
+    search: (input) => contentSearch.search(input),
+  });
+  if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
+    const started = await localMcpServer.startStdio();
+    if (!started) {
+      process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
+      app.exit(1);
+      return;
+    }
+    app.exit(0);
+    return;
+  }
   configureAutoUpdates();
   registerIpc();
+  syncCaptureGlobalShortcut();
+  let agentAccessStartupError = '';
+  if (process.env.IMNOTA_SMOKE !== '1')
+    await localMcpServer.sync().catch(async () => {
+      agentAccessStartupError =
+        'Local agent access could not start. Port 17384 may be in use. Access is off; free the port and enable it again in Settings → Workspace.';
+      const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
+      // Fail closed for this process even if storing the disabled preference also fails.
+      preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
+      await persistApplicationSettings(settings, next).catch(() => {
+        agentAccessStartupError += ' The disabled preference could not be saved.';
+      });
+    });
   await createWindow();
+  createAppTray();
+  if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {
     const temporaryRoot = await fs.realpath(app.getPath('temp'));
     const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));
     let exitCode = 0;
     let result: unknown;
     try {
-      result = await runSmokeWorkflow(
-        {
-          setWorkspace(workspacePath) {
-            settings = { ...settings, workspacePath };
-          },
-          async reopenWindow() {
-            const previousWindow = mainWindow;
-            const nextWindow = await createWindow();
-            if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
-              previousWindow.destroy();
-            return nextWindow;
-          },
-          readProject,
-          async restoreRecovery(projectPath) {
-            return (await openWithRecovery(projectPath, 'restore')).project;
-          },
-          async readSettings() {
-            return structuredClone(settings);
-          },
-          async approveNextBackupRestore(projectPath) {
-            const real = await fs.realpath(projectPath);
-            if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
-              throw new Error('Smoke restore approval must name a real disposable fixture project.');
-            smokeBackupRestorePath = real;
-          },
-        },
-        {
-          fixtureRoot: fixture,
-          artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-          version: app.getVersion(),
-          expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
-          mode: process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke',
-        },
-      );
+      const mode = process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke';
       if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
-        const capability = await smokeDesktopCaptureCapability();
         result = {
-          ...(result as Record<string, unknown>),
-          captureCapability: capability,
-          assertions: [
-            ...((result as { assertions?: string[] }).assertions ?? []),
-            'exact desktopCapturer source and in-memory crop dimensions for every real display',
-          ],
+          passed: true,
+          version: app.getVersion(),
+          mode,
+          artifacts: [],
+          captureCapability: await smokeDesktopCaptureCapability(),
+          assertions: ['exact desktopCapturer source and in-memory crop dimensions for every real display'],
         };
+      } else {
+        result = await runSmokeWorkflow(
+          {
+            setWorkspace(workspacePath) {
+              settings = { ...settings, workspacePath };
+            },
+            async reopenWindow() {
+              const previousWindow = mainWindow;
+              const nextWindow = await createWindow();
+              if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
+                previousWindow.destroy();
+              return nextWindow;
+            },
+            async captureFromTray(mode) {
+              const nextWindow = new Promise<BrowserWindow>((resolve) =>
+                app.once('browser-window-created', (_event, window) => resolve(window)),
+              );
+              mainWindow?.destroy();
+              requestCapture({ source: 'tray', mode });
+              return nextWindow;
+            },
+            trayAvailable() {
+              return appTray !== null && !appTray.isDestroyed();
+            },
+            globalCaptureShortcutRegistered() {
+              return captureGlobalShortcut.registeredAccelerator !== null;
+            },
+            readProject,
+            async restoreRecovery(projectPath) {
+              return (await openWithRecovery(projectPath, 'restore')).project;
+            },
+            async readSettings() {
+              return structuredClone(settings);
+            },
+            async approveNextBackupRestore(projectPath) {
+              const real = await fs.realpath(projectPath);
+              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
+                throw new Error('Smoke restore approval must name a real disposable fixture project.');
+              smokeBackupRestorePath = real;
+            },
+          },
+          {
+            fixtureRoot: fixture,
+            artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
+            version: app.getVersion(),
+            expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
+            mode,
+          },
+        );
       }
     } catch (error) {
       exitCode = 1;
@@ -3015,10 +3463,20 @@ app.whenReady().then(async () => {
     return;
   }
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    if (BrowserWindow.getAllWindows().length === 0)
+      void createWindow().then(() => syncCaptureGlobalShortcut());
   });
 });
 app.on('window-all-closed', () => {
+  if (appTray) return;
+  captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => projectWatchManager?.stopAll());
+onSuccessfulQuit(app, () => {
+  appTray = teardownTrayAfterSuccessfulQuit({
+    tray: appTray,
+    clearCaptureShortcut: () => captureGlobalShortcut.clear(),
+    stopProjectWatches: () => projectWatchManager?.stopAll(),
+  });
+  void localMcpServer?.stop();
+});

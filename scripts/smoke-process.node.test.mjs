@@ -17,15 +17,32 @@ afterEach(() => {
 });
 
 describe('native smoke process safety', () => {
-  it('uses built renderer assets without mutating the inherited environment', () => {
+  it('uses built renderer assets and enables synthetic capture only on supported native platforms', () => {
     const inherited = {
       ELECTRON_RUN_AS_NODE: '1',
       VITE_DEV_SERVER_URL: 'http://localhost:5173',
+      IMNOTA_SMOKE_CAPTURE_SOURCE: 'real',
       PATH: 'test',
     };
-    assert.deepEqual(nativeVerificationEnvironment(inherited), { PATH: 'test' });
+    assert.deepEqual(nativeVerificationEnvironment(inherited, 'win32'), {
+      PATH: 'test',
+      IMNOTA_SMOKE_CAPTURE_SOURCE: 'synthetic',
+    });
+    assert.deepEqual(nativeVerificationEnvironment(inherited, 'darwin'), {
+      PATH: 'test',
+      IMNOTA_SMOKE_CAPTURE_SOURCE: 'synthetic',
+    });
+    assert.deepEqual(nativeVerificationEnvironment(inherited, 'linux'), { PATH: 'test' });
+    assert.deepEqual(
+      nativeVerificationEnvironment(
+        { ...inherited, IMNOTA_SMOKE_CAPTURE_CAPABILITY: 'real-memory-only' },
+        'win32',
+      ),
+      { PATH: 'test', IMNOTA_SMOKE_CAPTURE_CAPABILITY: 'real-memory-only' },
+    );
     assert.equal(inherited.ELECTRON_RUN_AS_NODE, '1');
     assert.equal(inherited.VITE_DEV_SERVER_URL, 'http://localhost:5173');
+    assert.equal(inherited.IMNOTA_SMOKE_CAPTURE_SOURCE, 'real');
   });
   it('accepts a dedicated newly created artifact directory and rejects broad names', () => {
     const parent = mkdtempSync(join(temporaryRoot, 'imnota-smoke-script-test-'));

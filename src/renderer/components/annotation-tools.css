@@ -225,3 +225,45 @@
   flex-wrap: wrap;
   max-width: 100%;
 }
+
+.capture-delay {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.capture-delay .icon-button:last-of-type {
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+}
+
+.capture-delay-menu {
+  position: absolute;
+  z-index: 35;
+  top: calc(100% + 9px);
+  right: 0;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+}
+
+.capture-delay-menu button {
+  width: 100%;
+  display: block;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-2);
+  background: transparent;
+  text-align: left;
+}
+
+.capture-delay-menu button:hover,
+.capture-delay-menu button:focus-visible {
+  background: var(--surface-3);
+  outline: none;
+}

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
   mergePreferenceSettings,
@@ -53,7 +54,9 @@ describe('profile-aware preference settings', () => {
     );
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
     expect(result.settings.nativeCopy.defaultFunction).toBe('files');
+    expect(result.settings.promptExport.includeRecognisedText).toBe(true);
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
+    expect(result.settings.agentAccess.enabled).toBe(false);
   });
 
   it('keeps older saved preferences compatible while adding capture opt-in', () => {
@@ -70,12 +73,28 @@ describe('profile-aware preference settings', () => {
       true,
     );
     expect(withoutNativeCopy.settings.nativeCopy.defaultFunction).toBe('files');
+    const withoutPromptExport = resolvePreferenceSettings(
+      { preferences: { ...current, promptExport: undefined } },
+      true,
+    );
+    expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(true);
+    expect(
+      mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
+    ).toEqual({ includeRecognisedText: false });
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });
     expect(
       mergePreferenceSettings(current, { updates: { whatsNewAcknowledgedVersion: '0.2.8' } }).updates,
     ).toEqual({ whatsNewAcknowledgedVersion: '0.2.8' });
+    const withoutAgentAccess = resolvePreferenceSettings(
+      { preferences: { ...current, agentAccess: undefined } },
+      true,
+    );
+    expect(withoutAgentAccess.settings.agentAccess.enabled).toBe(false);
+    expect(mergePreferenceSettings(current, { agentAccess: { enabled: true } }).agentAccess).toEqual({
+      enabled: true,
+    });
   });
 
   it('defaults an unknown persisted native copy function without discarding unrelated preferences', () => {

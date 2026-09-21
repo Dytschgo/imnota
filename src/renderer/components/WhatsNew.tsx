@@ -1,4 +1,5 @@
 import { ExternalLink, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 import type { UpdateChannel } from '../../shared/types';
 import {
   findWhatsNewRelease,
@@ -10,6 +11,30 @@ import { Button, Modal } from './ui';
 
 export type WhatsNewAction = WhatsNewFeature['action'];
 
+function FeatureCard({
+  feature,
+  onAction,
+}: {
+  feature: WhatsNewFeature;
+  onAction?(action: WhatsNewAction): void;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  return (
+    <article className="whats-new-card">
+      {feature.imageSrc && !imageFailed && (
+        <img src={feature.imageSrc} alt="" onError={() => setImageFailed(true)} />
+      )}
+      <h3>{feature.title}</h3>
+      <p>{feature.description}</p>
+      {feature.action && (
+        <Button variant="soft" onClick={() => onAction?.(feature.action)}>
+          Try it now
+        </Button>
+      )}
+    </article>
+  );
+}
+
 function FeatureCards({
   release,
   onAction,
@@ -20,16 +45,7 @@ function FeatureCards({
   return (
     <div className="whats-new-cards">
       {release.features.map((feature) => (
-        <article className="whats-new-card" key={feature.id}>
-          {feature.imageSrc && <img src={feature.imageSrc} alt="" />}
-          <h3>{feature.title}</h3>
-          <p>{feature.description}</p>
-          {feature.action && (
-            <Button variant="soft" onClick={() => onAction?.(feature.action)}>
-              Try it now
-            </Button>
-          )}
-        </article>
+        <FeatureCard key={feature.id} feature={feature} onAction={onAction} />
       ))}
     </div>
   );

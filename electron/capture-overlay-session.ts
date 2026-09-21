@@ -1,4 +1,10 @@
-import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
+import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
+import { WINDOW_CAPTURE_UNAVAILABLE_MESSAGE } from '../src/shared/capture.js';
+import {
+  captureWindowAtPoint,
+  clipRectangleToDisplays,
+  type CaptureWindowCandidate,
+} from './capture-windows.js';
 
 export type CaptureOverlayFailure = 'not-ready' | 'misplaced' | 'display-changed';
 
@@ -45,15 +51,20 @@ export class CaptureOverlaySession {
 }
 
 export function closeCaptureOverlayWindows(
-  windows: readonly { isDestroyed(): boolean; close(): void }[],
+  windows: readonly { isDestroyed(): boolean; destroy(): void }[],
 ): void {
-  for (const window of windows) if (!window.isDestroyed()) window.close();
+  // Selection windows have no unsaved renderer state. Destroy them after settling
+  // the session, without cancellable close or macOS fullscreen transitions.
+  for (const window of windows) if (!window.isDestroyed()) window.destroy();
 }
 
 export interface CaptureSelectionState {
   selection: CaptureRectangle | null;
   complete: boolean;
   actionsDisplayId: number | null;
+  mode: CaptureOverlayMode;
+  windowTitle: string | null;
+  windowMessage: string | null;
 }
 
 export function capturePointerGlobalPoint(
@@ -90,15 +101,33 @@ function clamp(value: number, minimum: number, maximum: number): number {
 export class CaptureSelectionCoordinator {
   private readonly desktop: CaptureRectangle;
   private start: { x: number; y: number } | null = null;
-  private state: CaptureSelectionState = {
+  private mode: CaptureOverlayMode = 'region';
+  private state: {
+    selection: CaptureRectangle | null;
+    complete: boolean;
+    actionsDisplayId: number | null;
+    windowTitle: string | null;
+  } = {
     selection: null,
     complete: false,
     actionsDisplayId: null,
+    windowTitle: null,
   };
 
-  constructor(private readonly displays: readonly CaptureDisplay[]) {
+  constructor(
+    private readonly displays: readonly CaptureDisplay[],
+    private readonly windows: readonly CaptureWindowCandidate[] = [],
+  ) {
     if (!displays.length) throw new Error('Capture selection needs at least one display.');
     this.desktop = desktopBounds(displays);
+  }
+
+  setMode(mode: CaptureOverlayMode): CaptureSelectionState {
+    this.start = null;
+    this.mode = mode;
+    if (mode === 'display') return this.restoreDisplaySelection();
+    this.clearSelection();
+    return this.current();
   }
 
   update(
@@ -109,7 +138,8 @@ export class CaptureSelectionCoordinator {
   ): CaptureSelectionState {
     if (phase === 'reset') {
       this.start = null;
-      this.state = { selection: null, complete: false, actionsDisplayId: null };
+      if (this.mode === 'display') return this.restoreDisplaySelection();
+      this.clearSelection();
       return this.current();
     }
     const display = this.displays.find((candidate) => candidate.id === displayId);
@@ -123,9 +153,11 @@ export class CaptureSelectionCoordinator {
       x: clamp(translated.x, this.desktop.x, this.desktop.x + this.desktop.width),
       y: clamp(translated.y, this.desktop.y, this.desktop.y + this.desktop.height),
     };
+    if (this.mode === 'window') return this.updateWindow(displayId, phase, point);
+    if (this.mode === 'display') return this.restoreDisplaySelection();
     if (phase === 'begin') {
       this.start = point;
-      this.state = { selection: null, complete: false, actionsDisplayId: null };
+      this.clearSelection();
       return this.current();
     }
     if (!this.start) return this.current();
@@ -138,20 +170,19 @@ export class CaptureSelectionCoordinator {
     const validSelection = selection.width >= 1 && selection.height >= 1 ? selection : null;
     if (phase === 'end') {
       this.start = null;
-      const actionsDisplay = this.displays.find(
-        ({ bounds }) =>
-          point.x >= bounds.x &&
-          point.x <= bounds.x + bounds.width &&
-          point.y >= bounds.y &&
-          point.y <= bounds.y + bounds.height,
-      );
       this.state = {
         selection: validSelection,
         complete: Boolean(validSelection),
-        actionsDisplayId: validSelection ? (actionsDisplay?.id ?? displayId) : null,
+        actionsDisplayId: validSelection ? this.displayIdAt(point, displayId) : null,
+        windowTitle: null,
       };
     } else {
-      this.state = { selection: validSelection, complete: false, actionsDisplayId: null };
+      this.state = {
+        selection: validSelection,
+        complete: false,
+        actionsDisplayId: null,
+        windowTitle: null,
+      };
     }
     return this.current();
   }
@@ -161,7 +192,72 @@ export class CaptureSelectionCoordinator {
       selection: this.state.selection ? { ...this.state.selection } : null,
       complete: this.state.complete,
       actionsDisplayId: this.state.actionsDisplayId,
+      mode: this.mode,
+      windowTitle: this.state.windowTitle,
+      windowMessage:
+        this.mode === 'window' && this.windows.length === 0 ? WINDOW_CAPTURE_UNAVAILABLE_MESSAGE : null,
     };
+  }
+
+  private clearSelection(): void {
+    this.state = { selection: null, complete: false, actionsDisplayId: null, windowTitle: null };
+  }
+
+  private displayIdAt(point: { x: number; y: number }, fallbackId: number): number {
+    const actionsDisplay = this.displays.find(
+      ({ bounds }) =>
+        point.x >= bounds.x &&
+        point.x <= bounds.x + bounds.width &&
+        point.y >= bounds.y &&
+        point.y <= bounds.y + bounds.height,
+    );
+    return actionsDisplay?.id ?? fallbackId;
+  }
+
+  private selectDisplay(displayId: number): void {
+    const display = this.displays.find((candidate) => candidate.id === displayId);
+    if (!display) {
+      this.clearSelection();
+      return;
+    }
+    this.state = {
+      selection: { ...display.bounds },
+      complete: true,
+      actionsDisplayId: display.id,
+      windowTitle: null,
+    };
+  }
+
+  private restoreDisplaySelection(): CaptureSelectionState {
+    this.selectDisplay(this.displays[0]!.id);
+    return this.current();
+  }
+
+  private updateWindow(
+    displayId: number,
+    phase: 'begin' | 'move' | 'end',
+    point: { x: number; y: number },
+  ): CaptureSelectionState {
+    if (phase !== 'end' && this.state.complete) return this.current();
+    const hit = captureWindowAtPoint(this.windows, point);
+    const selection = hit ? clipRectangleToDisplays(hit.bounds, this.displays) : null;
+    if (phase === 'end') {
+      if (!selection) return this.current();
+      this.state = {
+        selection,
+        complete: true,
+        actionsDisplayId: this.displayIdAt(point, displayId),
+        windowTitle: hit!.title,
+      };
+      return this.current();
+    }
+    this.state = {
+      selection,
+      complete: false,
+      actionsDisplayId: null,
+      windowTitle: selection && hit ? hit.title : null,
+    };
+    return this.current();
   }
 }
 
