@@ -25,6 +25,8 @@ export interface AppDialogsProps {
   dialog: AppDialog;
   newProject: NewProjectDraft;
   editProject?: ProjectEditDraft;
+  /** Name of the project awaiting deletion confirmation. */
+  deleteProjectName?: string;
   shortcuts: ShortcutPreferences;
   currentVersion?: string;
   busy?: boolean;
@@ -41,6 +43,7 @@ export function AppDialogs({
   dialog,
   newProject,
   editProject,
+  deleteProjectName,
   shortcuts,
   currentVersion,
   busy = false,
@@ -233,7 +236,7 @@ export function AppDialogs({
   if (dialog === 'delete-project')
     return (
       <Modal
-        title="Delete this project?"
+        title={deleteProjectName ? `Delete ${deleteProjectName}?` : 'Delete this project?'}
         description="This moves the local project folder, screenshots, descriptions, and annotations to the operating-system trash."
         onClose={onClose}
       >

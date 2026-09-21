@@ -57,22 +57,22 @@
   padding: 0 8px;
 }
 
-.project-row-actions button {
-  min-height: 32px;
-  padding: 0 9px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+.project-row-actions .icon-button {
+  width: 32px;
+  height: 32px;
   color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 600;
 }
 
-.project-row-actions button:hover,
-.project-row-actions button:focus-visible {
+.project-row-actions .icon-button:hover,
+.project-row-actions .icon-button:focus-visible {
   border-color: var(--line);
   background: var(--surface-2);
   color: var(--ink);
+}
+
+.project-row-actions .project-row-delete:hover,
+.project-row-actions .project-row-delete:focus-visible {
+  color: var(--danger);
 }
 
 .project-icon-picker {

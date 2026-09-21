@@ -16,7 +16,7 @@ Overall context is optional and applies to the active collection. Prompt 1 conta
 
 Use the plus button beside **Projects** to create a project from the sidebar. Choose a predefined icon in the new-project dialog. **Edit project** on a project row changes its name, description and icon without renaming its folder.
 
-**Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Open **Archived projects** to search archived projects or restore one to the active library.
+Each project row ends with icon buttons for edit, archive or restore, and delete. **Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Open **Archived projects** to search archived projects or restore one to the active library. **Delete project** asks for confirmation, then moves the whole project folder to the operating-system trash.
 
 ### Start from a template
 

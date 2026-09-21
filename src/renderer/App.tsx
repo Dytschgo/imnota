@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
-import { Check, FolderOpen, FolderPlus, Heart, Plus, Search, ShieldCheck, X } from 'lucide-react';
+import {
+  Archive,
+  ArchiveRestore,
+  Check,
+  FolderOpen,
+  FolderPlus,
+  Heart,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -96,6 +109,7 @@ export default function App() {
   const [editProjectPath, setEditProjectPath] = useState<string | null>(null);
   const [editProjectRevision, setEditProjectRevision] = useState<string | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<ProjectListItem | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [tool, setTool] = useState<ToolChoice>('select');
   const lastAnnotateTool = useRef<ToolChoice>('arrow');
@@ -1388,17 +1402,24 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
     }
   }
+  function requestProjectDeletion(projectPath: string) {
+    const project = useAppStore.getState().projects.find((entry) => entry.projectPath === projectPath);
+    if (!project) return;
+    setProjectToDelete(project);
+    setDialog('delete-project');
+  }
   async function deleteProject() {
-    const current = useAppStore.getState().snapshot;
-    if (!current) return;
+    const target = projectToDelete;
+    if (!target) return;
     const identity = ++navigationIdentity.current;
     if (!(await flushAll()) || identity !== navigationIdentity.current) return;
     setDialogBusy(true);
     try {
-      await window.imnota.deleteProject(current.projectPath);
+      await window.imnota.deleteProject(target.projectPath);
       if (identity !== navigationIdentity.current) return;
       setDialog(null);
-      if (useAppStore.getState().snapshot?.projectPath === current.projectPath)
+      setProjectToDelete(null);
+      if (useAppStore.getState().snapshot?.projectPath === target.projectPath)
         useAppStore.getState().setProject(null);
       await refreshProjects();
       if (identity !== navigationIdentity.current) return;
@@ -1989,6 +2010,7 @@ export default function App() {
             onEdit={beginProjectEdit}
             onArchive={(path) => void setProjectArchived(path, true)}
             onRestore={(path) => void setProjectArchived(path, false)}
+            onDelete={requestProjectDeletion}
             onSearch={openProjectSearch}
             onBrowseProjects={() => navigate('projects')}
             onSelectContentResult={openContentSearchResult}
@@ -2107,7 +2129,6 @@ export default function App() {
             onDeleteItem={(id, kind) =>
               kind === 'screenshot' ? requestScreenshotDeletion(id) : requestContentDeletion(id)
             }
-            onDeleteProject={() => setDialog('delete-project')}
           />
         )}
         <input
@@ -2140,6 +2161,7 @@ export default function App() {
         dialog={dialog}
         newProject={newProject}
         editProject={editProject ?? undefined}
+        deleteProjectName={projectToDelete?.name}
         shortcuts={preferences.settings.shortcuts}
         currentVersion={updateStatus?.currentVersion}
         busy={dialogBusy}
@@ -2149,7 +2171,10 @@ export default function App() {
         onCreateProject={createProject}
         onDeleteProject={deleteProject}
         onShortcutChange={preferences.saveShortcuts}
-        onClose={() => setDialog(null)}
+        onClose={() => {
+          setDialog(null);
+          setProjectToDelete(null);
+        }}
       />
       {captureDisplayChoices && (
         <CaptureDisplayDialog
@@ -2301,6 +2326,7 @@ function Library({
   onEdit,
   onArchive,
   onRestore,
+  onDelete,
   onSearch,
   onBrowseProjects,
   onSelectContentResult,
@@ -2312,6 +2338,7 @@ function Library({
   onEdit(projectPath: string): void;
   onArchive(projectPath: string): void;
   onRestore(projectPath: string): void;
+  onDelete(projectPath: string): void;
   onSearch(): void | Promise<void>;
   onBrowseProjects(): void | Promise<void>;
   onSelectContentResult(result: ContentSearchResult): void;
@@ -2461,31 +2488,38 @@ function Library({
                 </div>
               </button>
               <div className="project-row-actions">
-                <button
-                  type="button"
+                <IconButton
                   data-testid={`project-edit-${project.id}`}
-                  aria-label={`Edit ${project.name}`}
+                  label={`Edit ${project.name}`}
                   onClick={() => onEdit(project.projectPath)}
                 >
-                  Edit
-                </button>
+                  <Pencil size={15} aria-hidden="true" />
+                </IconButton>
                 {project.status === 'archived' ? (
-                  <button
-                    type="button"
+                  <IconButton
                     data-testid={`project-restore-${project.id}`}
+                    label={`Restore ${project.name}`}
                     onClick={() => onRestore(project.projectPath)}
                   >
-                    Restore
-                  </button>
+                    <ArchiveRestore size={15} aria-hidden="true" />
+                  </IconButton>
                 ) : (
-                  <button
-                    type="button"
+                  <IconButton
                     data-testid={`project-archive-${project.id}`}
+                    label={`Archive ${project.name}`}
                     onClick={() => onArchive(project.projectPath)}
                   >
-                    Archive
-                  </button>
+                    <Archive size={15} aria-hidden="true" />
+                  </IconButton>
                 )}
+                <IconButton
+                  data-testid={`project-delete-${project.id}`}
+                  className="project-row-delete"
+                  label={`Delete ${project.name}`}
+                  onClick={() => onDelete(project.projectPath)}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </IconButton>
               </div>
             </div>
           ))}
