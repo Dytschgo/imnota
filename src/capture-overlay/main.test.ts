@@ -61,15 +61,32 @@ async function setup(displayId = 2, displayBounds = { x: 0, y: 0, width: 800, he
 beforeEach(() => {
   vi.resetModules();
   document.body.innerHTML = '<div id="root"></div>';
+  window.history.replaceState({}, '', '/');
   window.imnotaCapture = {
     ready: vi.fn(async () => {}),
     pointer: vi.fn(),
     setMode: vi.fn(),
     save: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    onCountdown: vi.fn(() => () => {}),
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
   };
+});
+
+it('shows a delay countdown without the region overlay', async () => {
+  let countdownHandler: ((payload: { remainingSeconds: number }) => void) | undefined;
+  window.history.replaceState({}, '', '?countdown=1');
+  window.imnotaCapture.onCountdown = vi.fn((handler) => {
+    countdownHandler = handler;
+    return () => {};
+  });
+  await import('./main');
+  expect(document.querySelector('.capture-overlay')).toBeNull();
+  countdownHandler!({ remainingSeconds: 3 });
+  expect(document.querySelector('[data-remaining]')!.textContent).toBe('3');
+  document.querySelector<HTMLButtonElement>('[data-action=cancel]')!.click();
+  expect(window.imnotaCapture.cancel).toHaveBeenCalledTimes(1);
 });
 
 it('reports uncapped pointer-capture coordinates for a cross-monitor reverse drag', async () => {

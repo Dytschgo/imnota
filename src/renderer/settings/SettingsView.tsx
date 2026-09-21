@@ -182,7 +182,9 @@ export function SettingsView({
                 <small>
                   Windows and macOS only while platform validation is in progress. Captures stay local.
                   Windows lets you choose a display when more than one is attached and captures only that
-                  display; macOS uses the display under the pointer.
+                  display; macOS uses the display under the pointer. Capture in 3 or 5 seconds waits after
+                  Imnota hides so hover menus and tooltips can appear. Press Escape during that wait to
+                  cancel; no overlay opens and no file is saved.
                 </small>
                 <small data-testid="capture-shortcut-summary">
                   Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd>

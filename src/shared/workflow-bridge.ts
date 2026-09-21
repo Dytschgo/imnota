@@ -215,6 +215,8 @@ export interface WorkflowBridge {
     collectionId?: string;
     /** Required for Windows when more than one display is attached. */
     displayId?: number;
+    /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
+    delaySeconds?: 3 | 5;
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string } | { buffered: true }>>;
   commitBufferedCapture(input: {
     projectPath: string;
