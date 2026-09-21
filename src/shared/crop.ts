@@ -1,12 +1,12 @@
-import type { Annotation } from './types';
+import type { Annotation } from './types.js';
 import {
   NOTE_BADGE_GAP,
   NOTE_BADGE_HEIGHT,
   noteBadgeWidth,
   textAnnotationLayout,
   type TextWidthMeasurer,
-} from './annotation-geometry';
-import { isTextAnnotation, textAnnotationNoteNumbers } from './annotation-order';
+} from './annotation-geometry.js';
+import { isTextAnnotation, textAnnotationNoteNumbers } from './annotation-order.js';
 
 export interface ImageBounds {
   x: number;

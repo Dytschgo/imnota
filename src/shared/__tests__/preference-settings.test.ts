@@ -52,6 +52,7 @@ describe('profile-aware preference settings', () => {
     expect(result.settings.capture.experimentalRegionCapture).toBe(false);
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
     expect(result.settings.nativeCopy.defaultFunction).toBe('files');
+    expect(result.settings.promptExport.includeRecognisedText).toBe(true);
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
   });
 
@@ -69,6 +70,14 @@ describe('profile-aware preference settings', () => {
       true,
     );
     expect(withoutNativeCopy.settings.nativeCopy.defaultFunction).toBe('files');
+    const withoutPromptExport = resolvePreferenceSettings(
+      { preferences: { ...current, promptExport: undefined } },
+      true,
+    );
+    expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(true);
+    expect(
+      mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
+    ).toEqual({ includeRecognisedText: false });
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });

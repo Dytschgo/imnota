@@ -1,6 +1,7 @@
 import { annotationMarkListItems } from './annotation-marks';
 import { pictureSourceSizeLine } from './markdown';
 import { textAnnotationReferences } from './annotation-order';
+import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr';
 import type { Annotation } from './types';
 
 export type PromptPriority = 'low' | 'medium' | 'high';
@@ -18,6 +19,7 @@ export interface PromptScreenshotInput {
   nativeHeight: number;
   contentRevision: string;
   annotations: readonly PromptAnnotationInput[];
+  visibleText?: string;
   kind?: 'screenshot';
 }
 export interface PromptDrawingInput {
@@ -72,6 +74,7 @@ export interface PromptBundlePicture {
   contentRevision: string;
   notes: PromptTextNote[];
   marks: string[];
+  visibleText?: string;
   sourceFilename?: string;
   estimatedPngCharacters?: number;
   dataUrl?: string;
@@ -296,6 +299,7 @@ function markdownForBundle(
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
       if (picture.marks.length)
         lines.push(`### Picture ${picture.pictureNumber} / Marks`, '', ...picture.marks, '');
+      lines.push(...visibleTextMarkdownLines(picture.visibleText));
     } else if (normalized(picture.description).trim()) {
       lines.push(normalized(picture.description), '');
     }
@@ -321,6 +325,14 @@ function orderedItems(collection: PromptCollectionInput): PromptCollectionItemIn
     .sort((a, b) => a.item.position - b.item.position || a.sourceIndex - b.sourceIndex)
     .map(({ item }) => item);
 }
+function screenshotVisibleText(
+  item: Extract<PromptCollectionItemInput, { kind?: 'screenshot' } | { kind: 'drawing' }>,
+): string | undefined {
+  if (item.kind === 'drawing') return undefined;
+  if (screenshotHasRedaction(item.annotations)) return undefined;
+  return normalized(item.visibleText ?? '').trim() || undefined;
+}
+
 function resolveRendered(
   item: Extract<PromptCollectionItemInput, { kind?: 'screenshot' } | { kind: 'drawing' }>,
   number: number,
@@ -355,6 +367,7 @@ function resolveRendered(
           originalWidth: item.nativeWidth,
           originalHeight: item.nativeHeight,
         }),
+    visibleText: screenshotVisibleText(item),
     sourceFilename: drawing ? item.sourceFilename : undefined,
     estimatedPngCharacters: rendered.estimatedPngCharacters,
     dataUrl: rendered.dataUrl,

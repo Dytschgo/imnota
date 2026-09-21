@@ -1,6 +1,7 @@
 import { annotationMarkListItems } from './annotation-marks.js';
 import { textAnnotationReferences } from './annotation-order.js';
 import { orderedCollectionItems as orderedContent, type ContentItem } from './content-items.js';
+import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr.js';
 import type { Annotation, ProjectData, ScreenshotRecord } from './types.js';
 
 export type CollectionItemKind = 'screenshot' | 'drawing' | 'text';
@@ -61,6 +62,7 @@ export function generateMarkdown(
   collectionId: string,
   annotations: Record<string, Annotation[]>,
   markdownByTextItem: Record<string, string> = {},
+  visibleTextByScreenshot: Record<string, string> = {},
 ): string {
   const collection = project.collections.find((item) => item.id === collectionId);
   if (!collection) throw new Error('Collection not found.');
@@ -106,6 +108,8 @@ export function generateMarkdown(
     }
     const marks = annotationMarkListItems(shotAnnotations, shot);
     if (marks.length) out.push(`### Picture ${visualNumber} / Marks`, '', ...marks, '');
+    if (!screenshotHasRedaction(shotAnnotations))
+      out.push(...visibleTextMarkdownLines(visibleTextByScreenshot[shot.id]));
   }
   return `${out.join('\n').replace(/\n+$/g, '')}\n`;
 }
