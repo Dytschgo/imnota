@@ -29,6 +29,138 @@ async function fixture() {
 }
 
 describe('local persistence diagnostics', () => {
+  it('records explicit OOM evidence and available memory without serializing raw process details', async () => {
+    const { directory, trace } = await fixture();
+    const details = {
+      type: 'Tab',
+      reason: 'oom',
+      exitCode: -1,
+      name: 'secret-window-title',
+      serviceName: 'private-service',
+      path: 'C:\\private-user\\secret.png',
+    };
+    await trace.record({
+      category: 'lifecycle',
+      action: 'renderer-gone',
+      phase: 'observed',
+      termination: {
+        details,
+        memory: {
+          mainResidentBytes: () => 125 * 1024 ** 2,
+          processMetrics: () => [
+            { type: 'Browser', memory: { workingSetSize: 125 * 1024 } },
+            { type: 'GPU', memory: { workingSetSize: 300 * 1024 }, name: 'private-GPU-name' },
+            { type: 'Utility', memory: { workingSetSize: 50 * 1024 } },
+          ],
+        },
+      },
+    });
+    const raw = await fs.readFile(await currentLog(directory), 'utf8');
+    expect(raw).not.toMatch(/secret|private|serviceName|peak|pid/i);
+    expect(JSON.parse(raw).termination).toEqual({
+      processType: 'Tab',
+      reason: 'oom',
+      exitCode: -1,
+      memory: {
+        observedAt: 'termination',
+        mainResidentMiB: 125,
+        availableChildWorkingSetMiB: 350,
+        availableChildProcessCount: 2,
+      },
+    });
+  });
+
+  it('preserves a crash reason when memory measurements fail without inventing zero readings', async () => {
+    const { directory, trace } = await fixture();
+    await trace.record({
+      category: 'lifecycle',
+      action: 'child-process-gone',
+      phase: 'observed',
+      termination: {
+        details: { type: 'GPU', reason: 'crashed', exitCode: 0xc000_0005 },
+        memory: {
+          mainResidentBytes: () => {
+            throw new Error('private-memory-error');
+          },
+          processMetrics: () => {
+            throw new Error('private-metrics-error');
+          },
+        },
+      },
+    });
+    const raw = await fs.readFile(await currentLog(directory), 'utf8');
+    expect(raw).not.toContain('private');
+    expect(JSON.parse(raw).termination).toEqual({
+      processType: 'GPU',
+      reason: 'crashed',
+      exitCode: 0xc000_0005,
+      memory: { observedAt: 'termination' },
+    });
+  });
+
+  it('bounds termination metrics and rejects unknown reason and process strings', async () => {
+    const { directory, trace } = await fixture();
+    await trace.record({
+      category: 'lifecycle',
+      action: 'child-process-gone',
+      phase: 'observed',
+      termination: {
+        details: {
+          type: 'private-process-name',
+          reason: 'private-failure-message',
+          exitCode: Number.MAX_SAFE_INTEGER,
+        },
+        memory: {
+          mainResidentBytes: () => Number.MAX_VALUE,
+          processMetrics: () =>
+            Array.from({ length: 5000 }, () => ({
+              type: 'Utility',
+              memory: { workingSetSize: Number.MAX_VALUE },
+            })),
+        },
+      },
+    });
+    const raw = await fs.readFile(await currentLog(directory), 'utf8');
+    expect(raw).not.toContain('private');
+    expect(JSON.parse(raw).termination).toEqual({
+      processType: 'Unknown',
+      reason: 'unknown',
+      exitCode: 0xffff_ffff,
+      memory: {
+        observedAt: 'termination',
+        mainResidentMiB: 1_048_576,
+        availableChildWorkingSetMiB: 1_048_576,
+        availableChildProcessCount: 4096,
+      },
+    });
+  });
+
+  it('omits invalid termination numbers and excludes invalid memory readings', async () => {
+    const { directory, trace } = await fixture();
+    await trace.record({
+      category: 'lifecycle',
+      action: 'renderer-gone',
+      phase: 'observed',
+      termination: {
+        details: { type: 'Tab', reason: 'memory-eviction', exitCode: 'private-exit-code' },
+        memory: {
+          mainResidentBytes: () => Number.NaN,
+          processMetrics: () => [
+            { type: 'GPU', memory: { workingSetSize: Number.POSITIVE_INFINITY } },
+            { type: 'Tab', memory: { workingSetSize: -1 } },
+          ],
+        },
+      },
+    });
+    const raw = await fs.readFile(await currentLog(directory), 'utf8');
+    expect(raw).not.toContain('private');
+    expect(JSON.parse(raw).termination).toEqual({
+      processType: 'Tab',
+      reason: 'memory-eviction',
+      memory: { observedAt: 'termination', availableChildWorkingSetMiB: 0, availableChildProcessCount: 0 },
+    });
+  });
+
   it('prunes only older inactive diagnostic files, preserving active or uncertain sessions and links', async () => {
     const { root, directory, trace } = await fixture();
     await trace.openDirectory();

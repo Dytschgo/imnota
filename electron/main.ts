@@ -391,11 +391,31 @@ const diagnostics = new PersistenceDiagnostics(() => path.join(app.getPath('user
   version: app.getVersion(),
   platform: process.platform,
 });
-app.on('render-process-gone', () => {
-  void diagnostics.record({ category: 'lifecycle', action: 'renderer-gone', phase: 'observed' });
+const terminationMemory = {
+  mainResidentBytes: () => process.memoryUsage.rss(),
+  processMetrics: () => app.getAppMetrics(),
+};
+app.on('render-process-gone', (_event, _contents, details) => {
+  void diagnostics.record({
+    category: 'lifecycle',
+    action: 'renderer-gone',
+    phase: 'observed',
+    termination: {
+      details: { type: 'Tab', reason: details.reason, exitCode: details.exitCode },
+      memory: terminationMemory,
+    },
+  });
 });
-app.on('child-process-gone', () => {
-  void diagnostics.record({ category: 'lifecycle', action: 'child-process-gone', phase: 'observed' });
+app.on('child-process-gone', (_event, details) => {
+  void diagnostics.record({
+    category: 'lifecycle',
+    action: 'child-process-gone',
+    phase: 'observed',
+    termination: {
+      details: { type: details.type, reason: details.reason, exitCode: details.exitCode },
+      memory: terminationMemory,
+    },
+  });
 });
 
 async function persistApplicationSettings(

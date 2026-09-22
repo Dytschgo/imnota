@@ -3,6 +3,11 @@ import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { assertNoLinks } from './files.js';
+import {
+  processTerminationObservation,
+  type TerminationDetails,
+  type TerminationMemorySources,
+} from './process-termination-diagnostics.js';
 
 const MAX_BYTES = 1_048_576;
 const MAX_PENDING = 128;
@@ -31,6 +36,7 @@ interface TraceEvent {
   target?: string;
   error?: unknown;
   count?: number;
+  termination?: { details: TerminationDetails; memory: TerminationMemorySources };
 }
 
 /** Local, bounded operational evidence. Never serialize payloads, paths, messages or stacks. */
@@ -114,6 +120,11 @@ export class PersistenceDiagnostics {
           : {}),
         ...(event.error !== undefined ? { errorCode: diagnosticErrorCode(event.error) } : {}),
         ...(Number.isSafeInteger(event.count) && event.count! >= 0 ? { count: event.count } : {}),
+        ...(event.termination
+          ? {
+              termination: processTerminationObservation(event.termination.details, event.termination.memory),
+            }
+          : {}),
       }) + '\n';
     this.pending++;
     let stored = false;
