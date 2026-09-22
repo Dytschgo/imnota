@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 it('reports missing screenshot sidecars and mixed content without recreating files or dropping records', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-integrity-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-integrity-')));
   roots.push(root);
   const project: ProjectData = {
     ...emptyProject('Preserve', ''),

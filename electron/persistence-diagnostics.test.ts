@@ -18,7 +18,7 @@ async function currentLog(directory: string): Promise<string> {
   return path.join(directory, name);
 }
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-diagnostics-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-diagnostics-')));
   roots.push(root);
   const directory = path.join(root, 'diagnostics');
   return {
