@@ -267,11 +267,29 @@ export function SideNav({
                     aria-current={
                       isActiveCollection(collection.projectPath, collection.id) ? 'location' : undefined
                     }
-                    title={collectionDisplayName(collection.name, collection.projectPath)}
+                    title={collectionDisplayName(
+                      collection.name,
+                      collection.projectPath,
+                      recentCollections
+                        .filter(
+                          (other) =>
+                            other.projectPath === collection.projectPath && other.id !== collection.id,
+                        )
+                        .map((other) => other.name),
+                    )}
                     onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
                   >
                     <span className="side-nav-collection-name">
-                      {collectionDisplayName(collection.name, collection.projectPath)}
+                      {collectionDisplayName(
+                        collection.name,
+                        collection.projectPath,
+                        recentCollections
+                          .filter(
+                            (other) =>
+                              other.projectPath === collection.projectPath && other.id !== collection.id,
+                          )
+                          .map((other) => other.name),
+                      )}
                     </span>
                     <small>
                       {collection.projectName} · {relativeOpenedTime(collection.openedAt)}
@@ -378,11 +396,23 @@ export function SideNav({
                                   ? 'location'
                                   : undefined
                               }
-                              title={collectionDisplayName(collection.name, project.projectPath)}
+                              title={collectionDisplayName(
+                                collection.name,
+                                project.projectPath,
+                                openCollections
+                                  .filter((other) => other.id !== collection.id)
+                                  .map((other) => other.name),
+                              )}
                               onClick={() => void onOpenCollection(project.projectPath, collection.id)}
                             >
                               <span className="side-nav-collection-name">
-                                {collectionDisplayName(collection.name, project.projectPath)}
+                                {collectionDisplayName(
+                                  collection.name,
+                                  project.projectPath,
+                                  openCollections
+                                    .filter((other) => other.id !== collection.id)
+                                    .map((other) => other.name),
+                                )}
                               </span>
                             </button>
                           ))}

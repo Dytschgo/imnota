@@ -291,6 +291,19 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Template' });
   await driver.click({ selector: '.project-row-main', text: 'Feedback Template' });
   await driver.waitFor({ selector: '[data-testid="workspace"]' });
+  // The workspace appears before its text content. Wait for the template editor
+  // to mount and autofocus; otherwise that late focus closes the picker on blur.
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const editor = document.querySelector('[data-testid="markdown-input"]');
+      if (editor instanceof HTMLTextAreaElement && editor.value.startsWith('# Summary') &&
+          document.activeElement === editor) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Template Markdown editor did not load and receive focus.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
   await captureCollectionPicker(
     driver,
     artifactDirectory,
