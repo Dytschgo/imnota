@@ -17,7 +17,7 @@ describe('capture global shortcut', () => {
     expect(shortcutPlatformFromProcess('darwin')).toBe('mac');
     expect(shortcutPlatformFromProcess('win32')).toBe('windows');
     expect(captureRegionBinding({}, 'win32')).toBe('Ctrl+Shift+5');
-    expect(captureRegionBinding({}, 'darwin')).toBe('Meta+Shift+5');
+    expect(captureRegionBinding({}, 'darwin')).toBe('Ctrl+Shift+5');
     expect(isOsHeldGlobalCaptureShortcut('Meta+Shift+5', 'mac')).toBe(true);
     expect(isOsHeldGlobalCaptureShortcut('Ctrl+Shift+5', 'windows')).toBe(false);
     expect(
@@ -44,6 +44,13 @@ describe('capture global shortcut', () => {
     expect(
       resolveCaptureGlobalShortcut({
         bindings: {},
+        processPlatform: 'darwin',
+        experimentalEnabled: true,
+      }),
+    ).toBe('Ctrl+Shift+5');
+    expect(
+      resolveCaptureGlobalShortcut({
+        bindings: { 'capture.region': 'Meta+Shift+5' },
         processPlatform: 'darwin',
         experimentalEnabled: true,
       }),

@@ -10,6 +10,51 @@ import { shouldShowOnboarding } from '../preferences';
 import { BACKDROP_PRESETS, backdropPresetValue, appearanceBackdrop } from '../preferences';
 
 describe('profile-aware preference settings', () => {
+  it('migrates profiles without presets and preserves presets across unrelated updates and restarts', () => {
+    const initial = resolvePreferenceSettings(undefined, false);
+    const legacy = { ...initial.settings };
+    Reflect.deleteProperty(legacy, 'exportPresets');
+    expect(resolvePreferenceSettings({ preferences: legacy }, true).settings.exportPresets).toEqual([]);
+    const preset = {
+      id: 'review',
+      name: 'Review',
+      defaultFunction: 'rich' as const,
+      includeRecognisedText: false,
+    };
+    const saved = mergePreferenceSettings(initial.settings, { exportPresets: [preset] });
+    const patched = mergePreferenceSettings(saved, { promptExport: { includeRecognisedText: false } });
+    const restarted = resolvePreferenceSettings(
+      preferenceSettingsEnvelope({}, patched, initial.profile),
+      true,
+    );
+    expect(restarted.settings.exportPresets).toEqual([preset]);
+    expect(preferenceSettingsUpdateSchema.parse({ promptExport: {} })).toEqual({ promptExport: {} });
+    expect(mergePreferenceSettings(patched, { exportPresets: [] }).exportPresets).toEqual([]);
+  });
+
+  it('rejects malformed, duplicate, and excessive presets before applying any preferences', () => {
+    const current = resolvePreferenceSettings(undefined, false).settings;
+    const preset = {
+      id: 'review',
+      name: 'Review',
+      defaultFunction: 'rich' as const,
+      includeRecognisedText: false,
+    };
+    for (const exportPresets of [
+      [{ ...preset, name: ' ' }],
+      [{ ...preset, name: 'x'.repeat(61) }],
+      [preset, { ...preset, id: 'second', name: ' REVIEW ' }],
+      [preset, { ...preset, name: 'Different' }],
+      Array.from({ length: 21 }, (_, index) => ({ ...preset, id: String(index), name: String(index) })),
+    ]) {
+      expect(() =>
+        mergePreferenceSettings(current, { nativeCopy: { defaultFunction: 'rich' }, exportPresets }),
+      ).toThrow();
+      expect(current.nativeCopy.defaultFunction).toBe('files');
+      expect(current.exportPresets).toEqual([]);
+    }
+  });
+
   it.each([{}, { accent: 'amber' }, { lightBackgroundImage: '' }])(
     'keeps appearance updates sparse without inserting stored-profile defaults: %j',
     (appearance) => {

@@ -2,6 +2,14 @@
 
 Status: plan only. Do not implement in this change.
 
+## September 22 targeted reliability work
+
+Completed content Undo receipts now act only as cleanup records. Reopening or retrying Undo after a cleanup failure preserves subsequent project and content edits, and reports blocked cleanup as a warning. Recovery validates project identity and the receipt before attempting cleanup; unexpected files remain untouched. When metadata matches the committed Undo image but the completion marker could not be written, recovery also avoids replaying stale content backups.
+
+Real temporary-filesystem tests cover text and drawing edits after Undo, repeated cleanup failures, external edits after commit-marker failure, foreign-project receipts, malformed receipts, and unknown journal files. Content-save tests inject failure at Markdown, drawing JSON, drawing PNG, and project metadata boundaries, including failed rollback followed by recovery and candidate replay through a fresh service. Existing screenshot-transaction and mixed-project backup tests retain their separate coverage. These are deterministic failure/reopen tests, not a claim of physical power-loss testing.
+
+If both the completion marker and cleanup fail, and later edits change metadata, the remaining `undoing` journal can be ambiguous. Recovery continues to preserve it and refuse guesses. The broader unification proposal below remains separate; no storage format is rewritten by this fix.
+
 Screenshot saves, mixed-content delete/Undo, and local history currently work, but they are three similar systems. The goal is one user-visible recovery model so screenshots, drawings, and text are handled the same way.
 
 ## What exists today

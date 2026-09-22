@@ -34,3 +34,20 @@ Keep the isolated runner and disposable projects. Label single-machine numbers a
 - Claiming support for very large projects before those budgets exist
 - Changing Picture-number or exclusion rules to make export cheaper
 - Cloud offload of rendering
+
+## Bounded composition reuse — Windows measurement, 2026-09-22
+
+The export controller now retains at most 8,388,608 characters of composed output during one export, reuses those outputs after split planning, and releases them as bundles are written. Larger outputs are recomposed. Source revision and screenshot bytes/dimensions are checked before writing cached output; cancellation still prevents the write. Independent review covered these invalidation and cleanup paths.
+
+One local before/after run used `node scripts/visual-performance.mjs`, separate disposable projects, and the same synthetic fixtures. Baseline: `a3f576e`; implementation: `65d44c1`. These are individual Windows measurements, not statistical performance guarantees. Targeted development checks also ran during parts of the session.
+
+| Native scenario | Baseline render time | With reuse | Bundles |
+| --------------- | -------------------: | ---------: | ------: |
+| Mixed 10        |            23,979 ms |  22,025 ms |       6 |
+| Mixed 20        |            20,454 ms |  20,022 ms |      13 |
+| Mixed 100       |            57,604 ms |  55,335 ms |      66 |
+| Dense 20        |            22,616 ms |  20,301 ms |      13 |
+
+For dense 20, peak renderer working set fell from 1,033.6 MB to 924.9 MB and post-run renderer working set from 1,026.1 MB to 847.6 MB. GPU post-run working set increased from 738.8 MB to 915.0 MB; this change does not establish a GPU-memory improvement. Native walkthrough assertions passed in both runs. Reports and synthetic screenshots remain local verification artifacts.
+
+Controller regression tests cover 1, 10, 20, 50, and 100 bundles, bounded-cache fallback, changed source pixels with unchanged metadata revision, cancellation, and replanning. The photographic/high-entropy fixture, native 50-item budget, and broader decode/rail work above remain open; this optimization does not meet all scale acceptance criteria.

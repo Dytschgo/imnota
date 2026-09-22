@@ -1941,6 +1941,9 @@ export default function App() {
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
             onPromptExportChange={preferences.savePromptExport}
+            onExportPresetChange={async (update) => {
+              await preferences.save(update);
+            }}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}

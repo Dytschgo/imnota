@@ -304,7 +304,7 @@ export async function exerciseRegionCapture(
   const baselineFiles = await screenshotFiles(projectPath);
 
   if (!host.trayAvailable()) throw new Error('Native smoke did not create the tray icon.');
-  if (process.platform === 'win32' && !host.globalCaptureShortcutRegistered())
+  if (!host.globalCaptureShortcutRegistered())
     throw new Error('Tray lifecycle did not retain the configured global capture shortcut.');
 
   // Exercise the actual countdown window and IPC in packaged Windows/macOS runs.

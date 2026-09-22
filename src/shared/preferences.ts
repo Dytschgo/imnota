@@ -143,6 +143,13 @@ export interface NativeCopyPreferences {
   defaultFunction: NativeCopyFunction;
 }
 
+export interface ExportPreset {
+  id: string;
+  name: string;
+  defaultFunction: NativeCopyFunction;
+  includeRecognisedText: boolean;
+}
+
 /** Application export Markdown options. Not stored on project.json. */
 export interface PromptExportPreferences {
   includeRecognisedText: boolean;
@@ -157,6 +164,7 @@ export interface PreferenceSettings {
   workbench: WorkbenchPreferences;
   nativeCopy: NativeCopyPreferences;
   promptExport: PromptExportPreferences;
+  exportPresets: ExportPreset[];
   updates: UpdatePreferences;
   agentAccess: AgentAccessPreferences;
 }
@@ -226,6 +234,7 @@ export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   workbench: DEFAULT_WORKBENCH,
   nativeCopy: DEFAULT_NATIVE_COPY_PREFERENCES,
   promptExport: DEFAULT_PROMPT_EXPORT_PREFERENCES,
+  exportPresets: [],
   updates: DEFAULT_UPDATE_PREFERENCES,
   agentAccess: DEFAULT_AGENT_ACCESS,
 };

@@ -43,9 +43,20 @@ import {
 } from '../export-image';
 import {
   composePromptBundle,
+  type ComposedPromptBundle,
   type PromptBundleComposition,
   type ResolvedPromptPicturePng,
 } from '../prompt-bundle-render';
+
+// Encoded PNGs only, scoped to one export. Never retain decoded canvases or grow
+// with collection size: eight million UTF-16 characters cost at most 16 MiB.
+export const MAX_RETAINED_EXPORT_CHARACTERS = 8 * 1024 * 1024;
+
+async function imageFingerprint(image: ImagePayload): Promise<string> {
+  const bytes = new TextEncoder().encode(`${image.width}:${image.height}:${image.dataUrl}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 import type {
   PromptBundleActionRequest,
   PromptBundleCardModel,
@@ -844,6 +855,7 @@ export class PromptBundleControllerEngine {
     prepared: PreparedPromptPlan,
     picture: PromptBundle['pictures'][number],
     signal: AbortSignal,
+    fingerprints?: Map<string, string>,
   ): Promise<PromptPictureResolveResult> {
     throwIfAborted(signal);
     if (picture.kind === 'drawing') {
@@ -887,6 +899,8 @@ export class PromptBundleControllerEngine {
         true,
       );
     const renderOptions = { signal };
+    if (fingerprints) fingerprints.set(picture.screenshotId, await imageFingerprint(loaded.image));
+    throwIfAborted(signal);
     const rendered = await this.rendering.render(loaded.image, loaded.annotations, renderOptions);
     throwIfAborted(signal);
     return {
@@ -898,7 +912,12 @@ export class PromptBundleControllerEngine {
     };
   }
 
-  private async compose(prepared: PreparedPromptPlan, bundle: PromptBundle, signal: AbortSignal) {
+  private async compose(
+    prepared: PreparedPromptPlan,
+    bundle: PromptBundle,
+    signal: AbortSignal,
+    fingerprints?: Map<string, string>,
+  ) {
     if (!bundle.pictures.length)
       return {
         kind: 'composed' as const,
@@ -912,7 +931,7 @@ export class PromptBundleControllerEngine {
     const composeOptions = {
       signal,
       resolvePicturePng: (picture: PromptBundle['pictures'][number]) =>
-        this.resolvePicture(prepared, picture, signal),
+        this.resolvePicture(prepared, picture, signal, fingerprints),
     };
     return this.rendering.compose(bundle, composeOptions);
   }
@@ -921,6 +940,7 @@ export class PromptBundleControllerEngine {
     prepared: PreparedPromptPlan,
     bundle: PromptBundle,
     signal: AbortSignal,
+    fingerprints?: ReadonlyMap<string, string>,
   ): Promise<readonly { filename: string; source: string }[]> {
     const assets: { filename: string; source: string }[] = [];
     for (const text of bundle.textItems) {
@@ -937,7 +957,29 @@ export class PromptBundleControllerEngine {
         );
     }
     for (const picture of bundle.pictures) {
-      if (picture.kind !== 'drawing') continue;
+      if (picture.kind !== 'drawing') {
+        if (fingerprints) {
+          throwIfAborted(signal);
+          const screenshot = prepared.context.snapshot.project.screenshots.find(
+            (item) => item.id === picture.screenshotId && item.collectionId === prepared.context.collectionId,
+          );
+          if (!screenshot) throw failure('content-changed', 'The screenshot is no longer available.', true);
+          const loaded = await this.bridge.loadScreenshotContent({
+            projectPath: prepared.context.snapshot.projectPath,
+            screenshot,
+          });
+          if (
+            loaded.contentRevision !== picture.contentRevision ||
+            (await imageFingerprint(loaded.image)) !== fingerprints.get(picture.screenshotId)
+          )
+            throw failure(
+              'content-changed',
+              'Picture content changed after export planning. Save and export again.',
+              true,
+            );
+        }
+        continue;
+      }
       throwIfAborted(signal);
       const loaded = await this.loadContentItem({
         projectPath: prepared.context.snapshot.projectPath,
@@ -962,15 +1004,24 @@ export class PromptBundleControllerEngine {
         );
       assets.push({ filename: expected.filename, source: expected.source });
     }
+    throwIfAborted(signal);
     return assets;
   }
 
-  private async settleSplits(run: ActiveRun, metadata: PreparedPromptMetadata): Promise<SettledPromptPlan> {
+  private async settleSplits(
+    run: ActiveRun,
+    metadata: PreparedPromptMetadata,
+    compositions: Map<number, ComposedPromptBundle>,
+    fingerprints: Map<string, string>,
+  ): Promise<SettledPromptPlan> {
     const breaks = new Set<string>();
     const includedCount = (metadata.input.items ?? metadata.input.screenshots).filter(
       (item) => item.includeInExport && item.kind !== 'text',
     ).length;
     for (let attempt = 0; attempt <= includedCount; attempt += 1) {
+      compositions.clear();
+      fingerprints.clear();
+      let retainedCharacters = 0;
       this.assertActive(run);
       const prepared = this.planMetadata(metadata, breaks);
       const encoded = new Map<number, number>();
@@ -984,7 +1035,7 @@ export class PromptBundleControllerEngine {
             message: `Checking Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
           },
         });
-        const composition = await this.compose(prepared, bundle, run.controller.signal);
+        const composition = await this.compose(prepared, bundle, run.controller.signal, fingerprints);
         this.assertActive(run);
         if (composition.kind === 'encoded-overflow') {
           if (breaks.has(composition.breakBeforeScreenshotId))
@@ -998,6 +1049,11 @@ export class PromptBundleControllerEngine {
           break;
         }
         encoded.set(bundle.number, composition.encodedCharacters);
+        const characters = composition.dataUrl?.length ?? 0;
+        if (retainedCharacters + characters <= MAX_RETAINED_EXPORT_CHARACTERS) {
+          compositions.set(bundle.number, composition);
+          retainedCharacters += characters;
+        }
         bundle.delivery = composition.delivery;
         bundle.warning = composition.warning;
       }
@@ -1096,77 +1152,91 @@ export class PromptBundleControllerEngine {
   }> {
     const metadata = await this.prepareMetadata(run);
     if ('kind' in metadata) throw failure('no-content', metadata.message, true);
-    const settled = await this.settleSplits(run, metadata);
-    this.assertActive(run);
-    const manifests = settled.plan.bundles.map((bundle) => ({
-      bundleNumber: bundle.number,
-      ...(bundle.pictures.length ? {} : { hasImage: false }),
-      width: bundle.layout.width,
-      height: bundle.layout.height,
-    }));
-    const startInput = {
-      projectPath: metadata.context.snapshot.projectPath,
-      collectionId: metadata.context.collectionId,
-      bundles: manifests,
-    };
-    const session = unwrap(await this.bridge.startPromptExport(startInput));
-    run.session = session;
-    this.assertActive(run);
-    const identifiedPlan = applyPromptBundleMarkdownIdentity(settled.plan, { setName: session.setName });
-    const prepared = { ...settled, plan: identifiedPlan };
-    run.plan = prepared;
-    this.latestPlan = prepared;
-    this.emit({ cards: cardsForPlan(prepared, settled.encodedCharacters) });
+    const compositions = new Map<number, ComposedPromptBundle>();
+    const fingerprints = new Map<string, string>();
+    try {
+      const settled = await this.settleSplits(run, metadata, compositions, fingerprints);
+      this.assertActive(run);
+      const manifests = settled.plan.bundles.map((bundle) => ({
+        bundleNumber: bundle.number,
+        ...(bundle.pictures.length ? {} : { hasImage: false }),
+        width: bundle.layout.width,
+        height: bundle.layout.height,
+      }));
+      const startInput = {
+        projectPath: metadata.context.snapshot.projectPath,
+        collectionId: metadata.context.collectionId,
+        bundles: manifests,
+      };
+      const session = unwrap(await this.bridge.startPromptExport(startInput));
+      run.session = session;
+      this.assertActive(run);
+      const identifiedPlan = applyPromptBundleMarkdownIdentity(settled.plan, { setName: session.setName });
+      const prepared = { ...settled, plan: identifiedPlan };
+      run.plan = prepared;
+      this.latestPlan = prepared;
+      this.emit({ cards: cardsForPlan(prepared, settled.encodedCharacters) });
 
-    for (const bundle of prepared.plan.bundles) {
-      this.assertActive(run);
-      this.setCardState(bundle.number, 'writing');
-      this.emit({
-        progress: {
-          phase: 'writing',
-          bundleNumber: bundle.number,
-          totalBundles: prepared.plan.bundles.length,
-          message: `Writing Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
-        },
-      });
-      const composition = await this.compose(prepared, bundle, run.controller.signal);
-      this.assertActive(run);
-      if (composition.kind === 'encoded-overflow')
-        throw failure(
-          'content-changed',
-          'Encoded output changed after preflight. No incomplete prompt pair was published; export again.',
-          true,
+      for (const bundle of prepared.plan.bundles) {
+        this.assertActive(run);
+        this.setCardState(bundle.number, 'writing');
+        this.emit({
+          progress: {
+            phase: 'writing',
+            bundleNumber: bundle.number,
+            totalBundles: prepared.plan.bundles.length,
+            message: `Writing Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
+          },
+        });
+        const cached = compositions.get(bundle.number);
+        compositions.delete(bundle.number);
+        const composition = cached ?? (await this.compose(prepared, bundle, run.controller.signal));
+        this.assertActive(run);
+        if (composition.kind === 'encoded-overflow')
+          throw failure(
+            'content-changed',
+            'Encoded output changed after preflight. No incomplete prompt pair was published; export again.',
+            true,
+          );
+        unwrap(
+          await this.bridge.writePromptExportBundle({
+            sessionId: session.sessionId,
+            bundleNumber: bundle.number,
+            pngDataUrl: composition.dataUrl,
+            markdown: bundle.markdown,
+            sourceAssets: await this.verifyBundleContent(
+              prepared,
+              bundle,
+              run.controller.signal,
+              cached !== undefined ? fingerprints : undefined,
+            ),
+          }),
         );
-      unwrap(
-        await this.bridge.writePromptExportBundle({
-          sessionId: session.sessionId,
-          bundleNumber: bundle.number,
-          pngDataUrl: composition.dataUrl,
-          markdown: bundle.markdown,
-          sourceAssets: await this.verifyBundleContent(prepared, bundle, run.controller.signal),
-        }),
-      );
-      this.assertActive(run);
-      this.setCardState(bundle.number, 'idle');
-    }
+        this.assertActive(run);
+        this.setCardState(bundle.number, 'idle');
+      }
 
-    const overview = this.includeMasterOverview
-      ? masterMarkdown(prepared.plan, prepared.input, session.setName)
-      : undefined;
-    const finishResult = await this.terminate(run, 'finish', overview);
-    if (!finishResult.ok) {
-      run.terminal = undefined;
-      run.terminalKind = undefined;
-      throw nativeFailure(finishResult.error);
-    }
-    const finalized = finishResult.value;
-    run.finalized = finalized;
-    if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
+      const overview = this.includeMasterOverview
+        ? masterMarkdown(prepared.plan, prepared.input, session.setName)
+        : undefined;
+      const finishResult = await this.terminate(run, 'finish', overview);
+      if (!finishResult.ok) {
+        run.terminal = undefined;
+        run.terminalKind = undefined;
+        throw nativeFailure(finishResult.error);
+      }
+      const finalized = finishResult.value;
+      run.finalized = finalized;
+      if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
+        this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
+        throw cancelledFailure();
+      }
       this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
-      throw cancelledFailure();
+      return { prepared, session, finalized };
+    } finally {
+      compositions.clear();
+      fingerprints.clear();
     }
-    this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
-    return { prepared, session, finalized };
   }
 
   async open(): Promise<PromptBundleControllerActionResult> {
