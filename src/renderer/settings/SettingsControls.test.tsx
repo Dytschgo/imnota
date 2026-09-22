@@ -12,6 +12,18 @@ vi.mock('../components/UpdateControl', () => ({ UpdateControl: () => null }));
 afterEach(cleanup);
 
 describe('preference controls', () => {
+  it('opens local diagnostics and reports access failure without changing preferences', async () => {
+    const openDiagnosticsFolder = vi.fn().mockRejectedValue(new Error('access denied'));
+    vi.stubGlobal('imnota', { openDiagnosticsFolder });
+    try {
+      render(<SettingsView activeCategory="Workspace" />);
+      fireEvent.click(screen.getByRole('button', { name: 'Open diagnostics folder' }));
+      await waitFor(() => expect(openDiagnosticsFolder).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/Local diagnostics are unavailable/)).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('emits independent theme, accent, and glass preference changes', async () => {
     const onChange = vi.fn(async () => {});
     const { rerender } = render(<AppearanceSettings value={DEFAULT_APPEARANCE} onChange={onChange} />);

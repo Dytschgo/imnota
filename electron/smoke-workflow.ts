@@ -5,7 +5,7 @@ import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Annotation, ProjectData, WorkspaceSettings } from '../src/shared/types.js';
+import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from '../src/shared/types.js';
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
@@ -43,7 +43,7 @@ export interface SmokeWorkflowHost {
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */
-  restoreRecovery(projectPath: string): Promise<ProjectData>;
+  restoreRecovery(projectPath: string): Promise<ProjectSnapshot>;
   /** Read the persisted legacy update/workspace settings through production code. */
   readSettings(): Promise<WorkspaceSettings>;
   /** One-use native confirmation for an exact project inside this disposable fixture. */
@@ -2213,8 +2213,27 @@ async function exerciseRecovery(
     recovered.screenshots[0].includeInExport = false;
     await window.imnota.saveRecovery({ projectPath: snapshot.projectPath, project: recovered, annotations: {} });
   })()`);
-  const recovered = await host.restoreRecovery(projectPath);
-  const screenshot = recovered.screenshots[0];
+  const before = await host.readProject(projectPath);
+  const original = path.join(
+    projectPath,
+    'collections',
+    before.screenshots[0].collectionId,
+    'screenshots',
+    before.screenshots[0].storedFilename,
+  );
+  const held = `${original}.smoke-held`;
+  await fs.rename(original, held);
+  let recovered: ProjectSnapshot;
+  try {
+    recovered = await host.restoreRecovery(projectPath);
+    if (!recovered.warnings?.some((warning) => warning.includes('missing or inaccessible')))
+      throw new Error('Recovery dropped the missing-file warning.');
+    if (!recovered.project.screenshots.some((shot) => shot.id === before.screenshots[0].id))
+      throw new Error('Recovery removed the missing screenshot record.');
+  } finally {
+    await fs.rename(held, original);
+  }
+  const screenshot = recovered.project.screenshots[0];
   if (
     screenshot.title !== 'Recovered native title' ||
     screenshot.description !== 'Recovered native description' ||
@@ -2224,6 +2243,60 @@ async function exerciseRecovery(
     throw new Error('Recovery did not restore screenshot metadata through production code.');
   if (await fs.stat(path.join(projectPath, '.imnota-recovery.json')).catch(() => null))
     throw new Error('Recovery journal remained after a successful restore.');
+}
+
+async function exerciseScreenshotPreservation(driver: NativeUiDriver, projectPath: string): Promise<void> {
+  const metadata = await fs.readFile(path.join(projectPath, 'project.json'));
+  const project = JSON.parse(metadata.toString('utf8')) as ProjectData;
+  const shot = project.screenshots[0];
+  const imagePath = path.join(
+    projectPath,
+    'collections',
+    shot.collectionId,
+    'screenshots',
+    shot.storedFilename,
+  );
+  const image = await fs.readFile(imagePath);
+  const reference = await driver.evaluate<string>(`(async () => {
+    ${bridgePrelude()}
+    const watch = unwrap(await workflow.startProjectWatch({ projectPath: ${JSON.stringify(projectPath)} }));
+    try {
+      const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+      const result = await workflow.saveProjectCompareAndSwap({ watchId: watch.watchId, expectedRevision: watch.projectRevision, project: { ...snapshot.project, screenshots: [] } });
+      if (result.ok) throw new Error('Metadata save discarded the screenshots');
+      const message = JSON.stringify(result);
+      const reference = message.match(/Diagnostic reference: ([a-f0-9-]{36})/);
+      if (!message.includes('screenshot list changed') || !reference) throw new Error('Rejected metadata save has no actionable diagnostic reference: ' + message);
+      return reference[1];
+    } finally { unwrap(await workflow.stopProjectWatch({ watchId: watch.watchId })); }
+  })()`);
+  if (
+    !(await fs.readFile(path.join(projectPath, 'project.json'))).equals(metadata) ||
+    !(await fs.readFile(imagePath)).equals(image)
+  )
+    throw new Error('Rejected screenshot omission changed metadata or original image bytes.');
+  const directory = path.join(app.getPath('userData'), 'diagnostics');
+  const lines = (
+    await Promise.all(
+      (await fs.readdir(directory))
+        .filter((name) => name.endsWith('.jsonl'))
+        .map((name) => fs.readFile(path.join(directory, name), 'utf8')),
+    )
+  ).join('\n');
+  const entries = lines
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  if (
+    !entries.some(
+      (entry) =>
+        entry.operationId === reference &&
+        entry.action === 'workflow:project-watch:cas' &&
+        entry.phase === 'failed',
+    )
+  )
+    throw new Error('Rejected CAS did not leave its correlated local failure trace.');
 }
 
 async function exerciseFixtureTrash(driver: NativeUiDriver, projectPath: string): Promise<void> {
@@ -2494,8 +2567,14 @@ export async function runSmokeWorkflow(
 
   await exerciseWatchAndConflict(driver, host, projectPath);
   assertions.push('filesystem watcher reload and stale compare-and-swap rejection');
+  await exerciseScreenshotPreservation(driver, projectPath);
+  assertions.push(
+    'metadata screenshot omission rejected without changing original/metadata bytes, with correlated CAS diagnostic reference',
+  );
   await exerciseRecovery(driver, host, projectPath);
-  assertions.push('interrupted-edit recovery metadata');
+  assertions.push(
+    'interrupted-edit recovery metadata and missing-original warning with retained screenshot record',
+  );
   await exerciseFixtureTrash(driver, projectPath);
   assertions.push('fixture-only native trash and Undo');
 

@@ -67,6 +67,7 @@ const bridge: ImnotaBridge = {
   exportBackupSnapshot: (input) => ipcRenderer.invoke('backups:export', input),
   restoreBackupSnapshot: (input) => ipcRenderer.invoke('backups:restore', input),
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  openDiagnosticsFolder: () => ipcRenderer.invoke('diagnostics:open-folder'),
   chooseWorkspace: () => ipcRenderer.invoke('settings:choose-workspace'),
   setSettings: (input) => ipcRenderer.invoke('settings:set', input),
   listProjects: () => ipcRenderer.invoke('projects:list'),
