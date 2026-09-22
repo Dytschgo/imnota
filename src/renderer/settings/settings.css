@@ -849,6 +849,10 @@
   font-size: 11px;
 }
 
+.imnota-backup-manual .field {
+  margin-bottom: 0;
+}
+
 .imnota-backup-retention select,
 .imnota-backup-manual select {
   width: 100%;
