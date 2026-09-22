@@ -99,7 +99,7 @@ describe('profile-aware preference settings', () => {
     );
     expect(result.settings.workbench.screenshotFirstAdd).toBe(true);
     expect(result.settings.nativeCopy.defaultFunction).toBe('files');
-    expect(result.settings.promptExport.includeRecognisedText).toBe(true);
+    expect(result.settings.promptExport.includeRecognisedText).toBe(false);
     expect(result.settings.updates.whatsNewAcknowledgedVersion).toBeUndefined();
     expect(result.settings.agentAccess.enabled).toBe(false);
   });
@@ -122,7 +122,7 @@ describe('profile-aware preference settings', () => {
       { preferences: { ...current, promptExport: undefined } },
       true,
     );
-    expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(true);
+    expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(false);
     expect(
       mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
     ).toEqual({ includeRecognisedText: false });

@@ -977,7 +977,7 @@ export default function App() {
         return;
       }
       if (!preferences.settings.capture.experimentalRegionCapture) {
-        setError('Screen capture is experimental — enable it in Settings');
+        setError('Screen capture is off — enable it in Settings → Features');
         return;
       }
       const current = useAppStore.getState();
@@ -1700,7 +1700,7 @@ export default function App() {
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
       : !activeCaptureCollection || activeCaptureCollection.archived
         ? 'Choose a current collection before capturing'
-        : 'Screen capture is experimental — enable it in Settings';
+        : 'Screen capture is off — enable it in Settings → Features';
   const orderedShots = useMemo(
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],

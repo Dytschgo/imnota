@@ -227,6 +227,17 @@ export function AppDialogs({
             Imnota keeps screenshot context local, editable, and ready to share. No account, backend, or cloud
             storage is required.
           </p>
+          <nav className="about-links" aria-label="Imnota links">
+            <a href="https://imnota.xyz/" target="_blank" rel="noopener noreferrer">
+              Website
+            </a>
+            <a href="https://github.com/Dytschgo/imnota" target="_blank" rel="noopener noreferrer">
+              GitHub
+            </a>
+            <a href="https://x.com/Dytschgo" target="_blank" rel="noopener noreferrer">
+              X · @Dytschgo
+            </a>
+          </nav>
           <span className="muted">
             Version {currentVersion ?? appVersion} · MIT License · Built by Dytschgo
           </span>

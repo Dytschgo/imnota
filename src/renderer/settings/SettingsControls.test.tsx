@@ -199,7 +199,7 @@ describe('preference controls', () => {
   it('explains when the background capture shortcut could not be registered', () => {
     render(
       <SettingsView
-        activeCategory="Shortcuts"
+        activeCategory="Features"
         preferences={{
           ...DEFAULT_PREFERENCE_SETTINGS,
           capture: { experimentalRegionCapture: true },
@@ -213,7 +213,7 @@ describe('preference controls', () => {
     cleanup();
     render(
       <SettingsView
-        activeCategory="Shortcuts"
+        activeCategory="Features"
         preferences={{
           ...DEFAULT_PREFERENCE_SETTINGS,
           capture: { experimentalRegionCapture: true },
@@ -226,18 +226,18 @@ describe('preference controls', () => {
     );
   });
 
-  it('defaults Include recognised text in Markdown on and emits a persisted change', async () => {
+  it('defaults beta recognised text in Markdown off and emits a persisted change', async () => {
     const onPromptExportChange = vi.fn(async () => {});
     render(
       <SettingsView
-        activeCategory="Sharing"
+        activeCategory="Features"
         preferences={DEFAULT_PREFERENCE_SETTINGS}
         onPromptExportChange={onPromptExportChange}
       />,
     );
     const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
-    expect(toggle).toBeChecked();
+    expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: false }));
+    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: true }));
   });
 });

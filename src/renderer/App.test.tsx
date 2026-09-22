@@ -1248,7 +1248,7 @@ describe('feedback controls', () => {
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
     expect(startRegionCapture).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Screen capture is experimental — enable it in Settings',
+      'Screen capture is off — enable it in Settings → Features',
     );
   });
 
@@ -2959,7 +2959,7 @@ describe('feedback controls', () => {
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('heading', { name: 'Privacy' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
-    expect(screen.getByRole('heading', { name: 'Privacy' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Privacy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Dark' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
 

@@ -230,8 +230,8 @@
 
 .side-nav-footer-button.active {
   color: var(--ink);
-  background: var(--imnota-accent-soft);
-  box-shadow: inset 0 -2px 0 var(--imnota-accent);
+  background: var(--surface-2);
+  box-shadow: none;
 }
 
 .side-nav-empty-collections {
