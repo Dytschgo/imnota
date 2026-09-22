@@ -35,8 +35,8 @@ The tradeoff is that package runners can spend work on a candidate whose quality
 - Release-channel and asset-staging tests still run once through `pnpm test`.
 - The three actual distributables still build and run native verification. Windows visual tolerances and baselines are unchanged.
 - Manifest validation, complete asset-set validation, SHA-256 generation, draft-first publication, and stable-release isolation remain intact.
-- PR/main CI still runs its unpackaged walkthrough and full platform suites. The removed nightly walkthrough therefore retains developer-build coverage there, as well as packaged coverage in nightly.
-- PR CI repeats the full suite across the platform matrix. Some renderer-only tests could eventually run on Linux alone, but platform filesystem, path, symlink, update and native tests must remain. This audit does not delete those suites without a separate coverage map.
+- At this audit, PR/main CI retained the unpackaged walkthrough. The [September 22 follow-up](verification-timing.md#september-22-validation-audit) removes that duplicate; local unpackaged smoke and all three packaged walkthroughs remain.
+- The subsequent [coverage map](pr-test-coverage.md) records exact portable renderer exclusions from the platform matrix. Platform filesystem, path, symlink, update and native tests remain.
 - Two native test readiness problems were corrected. The Markdown search check now waits for the search dialog to close and the matching content to load, instead of accepting the old editor behind the dialog. Double-clicks now queue both trusted click pairs before yielding, preventing main-process scheduling between clicks from exceeding the canvas double-click window. A driver regression test checks that ordering. Assertions and visual tolerances remain intact; no automatic retries were added.
 
 ## Validation
