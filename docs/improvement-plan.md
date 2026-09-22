@@ -7,7 +7,7 @@ Goal: shorten the time from a reviewed change to a verified release while preser
 [PR #34](https://github.com/Dytschgo/imnota/pull/34) delivered:
 
 - [x] Nightly quality and packaging run concurrently after the exact-main-commit guard. Publication still requires quality and every package job to succeed.
-- [x] Remove duplicate release-test invocation and the extra nightly build/unpackaged Linux walkthrough. Packaged verification remains on all three OSes; PR/main CI retains the unpackaged walkthrough.
+- [x] Remove duplicate release-test invocation and the extra nightly build/unpackaged Linux walkthrough. Packaged verification remains on all three OSes. PR/main retained the unpackaged walkthrough at that point; the [September 22 audit](verification-timing.md#september-22-validation-audit) removes that duplicate too.
 - [x] Correct premature Markdown-search assertions and native double-click scheduling in the smoke driver without weakening assertions or adding automatic retries.
 
 The [baseline nightly](https://github.com/Dytschgo/imnota/actions/runs/34266014334) took 10m 25s from guard start to publication-job completion. The [optimized nightly](https://github.com/Dytschgo/imnota/actions/runs/34274745361) took 7m 17s: 3m 08s, or about 30%, less in that single comparison. Queue, runner, and upload timing vary; this is observed evidence, not a guaranteed improvement. See the [verification audit](nightly-verification-audit.md) for the original measurements and coverage rationale.

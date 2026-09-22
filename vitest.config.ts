@@ -9,6 +9,7 @@ export default defineConfig({
     // The service uses node:test and its own Node/SQLite runtime, exercised separately in CI.
     exclude: [
       '**/node_modules/**',
+      '.claude/**',
       'dist-electron/**',
       'scripts/*.test.mjs',
       'share-service/**',
