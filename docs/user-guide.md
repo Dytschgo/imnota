@@ -169,3 +169,9 @@ A compact update control stays beside **About** in the workspace navigation. Whe
 Installed builds also check the selected channel (Stable or Nightly) shortly after Imnota starts and about once an hour while it stays open. Those background checks are discovery only. They stay quiet while discovery is offline; a manual check reports the failure. If preparing a discovered update fails, Imnota clears the download action and shows a retry message. Switch channels and check again in Settings → Updates & about → App updates. Nightly is labeled as a preview. Checking contacts GitHub for release information only; your project files stay local.
 
 After you start a newer installed version, **What’s new** appears once for that version with a short summary and screenshots when they are bundled. Nightly notes are labeled as preview. Choose **Try it now** to open a related setting or the onboarding guide, or **Later** / dismiss to keep working. Missing screenshots do not block startup. Imnota stores that you have seen this version in local application settings, not in project files, and will not show it again until a newer version is installed. Replay the same notes from Settings → Updates & about.
+
+### Saved export presets
+
+In Settings > Sharing, set the primary copy action and whether to include recognised text, then enter a name under Export presets and choose **Save current options**. Choose a saved preset and **Apply preset** to restore both options together. On platforms without native file clipboard support, presets use rich copy (text and image). The receiving app still decides which formats to accept.
+
+Up to 20 uniquely named presets are stored on this device in application preferences. Removing a preset leaves the current export options unchanged. Presets do not change project content, annotation styling, bundle size, or sharing permissions. If saving fails, the previous preferences remain active and the name stays available for retry.

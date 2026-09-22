@@ -18,6 +18,26 @@ const nativeCopyPreferencesSchema = z
   .object({ defaultFunction: z.enum(['files', 'files-rich', 'rich']) })
   .strict();
 const promptExportPreferencesSchema = z.object({ includeRecognisedText: z.boolean() }).strict();
+const exportPresetsSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().min(1).max(100),
+        name: z.string().trim().min(1).max(60),
+        defaultFunction: z.enum(['files', 'files-rich', 'rich']),
+        includeRecognisedText: z.boolean(),
+      })
+      .strict(),
+  )
+  .max(20)
+  .superRefine((presets, context) => {
+    if (
+      new Set(presets.map((preset) => preset.id)).size !== presets.length ||
+      new Set(presets.map((preset) => preset.name.toLowerCase())).size !== presets.length
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Preset names and IDs must be unique.' });
+    }
+  });
 const updatePreferencesSchema = z
   .object({ whatsNewAcknowledgedVersion: z.string().max(120).optional() })
   .strict();
@@ -77,6 +97,7 @@ export const preferenceSettingsSchema = z
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     promptExport: promptExportPreferencesSchema.default({ includeRecognisedText: true }),
+    exportPresets: exportPresetsSchema.default([]),
     updates: updatePreferencesSchema.default({}),
     agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),
   })
@@ -109,6 +130,7 @@ export const preferenceSettingsUpdateSchema = z
     workbench: workbenchPreferencesSchema.partial().strict().optional(),
     nativeCopy: nativeCopyPreferencesSchema.partial().strict().optional(),
     promptExport: promptExportPreferencesSchema.partial().strict().optional(),
+    exportPresets: exportPresetsSchema.optional(),
     updates: updatePreferencesSchema.partial().strict().optional(),
     agentAccess: agentAccessPreferencesSchema.partial().strict().optional(),
   })
@@ -124,6 +146,7 @@ function cloneDefaults(newProfile = false): PreferenceSettings {
     workbench: { ...DEFAULT_PREFERENCE_SETTINGS.workbench },
     nativeCopy: { ...DEFAULT_PREFERENCE_SETTINGS.nativeCopy },
     promptExport: { ...DEFAULT_PREFERENCE_SETTINGS.promptExport },
+    exportPresets: [],
     updates: { ...DEFAULT_PREFERENCE_SETTINGS.updates },
     agentAccess: { ...DEFAULT_PREFERENCE_SETTINGS.agentAccess },
   };
@@ -215,6 +238,7 @@ export function mergePreferenceSettings(
     workbench: { ...current.workbench, ...update.workbench },
     nativeCopy: { ...current.nativeCopy, ...update.nativeCopy },
     promptExport: { ...current.promptExport, ...update.promptExport },
+    exportPresets: update.exportPresets ?? current.exportPresets,
     updates: { ...current.updates, ...update.updates },
     agentAccess: { ...current.agentAccess, ...update.agentAccess },
   });
