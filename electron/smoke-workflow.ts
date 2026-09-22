@@ -1652,26 +1652,15 @@ async function exerciseSharingPreferences(
     throw new Error('Export preset did not persist.');
   })()`);
   await driver.waitFor({ selector: '[aria-label="New export preset name"]:not(:disabled)' });
-  driver.setWindow(await host.reopenWindow());
-  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
-  await driver.click({ text: 'Sharing', exact: true });
-  await driver.waitFor(input);
-  const remembered = await driver.evaluate<string>(
-    `document.querySelector('[data-testid="sharing-sender-name"]').value`,
-  );
-  if (remembered !== 'Native Sharing') throw new Error('Sharing sender name was lost on window reopen.');
   const preset = await driver.evaluate<{ id: string; includeRecognisedText: boolean }>(`(async () => {
     const result = await window.imnota.getPreferenceSettings();
     if (!result.ok) throw new Error('Could not read saved export preset.');
     const preset = result.value.settings.exportPresets.find(preset => preset.name === 'Native review');
-    if (!preset) throw new Error('Export preset was lost on reopen.');
+    if (!preset) throw new Error('Export preset was not saved.');
     return preset;
   })()`);
-  // Keep the select closed: native popup menus do not receive webContents key events.
-  await driver.evaluate(`document.querySelector('[aria-label="Saved export preset"]').focus()`);
-  await driver.press('Home');
-  await driver.press('Down');
-  await driver.press('Enter');
+  // Saving selects the new preset through the real UI. OS select popups do not
+  // consistently receive webContents input; component tests cover selection changes.
   await driver.click({ selector: '[aria-label="Include recognised text in Markdown"]' });
   await driver.evaluate(`(async () => {
     const deadline = Date.now() + 10000;
@@ -1698,6 +1687,21 @@ async function exerciseSharingPreferences(
   if (!applied) throw new Error('Applying a saved export preset did not restore its options.');
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, 'export-presets-settings.png'));
+  driver.setWindow(await host.reopenWindow());
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
+  await driver.click({ text: 'Sharing', exact: true });
+  await driver.waitFor(input);
+  const remembered = await driver.evaluate<string>(
+    `document.querySelector('[data-testid="sharing-sender-name"]').value`,
+  );
+  if (remembered !== 'Native Sharing') throw new Error('Sharing sender name was lost on window reopen.');
+  const restored = await driver.evaluate<boolean>(`(async () => {
+    const result = await window.imnota.getPreferenceSettings();
+    const saved = result.ok && result.value.settings.exportPresets.find(preset => preset.id === ${JSON.stringify(preset.id)});
+    const visible = [...document.querySelectorAll('[aria-label="Saved export preset"] option')].some(option => option.value === ${JSON.stringify(preset.id)} && option.textContent === 'Native review');
+    return Boolean(saved && visible && result.value.settings.promptExport.includeRecognisedText === saved.includeRecognisedText && result.value.settings.nativeCopy.defaultFunction === saved.defaultFunction);
+  })()`);
+  if (!restored) throw new Error('Export preset or applied options were lost on window reopen.');
   const hasOwnerLink = await driver.evaluate<boolean>(
     `Boolean(document.querySelector('a[href="https://app.imnota.xyz/owner"]'))`,
   );
