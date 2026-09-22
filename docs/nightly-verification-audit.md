@@ -41,4 +41,6 @@ The tradeoff is that package runners can spend work on a candidate whose quality
 
 ## Validation
 
+The [capture display matrix](capture-display-matrix.md) records real source/crop probes and the remaining physical-display walkthroughs. The [clipboard receiver matrix](clipboard-receiver-matrix.md) records actual paste acceptance separately from native clipboard-write assertions.
+
 Validate workflow syntax and the dependency graph, confirm every package still builds and verifies the guard SHA, and confirm publication requires all gates. Run formatting and the existing release tests. Compare a future optimized hosted nightly against the baseline above before claiming a measured speedup.

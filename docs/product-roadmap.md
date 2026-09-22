@@ -1,6 +1,6 @@
 # Imnota product roadmap
 
-Reviewed 2026-09-21 against the v0.2.8 stable release and nightly `v0.2.9-nightly.20260921.35645731983` from `bf8d24e`. This consolidates the earlier local roadmap draft. The [implementation status](implementation-plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
+Release baseline: v0.2.8 stable and nightly `v0.2.9-nightly.20260921.35645731983` from `bf8d24e`. Reconciled against main `a3f576e` on 2026-09-22; linked follow-up PRs are not claims of a published release. The [implementation status](implementation-plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
 
 This roadmap builds on the existing local-first workflow:
 
@@ -62,6 +62,8 @@ Investigate the current high memory and export times before promising support fo
 
 Acceptance: documented budgets for import, reload, export time and peak memory on representative 1, 10, 50 and 100-item projects.
 
+The first measured follow-up is [PR #116](https://github.com/Dytschgo/imnota/pull/116), which reuses composed prompt outputs within a fixed per-export budget. Windows synthetic before/after evidence shows lower render times and renderer working set in that run; photographic fixtures and native 50-item budgets remain open.
+
 ### 4. Clipboard compatibility
 
 Keep the combined copy action, but make the fallback path explicit and dependable:
@@ -74,32 +76,21 @@ Keep the combined copy action, but make the fallback path explicit and dependabl
 
 Build a compatibility matrix for common coding editors and browsers on Windows, macOS and Linux. The UI should explain what was copied and offer the next best action when a target rejects a clipboard representation.
 
-### 5. Local backup and version history
+### 5. Verify local backup and version history
 
-Add an opt-in local history for project metadata and content files. A history entry should be atomic, inspectable and restorable without a server.
+Local snapshots, retention, inspection, restore, and archive export are implemented; see [Backups and history](user-guide.md#local-backup-and-version-history). The next work is failure/recovery evidence across mixed content and supported operating systems, not a new storage framework. Preserve byte-exact content and unrelated files through failed writes, rollback, reopen, and retry.
 
-Proposed first version:
-
-- automatic snapshots before migrations and destructive project-wide operations;
-- a manual “Create snapshot” action;
-- retention by count and age;
-- restore to a new project or restore in place with a confirmation;
-- a visible backup location and an exportable archive;
-- no silent deletion of the user’s original files.
-
-Acceptance: a user can recover a previous mixed-content project after an accidental edit, failed migration or corrupted content file.
+The September 22 recovery follow-up is [PR #115](https://github.com/Dytschgo/imnota/pull/115): completed content Undo must retry journal cleanup without blocking reopen or replaying stale content over later edits. Its status is independent of release publication.
 
 ## Later: workflow acceleration
 
 ### 6. Search across all content
 
-Project search already includes stored context. Extend it to item-level results across collection names, screenshot titles/descriptions, full text-block Markdown, drawing titles and annotation text where useful. Results should identify the collection, item type and match location, then focus the item without changing its order.
-
-Start with an in-memory index built from local files. Add an on-disk index only if measured project sizes make it necessary.
+Saved-text search across projects, collections, screenshots, annotations, Markdown and drawings is implemented, including navigation to the matching item. The user guide documents limits and partial-result reporting. Measure large-workspace latency and completeness before proposing an on-disk index; screenshot-pixel OCR indexing is separate from export-scoped OCR.
 
 ### 7. Export presets
 
-Replace the single default export preference with named local presets. A preset may control included content, annotation metadata, original-image inclusion, Markdown structure and image quality. Presets must be versioned and portable, with a clear fallback when a future setting is unknown.
+The first scoped implementation is [PR #117](https://github.com/Dytschgo/imnota/pull/117): named device-local presets for the existing copy format and recognised-text option. Applying one saves both options together. Presets do not yet change image quality, original-image inclusion, annotation metadata or Markdown structure. Portable preset files and their version/fallback contract remain future work requiring separate scope.
 
 Do not add arbitrary template scripting in the first version.
 
