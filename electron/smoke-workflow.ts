@@ -528,18 +528,30 @@ async function importImages(
   const paths = Array.from({ length: count }, (_, index) => sources[index % sources.length].path);
   for (let offset = 0; offset < paths.length; offset += 10) {
     const batch = paths.slice(offset, offset + 10);
-    await driver.evaluate(`(async () => {
-      const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
-      const collectionId = snapshot.project.collections.find((item) => !item.archived)?.id
-        ?? snapshot.project.collections.at(-1)?.id;
-      if (!collectionId) throw new Error('Fixture project has no collection');
-      await window.imnota.importImageFiles({
+    const batchLabel = `Image fixture ${offset + 1}-${offset + batch.length} of ${count}`;
+    let collectionId: string;
+    try {
+      collectionId = await driver.evaluate<string>(`(async () => {
+        const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+        const collectionId = snapshot.project.collections.find((item) => !item.archived)?.id
+          ?? snapshot.project.collections.at(-1)?.id;
+        if (!collectionId) throw new Error('Fixture project has no collection');
+        return collectionId;
+      })()`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${batchLabel} collection lookup failed: ${message}`, { cause: error });
+    }
+    try {
+      await driver.evaluate(`window.imnota.importImageFiles({
         projectPath: ${JSON.stringify(projectPath)},
-        collectionId,
+        collectionId: ${JSON.stringify(collectionId)},
         paths: ${JSON.stringify(batch)}
-      });
-      return true;
-    })()`);
+      }).then(() => true)`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${batchLabel} import failed: ${message}`, { cause: error });
+    }
   }
 }
 
