@@ -123,6 +123,16 @@ export function DrawingEditor({
     }),
     [],
   );
+  const inspectorRestore = showInspector ? (
+    <IconButton
+      className="drawing-inspector-restore"
+      data-testid="inspector-toggle"
+      label="Expand inspector"
+      onClick={(event) => onShowInspector(event.currentTarget)}
+    >
+      <PanelRight size={16} aria-hidden="true" />
+    </IconButton>
+  ) : null;
 
   if (loaded.error || !loaded.initialData) {
     return (
@@ -132,6 +142,12 @@ export function DrawingEditor({
         data-testid="drawing-editor"
         aria-label="Drawing editor"
       >
+        <div className="drawing-editor-tools" aria-label="Drawing tools">
+          <span className="drawing-editor-title" title={title}>
+            {title || 'Untitled drawing'}
+          </span>
+          {inspectorRestore}
+        </div>
         <div className="content-loading" role="alert">
           {loaded.error}
         </div>
@@ -174,16 +190,7 @@ export function DrawingEditor({
         <span className="drawing-editor-shortcut" title="Select shapes and press Ctrl/⌘ + G to group">
           Group: Ctrl/⌘G
         </span>
-        {showInspector && (
-          <IconButton
-            className="drawing-inspector-restore"
-            data-testid="inspector-toggle"
-            label="Expand inspector"
-            onClick={(event) => onShowInspector(event.currentTarget)}
-          >
-            <PanelRight size={16} aria-hidden="true" />
-          </IconButton>
-        )}
+        {inspectorRestore}
       </div>
       <div
         className="drawing-editor-canvas canvas-workspace-surface"
