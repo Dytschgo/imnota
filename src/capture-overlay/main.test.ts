@@ -222,7 +222,7 @@ it('retake clears every overlay through the coordinator and cancellation remains
   expect(window.imnotaCapture.cancel).toHaveBeenCalledTimes(1);
 });
 
-it('defaults to Region and does not start a drag from the mode switcher', async () => {
+it('defaults to Area and does not start a drag from the mode switcher', async () => {
   const { surface } = await setup();
   const region = document.querySelector<HTMLButtonElement>('[data-mode=region]')!;
   expect(region.getAttribute('aria-checked')).toBe('true');
@@ -232,7 +232,7 @@ it('defaults to Region and does not start a drag from the mode switcher', async 
   expect(window.imnotaCapture.pointer).not.toHaveBeenCalled();
 });
 
-it('explains when windows cannot be identified and keeps Region available', async () => {
+it('explains when windows cannot be identified and keeps Area available', async () => {
   const { selectionHandler } = await setup();
   selectionHandler(
     selectionState({

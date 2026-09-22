@@ -374,7 +374,7 @@ export function Toolbar({
   captureEnabled = false,
   captureInProgress = false,
   captureShortcut,
-  captureDisabledLabel = 'Screen capture is experimental — enable it in Settings',
+  captureDisabledLabel = 'Screen capture is off — enable it in Settings → Features',
   onColorSelect,
   selectedColor,
   shortcutLabels = {},
@@ -639,7 +639,7 @@ export function Toolbar({
                 captureInProgress
                   ? 'Capture in progress…'
                   : captureEnabled
-                    ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                    ? `Capture area${captureShortcut ? ` (${captureShortcut})` : ''}`
                     : captureDisabledLabel
               }
               disabled={!captureEnabled || captureInProgress}

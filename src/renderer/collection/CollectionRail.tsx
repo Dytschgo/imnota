@@ -9,7 +9,6 @@ import {
   FileImage,
   FileText,
   PanelLeft,
-  Timer,
   Trash2,
   Pencil,
   Plus,
@@ -452,30 +451,10 @@ export function CollectionRail({
             id: 'capture',
             label: 'Take screenshot',
             description: captureEnabled
-              ? 'Capture a region on a chosen display'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+              ? 'Capture an area on a chosen display'
+              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
             icon: Camera,
             run: () => onCapture(),
-            disabled: !captureEnabled || captureInProgress,
-          },
-          {
-            id: 'capture-delay-3',
-            label: 'Take screenshot in 3 seconds',
-            description: captureEnabled
-              ? 'Wait so hover menus and tooltips can appear'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
-            icon: Timer,
-            run: () => onCapture(3),
-            disabled: !captureEnabled || captureInProgress,
-          },
-          {
-            id: 'capture-delay-5',
-            label: 'Take screenshot in 5 seconds',
-            description: captureEnabled
-              ? 'Wait so hover menus and tooltips can appear'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
-            icon: Timer,
-            run: () => onCapture(5),
             disabled: !captureEnabled || captureInProgress,
           },
         ]

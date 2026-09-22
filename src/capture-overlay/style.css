@@ -84,12 +84,26 @@ button {
   background: rgb(255 255 255 / 0.08);
 }
 .capture-modes button {
+  box-sizing: border-box;
+  width: 36px;
+  height: 34px;
+  display: grid;
+  place-items: center;
   border: 0;
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 0;
   color: #e5e7eb;
   background: transparent;
   cursor: pointer;
+}
+.capture-modes button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 .capture-modes button:hover,
 .capture-modes button:focus-visible {

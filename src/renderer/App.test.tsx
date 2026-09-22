@@ -1240,7 +1240,7 @@ describe('feedback controls', () => {
 
     const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
     expect(addScreenshot).toBeEnabled();
-    expect(screen.queryByRole('button', { name: /Capture screen region/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Capture area/ })).not.toBeInTheDocument();
     fireEvent.click(addScreenshot);
     expect(importClick).toHaveBeenCalledOnce();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
@@ -1248,7 +1248,7 @@ describe('feedback controls', () => {
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
     expect(startRegionCapture).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Screen capture is experimental — enable it in Settings',
+      'Screen capture is off — enable it in Settings → Features',
     );
   });
 
@@ -1274,7 +1274,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture: startRegionCapture as never,
     });
-    const capture = await screen.findByRole('button', { name: /Capture screen region/ });
+    const capture = await screen.findByRole('button', { name: /Capture area/ });
     fireEvent.click(capture);
     fireEvent.click(capture);
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
@@ -1341,7 +1341,7 @@ describe('feedback controls', () => {
     fireEvent.keyDown(window, { key: 'v', code: 'KeyV' });
     await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'select' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Capture area/ }));
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
     await screen.findByText('Screen capture added — annotate');
     await waitFor(() =>
@@ -1382,7 +1382,7 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
       repeatLastRegionCapture: repeatLastRegionCapture as never,
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
     const progress = screen.getByRole('button', { name: 'Capture in progress…' });
     expect(progress).toBeDisabled();
@@ -1399,7 +1399,7 @@ describe('feedback controls', () => {
     await waitFor(() => expect(releaseProjects).toBeTypeOf('function'));
     expect(screen.getByRole('button', { name: 'Capture in progress…' })).toBeDisabled();
     await act(async () => releaseProjects([]));
-    const ready = await screen.findByRole('button', { name: /Capture screen region/ });
+    const ready = await screen.findByRole('button', { name: /Capture area/ });
     expect(ready).toBeEnabled();
     expect(ready).not.toHaveAttribute('aria-busy');
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
@@ -1439,7 +1439,7 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
-  it('starts a 5s capture delay from the Add menu', async () => {
+  it('starts a 5s capture delay from the toolbar control', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
       ok: false as const,
@@ -1458,8 +1458,8 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(screen.getByTestId('add-item-trigger'));
-    fireEvent.click(await screen.findByTestId('add-item-capture-delay-5'));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 5 seconds' }));
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1612,7 +1612,7 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Capture Left of primary/ }));
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
@@ -1660,7 +1660,7 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument(),
@@ -1749,7 +1749,7 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
     await screen.findByRole('dialog', { name: 'Choose a display' });
     act(() => useAppStore.getState().set({ activeCollectionId: 'changed-during-choice' }));
     fireEvent.click(screen.getByRole('button', { name: /Capture Right of primary/ }));
@@ -1848,7 +1848,7 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
     });
     fireEvent.change(note, { target: { value: 'Needs flushing' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Capture screen region/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
     await waitFor(() => expect(saveScreenshotContent).toHaveBeenCalledTimes(1));
     act(() => useAppStore.getState().set({ activeCollectionId: 'changed-during-flush' }));
     await act(async () =>
@@ -1870,8 +1870,7 @@ describe('feedback controls', () => {
       ok: false as const,
       error: {
         code: 'capture-unavailable' as const,
-        message:
-          'Capture a region first. Repeat last region uses the last successful region from this session.',
+        message: 'Capture an area first. Repeat last area uses the last successful area from this session.',
         retryable: false,
       },
     }));
@@ -1917,7 +1916,7 @@ describe('feedback controls', () => {
     expect(startRegionCapture).not.toHaveBeenCalled();
     expect(
       await screen.findByText(
-        'Capture a region first. Repeat last region uses the last successful region from this session.',
+        'Capture an area first. Repeat last area uses the last successful area from this session.',
       ),
     ).toBeInTheDocument();
   });

@@ -82,7 +82,7 @@ describe('preference controls', () => {
     const onChange = vi.fn(async () => {});
     render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
     const recorder = screen.getByRole('button', {
-      name: 'Shortcut for Capture screen region (experimental)',
+      name: 'Shortcut for Capture screen area',
     });
     expect(recorder).toHaveTextContent('Ctrl + Shift + 5');
 
@@ -123,14 +123,10 @@ describe('preference controls', () => {
       <ShortcutSettings value={settings.shortcuts} onChange={onChange} platform="windows" />,
     );
     expect(screen.getByRole('button', { name: 'Reset Arrow shortcut to default' })).toBeDisabled();
-    const capture = screen.getByRole('button', { name: 'Shortcut for Capture screen region (experimental)' });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Clear Capture screen region (experimental) shortcut' }),
-    );
+    const capture = screen.getByRole('button', { name: 'Shortcut for Capture screen area' });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Capture screen area shortcut' }));
     await waitFor(() => expect(capture).toHaveTextContent('Not set'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Reset Capture screen region (experimental) shortcut to default' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Capture screen area shortcut to default' }));
     await waitFor(() => expect(capture).toHaveTextContent('Ctrl + Shift + 5'));
     expect(settings.shortcuts.bindings['capture.region']).toBe('Ctrl+Shift+5');
 
