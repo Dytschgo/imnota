@@ -87,6 +87,7 @@ export function Workspace(props: WorkspaceProps) {
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
+  const drawingTitle = item?.kind === 'drawing' ? item.title || 'Untitled drawing' : 'Drawing';
   const captureIsPrimary = props.capturePrimary && props.captureEnabled && Boolean(props.onCapture);
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
@@ -167,6 +168,31 @@ export function Workspace(props: WorkspaceProps) {
       <PanelRight size={17} aria-hidden="true" />
     </IconButton>
   );
+  const drawingPlaceholder = (message: string) => (
+    <div className="drawing-editor">
+      <div className="drawing-editor-tools">
+        <span className="drawing-editor-title" title={drawingTitle}>
+          {drawingTitle}
+        </span>
+        {!store.rightPanelOpen && (
+          <IconButton
+            className="drawing-inspector-restore"
+            data-testid="inspector-toggle"
+            label="Expand inspector"
+            onClick={(event) => {
+              inspectorTriggerRef.current = event.currentTarget;
+              store.set({ rightPanelOpen: true });
+            }}
+          >
+            <PanelRight size={16} aria-hidden="true" />
+          </IconButton>
+        )}
+      </div>
+      <div role="status" className="content-loading">
+        {message}
+      </div>
+    </div>
+  );
   return (
     <section
       className="workspace"
@@ -197,63 +223,67 @@ export function Workspace(props: WorkspaceProps) {
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
-        <div className="workspace-toolbar">
-          {item ? (
-            <strong className="content-editor-heading">
-              {item.kind === 'drawing' ? 'Drawing' : 'Text block'}
-            </strong>
-          ) : (
-            <Toolbar
-              tool={props.tool}
-              setTool={props.onTool}
-              onUndo={props.onUndo}
-              onRedo={props.onRedo}
-              canUndo={props.canUndo}
-              canRedo={props.canRedo}
-              onZoom={props.onZoom}
-              onFit={props.onFit}
-              onActualSize={props.onActualSize}
-              onCapture={props.onCapture}
-              captureEnabled={props.captureEnabled}
-              captureInProgress={props.captureInProgress}
-              captureShortcut={props.captureShortcut}
-              captureDisabledLabel={props.captureDisabledLabel}
-              onColorSelect={props.onColor}
-              selectedColor={props.paletteColor}
-              shortcutLabels={props.shortcutLabels}
-            />
-          )}
-          {!store.rightPanelOpen && (
-            <IconButton
-              className="inspector-restore"
-              data-testid="inspector-toggle"
-              label="Expand inspector"
-              onClick={(event) => {
-                inspectorTriggerRef.current = event.currentTarget;
-                store.set({ rightPanelOpen: true });
-              }}
-            >
-              <PanelRight size={17} aria-hidden="true" />
-            </IconButton>
-          )}
-        </div>
+        {(!item || item.kind === 'text') && (
+          <div className="workspace-toolbar">
+            {item ? (
+              <strong className="content-editor-heading">Text block</strong>
+            ) : (
+              <Toolbar
+                tool={props.tool}
+                setTool={props.onTool}
+                onUndo={props.onUndo}
+                onRedo={props.onRedo}
+                canUndo={props.canUndo}
+                canRedo={props.canRedo}
+                onZoom={props.onZoom}
+                onFit={props.onFit}
+                onActualSize={props.onActualSize}
+                onCapture={props.onCapture}
+                captureEnabled={props.captureEnabled}
+                captureInProgress={props.captureInProgress}
+                captureShortcut={props.captureShortcut}
+                captureDisabledLabel={props.captureDisabledLabel}
+                onColorSelect={props.onColor}
+                selectedColor={props.paletteColor}
+                shortcutLabels={props.shortcutLabels}
+              />
+            )}
+            {!store.rightPanelOpen && (
+              <IconButton
+                className="inspector-restore"
+                data-testid="inspector-toggle"
+                label="Expand inspector"
+                onClick={(event) => {
+                  inspectorTriggerRef.current = event.currentTarget;
+                  store.set({ rightPanelOpen: true });
+                }}
+              >
+                <PanelRight size={17} aria-hidden="true" />
+              </IconButton>
+            )}
+          </div>
+        )}
         {item ? (
           props.contentLoading || !props.content || props.content.item.id !== item.id ? (
-            <div role="status" className="content-loading">
-              {props.contentLoading ? 'Loading content…' : 'Content could not be loaded.'}
-            </div>
+            item.kind === 'drawing' ? (
+              drawingPlaceholder(props.contentLoading ? 'Loading content…' : 'Content could not be loaded.')
+            ) : (
+              <div role="status" className="content-loading">
+                {props.contentLoading ? 'Loading content…' : 'Content could not be loaded.'}
+              </div>
+            )
           ) : item.kind === 'drawing' ? (
-            <Suspense
-              fallback={
-                <div role="status" className="content-loading">
-                  Loading drawing tools…
-                </div>
-              }
-            >
+            <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
               <DrawingEditor
                 key={item.id}
                 source={props.content.source ?? ''}
                 theme={props.resolvedTheme}
+                title={item.title}
+                showInspector={!store.rightPanelOpen}
+                onShowInspector={(trigger) => {
+                  inspectorTriggerRef.current = trigger;
+                  store.set({ rightPanelOpen: true });
+                }}
                 onChange={(source) => props.onContentChange?.({ source })}
               />
             </Suspense>

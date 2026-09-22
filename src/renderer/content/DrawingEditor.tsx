@@ -17,6 +17,8 @@ import type {
   ExcalidrawProps,
 } from '@excalidraw/excalidraw/types';
 import '@excalidraw/excalidraw/index.css';
+import { PanelRight } from 'lucide-react';
+import { IconButton } from '../components/ui';
 import './content-editors.css';
 import '../components/canvas-surface.css';
 import { DrawingSourceError, isAllowedDrawingElement, parseDrawingSource } from './drawing-render';
@@ -58,10 +60,16 @@ export function DrawingEditor({
   source,
   onChange,
   theme,
+  title = 'Drawing',
+  showInspector = false,
+  onShowInspector = () => {},
 }: {
   source: string;
   onChange: (source: string) => void;
   theme: 'light' | 'dark';
+  title?: string;
+  showInspector?: boolean;
+  onShowInspector?(trigger: HTMLButtonElement): void;
 }) {
   // The embedding surface keys this component by content item. Initial data is
   // intentionally read once, so a parent autosave never reloads an active canvas.
@@ -115,6 +123,16 @@ export function DrawingEditor({
     }),
     [],
   );
+  const inspectorRestore = showInspector ? (
+    <IconButton
+      className="drawing-inspector-restore"
+      data-testid="inspector-toggle"
+      label="Expand inspector"
+      onClick={(event) => onShowInspector(event.currentTarget)}
+    >
+      <PanelRight size={16} aria-hidden="true" />
+    </IconButton>
+  ) : null;
 
   if (loaded.error || !loaded.initialData) {
     return (
@@ -124,6 +142,12 @@ export function DrawingEditor({
         data-testid="drawing-editor"
         aria-label="Drawing editor"
       >
+        <div className="drawing-editor-tools" aria-label="Drawing tools">
+          <span className="drawing-editor-title" title={title}>
+            {title || 'Untitled drawing'}
+          </span>
+          {inspectorRestore}
+        </div>
         <div className="content-loading" role="alert">
           {loaded.error}
         </div>
@@ -139,6 +163,10 @@ export function DrawingEditor({
       aria-label="Drawing editor"
     >
       <div className="drawing-editor-tools" aria-label="Drawing tools">
+        <span className="drawing-editor-title" title={title}>
+          {title || 'Untitled drawing'}
+        </span>
+        <span className="drawing-editor-divider" aria-hidden="true" />
         {tools.map((button) => {
           const Icon = button.icon;
           const selected =
@@ -162,6 +190,7 @@ export function DrawingEditor({
         <span className="drawing-editor-shortcut" title="Select shapes and press Ctrl/⌘ + G to group">
           Group: Ctrl/⌘G
         </span>
+        {inspectorRestore}
       </div>
       <div
         className="drawing-editor-canvas canvas-workspace-surface"

@@ -103,3 +103,25 @@ test('drawing tools wait for the engine and the first enabled click reaches it',
   expect(rounded).toHaveAttribute('aria-pressed', 'true');
   expect(rectangle).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('a corrupt drawing keeps its title and inspector restore action available', () => {
+  const onShowInspector = vi.fn();
+  render(
+    <DrawingEditor
+      source="{corrupt"
+      theme="dark"
+      title="Diagram"
+      onChange={vi.fn()}
+      showInspector
+      onShowInspector={onShowInspector}
+    />,
+  );
+
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  expect(screen.getByTitle('Diagram')).toHaveTextContent('Diagram');
+  const restore = screen.getByRole('button', { name: 'Expand inspector' });
+  restore.focus();
+  expect(restore).toHaveFocus();
+  fireEvent.click(restore);
+  expect(onShowInspector).toHaveBeenCalledExactlyOnceWith(restore);
+});

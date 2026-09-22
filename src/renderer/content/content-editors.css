@@ -52,6 +52,29 @@
   scrollbar-width: thin;
 }
 
+.drawing-editor-title {
+  max-width: min(240px, 24vw);
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawing-editor-divider {
+  width: 1px;
+  height: 22px;
+  flex: none;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+.drawing-inspector-restore {
+  flex: none;
+  margin-left: auto;
+}
+
 .drawing-tool {
   width: 32px;
   height: 32px;
@@ -103,6 +126,40 @@
 .drawing-editor .drawing-editor-canvas .excalidraw .App-menu_top,
 .drawing-editor .drawing-editor-canvas .excalidraw .App-top-bar {
   display: none;
+}
+
+.drawing-editor .excalidraw .context-menu {
+  padding: 5px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+.drawing-editor .excalidraw .context-menu button,
+.drawing-editor .excalidraw .context-menu-item {
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.drawing-editor .excalidraw .context-menu-item {
+  min-height: 30px;
+  padding: 5px 11px 5px 22px;
+}
+
+.drawing-editor .excalidraw .context-menu-item:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+.drawing-editor .excalidraw .context-menu-item.dangerous .context-menu-item__label {
+  color: var(--danger);
+}
+
+.drawing-editor .excalidraw .context-menu-item-separator {
+  margin: 4px 8px;
+  border-top-color: var(--line);
 }
 
 .text-block-editor-bar {
