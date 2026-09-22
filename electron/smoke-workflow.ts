@@ -2200,6 +2200,14 @@ async function exerciseWatchAndConflict(
     unwrap(await workflow.stopProjectWatch({ watchId: ${JSON.stringify(watch.watchId)} }));
     window.__imnotaSmokeStopWatchEvents?.();
   })()`);
+  await clickAny(driver, [
+    {
+      selector: '[data-testid="external-change-banner"] button',
+      text: 'Discard local edits & reload',
+    },
+    { selector: '[data-testid="external-change-banner"] button', text: 'Reload project' },
+  ]);
+  await driver.waitFor({ selector: '[data-testid="external-change-banner"]' }, { absent: true });
 }
 
 async function exerciseRecovery(
@@ -2569,7 +2577,7 @@ export async function runSmokeWorkflow(
   await closePromptDialog(driver);
 
   await exerciseWatchAndConflict(driver, host, projectPath);
-  assertions.push('filesystem watcher reload and stale compare-and-swap rejection');
+  assertions.push('filesystem watcher reload, stale compare-and-swap rejection and conflict recovery');
   await exerciseScreenshotPreservation(driver, projectPath);
   assertions.push(
     'metadata screenshot omission rejected without changing original/metadata bytes, with correlated CAS diagnostic reference',
