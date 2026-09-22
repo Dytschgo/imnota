@@ -79,7 +79,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview and a **Bundle 1**, **Bundle 2**, etc. heading. Dimensions and counts are under **Bundle details**.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
@@ -158,7 +158,7 @@ Appearance follows the operating-system theme by default. Settings also provides
 
 You can use the same background for both themes or choose separate Light and Dark images and opacity. Existing backgrounds remain shared until you change this option. **No image** applies to the selected theme when using separate backgrounds. System mode uses the background for the current operating-system theme. Reading surfaces keep a protective light or dark background over wallpaper; **Solid** removes transparency. These preferences do not change the white background of exported bundles. Settings categories scroll with the page.
 
-Onboarding appears only for a genuinely new local application profile. It uses an isolated demo project, never the real workspace, and walks through adding a screenshot, annotating it, adding Markdown, and copying the prompt bundle through the same native copy path as Copy Bundle. The guide reports the formats the clipboard actually kept and shows the Windows fallbacks (**Copy Markdown only**, **Copy image only**, **Open files**) when a format is missing. It does not write files into the workspace. Skip remains available. Completion is stored with local application settings rather than project files, so normal updates do not show it again. Replay it at any time from Settings.
+Onboarding appears only for a genuinely new local application profile. It uses an isolated demo project, never the real workspace, and walks through adding a screenshot, annotating it, adding Markdown, and copying the prompt bundle through the same native copy path as Copy Bundle. The guide reports the formats the clipboard actually kept; after the first copy attempt it shows the fallbacks (**Copy Markdown only**, **Copy image only**, **Open files**, **Copy file paths**, **Open export folder**), highlighted when a format is missing. On Windows the dropdown attached to the copy button chooses the saved copy format. It does not write files into the workspace. Skip remains available. Completion is stored with local application settings rather than project files, so normal updates do not show it again. Replay it at any time from Settings.
 
 Keyboard shortcuts are configurable in Settings with Windows/macOS-aware defaults, conflict explanations and Reset to defaults. Mouse controls remain available for the complete workflow.
 

@@ -51,7 +51,7 @@ async function reachCopyStep(overrides: Partial<OnboardingDemoProps> = {}) {
   fireEvent.click(screen.getByRole('button', { name: 'Use sample screenshot' }));
   fireEvent.click(screen.getByRole('button', { name: 'Add guided note' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
-  await screen.findByRole('heading', { name: 'Copy the matching bundle' });
+  await screen.findByRole('heading', { name: 'Copy the bundle' });
   return { props, ...view };
 }
 
@@ -239,5 +239,24 @@ describe('OnboardingDemo', () => {
     });
     expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
     expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
+  });
+
+  it('keeps fallbacks hidden until a copy has been tried, even when it fails', async () => {
+    const onCopyHandoff = vi.fn(async () => {
+      throw new Error('Clipboard unavailable');
+    });
+    await reachCopyStep({ onCopyHandoff });
+    expect(screen.queryByRole('button', { name: 'Copy Markdown only' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open export folder' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('clipboard is unavailable');
+    for (const name of ['Copy Markdown only', 'Copy image only', 'Open files', 'Copy file paths'])
+      expect(screen.getByRole('button', { name })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
+    await screen.findByRole('heading', { name: 'Copy the bundle' });
+    expect(screen.queryByRole('button', { name: 'Copy Markdown only' })).not.toBeInTheDocument();
   });
 });

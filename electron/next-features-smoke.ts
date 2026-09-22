@@ -38,9 +38,10 @@ export async function exerciseNextFeatures(
   await driver.waitFor({
     selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]',
   });
+  await driver.click({ selector: '[aria-label="Copy options"]' });
   await driver.click({
-    selector: '.prompt-bundle-fallbacks button',
-    text: 'Copy Markdown only',
+    selector: '[role="menuitem"]',
+    text: 'Copy Markdown',
     exact: true,
   });
   await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'Markdown copied', exact: true });
@@ -49,7 +50,8 @@ export async function exerciseNextFeatures(
     !(await nativeClipboard.readImage()).isEmpty()
   )
     throw new Error('Independent Markdown copy did not use the latest edited template.');
-  await driver.click({ selector: '.prompt-bundle-fallbacks button', text: 'Copy file paths', exact: true });
+  await driver.click({ selector: '[aria-label="Copy options"]' });
+  await driver.click({ selector: '[role="menuitem"]', text: 'Copy file paths', exact: true });
   await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'File paths copied', exact: true });
   const copiedPaths = await nativeClipboard.readText();
   if (!copiedPaths.endsWith('.md') || copiedPaths.includes('.png'))
@@ -141,9 +143,10 @@ export async function captureNextFeatureLightViews(
   await driver.waitFor({
     selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] [data-testid="copy-bundle-1"]',
   });
+  await driver.click({ selector: '[aria-label="Copy options"]' });
   await driver.click({
-    selector: '.prompt-bundle-fallbacks button',
-    text: 'Copy Markdown only',
+    selector: '[role="menuitem"]',
+    text: 'Copy Markdown',
     exact: true,
   });
   await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'Markdown copied', exact: true });

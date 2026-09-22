@@ -71,6 +71,8 @@ const TOOLS: Array<{ tool: 'select' | AnnotationKind; label: string; icon: typeo
   { tool: 'highlight', label: 'Highlight', icon: Highlighter },
 ];
 
+const STEPS = ['Add screenshot', 'Annotate', 'Copy prompt'];
+
 const COPY_OUTCOME_LABELS: Record<PromptDeliveryOutcome, string> = {
   combined: 'Markdown + image prepared',
   markdown: 'Markdown copied',
@@ -106,6 +108,7 @@ export function OnboardingDemo({
   const [copyOutcome, setCopyOutcome] = useState<PromptDeliveryOutcome>();
   const [copyWarning, setCopyWarning] = useState('');
   const [openStatus, setOpenStatus] = useState('');
+  const [copyAttempted, setCopyAttempted] = useState(false);
   const [explanation, setExplanation] = useState(
     'Keep the component search visible while someone reviews several results.',
   );
@@ -131,6 +134,8 @@ export function OnboardingDemo({
     'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
     rich: { label: 'Rich copy', detail: 'Text + image' },
   };
+  // Fallbacks stay out of the way until a copy has actually been tried.
+  const showFallbacks = Boolean(handoff && copyAttempted);
 
   const dismiss = async () => {
     if (busy) return;
@@ -211,6 +216,7 @@ export function OnboardingDemo({
       setCopyOutcome(undefined);
       setCopyWarning('');
       setOpenStatus('');
+      setCopyAttempted(false);
       setStep(2);
     } catch {
       setError('The annotated sample could not be prepared. Try the step again.');
@@ -223,6 +229,7 @@ export function OnboardingDemo({
     if (!bundle || busy) return;
     setBusy(true);
     setError('');
+    setCopyAttempted(true);
     try {
       if (!handoff || !onCopyHandoff) throw new Error('The native handoff is unavailable.');
       const placed = await onCopyHandoff(handoff, variant);
@@ -294,7 +301,18 @@ export function OnboardingDemo({
         <header className="imnota-onboarding-header">
           <div>
             <h1 id="imnota-onboarding-title">Try the complete handoff</h1>
-            <p>One local sample. Three steps. Nothing is added to your workspace.</p>
+            <nav className="imnota-onboarding-progress" aria-label="Onboarding progress">
+              {STEPS.map((label, index) => (
+                <div
+                  key={label}
+                  data-current={step === index || undefined}
+                  data-complete={step > index || undefined}
+                >
+                  <span>{step > index ? <Check size={11} aria-hidden="true" /> : index + 1}</span>
+                  {label}
+                </div>
+              ))}
+            </nav>
           </div>
           <button
             type="button"
@@ -307,40 +325,22 @@ export function OnboardingDemo({
           </button>
         </header>
 
-        <nav className="imnota-onboarding-progress" aria-label="Onboarding progress">
-          {['Add screenshot', 'Annotate', 'Copy prompt'].map((label, index) => (
-            <div
-              key={label}
-              data-current={step === index || undefined}
-              data-complete={step > index || undefined}
-            >
-              <span>{step > index ? <Check size={12} aria-hidden="true" /> : index + 1}</span>
-              {label}
-            </div>
-          ))}
-        </nav>
-
         <div className="imnota-onboarding-body">
           {step === 0 && (
             <div className="imnota-onboarding-intro">
-              <div className="imnota-sample-window" aria-hidden="true">
-                <div>
-                  <i />
-                  <i />
-                  <i />
-                </div>
-                <span>component-search.png</span>
+              <figure className="imnota-sample-window" aria-hidden="true">
                 {sampleImage ? (
                   <img src={sampleImage.dataUrl} alt="" />
                 ) : (
                   <small>Canvas preview unavailable</small>
                 )}
-              </div>
+                <figcaption>component-search.png</figcaption>
+              </figure>
               <div className="imnota-onboarding-instruction">
                 <h2>Start with a screenshot</h2>
                 <p>
-                  In a project you can paste, drop, or import screenshots. This guide creates a generic search
-                  interface locally so you can practice without choosing a file.
+                  In a project you paste, drop, or import screenshots. This guide uses a local sample instead,
+                  so nothing is added to your workspace.
                 </p>
                 <button
                   data-testid="onboarding-use-sample"
@@ -361,7 +361,7 @@ export function OnboardingDemo({
               <aside className="imnota-onboarding-instruction">
                 <h2>Mark what should change</h2>
                 <p>
-                  Pick a tool and draw on the search UI, or add the guided note to see a complete example.
+                  Pick a tool and draw on the screenshot, or add the guided note to see a complete example.
                 </p>
                 <div className="imnota-demo-tools" role="toolbar" aria-label="Sample annotation tools">
                   {TOOLS.map(({ tool: option, label, icon: Icon }) => (
@@ -390,11 +390,10 @@ export function OnboardingDemo({
                   Add guided note
                 </button>
                 <small className="imnota-onboarding-tip">
-                  Double-click the screenshot to add editable text. Drag empty canvas space to pan, or drag a
-                  marker over an area.
+                  Double-click the screenshot for text. Drag empty space to pan.
                 </small>
                 <label className="imnota-onboarding-explanation">
-                  Markdown explanation
+                  Explanation for the agent
                   <textarea
                     value={explanation}
                     onChange={(event) => setExplanation(event.target.value)}
@@ -420,30 +419,31 @@ export function OnboardingDemo({
 
           {step === 2 && bundle && (
             <div className="imnota-copy-step">
-              <div className="imnota-bundle-preview">
+              <figure className="imnota-bundle-preview">
                 <img src={bundle.imageDataUrl} alt="Annotated component search sample" />
-                <div>
+                <figcaption>
                   <strong>{bundle.filename}</strong>
-                  <span>PNG with visible annotations</span>
-                </div>
-              </div>
+                  <span>PNG with your marks</span>
+                </figcaption>
+              </figure>
               <div className="imnota-onboarding-instruction">
                 <h2>
                   {copyOutcome === 'combined' || copyOutcome === 'files'
                     ? 'The handoff is ready'
-                    : 'Copy the matching bundle'}
+                    : 'Copy the bundle'}
                 </h2>
                 <p>
-                  The PNG carries the visual marks. The Markdown carries the picture reference, priority,
-                  description, and text notes. Copy uses the same native path as Copy Bundle and reports the
-                  formats the clipboard actually kept. You can skip copying and still create a project.
+                  The PNG carries your marks; the Markdown carries the notes. Imnota reports which formats the
+                  clipboard actually kept.
                 </p>
-                <pre>{bundle.markdown}</pre>
-                <div
-                  className={`imnota-copy-variants${fileClipboardAvailable ? '' : ' is-rich-only'}`}
-                  role="group"
-                  aria-label="Copy format"
-                >
+                <div className="imnota-markdown-preview">
+                  <div>
+                    <FileText size={13} aria-hidden="true" />
+                    {bundle.markdownFilename}
+                  </div>
+                  <pre>{bundle.markdown}</pre>
+                </div>
+                <div className="imnota-copy-split" role="group" aria-label="Copy format">
                   <button
                     type="button"
                     className="imnota-onboarding-primary"
@@ -454,32 +454,31 @@ export function OnboardingDemo({
                   >
                     <Clipboard size={15} aria-hidden="true" />
                     <span>{copyVariantLabels[primaryCopyVariant].label}</span>
-                    <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
                   </button>
                   {fileClipboardAvailable && (
-                    <label className="imnota-copy-function-select">
-                      <span>Native copy function</span>
-                      <select
-                        aria-label="Native copy function"
-                        value={defaultCopyVariant}
-                        disabled={busy || !onDefaultCopyVariantChange}
-                        onChange={async (event) => {
-                          setError('');
-                          try {
-                            await onDefaultCopyVariantChange?.(event.target.value as WindowsCopyVariantId);
-                          } catch {
-                            setError(
-                              'The primary copy action could not be saved. Your previous choice is still active.',
-                            );
-                          }
-                        }}
-                      >
-                        <option value="files">Copy files</option>
-                        <option value="files-rich">Files + rich copy</option>
-                        <option value="rich">Rich copy</option>
-                      </select>
-                    </label>
+                    <select
+                      className="imnota-copy-split-select"
+                      aria-label="Native copy function"
+                      title="Native copy function"
+                      value={defaultCopyVariant}
+                      disabled={busy || !onDefaultCopyVariantChange}
+                      onChange={async (event) => {
+                        setError('');
+                        try {
+                          await onDefaultCopyVariantChange?.(event.target.value as WindowsCopyVariantId);
+                        } catch {
+                          setError(
+                            'The primary copy action could not be saved. Your previous choice is still active.',
+                          );
+                        }
+                      }}
+                    >
+                      <option value="files">Copy files · MD + PNG files</option>
+                      <option value="files-rich">Files + rich copy · Files, text + image</option>
+                      <option value="rich">Rich copy · Text + image</option>
+                    </select>
                   )}
+                  <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
                 </div>
                 {(copyOutcome || openStatus) && (
                   <div className="imnota-copy-success" role="status">
@@ -497,64 +496,31 @@ export function OnboardingDemo({
                     <span>{copyWarning}</span>
                   </p>
                 )}
-                {handoff && (
+                {showFallbacks && (
                   <div
                     className={`imnota-onboarding-fallbacks${copyWarning ? ' is-needed' : ''}`}
                     aria-label="Bundle fallback actions"
                   >
-                    <button
-                      type="button"
-                      className="btn btn-soft"
-                      onClick={() => void runFallback('markdown')}
-                      disabled={busy}
-                    >
-                      <FileText size={14} aria-hidden="true" /> Copy Markdown only
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-soft"
-                      onClick={() => void runFallback('image')}
-                      disabled={busy}
-                    >
-                      <FileImage size={14} aria-hidden="true" /> Copy image only
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-soft"
-                      onClick={() => void runFallback('files')}
-                      disabled={busy}
-                    >
-                      Open files
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-soft"
-                      onClick={() => void runFallback('paths')}
-                      disabled={busy}
-                    >
-                      Copy file paths
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-soft"
-                      onClick={() => void runFallback('folder')}
-                      disabled={busy}
-                    >
-                      <FolderOpen size={14} aria-hidden="true" /> Open export folder
-                    </button>
+                    <span>Other ways to hand off</span>
+                    <div>
+                      <button type="button" onClick={() => void runFallback('markdown')} disabled={busy}>
+                        <FileText size={13} aria-hidden="true" /> Copy Markdown only
+                      </button>
+                      <button type="button" onClick={() => void runFallback('image')} disabled={busy}>
+                        <FileImage size={13} aria-hidden="true" /> Copy image only
+                      </button>
+                      <button type="button" onClick={() => void runFallback('files')} disabled={busy}>
+                        Open files
+                      </button>
+                      <button type="button" onClick={() => void runFallback('paths')} disabled={busy}>
+                        Copy file paths
+                      </button>
+                      <button type="button" onClick={() => void runFallback('folder')} disabled={busy}>
+                        <FolderOpen size={13} aria-hidden="true" /> Open export folder
+                      </button>
+                    </div>
                   </div>
                 )}
-                <details className="imnota-onboarding-checklist">
-                  <summary>Final workflow checklist</summary>
-                  <ul>
-                    <li>Capture, paste, or import screenshots.</li>
-                    <li>Annotate the region and add an explanation.</li>
-                    <li>Arrange screenshots in a collection.</li>
-                    <li>Copy or open the Markdown and PNG bundle.</li>
-                    <li>Use search to find earlier work.</li>
-                    <li>Restore local history when you need it.</li>
-                  </ul>
-                </details>
               </div>
             </div>
           )}
@@ -576,6 +542,7 @@ export function OnboardingDemo({
                 setCopyOutcome(undefined);
                 setCopyWarning('');
                 setOpenStatus('');
+                setCopyAttempted(false);
                 setStep(step === 2 ? 1 : 0);
               }}
               disabled={busy}

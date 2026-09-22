@@ -397,3 +397,25 @@ it('does not show Files ready when clipboard formats were not confirmed', () => 
   expect(screen.getByRole('button', { name: /image only/i })).toBeEnabled();
   expect(screen.getByRole('button', { name: /^open files$/i })).toBeEnabled();
 });
+
+it('keeps a healthy clipboard bundle to one action and its menu, without inline fallbacks', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({ textCount: 2 })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyMarkdown={vi.fn()}
+      onCopyImage={vi.fn()}
+      onOpenFiles={vi.fn()}
+      onCopyPaths={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: /markdown only/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^open files$/i })).not.toBeInTheDocument();
+  expect(screen.getByText('Pictures 3, 4')).toBeInTheDocument();
+  expect(screen.getByText('2 text')).toBeInTheDocument();
+  expect(screen.getByText('1 excluded')).toBeInTheDocument();
+  expect(screen.getByText('1952 × 2300')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  expect(screen.getByRole('menuitem', { name: 'Open files' })).toBeEnabled();
+});
