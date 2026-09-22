@@ -10,6 +10,7 @@ import type {
 import type { PromptBundleComposition } from '../prompt-bundle-render';
 import {
   PromptBundleControllerEngine,
+  MAX_RETAINED_EXPORT_CHARACTERS,
   type PromptBundleComposeControllerOptions,
   type PromptBundleControllerBridge,
   type PromptBundleControllerRendering,
@@ -625,7 +626,10 @@ describe('prompt export controller orchestration', () => {
             options.signal.addEventListener('abort', () => resolve(), { once: true }),
           );
         }
-        return defaultCompose();
+        const composition = await defaultCompose();
+        return composition.kind === 'composed'
+          ? { ...composition, dataUrl: 'x'.repeat(MAX_RETAINED_EXPORT_CHARACTERS + 1) }
+          : composition;
       },
     });
     const controller = engine(
@@ -647,6 +651,36 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().progress?.phase).toBe('cancelled');
     expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
     expect(controller.getState().cards[1].artifactSessionId).toBeUndefined();
+  });
+
+  test('discards earlier retained PNGs when a later bundle forces replanning', async () => {
+    const native = fakeBridge();
+    let overflow = false;
+    let encoding = 0;
+    const renderer = fakeRendering({
+      preflightSize: { width: 1000, height: 3000 },
+      compose: async (number, ids, _options, defaultCompose) => {
+        if (number === 2 && ids.length === 2 && !overflow) {
+          overflow = true;
+          return {
+            kind: 'encoded-overflow',
+            encodedCharacters: 40_000_000,
+            breakBeforeScreenshotId: ids[1],
+            message: 'split',
+          };
+        }
+        const composed = await defaultCompose();
+        return composed.kind === 'composed' ? { ...composed, dataUrl: `${PNG}-${++encoding}` } : composed;
+      },
+    });
+    const controller = engine(
+      async () => savedContext(Array.from({ length: 4 }, (_, i) => screenshot(i))),
+      native.bridge,
+      renderer.rendering,
+    );
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(overflow).toBe(true);
+    expect(native.writes.map((write) => write.pngDataUrl)).toEqual([`${PNG}-2`, `${PNG}-3`, `${PNG}-4`]);
   });
 
   test('cancels a session that resolves after cancellation during startPromptExport', async () => {
@@ -681,7 +715,7 @@ describe('prompt export controller orchestration', () => {
     expect(native.finishes).toHaveLength(0);
   });
 
-  test.each([1, 10, 20, 100])(
+  test.each([1, 10, 20, 50, 100])(
     'keeps %i-screenshot planning metadata-only and rendering sequential',
     async (count) => {
       const screenshots = Array.from({ length: count }, (_, index) => screenshot(index));
@@ -698,10 +732,109 @@ describe('prompt export controller orchestration', () => {
       expect(controller.getState().cards.every((card) => card.previewDataUrl === THUMBNAIL)).toBe(true);
       expect(controller.getState().cards.every((card) => !card.previewDataUrl?.includes('QUJD'))).toBe(true);
       expect(renderer.stats.maxActiveRenders).toBe(1);
-      expect(renderer.stats.renderCount).toBe(count * 2);
+      expect(renderer.stats.renderCount).toBe(count);
       expect(native.loadCounts.size).toBe(count);
     },
   );
+
+  test('revalidates cached screenshot revisions before writing and cancels stale exports', async () => {
+    const native = fakeBridge({ revisionForLoad: (_id, call) => (call < 3 ? 'planned' : 'edited') });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    expect(await controller.prepareFreshFiles()).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.starts).toHaveLength(1);
+    expect(native.writes).toHaveLength(0);
+    expect(native.cancellations).toEqual(['session-1']);
+    expect(renderer.stats.renderCount).toBe(1);
+  });
+
+  test('bounds retained encodings across bundles and discards them between exports', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering({
+      preflightSize: { width: 7000, height: 5000 },
+      compose: async (_number, _ids, _options, defaultCompose) => {
+        const composition = await defaultCompose();
+        return composition.kind === 'composed'
+          ? { ...composition, dataUrl: 'x'.repeat(MAX_RETAINED_EXPORT_CHARACTERS / 2 + 1) }
+          : composition;
+      },
+    });
+    const controller = engine(
+      async () => savedContext([screenshot(0), screenshot(1)]),
+      native.bridge,
+      renderer.rendering,
+    );
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(native.writes).toHaveLength(2);
+    expect(renderer.stats.renderCount).toBe(3);
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(renderer.stats.renderCount).toBe(6);
+  });
+
+  test.each(['pixels', 'dimensions'])(
+    'rejects changed original %s even when annotation revision is unchanged',
+    async (change) => {
+      const native = fakeBridge();
+      const load = native.bridge.loadScreenshotContent;
+      let calls = 0;
+      native.bridge.loadScreenshotContent = async (input) => {
+        const result = await load(input);
+        if (++calls === 3)
+          result.image =
+            change === 'pixels'
+              ? { ...result.image, dataUrl: `${PNG}changed` }
+              : { ...result.image, width: result.image.width + 1 };
+        return result;
+      };
+      const controller = engine(
+        async () => savedContext([screenshot(0)]),
+        native.bridge,
+        fakeRendering().rendering,
+      );
+      expect(await controller.prepareFreshFiles()).toMatchObject({
+        ok: false,
+        error: { code: 'content-changed' },
+      });
+      expect(native.writes).toHaveLength(0);
+      expect(native.cancellations).toEqual(['session-1']);
+    },
+  );
+
+  test('does not write a retained encoding when cancellation arrives during revision verification', async () => {
+    const native = fakeBridge();
+    const load = native.bridge.loadScreenshotContent;
+    let loaded = 0;
+    let entered!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    native.bridge.loadScreenshotContent = async (input) => {
+      const result = await load(input);
+      if (++loaded === 3) {
+        entered();
+        await gate;
+      }
+      return result;
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    const pending = controller.prepareFreshFiles();
+    await started;
+    await controller.cancel();
+    resume();
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(native.writes).toHaveLength(0);
+  });
 
   test('copies Markdown directly without image rendering or a combined-copy attempt', async () => {
     const native = fakeBridge();
