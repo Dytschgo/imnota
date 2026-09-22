@@ -159,6 +159,7 @@ function addPixelation(
   image: ImagePayload,
   bounds: ImageBounds,
   sourceBounds: ImageBounds,
+  surfaces: HTMLCanvasElement[],
 ) {
   const sampledBounds = exportBounds(image.width, image.height, [{ ...annotation, kind: 'crop' }]);
   const group = new Konva.Group({
@@ -167,9 +168,11 @@ function addPixelation(
     clipWidth: sourceBounds.width,
     clipHeight: sourceBounds.height,
   });
+  const pixels = pixelatedRegion(bitmap, annotation);
+  surfaces.push(pixels);
   group.add(
     new Konva.Image({
-      image: pixelatedRegion(bitmap, annotation),
+      image: pixels,
       x: sampledBounds.x - bounds.x,
       y: sampledBounds.y - bounds.y,
       width: sampledBounds.width,
@@ -333,6 +336,7 @@ function addAnnotation(
   sourceBounds: ImageBounds,
   noteNumber: number | undefined,
   measureText: TextWidthMeasurer,
+  surfaces: HTMLCanvasElement[],
 ) {
   if (annotation.kind === 'crop') return;
   if ((annotation.kind === 'text' || annotation.kind === 'callout') && !isTextAnnotation(annotation)) return;
@@ -384,7 +388,7 @@ function addAnnotation(
       addStep(layer, annotation, bounds);
       return;
     case 'pixelate':
-      addPixelation(layer, bitmap, annotation, image, bounds, sourceBounds);
+      addPixelation(layer, bitmap, annotation, image, bounds, sourceBounds, surfaces);
       return;
     case 'blur':
       layer.add(new Konva.Rect({ ...config, width, height, fill: '#0b0d12', opacity: 1 }));
@@ -420,13 +424,19 @@ export async function renderAnnotatedImageWithDimensions(
   );
   assertAnnotatedImageRenderBounds(bounds);
   const bitmap = new Image();
-  bitmap.src = image.dataUrl;
-  await bitmap.decode();
-  const container = document.createElement('div');
-  const stage = new Konva.Stage({ container, width: bounds.width, height: bounds.height });
-  const layer = new Konva.Layer();
-  stage.add(layer);
+  let stage: Konva.Stage | undefined;
+  const surfaces: HTMLCanvasElement[] = [];
   try {
+    bitmap.src = image.dataUrl;
+    await bitmap.decode();
+    const container = document.createElement('div');
+    stage = new Konva.Stage({ container, width: bounds.width, height: bounds.height });
+    // Translucent fill/stroke shapes use this scratch canvas even with hit testing off.
+    stage.bufferCanvas.setPixelRatio(1);
+    const layer = new Konva.Layer({ listening: false });
+    // Export at source resolution, regardless of the monitor's device pixel ratio.
+    layer.getCanvas().setPixelRatio(1);
+    stage.add(layer);
     layer.add(new Konva.Rect({ x: 0, y: 0, width: bounds.width, height: bounds.height, fill: '#ffffff' }));
     addSource(layer, bitmap, image, bounds, sourceBounds);
     const noteNumbers = textAnnotationNoteNumbers(annotations);
@@ -440,17 +450,25 @@ export async function renderAnnotatedImageWithDimensions(
         sourceBounds,
         noteNumbers.get(annotation.id),
         measureText,
+        surfaces,
       );
     layer.draw();
     return {
-      dataUrl: stage.toDataURL({ pixelRatio: 1 }),
+      // The layer already contains the complete output. Stage export would allocate
+      // extra full-size canvases and redraw it before encoding.
+      dataUrl: layer.getNativeCanvasElement().toDataURL('image/png'),
       width: bounds.width,
       height: bounds.height,
       bounds,
       sourceBounds,
     };
   } finally {
-    stage.destroy();
+    stage?.destroy();
+    for (const surface of surfaces) {
+      surface.width = 0;
+      surface.height = 0;
+    }
+    bitmap.src = '';
   }
 }
 

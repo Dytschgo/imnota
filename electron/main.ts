@@ -77,6 +77,7 @@ import {
   filenameSchema,
 } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
+import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import {
   ensureCollection,
   addEmptyCollection,
@@ -631,7 +632,11 @@ function dataUrlFromBuffer(buffer: Uint8Array, mime: string): string {
   return `data:${mime};base64,${Buffer.from(buffer).toString('base64')}`;
 }
 
-const thumbnailCache = new Map<string, { mtime: number; dataUrl: string }>();
+const thumbnailCache = new ThumbnailCache((filePath) => {
+  const image = nativeImage.createFromPath(filePath);
+  if (image.isEmpty()) throw new Error('The image preview could not be loaded.');
+  return image.resize({ ...thumbnailSize(image.getSize()), quality: 'good' }).toDataURL();
+});
 async function makeSnapshotAttempt(projectPath: string): Promise<ProjectSnapshot> {
   const project = await readProject(projectPath);
   const thumbnails: Record<string, string> = {};
@@ -642,17 +647,7 @@ async function makeSnapshotAttempt(projectPath: string): Promise<ProjectSnapshot
         const filePath = screenshotPath(projectPath, shot);
         await assertNoLinks(filePath);
         const stat = await fs.stat(filePath);
-        const cached = thumbnailCache.get(filePath);
-        if (cached?.mtime === stat.mtimeMs) thumbnails[shot.id] = cached.dataUrl;
-        else {
-          const image = nativeImage.createFromPath(filePath);
-          if (!image.isEmpty()) {
-            const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
-            thumbnails[shot.id] = dataUrl;
-            if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
-            thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
-          } else warnings.push(`Preview unavailable for ${shot.originalFilename}.`);
-        }
+        thumbnails[shot.id] = await thumbnailCache.get(filePath, stat);
       } catch {
         warnings.push(`Preview unavailable for ${shot.originalFilename}.`);
       }
@@ -667,16 +662,7 @@ async function makeSnapshotAttempt(projectPath: string): Promise<ProjectSnapshot
           const filePath = path.join(projectPath, relative);
           await assertNoLinks(filePath);
           const stat = await fs.stat(filePath);
-          const cached = thumbnailCache.get(filePath);
-          if (cached?.mtime === stat.mtimeMs) thumbnails[item.id] = cached.dataUrl;
-          else {
-            const image = nativeImage.createFromPath(filePath);
-            if (image.isEmpty()) throw new Error('Drawing preview is invalid.');
-            const dataUrl = image.resize({ width: 220, quality: 'good' }).toDataURL();
-            thumbnails[item.id] = dataUrl;
-            if (thumbnailCache.size >= 300) thumbnailCache.delete(thumbnailCache.keys().next().value!);
-            thumbnailCache.set(filePath, { mtime: stat.mtimeMs, dataUrl });
-          }
+          thumbnails[item.id] = await thumbnailCache.get(filePath, stat);
         } catch {
           warnings.push(`Preview unavailable for ${item.title}.`);
         }

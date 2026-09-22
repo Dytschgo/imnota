@@ -65,6 +65,14 @@ Deferred after this pass:
 
 These are candidates for focused investigation, not prerequisites for releasing or commitments to a specific architecture.
 
+The September 22 memory/data-loss audit identified three concrete stability follow-ups beyond the measured image-memory changes:
+
+- **Bound autosave postponement.** Screenshot/content/project metadata saves currently use a trailing 650-700 ms debounce without a maximum wait. Continuous editing can leave a longer unsaved interval. Add a maximum wait while preserving revision checks, navigation drains and failure visibility; verify a crash during sustained editing against the last acknowledged save.
+- **Make import interruption recoverable.** `importOne` copies the original and sidecars before updating project metadata, without one transaction. Main-process interruption can leave files present but unlisted. Journal import and test interruption at each boundary before considering any orphan-file recovery UI. Never automatically remove unlisted files.
+- **Check source size before decoding.** Thumbnail and image loading still decode original files natively. A bounded preview/cache does not protect against a single oversized compressed image. Validate supported-format dimensions before native allocation, preserving originals and reporting an actionable limit; cover malformed headers and supported OS decoders.
+
+These are follow-up proposals, not demonstrated causes of the reported user's loss. Ordinary screenshot-save transactions do not remove original images; renderer memory exhaustion can interrupt unsaved edits, while already admitted native saves may finish.
+
 - **IPC boundaries:** extract one domain from `electron/main.ts` when its coupling makes changes or tests difficult. Preserve IPC validation, behavior, and ownership. Evaluate testability and review effort rather than a target line count.
 - **Persistence and recovery:** characterize journal replay, partial writes, conflict handling, undo, and restart recovery before consolidation. Compare screenshot/content semantics before proposing a shared abstraction. Require independent review and a recovery plan for changes to data-loss paths.
 - **Renderer state and canvas/export code:** use repeated defects or change friction to select one boundary. Pilot a focused hook, reducer, or module; do not migrate every state owner or force new libraries in one effort.
