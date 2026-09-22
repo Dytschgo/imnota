@@ -1152,10 +1152,7 @@ async function verifyOneImagePromptBundle(
   const imageY = 32 + 36 + 12;
   const promptImageOrigin = { x: imageX, y: imageY };
   const expandedSourceOrigin = { x: expandedScreenshot.x, y: expandedScreenshot.y };
-  for (const [sourcePoint, expectedPixel] of [
-    [{ x: 260, y: 180 }, [27, 44, 188, 255]],
-    [{ x: 460, y: 270 }, [85, 117, 83, 255]],
-  ] as const) {
+  for (const [sourcePoint, expectedPixel] of [[{ x: 260, y: 180 }, [27, 44, 188, 255]]] as const) {
     const point = mapSourcePointToPromptPixel(sourcePoint, expandedSourceOrigin, promptImageOrigin);
     const actual = pixelAt(exported, point.x, point.y);
     if (expectedPixel.some((channel, index) => Math.abs(channel - actual[index]) > 1))
@@ -1163,6 +1160,21 @@ async function verifyOneImagePromptBundle(
         `Opacity/pixelation changed at ${sourcePoint.x},${sourcePoint.y}: ${actual.toString('hex')}`,
       );
   }
+  // This block spans two stripes. Downsampling must mix their colors; an absent
+  // (or prematurely cleared) pixelation surface would leave the lower stripe intact.
+  // Do not prescribe browser-specific resampling weights.
+  const sampled = mapSourcePointToPromptPixel({ x: 460, y: 270 }, expandedSourceOrigin, promptImageOrigin);
+  const mixed = pixelAt(exported, sampled.x, sampled.y);
+  if (!(
+    mixed[0] > 54 &&
+    mixed[0] < 116 &&
+    mixed[1] > 88 &&
+    mixed[1] < 145 &&
+    mixed[2] > 44 &&
+    mixed[2] < 122 &&
+    mixed[3] === 255
+  ))
+    throw new Error(`Pixelation did not mix the stripe boundary: ${mixed.toString('hex')}`);
   const maskPixel = mapSourcePointToPromptPixel(
     { x: 320 + 48, y: 220 + 40 },
     expandedSourceOrigin,
