@@ -87,6 +87,7 @@ export function Workspace(props: WorkspaceProps) {
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 950px)').matches);
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
+  const drawingTitle = item?.kind === 'drawing' ? item.title || 'Untitled drawing' : 'Drawing';
   const captureIsPrimary = props.capturePrimary && props.captureEnabled && Boolean(props.onCapture);
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
@@ -167,6 +168,31 @@ export function Workspace(props: WorkspaceProps) {
       <PanelRight size={17} aria-hidden="true" />
     </IconButton>
   );
+  const drawingPlaceholder = (message: string) => (
+    <div className="drawing-editor">
+      <div className="drawing-editor-tools">
+        <span className="drawing-editor-title" title={drawingTitle}>
+          {drawingTitle}
+        </span>
+        {!store.rightPanelOpen && (
+          <IconButton
+            className="drawing-inspector-restore"
+            data-testid="inspector-toggle"
+            label="Expand inspector"
+            onClick={(event) => {
+              inspectorTriggerRef.current = event.currentTarget;
+              store.set({ rightPanelOpen: true });
+            }}
+          >
+            <PanelRight size={16} aria-hidden="true" />
+          </IconButton>
+        )}
+      </div>
+      <div role="status" className="content-loading">
+        {message}
+      </div>
+    </div>
+  );
   return (
     <section
       className="workspace"
@@ -239,17 +265,15 @@ export function Workspace(props: WorkspaceProps) {
         )}
         {item ? (
           props.contentLoading || !props.content || props.content.item.id !== item.id ? (
-            <div role="status" className="content-loading">
-              {props.contentLoading ? 'Loading content…' : 'Content could not be loaded.'}
-            </div>
+            item.kind === 'drawing' ? (
+              drawingPlaceholder(props.contentLoading ? 'Loading content…' : 'Content could not be loaded.')
+            ) : (
+              <div role="status" className="content-loading">
+                {props.contentLoading ? 'Loading content…' : 'Content could not be loaded.'}
+              </div>
+            )
           ) : item.kind === 'drawing' ? (
-            <Suspense
-              fallback={
-                <div role="status" className="content-loading">
-                  Loading drawing tools…
-                </div>
-              }
-            >
+            <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
               <DrawingEditor
                 key={item.id}
                 source={props.content.source ?? ''}
