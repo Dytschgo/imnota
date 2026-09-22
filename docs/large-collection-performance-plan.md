@@ -1,6 +1,6 @@
 # Large-collection performance plan
 
-Status: plan only. Do not implement in this change.
+Status: remaining scale plan. The first bounded-composition reuse implementation and its measurements are in [PR #116](https://github.com/Dytschgo/imnota/pull/116); the broader work below remains proposed until separately scoped.
 
 Measured Windows stress on synthetic images already shows that export is the bottleneck. Photographic images will cost more. Treat this as a current UX issue for 20–50 item collections, not a future scale feature.
 
