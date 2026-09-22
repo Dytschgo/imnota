@@ -207,6 +207,201 @@ describe('local persistence diagnostics', () => {
     expect((await fs.stat(first.replace(/\.jsonl$/, '.previous.jsonl'))).size).toBe(1_048_576);
   });
 
+  it('resumes diagnostics after a timed-out write eventually completes without retrying that write', async () => {
+    const { trace } = await fixture();
+    const openDirectory = trace.openDirectory.bind(trace);
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const open = vi.spyOn(trace, 'openDirectory').mockImplementationOnce(async () => {
+      await stalled;
+      return openDirectory();
+    });
+    vi.useFakeTimers();
+    try {
+      const save = trace.run('projects:save', async () => 'saved');
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(await save).toBe('saved');
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(trace.health()).toMatchObject({
+        state: 'stalled',
+        pending: 1,
+        dropped: 1,
+        stalls: 1,
+        recoveries: 0,
+        lastFailure: { reason: 'timeout', stage: 'directory' },
+      });
+      release();
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(trace.health().pending).toBe(0));
+      expect(trace.health()).toMatchObject({ state: 'ready', stalls: 1, recoveries: 1 });
+      await expect(
+        trace.run('projects:save', async () => {
+          throw new Error('Next save failed');
+        }),
+      ).rejects.toThrow(/Diagnostic reference:/);
+      expect(open).toHaveBeenCalledTimes(3);
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let an earlier write completion clear a later queued timeout', async () => {
+    const { trace } = await fixture();
+    const openDirectory = trace.openDirectory.bind(trace);
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    let secondStarted!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    const open = vi
+      .spyOn(trace, 'openDirectory')
+      .mockImplementationOnce(async () => {
+        await first;
+        return openDirectory();
+      })
+      .mockImplementationOnce(async () => {
+        secondStarted();
+        await second;
+        return openDirectory();
+      });
+    vi.useFakeTimers();
+    try {
+      const firstRecord = trace.record({ category: 'lifecycle', action: 'first', phase: 'observed' });
+      const secondRecord = trace.record({ category: 'lifecycle', action: 'second', phase: 'observed' });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(await Promise.all([firstRecord, secondRecord])).toEqual([false, false]);
+      expect(trace.health()).toMatchObject({
+        state: 'stalled',
+        stalls: 2,
+        lastFailure: { reason: 'timeout', stage: 'queued' },
+      });
+      releaseFirst();
+      vi.useRealTimers();
+      await started;
+      expect(trace.health()).toMatchObject({ state: 'stalled', pending: 1, recoveries: 0 });
+      expect(await trace.record({ category: 'lifecycle', action: 'dropped', phase: 'observed' })).toBe(false);
+      expect(open).toHaveBeenCalledTimes(2);
+      releaseSecond();
+      await vi.waitFor(() => expect(trace.health().pending).toBe(0));
+      expect(trace.health()).toMatchObject({ state: 'ready', stalls: 2, recoveries: 1, dropped: 1 });
+    } finally {
+      releaseFirst();
+      releaseSecond();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an I/O failure latched when an already accepted later write succeeds', async () => {
+    const { trace } = await fixture();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(trace, 'openDirectory').mockImplementationOnce(async () => {
+      await blocked;
+      throw Object.assign(new Error('private path and storage message'), { code: 'EACCES' });
+    });
+    const first = trace.record({ category: 'lifecycle', action: 'first', phase: 'observed' });
+    const second = trace.record({ category: 'lifecycle', action: 'second', phase: 'observed' });
+    release();
+    expect(await Promise.all([first, second])).toEqual([false, true]);
+    expect(trace.health()).toMatchObject({
+      state: 'failed',
+      pending: 0,
+      recoveries: 0,
+      lastFailure: { reason: 'io-error', stage: 'directory', errorCode: 'EACCES' },
+    });
+    expect(JSON.stringify(trace.health())).not.toMatch(/private|path|message/);
+    const original = new Error('Application failure');
+    await expect(
+      trace.run('projects:save', async () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
+    expect(original.message).toBe('Application failure');
+    trace.retryStorage();
+    expect(await trace.record({ category: 'lifecycle', action: 'manual-retry', phase: 'observed' })).toBe(
+      true,
+    );
+    expect(trace.health().state).toBe('ready');
+  });
+
+  it('bounds queued writes and reports backpressure separately from storage errors', async () => {
+    const { trace } = await fixture();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const open = vi.spyOn(trace, 'openDirectory').mockImplementation(async () => {
+      await blocked;
+      throw Object.assign(new Error('private storage message'), { code: 'ENOSPC' });
+    });
+    const accepted = Array.from({ length: 128 }, () =>
+      trace.record({ category: 'lifecycle', action: 'queued', phase: 'observed' }),
+    );
+    try {
+      expect(await trace.record({ category: 'lifecycle', action: 'overflow', phase: 'observed' })).toBe(
+        false,
+      );
+      expect(trace.health()).toMatchObject({
+        state: 'ready',
+        pending: 128,
+        dropped: 1,
+        stalls: 0,
+        lastFailure: { reason: 'queue-full', stage: 'queued' },
+      });
+    } finally {
+      release();
+      await Promise.all(accepted);
+    }
+    expect(open).toHaveBeenCalledTimes(128);
+    expect(trace.health()).toMatchObject({
+      state: 'failed',
+      pending: 0,
+      dropped: 1,
+      lastFailure: { reason: 'io-error', stage: 'directory', errorCode: 'ENOSPC' },
+    });
+  });
+
+  it('reports the failed sync stage without a reference or raw error details', async () => {
+    const { trace } = await fixture();
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      vi.spyOn(handle, 'sync').mockRejectedValue(
+        Object.assign(new Error('private screenshot path'), { code: 'EIO' }),
+      );
+      return handle;
+    });
+    const original = new Error('Application failure');
+    await expect(
+      trace.run('projects:save', async () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
+    expect(original.message).toBe('Application failure');
+    expect(trace.health()).toMatchObject({
+      state: 'failed',
+      stage: 'idle',
+      pending: 0,
+      lastFailure: { reason: 'io-error', stage: 'sync', errorCode: 'EIO' },
+    });
+    expect(JSON.stringify(trace.health())).not.toMatch(/private|screenshot|path|message/);
+    const snapshot = trace.health();
+    snapshot.lastFailure!.errorCode = 'private';
+    expect(trace.health().lastFailure?.errorCode).toBe('EIO');
+  });
+
   it('stops waiting on stalled diagnostics without changing save results', async () => {
     const { trace } = await fixture();
     vi.useFakeTimers();
@@ -231,6 +426,12 @@ describe('local persistence diagnostics', () => {
       await vi.advanceTimersByTimeAsync(0);
       vi.useRealTimers();
     }
+    await vi.waitFor(() => expect(trace.health().pending).toBe(0));
+    expect(trace.health()).toMatchObject({
+      state: 'failed',
+      recoveries: 0,
+      lastFailure: { reason: 'io-error', stage: 'directory', errorCode: 'operation-failed' },
+    });
   });
 
   it('correlates operations and file checkpoints without exposing paths, error messages or content', async () => {

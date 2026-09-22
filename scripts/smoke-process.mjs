@@ -144,6 +144,8 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
         `Native verification exited without a readable report (exit ${result.code}, signal ${result.signal}).`,
       );
     }
+    if (report.diagnosticsHealth)
+      console.log('Local diagnostics health:', JSON.stringify(report.diagnosticsHealth));
     if (result.code !== 0) {
       if (report.rendererState)
         console.error(

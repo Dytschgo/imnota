@@ -15,6 +15,7 @@ import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
   NativeUiDriver,
@@ -32,6 +33,7 @@ import {
 export type SmokeWorkflowMode = 'smoke' | 'stress';
 
 export interface SmokeWorkflowHost {
+  diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
   /** Update the in-memory production workspace without opening a native chooser. */
   setWorkspace(workspacePath: string): void | Promise<void>;
   /** Replace the app window through the production create/load path and return the ready window. */
@@ -91,6 +93,7 @@ export interface SmokeWorkflowReport {
   artifacts: SmokeCapture[];
   timings: SmokeTiming[];
   assertions: string[];
+  diagnosticsHealth: ReturnType<PersistenceDiagnostics['health']>;
 }
 
 interface FixtureSource {
@@ -2752,6 +2755,7 @@ export async function runSmokeWorkflow(
     artifacts,
     timings,
     assertions,
+    diagnosticsHealth: host.diagnosticsHealth(),
   };
   await writeReportArtifact(artifactDirectory, report);
   return report;
