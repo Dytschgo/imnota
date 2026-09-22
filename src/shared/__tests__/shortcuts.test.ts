@@ -61,7 +61,7 @@ describe('shortcut normalization', () => {
       validateShortcut('capture.region', 'Ctrl+Shift+S', getDefaultShortcuts('windows'), 'windows'),
     ).toBeNull();
     expect(getDefaultShortcut('capture.region', 'windows')).toBe('Ctrl+Shift+5');
-    expect(getDefaultShortcut('capture.region', 'mac')).toBe('Meta+Shift+5');
+    expect(getDefaultShortcut('capture.region', 'mac')).toBe('Ctrl+Shift+5');
     expect(getDefaultShortcut('capture.repeatLastRegion', 'windows')).toBe('Ctrl+Shift+6');
     expect(getDefaultShortcut('capture.repeatLastRegion', 'mac')).toBe('Meta+Shift+6');
   });
@@ -69,6 +69,14 @@ describe('shortcut normalization', () => {
   it('formats compact macOS labels', () => {
     expect(formatShortcut('Meta+Shift+C', 'mac')).toBe('⌘⇧C');
     expect(formatShortcut('Ctrl+Shift+C', 'windows')).toBe('Ctrl + Shift + C');
+  });
+
+  it('preserves explicit capture overrides and cleared bindings when the Mac default changes', () => {
+    expect(resolveShortcutBindings({ 'capture.region': 'Meta+Shift+5' }, 'mac')['capture.region']).toBe(
+      'Meta+Shift+5',
+    );
+    expect(resolveShortcutBindings({ 'capture.region': null }, 'mac')['capture.region']).toBeNull();
+    expect(formatShortcut(getDefaultShortcut('capture.region', 'mac')!, 'mac')).toBe('⌃⇧5');
   });
 });
 

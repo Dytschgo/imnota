@@ -1969,7 +1969,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole('alert')).toHaveTextContent('Allow Screen Recording');
   });
 
