@@ -225,7 +225,7 @@ async function startCapture(
       if (!registered) throw new Error('Windows global capture shortcut is not registered.');
       focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
       sendWindowsSmokeCaptureShortcut();
-    } else await driver.click({ selector: 'button[aria-label^="Capture screen region"]' });
+    } else await driver.click({ selector: 'button[aria-label^="Capture area"]' });
     if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
       await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
       const displays = screen.getAllDisplays();
@@ -486,7 +486,7 @@ export async function exerciseRegionCapture(
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
-  await driver.waitFor({ selector: 'button[aria-label^="Capture screen region"]:not(:disabled)' });
+  await driver.waitFor({ selector: 'button[aria-label^="Capture area"]:not(:disabled)' });
 
   // Full-display capture must not replace the remembered region. Repeat uses the
   // same source pixels and crop through the normal renderer/native IPC path.

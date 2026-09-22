@@ -15,7 +15,7 @@ export function CaptureDisplayDialog({
   return (
     <Modal
       title="Choose a display"
-      description="Choose which display supplies the screenshot. Capture pixels stay local and in memory until you save a region."
+      description="Choose which display supplies the screenshot. Capture pixels stay local and in memory until you save an area."
       onClose={onCancel}
       closeTestId="capture-display-cancel"
     >

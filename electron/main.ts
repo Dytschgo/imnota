@@ -2497,7 +2497,7 @@ function registerIpc(): void {
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            'The display used for the last region changed while the capture was being prepared. Capture a new region, or reconnect that display.',
+            'The display used for the last area changed while the capture was being prepared. Capture a new area, or reconnect that display.',
             true,
           );
         captured = [stableCapture];

@@ -638,7 +638,7 @@ export function Toolbar({
                 captureInProgress
                   ? 'Capture in progress…'
                   : captureEnabled
-                    ? `Capture screen region${captureShortcut ? ` (${captureShortcut})` : ''}`
+                    ? `Capture area${captureShortcut ? ` (${captureShortcut})` : ''}`
                     : captureDisabledLabel
               }
               disabled={!captureEnabled || captureInProgress}

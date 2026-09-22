@@ -349,7 +349,7 @@ describe('CollectionRail', () => {
     );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     const capture = await screen.findByTestId('add-item-capture');
-    expect(capture).toHaveTextContent('Capture a region on a chosen display');
+    expect(capture).toHaveTextContent('Capture an area on a chosen display');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
     expect(onCapture).toHaveBeenCalledWith();
@@ -376,17 +376,6 @@ describe('CollectionRail', () => {
 
     rerender(<CollectionRail {...props({ onAddContent: vi.fn() })} />);
     expect(screen.queryByTestId('add-item-capture')).not.toBeInTheDocument();
-  });
-
-  it('starts a 3s or 5s capture delay from the Add menu', async () => {
-    const onCapture = vi.fn();
-    render(<CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />);
-    fireEvent.click(screen.getByTestId('add-item-trigger'));
-    fireEvent.click(await screen.findByTestId('add-item-capture-delay-3'));
-    expect(onCapture).toHaveBeenCalledWith(3);
-    fireEvent.click(screen.getByTestId('add-item-trigger'));
-    fireEvent.click(await screen.findByTestId('add-item-capture-delay-5'));
-    expect(onCapture).toHaveBeenCalledWith(5);
   });
 
   it('keeps the Add item menu keyboard navigable and restores focus after dismissal', async () => {

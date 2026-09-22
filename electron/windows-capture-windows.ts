@@ -8,7 +8,7 @@ const WS_EX_APPWINDOW = 0x00040000;
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 const DWMWA_CLOAKED = 14;
 const GW_HWNDNEXT = 2;
-const MAX_ENUMERATED_WINDOWS = 128;
+const MAX_ENUMERATED_WINDOWS = 512;
 
 type NativeHandle = unknown;
 

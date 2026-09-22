@@ -56,7 +56,7 @@ function setupCaptureDelayCountdown() {
 }
 
 function setupRegionSelection() {
-  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-checked="true" data-mode="region">Region</button><button type="button" role="radio" aria-checked="false" data-mode="window">Window</button><button type="button" role="radio" aria-checked="false" data-mode="display">Display</button></div><button type="button" data-action="last-region" disabled>Last region</button><strong class="capture-instruction">Drag to select a region</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
+  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-label="Area" title="Area" aria-checked="true" data-mode="region"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4" /></svg></button><button type="button" role="radio" aria-label="Window" title="Window" aria-checked="false" data-mode="window"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="13" height="12" rx="1.5" /><path d="M8 19h12V9" /></svg></button><button type="button" role="radio" aria-label="Display" title="Display" aria-checked="false" data-mode="display"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8m-4-4v4" /></svg></button></div><button type="button" data-action="last-region" disabled>Last area</button><strong class="capture-instruction">Drag to select an area</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
 
   const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
   const freezeFrame = root.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
@@ -101,9 +101,9 @@ function setupRegionSelection() {
   function setLastRegionAvailability(lastRegion: CaptureRectangle | null, lastRegionAvailable: boolean) {
     lastRegionButton.disabled = !lastRegion;
     lastRegionButton.title = lastRegion
-      ? 'Select the last captured region from this session'
+      ? 'Select the last captured area from this session'
       : lastRegionAvailable
-        ? 'The last region was captured on a different display.'
+        ? 'The last area was captured on a different display.'
         : LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE;
   }
 
@@ -114,7 +114,7 @@ function setupRegionSelection() {
       return 'Click a window';
     }
     if (state.mode === 'display') return 'Capture this entire display';
-    return 'Drag to select a region';
+    return 'Drag to select an area';
   }
 
   function draw(state: CaptureSelectionState) {
@@ -215,6 +215,16 @@ function setupRegionSelection() {
     button.addEventListener('click', () => {
       const next = button.dataset.mode;
       if (next === 'region' || next === 'window' || next === 'display') window.imnotaCapture.setMode(next);
+    });
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const buttons = Array.from(surface.querySelectorAll<HTMLButtonElement>('.capture-modes [data-mode]'));
+      const currentIndex = buttons.indexOf(button);
+      const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+      const next = buttons[(currentIndex + direction + buttons.length) % buttons.length];
+      next?.focus();
+      next?.click();
     });
   }
   lastRegionButton.addEventListener('click', () => {

@@ -24,18 +24,18 @@ afterEach(() => {
 });
 
 describe('annotation toolbar', () => {
-  test('only renders experimental capture when a capture action is available', () => {
+  test('only renders capture when a capture action is available', () => {
     const view = render(<Toolbar {...props()} />);
     expect(screen.queryByRole('button', { name: /screen capture/i })).not.toBeInTheDocument();
 
     view.rerender(<Toolbar {...props({ onCapture: vi.fn(), captureEnabled: true })} />);
-    expect(screen.getByRole('button', { name: 'Capture screen region' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Capture area' })).toBeEnabled();
   });
 
   test('starts immediate capture from the camera and delayed capture from the delay menu', () => {
     const onCapture = vi.fn();
     render(<Toolbar {...props({ onCapture, captureEnabled: true })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Capture screen region' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture area' }));
     expect(onCapture).toHaveBeenCalledWith();
     fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
