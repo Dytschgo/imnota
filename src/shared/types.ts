@@ -269,6 +269,7 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   }): Promise<string>;
   exportPackage(input: ExportRequest): Promise<{ folderPath: string; zipPath: string; count: number }>;
   openPath(targetPath: string): Promise<void>;
+  openDiagnosticsFolder(): Promise<void>;
   copyText(text: string): Promise<void>;
   copyContext(input: { markdown: string; imageDataUrl: string }): Promise<ClipboardFormatsReport>;
   copyImage(dataUrl: string): Promise<void>;

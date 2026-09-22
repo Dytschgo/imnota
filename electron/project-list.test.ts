@@ -305,7 +305,12 @@ describe('read-only project listing', () => {
     await fs.truncate(path.join(oversized, 'project.json'), SEARCH_LIMITS.projectBytes + 1);
     await writeProject(root, 'valid', emptyProject('Usable', ''));
     const read = vi.spyOn(Buffer, 'alloc');
-    expect((await listWorkspaceProjects(root)).map(({ name }) => name)).toEqual(['Usable']);
+    const report = vi.fn<(target: string, error: unknown) => Promise<void>>(async () => undefined);
+    expect((await listWorkspaceProjects(root, report)).map(({ name }) => name)).toEqual(['Usable']);
+    expect(report).toHaveBeenCalledTimes(4);
+    expect(report.mock.calls.map(([target]) => path.basename(target))).toEqual(
+      expect.arrayContaining(['not-a-project', 'invalid', 'corrupt', 'oversized']),
+    );
     expect(read.mock.calls.every(([size]) => size <= SEARCH_LIMITS.projectBytes)).toBe(true);
   });
 
@@ -340,5 +345,13 @@ describe('read-only project listing', () => {
     expect(await listWorkspaceProjects(root)).toEqual([]);
     expect(await listWorkspaceProjects(path.join(root, 'missing'))).toEqual([]);
     expect(await fs.readdir(root)).toEqual([]);
+  });
+
+  it('reports an inaccessible workspace as an error instead of an empty library', async () => {
+    const root = await workspace();
+    vi.spyOn(fs, 'opendir').mockRejectedValue(Object.assign(new Error('Denied'), { code: 'EACCES' }));
+    const report = vi.fn<(target: string, error: unknown) => Promise<void>>(async () => undefined);
+    await expect(listWorkspaceProjects(root, report)).rejects.toThrow(/workspace could not be read/);
+    expect(report).toHaveBeenCalledWith(root, expect.objectContaining({ code: 'EACCES' }));
   });
 });
