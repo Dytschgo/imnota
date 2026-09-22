@@ -177,6 +177,7 @@ export function DrawingEditor({
         {showInspector && (
           <IconButton
             className="drawing-inspector-restore"
+            data-testid="inspector-toggle"
             label="Expand inspector"
             onClick={(event) => onShowInspector(event.currentTarget)}
           >

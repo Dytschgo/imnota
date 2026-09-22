@@ -2458,13 +2458,27 @@ function Library({
                 className="project-row"
                 key={`${entry.projectPath}:${entry.id}`}
                 onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
-                title={collectionDisplayName(entry.name, entry.projectPath)}
+                title={collectionDisplayName(
+                  entry.name,
+                  entry.projectPath,
+                  recent
+                    .filter((other) => other.projectPath === entry.projectPath && other.id !== entry.id)
+                    .map((other) => other.name),
+                )}
               >
                 <div className="project-symbol">
                   <ProjectIcon icon={entry.icon} />
                 </div>
                 <div className="project-row-copy">
-                  <strong>{collectionDisplayName(entry.name, entry.projectPath)}</strong>
+                  <strong>
+                    {collectionDisplayName(
+                      entry.name,
+                      entry.projectPath,
+                      recent
+                        .filter((other) => other.projectPath === entry.projectPath && other.id !== entry.id)
+                        .map((other) => other.name),
+                    )}
+                  </strong>
                   <span>{entry.projectName}</span>
                   <small>{relativeOpenedTime(entry.openedAt)}</small>
                 </div>

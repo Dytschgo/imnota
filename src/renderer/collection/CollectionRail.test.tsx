@@ -467,6 +467,23 @@ describe('CollectionRail', () => {
     expect(useAppStore.getState().snapshot?.project.contentItems?.[0].includeInExport).toBe(false);
     expect(useAppStore.getState().snapshot?.project.screenshots).toEqual(current.project.screenshots);
   });
+  it('keeps collection picker actions distinct when a shortened name would collide', async () => {
+    const snapshot = projectSnapshot();
+    snapshot.project.collections[0]!.name = 'project / Collection 01';
+    snapshot.project.collections[1]!.name = 'Collection 01';
+    useAppStore.setState({ snapshot });
+    render(<CollectionRail {...props()} />);
+
+    fireEvent.click(screen.getByTestId('collection-picker'));
+    const menu = screen.getByRole('menu', { name: 'Collections' });
+    expect(within(menu).getByRole('menuitemradio', { name: 'project / Collection 01' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemradio', { name: 'Collection 01' })).toBeInTheDocument();
+    expect(
+      within(menu).getByRole('menuitem', { name: 'Rename project / Collection 01' }),
+    ).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Rename Collection 01' })).toBeInTheDocument();
+  });
+
   it('archives and restores the current collection through snapshot adoption', async () => {
     const editCollection = vi.fn<ImnotaBridge['editCollection']>(async (input) => {
       const current = useAppStore.getState().snapshot!;

@@ -717,6 +717,43 @@ describe('feedback controls', () => {
     expect(screen.getByRole('button', { name: 'Expand inspector' })).toHaveFocus();
   });
 
+  it.each(['loading', 'error'] as const)(
+    'keeps the collapsed inspector reachable while drawing content is %s',
+    async (state) => {
+      const drawing = {
+        id: 'drawing',
+        kind: 'drawing' as const,
+        collectionId: '001-collection',
+        position: 0,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        title: 'Diagram',
+        sourceFilename: 'drawing.excalidraw',
+        imageFilename: 'drawing.png',
+        originalWidth: 100,
+        originalHeight: 100,
+      };
+      renderApp({
+        loadContentItem: () =>
+          state === 'loading' ? new Promise(() => {}) : Promise.reject(new Error('Could not read drawing')),
+      });
+      await screen.findByTestId('library-full-search');
+      act(() => {
+        useAppStore.getState().setProject({
+          ...snapshot,
+          project: { ...snapshot.project, schemaVersion: 4, contentItems: [drawing] },
+        });
+      });
+      await screen.findByText(state === 'loading' ? 'Loading content…' : 'Content could not be loaded.');
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
+      const restore = screen.getByRole('button', { name: 'Expand inspector' });
+      expect(restore.closest('.drawing-editor-tools')).not.toBeNull();
+      fireEvent.click(restore);
+      expect(screen.getByRole('button', { name: 'Collapse inspector' })).toBeInTheDocument();
+    },
+  );
+
   it('keeps the desktop inspector modeless', async () => {
     await renderEditingProject();
     expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();

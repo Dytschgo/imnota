@@ -134,12 +134,24 @@ export function AppShell({
                   className="crumb-current"
                   title={
                     activeCollection
-                      ? collectionDisplayName(activeCollection.name, store.snapshot!.projectPath)
+                      ? collectionDisplayName(
+                          activeCollection.name,
+                          store.snapshot!.projectPath,
+                          store
+                            .snapshot!.project.collections.filter((other) => other.id !== activeCollection.id)
+                            .map((other) => other.name),
+                        )
                       : undefined
                   }
                 >
                   {activeCollection
-                    ? collectionDisplayName(activeCollection.name, store.snapshot!.projectPath)
+                    ? collectionDisplayName(
+                        activeCollection.name,
+                        store.snapshot!.projectPath,
+                        store
+                          .snapshot!.project.collections.filter((other) => other.id !== activeCollection.id)
+                          .map((other) => other.name),
+                      )
                     : 'Collection'}
                 </span>
                 {saveState && (

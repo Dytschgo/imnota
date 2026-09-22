@@ -18,19 +18,19 @@
   "devicePixelRatio": 1,
   "reviewedAt": "2026-09-22",
   "platform": "win32",
-  "sourceRevision": "9b3023af043111cf7694ca1ffc10210b9e9ee8eb",
+  "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
   "electron": "44.2.0",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35782465670",
-  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Recent navigation and drawing toolbar changes are captured and documented individually. Eleven captures cover the Recent labels, hidden collection-folder prefixes, and neutral collection plus action; two backdrop captures show the consolidated drawing toolbar. Other captures remain unchanged. Strict comparison tolerance is unchanged; packaged native verification passed.",
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
+  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Recent navigation and drawing changes are documented in their capture entries. Four compact workspace captures record removal of the View caption; two backdrop captures record the consolidated drawing toolbar. Other captures remain unchanged. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
+      "reviewedAt": "2026-09-23",
+      "sourceRevision": "b06421f5b857c1fbb4e4b89496ba0cfbc17a4eec",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35785000618",
+      "review": "Candidate and highlighted difference inspected. The Features category appears between Shortcuts and Workspace; all seven category labels fit with the existing Appearance content aligned. The active Settings control has its intended neutral surface. Packaged Windows native verification passed in this run; its visual comparison failed solely on this expected Settings change. Strict tolerance is unchanged."
     },
     "1920x1080-workspace-light.png": {
       "reviewedAt": "2026-09-21",
@@ -76,42 +76,6 @@
       "platform": "win32",
       "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
       "devicePixelRatio": 1
-    },
-    "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
     },
     "backdrop-collapsed.png": {
       "reviewedAt": "2026-09-21",
@@ -247,6 +211,42 @@
       "devicePixelRatio": 1,
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35782465670",
       "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1280x800-workspace-light.png": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
+      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+    },
+    "1280x800-workspace-dark.png": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
+      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-light.png": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
+      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-dark.png": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
+      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
     }
   }
 }
