@@ -643,6 +643,54 @@ async function createBenchmarkProject(
   return { projectPath, importMs, reopenMs };
 }
 
+async function exerciseThumbnailMemoryFixtures(
+  driver: NativeUiDriver,
+  fixtureRoot: string,
+  timings: SmokeTiming[],
+): Promise<void> {
+  for (const [label, width, height, count] of [
+    ['tall', 100, 30000, 1],
+    ['high-entropy', 1024, 1024, 10],
+  ] as const) {
+    const pixels = Buffer.alloc(width * height * 4);
+    let seed = 123456789;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      pixels[offset] = seed & 255;
+      pixels[offset + 1] = (seed >>> 8) & 255;
+      pixels[offset + 2] = (seed >>> 16) & 255;
+      pixels[offset + 3] = 255;
+    }
+    const source = path.join(fixtureRoot, 'sources', `${label}.png`);
+    await fs.writeFile(
+      source,
+      nativeImage.createFromBitmap(pixels, { width, height, scaleFactor: 1 }).toPNG(),
+      { flag: 'wx' },
+    );
+    const measured = await profileMemoryDuring(driver.browserWindow, () =>
+      createBenchmarkProject(driver, [{ path: source, width, height }], count, `Verification ${label}`),
+    );
+    const thumbnails = await driver.evaluate<Record<string, string>>(
+      `window.imnota.loadProject(${JSON.stringify(measured.result.projectPath)}).then(snapshot => snapshot.thumbnails)`,
+    );
+    for (const dataUrl of Object.values(thumbnails)) {
+      const size = nativeImage.createFromDataURL(dataUrl).getSize();
+      if (size.width < 1 || size.height < 1 || size.width > 220 || size.height > 220)
+        throw new Error(`Unbounded ${label} thumbnail: ${size.width}x${size.height}`);
+    }
+    timings.push({
+      scenario: `${label}-native-${count}`,
+      screenshotCount: count,
+      importMs: Math.round(measured.result.importMs),
+      reopenMs: Math.round(measured.result.reopenMs),
+      ...measured.memoryProfile.post,
+      memoryProfile: measured.memoryProfile,
+    });
+  }
+}
+
 async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
   return driver.evaluate<CanvasGeometry>(`(() => {
     const wrap = document.querySelector('[data-testid="annotation-canvas"], .canvas-wrap');
@@ -957,6 +1005,7 @@ async function assertNativeCanvasAnnotationsPersisted(
 async function installDeterministicExportAnnotations(
   driver: NativeUiDriver,
   projectPath: string,
+  memoryCases = false,
 ): Promise<{ screenshotId: string; annotations: Annotation[] }> {
   return driver.evaluate(`(async () => {
     const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
@@ -967,6 +1016,10 @@ async function installDeterministicExportAnnotations(
       { id: 'redaction', kind: 'blur', x: 320, y: 220, width: 96, height: 80, opacity: 0.1, zIndex: 1 },
       { id: 'outside', kind: 'rectangle', x: 1080, y: 500, width: 220, height: 100, stroke: '#ef4444', strokeWidth: 8, zIndex: 2 }
     ];
+    if (${memoryCases}) annotations.push(
+      { id: 'alpha', kind: 'rectangle', x: 240, y: 160, width: 40, height: 40, fill: '#ff0000', stroke: '#ffffff', strokeWidth: 2, opacity: 0.5, zIndex: 3 },
+      { id: 'pixels', kind: 'pixelate', x: 440, y: 255, width: 40, height: 40, blurIntensity: 10, zIndex: 4 },
+    );
     const saved = await window.imnota.saveScreenshotContent({
       projectPath: snapshot.projectPath,
       screenshot,
@@ -1084,7 +1137,7 @@ async function verifyOneImagePromptBundle(
   if (!pathIsWithin(projectPath, exportedPath)) throw new Error('PNG export escaped its fixture project.');
   const exported = nativeImage.createFromPath(exportedPath);
   if (exported.isEmpty()) throw new Error('Prompt bundle PNG could not be decoded.');
-  if (annotations.length !== 3) throw new Error('Deterministic export annotations changed.');
+  if (annotations.length !== 5) throw new Error('Deterministic export annotations changed.');
   const expandedScreenshot = { x: 160, y: 76, width: 1176, height: 604 };
   const expected = {
     width: expandedScreenshot.width + 64,
@@ -1099,6 +1152,17 @@ async function verifyOneImagePromptBundle(
   const imageY = 32 + 36 + 12;
   const promptImageOrigin = { x: imageX, y: imageY };
   const expandedSourceOrigin = { x: expandedScreenshot.x, y: expandedScreenshot.y };
+  for (const [sourcePoint, expectedPixel] of [
+    [{ x: 260, y: 180 }, [27, 44, 188, 255]],
+    [{ x: 460, y: 270 }, [85, 117, 83, 255]],
+  ] as const) {
+    const point = mapSourcePointToPromptPixel(sourcePoint, expandedSourceOrigin, promptImageOrigin);
+    const actual = pixelAt(exported, point.x, point.y);
+    if (expectedPixel.some((channel, index) => Math.abs(channel - actual[index]) > 1))
+      throw new Error(
+        `Opacity/pixelation changed at ${sourcePoint.x},${sourcePoint.y}: ${actual.toString('hex')}`,
+      );
+  }
   const maskPixel = mapSourcePointToPromptPixel(
     { x: 320 + 48, y: 220 + 40 },
     expandedSourceOrigin,
@@ -2366,15 +2430,31 @@ export async function runSmokeWorkflow(
   await closePromptDialog(driver);
 
   const pixelFixture = await createBenchmarkProject(driver, sources, 1, 'Verification Pixel Bundle');
-  const deterministic = await installDeterministicExportAnnotations(driver, pixelFixture.projectPath);
+  const deterministic = await installDeterministicExportAnnotations(driver, pixelFixture.projectPath, true);
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
-  const pixelPrompt = await exercisePromptWorkflow(driver, host, pixelFixture.projectPath, {
-    artifacts,
-    freshActions: 1,
-    requireSplit: false,
-  });
+  const debuggerApi = driver.browserWindow.webContents.debugger;
+  debuggerApi.attach('1.3');
+  let pixelPrompt: Awaited<ReturnType<typeof exercisePromptWorkflow>>;
+  try {
+    await debuggerApi.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width: 1280,
+      height: 800,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
+    if ((await driver.evaluate<number>('window.devicePixelRatio')) !== 2)
+      throw new Error('DPR 2 export fixture was not applied.');
+    pixelPrompt = await exercisePromptWorkflow(driver, host, pixelFixture.projectPath, {
+      artifacts,
+      freshActions: 1,
+      requireSplit: false,
+    });
+  } finally {
+    await debuggerApi.sendCommand('Emulation.clearDeviceMetricsOverride');
+    debuggerApi.detach();
+  }
   if (pixelPrompt.bundleCount !== 1)
     throw new Error(`One-image pixel fixture unexpectedly split into ${pixelPrompt.bundleCount} bundles.`);
   await verifyOneImagePromptBundle(
@@ -2396,7 +2476,7 @@ export async function runSmokeWorkflow(
     }
   }
   assertions.push(
-    'one-image prompt header/margins, expanded crop/outside bounds, cropped-source privacy, opaque redaction pixels, and one PNG/Markdown pair',
+    'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, and one PNG/Markdown pair',
   );
   await closePromptDialog(driver);
 
@@ -2418,10 +2498,13 @@ export async function runSmokeWorkflow(
   );
   assertions.push('prompt workflow path and collection rejection');
 
-  const counts = mode === 'stress' ? [1, 10, 20, 100] : [1, 10];
+  const counts = mode === 'stress' ? [1, 10, 20, 50, 100] : [1, 10];
   const benchmarkProjects = new Map<number, string>();
   for (const count of counts) {
-    const benchmark = await createBenchmarkProject(driver, sources, count);
+    const measured = await profileMemoryDuring(driver.browserWindow, () =>
+      createBenchmarkProject(driver, sources, count),
+    );
+    const benchmark = measured.result;
     benchmarkProjects.set(count, benchmark.projectPath);
     const memory = await memoryMegabytes(driver.browserWindow);
     timings.push({
@@ -2430,6 +2513,7 @@ export async function runSmokeWorkflow(
       importMs: Math.round(benchmark.importMs),
       reopenMs: Math.round(benchmark.reopenMs),
       ...memory,
+      memoryProfile: measured.memoryProfile,
     });
     if (mode === 'stress' && count === 20) {
       activeWindow = await host.reopenWindow();
@@ -2523,8 +2607,10 @@ export async function runSmokeWorkflow(
       'one fresh dense 20-image prompt action with 200 unique Markdown notes, outside-source bounds, complete pairs, and sampled main/renderer/GPU memory',
     );
     assertions.push(
-      'mixed-resolution 1/10/20/100 fixtures with one complete 20-image and one complete 100-image prompt render action',
+      'sampled loading memory for mixed-resolution 1/10/20/50/100 fixtures with complete 20-image and 100-image prompt actions',
     );
+    await exerciseThumbnailMemoryFixtures(driver, fixtureRoot, timings);
+    assertions.push('tall 100x30000 and high-entropy PNG fixtures retain all previews within 220x220');
   } else assertions.push('mixed-resolution 1/10 smoke benchmark; 20/100 reserved for stress mode');
 
   await checkpoint('existing image, clipboard, recovery and benchmark checks complete');

@@ -39,5 +39,29 @@ describe('pixelation sampling', () => {
     expect(result.width).toBe(80);
     expect(result.height).toBe(30);
     expect(output.imageSmoothingEnabled).toBe(false);
+    const temporary = output.drawImage.mock.calls[0][0] as HTMLCanvasElement;
+    expect([temporary.width, temporary.height]).toEqual([0, 0]);
+  });
+
+  it('releases allocated canvases when the output context is unavailable', () => {
+    const create = vi.spyOn(document, 'createElement');
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValueOnce({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
+      .mockReturnValueOnce(null);
+    expect(() =>
+      pixelatedRegion({ naturalWidth: 200, naturalHeight: 200 } as HTMLImageElement, {
+        id: 'failed',
+        kind: 'pixelate',
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        zIndex: 0,
+      }),
+    ).toThrow('Image processing is unavailable');
+    for (const result of create.mock.results) {
+      const canvas = result.value as HTMLCanvasElement;
+      expect([canvas.width, canvas.height]).toEqual([0, 0]);
+    }
   });
 });
