@@ -18,6 +18,7 @@ import {
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
+import { collectionDisplayName } from './collection-display-name';
 import { orderedCollectionItems } from '../../shared/content-items';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
@@ -76,6 +77,12 @@ export function CollectionControls({
   const restorePickerFocusAfterRename = useRef(false);
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
+  const collectionLabel = (collection: (typeof collections)[number]) =>
+    collectionDisplayName(
+      collection.name,
+      store.snapshot!.projectPath,
+      collections.filter((other) => other.id !== collection.id).map((other) => other.name),
+    );
   const selectedIndex = Math.max(
     0,
     collections.findIndex((collection) => collection.id === current?.id),
@@ -255,7 +262,7 @@ export function CollectionControls({
             }
           }}
         >
-          <span>{current.name}</span>
+          <span>{collectionLabel(current)}</span>
           <ChevronDown size={14} aria-hidden="true" />
         </button>
         {pickerOpen && (
@@ -280,7 +287,7 @@ export function CollectionControls({
                     type="button"
                     role="menuitemradio"
                     aria-checked={collection.id === current.id}
-                    aria-label={collection.name}
+                    aria-label={collectionLabel(collection)}
                     aria-description={collection.archived ? 'Archived' : 'Active'}
                     tabIndex={optionIndex === focusedItemIndex ? 0 : -1}
                     className="collection-picker-option"
@@ -292,7 +299,7 @@ export function CollectionControls({
                       } else handlePickerItemKeyDown(event, optionIndex);
                     }}
                   >
-                    <span>{collection.name}</span>
+                    <span>{collectionLabel(collection)}</span>
                   </button>
                   <IconButton
                     ref={(element) => {
@@ -300,7 +307,7 @@ export function CollectionControls({
                     }}
                     role="menuitem"
                     tabIndex={optionIndex + 1 === focusedItemIndex ? 0 : -1}
-                    label={`Rename ${collection.name}`}
+                    label={`Rename ${collectionLabel(collection)}`}
                     disabled={busy}
                     onClick={() => beginRename(collection)}
                     onKeyDown={(event) => {
@@ -318,7 +325,7 @@ export function CollectionControls({
                     }}
                     role="menuitem"
                     tabIndex={optionIndex + 2 === focusedItemIndex ? 0 : -1}
-                    label={`${collection.archived ? 'Restore' : 'Archive'} ${collection.name}`}
+                    label={`${collection.archived ? 'Restore' : 'Archive'} ${collectionLabel(collection)}`}
                     disabled={busy}
                     onClick={() => void apply(collection.archived ? 'restore' : 'archive', collection.id)}
                     onKeyDown={(event) => {
