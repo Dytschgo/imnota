@@ -3,6 +3,34 @@ import { validateProject } from '../src/shared/schema.js';
 
 /** Protects native-owned content identity/files while allowing mixed order, visibility, and drawing titles. */
 export function preserveMixedProjectMetadata(current: ProjectData, candidate: ProjectData): ProjectData {
+  const proposedScreenshots = new Map(candidate.screenshots.map((item) => [item.id, item]));
+  if (
+    candidate.screenshots.length !== current.screenshots.length ||
+    proposedScreenshots.size !== current.screenshots.length ||
+    current.screenshots.some((item) => !proposedScreenshots.has(item.id))
+  ) {
+    throw new Error(
+      'The screenshot list changed. Reload the project before saving. Screenshots can only be added or removed through import, capture, or Delete.',
+    );
+  }
+  const nativeFields = [
+    'collectionId',
+    'storedFilename',
+    'originalFilename',
+    'annotationFile',
+    'descriptionFile',
+    'createdAt',
+    'originalWidth',
+    'originalHeight',
+  ] as const;
+  for (const screenshot of current.screenshots) {
+    const proposed = proposedScreenshots.get(screenshot.id)!;
+    if (nativeFields.some((field) => proposed[field] !== screenshot[field])) {
+      throw new Error(
+        'Screenshot identity or file locations changed. Reload the project before saving; existing files were not changed.',
+      );
+    }
+  }
   if (current.schemaVersion === 3 && candidate.schemaVersion === 4)
     throw new Error('Only native content creation can upgrade a project to schema version 4.');
   if (current.schemaVersion === 4) {

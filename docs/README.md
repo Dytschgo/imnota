@@ -16,6 +16,8 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [User-feedback protocol](user-feedback-protocol.md) — consented manual sessions and evidence boundaries.
 - [Test coverage map](pr-test-coverage.md), [CI routing](ci-routing.md) and [CI artifacts](ci-artifacts.md) — automated check ownership and classification.
 
+- [Data-loss investigation](data-loss-investigation.md) � preservation steps, local diagnostics and the September Windows report.
+
 ## Proposal-only or validation plans
 
 - [Engineering follow-up](engineering-follow-up-20260918.md) — Phase 0 housekeeping is complete; later extraction and native-evidence phases remain proposals.

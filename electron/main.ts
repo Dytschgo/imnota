@@ -17,6 +17,8 @@ import {
 } from 'electron';
 import os from 'node:os';
 import { nativeClipboard } from './native-clipboard.js';
+import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
+import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
 import {
   onboardingHandoffRoot,
@@ -343,21 +345,21 @@ function resolvedWindowBackground(
 }
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await writeAtomically(filePath, content);
+  await diagnostics.filesystem('write', filePath, () => writeAtomically(filePath, content));
   projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfWrite(filePath, content);
   contentSearch.invalidatePath(filePath);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
-  await fs.copyFile(filePath, targetPath);
+  await diagnostics.filesystem('copy', targetPath, () => fs.copyFile(filePath, targetPath));
   projectSearchService?.invalidateForPath(targetPath);
   projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
   contentSearch.invalidatePath(targetPath);
 }
 
 async function unlinkTracked(filePath: string): Promise<void> {
-  await fs.unlink(filePath);
+  await diagnostics.filesystem('unlink', filePath, () => fs.unlink(filePath));
   projectSearchService?.invalidateForPath(filePath);
   projectWatchManager?.recordSelfDelete(filePath);
   contentSearch.invalidatePath(filePath);
@@ -366,22 +368,35 @@ async function unlinkTracked(filePath: string): Promise<void> {
 const screenshotTransactionOperations: ScreenshotTransactionOperations = {
   write: atomicWrite,
   unlink: unlinkTracked,
-  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+  removeDirectory: (target) =>
+    diagnostics.filesystem('remove-directory', target, () => fs.rm(target, { recursive: true, force: true })),
 };
 
 const screenshotTrashOperations: ScreenshotTrashOperations = {
   write: atomicWrite,
   unlink: unlinkTracked,
-  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+  removeDirectory: (target) =>
+    diagnostics.filesystem('remove-directory', target, () => fs.rm(target, { recursive: true, force: true })),
 };
 
 const contentTrashOperations: ContentTrashOperations = {
   write: atomicWrite,
   unlink: unlinkTracked,
-  removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+  removeDirectory: (target) =>
+    diagnostics.filesystem('remove-directory', target, () => fs.rm(target, { recursive: true, force: true })),
 };
 
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
+const diagnostics = new PersistenceDiagnostics(() => path.join(app.getPath('userData'), 'diagnostics'), {
+  version: app.getVersion(),
+  platform: process.platform,
+});
+app.on('render-process-gone', () => {
+  void diagnostics.record({ category: 'lifecycle', action: 'renderer-gone', phase: 'observed' });
+});
+app.on('child-process-gone', () => {
+  void diagnostics.record({ category: 'lifecycle', action: 'child-process-gone', phase: 'observed' });
+});
 
 async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
@@ -517,6 +532,13 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
   const recoveredDeletes: Array<{ undoToken: string; screenshotId: string }> = [];
   const recoveredContentDeletes: Array<{ undoToken: string; itemId: string }> = [];
   const transactions = await recoverScreenshotTransactions(projectPath, screenshotTransactionOperations);
+  await diagnostics.record({
+    category: 'integrity',
+    action: 'save-recovery-checked',
+    phase: 'observed',
+    target: projectPath,
+    count: transactions.length,
+  });
   for (const transaction of transactions) {
     if (transaction.warning) warnings.push(transaction.warning);
     if (!transaction.candidateAvailable) continue;
@@ -546,6 +568,13 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
   }
 
   const trash = await recoverScreenshotTrashTransactions(projectPath, screenshotTrashOperations);
+  await diagnostics.record({
+    category: 'integrity',
+    action: 'screenshot-undo-checked',
+    phase: 'observed',
+    target: projectPath,
+    count: trash.length,
+  });
   for (const transaction of trash) {
     if (transaction.warning) warnings.push(transaction.warning);
     if (transaction.undoAvailable)
@@ -555,6 +584,13 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
       });
   }
   const contentTrash = await recoverContentTrashTransactions(projectPath, contentTrashOperations);
+  await diagnostics.record({
+    category: 'integrity',
+    action: 'content-undo-checked',
+    phase: 'observed',
+    target: projectPath,
+    count: contentTrash.length,
+  });
   for (const transaction of contentTrash) {
     if (transaction.warning) warnings.push(transaction.warning);
     if (transaction.undoAvailable)
@@ -664,9 +700,21 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
         : {}),
     };
   };
+  const inspectSnapshot = async (snapshot: ProjectSnapshot) => {
+    const integrityWarnings = await inspectProjectFiles(projectPath, snapshot.project, (target, error) =>
+      diagnostics.record({
+        category: 'integrity',
+        action: 'file-unavailable',
+        phase: 'observed',
+        target,
+        error,
+      }),
+    );
+    return withSnapshotWarnings(snapshot, integrityWarnings);
+  };
   const snapshot = decorateSnapshot(await makeSnapshot(projectPath));
   const recoveryPath = path.join(projectPath, '.imnota-recovery.json');
-  if (!snapshot.recoveryFound) return snapshot;
+  if (!snapshot.recoveryFound) return inspectSnapshot(snapshot);
   const recoverySource = await readOptionalFile(recoveryPath);
   if (!recoverySource) throw new Error('Recovery data disappeared while the project was opened.');
   const recovery = z
@@ -725,7 +773,7 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
     await atomicWrite(recoveryBackupPath, recoverySource);
     await unlinkTracked(recoveryPath);
   }
-  return decorateSnapshot(await makeSnapshot(projectPath), warnings);
+  return inspectSnapshot(decorateSnapshot(await makeSnapshot(projectPath), warnings));
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
@@ -793,6 +841,19 @@ async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRe
     readOptionalFile(annotationPath),
     readOptionalFile(descriptionPath),
   ]);
+  for (const [target, source] of [
+    [annotationPath, annotationSource],
+    [descriptionPath, descriptionSource],
+  ] as const) {
+    if (source === null)
+      await diagnostics.record({
+        category: 'integrity',
+        action: 'sidecar-missing',
+        phase: 'observed',
+        target,
+        error: { code: 'ENOENT' },
+      });
+  }
   const annotationsJson = annotationSource?.toString('utf8') ?? '[]';
   const description = descriptionSource?.toString('utf8') ?? screenshot.description;
   return {
@@ -1411,6 +1472,7 @@ function registerIpc(): void {
   const projectIcon = z.enum(PROJECT_ICON_KEYS);
   const contracts: Record<string, z.ZodType<unknown[]>> = {
     'settings:get': z.tuple([]),
+    'diagnostics:open-folder': z.tuple([]),
     'settings:choose-workspace': z.tuple([]),
     'settings:set': z.tuple([settingsPatchSchema]),
     'backups:list': z.tuple([]),
@@ -1760,7 +1822,10 @@ function registerIpc(): void {
       // Search is read-only and owns a single cancellable scan. Do not queue obsolete queries
       // behind mutations or block saves while the workspace text is being indexed.
       if (channel === 'projects:search-content') return listener(event, ...validated);
-      const result = pending.then(() => listener(event, ...validated));
+      const invoke = () => listener(event, ...validated);
+      const result = pending.then(() =>
+        tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke(),
+      );
       pending = result.catch(() => undefined);
       return result;
     });
@@ -1784,8 +1849,11 @@ function registerIpc(): void {
         if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
           throw new Error('Untrusted IPC sender.');
         if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
-        if (!queued) return listener(event, ...args);
-        const result = pending.then(() => listener(event, ...args));
+        const invoke = () => listener(event, ...args);
+        if (!queued) return tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke();
+        const result = pending.then(() =>
+          tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke(),
+        );
         pending = result.catch(() => undefined);
         return result;
       }),
@@ -1825,7 +1893,9 @@ function registerIpc(): void {
         event.sender.once('destroyed', revoke);
         event.sender.once('render-process-gone', revoke);
         try {
-          const result = pending.then(() => listener(event, admission, ...args));
+          const result = pending.then(() =>
+            diagnostics.run(channel, () => listener(event, admission, ...args)),
+          );
           pending = result.catch(() => undefined);
           return await result;
         } finally {
@@ -1851,6 +1921,13 @@ function registerIpc(): void {
       return makeSnapshot(projectPath);
     },
     emit: (event: ProjectWatchEvent) => {
+      void diagnostics.record({
+        category: 'integrity',
+        action: event.kind,
+        phase: 'observed',
+        target: event.projectPath,
+        count: event.changedPaths.length,
+      });
       contentSearch.invalidatePath(event.projectPath);
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('workflow:project-watch-event', event);
@@ -1875,7 +1952,7 @@ function registerIpc(): void {
     transactionOperations: screenshotTransactionOperations,
     trashOperations: contentTrashOperations,
     trashItem: async (target) => {
-      await shell.trashItem(target);
+      await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
       projectWatchManager?.recordSelfDelete(target);
     },
     validatePng: (png, expected) => {
@@ -1949,6 +2026,17 @@ function registerIpc(): void {
       }),
   );
   handle('settings:get', () => settings);
+  handle('diagnostics:open-folder', async () => {
+    diagnostics.retryStorage();
+    if (
+      !(await diagnostics.record({ category: 'lifecycle', action: 'diagnostics-check', phase: 'observed' }))
+    )
+      throw new Error(
+        'Local diagnostics could not be written. Check free space and application data folder access.',
+      );
+    const error = await shell.openPath(await diagnostics.openDirectory());
+    if (error) throw new Error('The diagnostics folder could not be opened.');
+  });
   handle('settings:choose-workspace', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose Imnota workspace',
@@ -2743,7 +2831,15 @@ function registerIpc(): void {
     contentSearch.invalidate();
     if (!settings.workspacePath) return [];
     await backupService!.recoverInterruptedRestores();
-    return listWorkspaceProjects(settings.workspacePath);
+    return listWorkspaceProjects(settings.workspacePath, (target, error) =>
+      diagnostics.record({
+        category: 'integrity',
+        action: 'project-list-unavailable',
+        phase: 'observed',
+        target,
+        error,
+      }),
+    );
   });
   handle('projects:search-content', async (_event, input: ContentSearchRequest) => {
     const workspacePath = workspaceOrThrow();
@@ -3045,7 +3141,7 @@ function registerIpc(): void {
       project,
       input.screenshotId,
       async (target) => {
-        await shell.trashItem(target);
+        await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
         projectWatchManager?.recordSelfDelete(target);
       },
       screenshotTrashOperations,
@@ -3163,7 +3259,7 @@ function registerIpc(): void {
     if (preferenceSettingsResult.settings.backups.enabled)
       await backupService!.createSnapshot(safePath, 'destructive-operation');
     projectWatchManager?.stopProject(safePath);
-    await shell.trashItem(safePath);
+    await diagnostics.filesystem('trash', safePath, () => shell.trashItem(safePath));
   });
   handle('exports:annotated-image', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
@@ -3410,6 +3506,7 @@ async function removeSmokeFixture(temporaryRoot: string, fixture: string): Promi
 }
 
 app.whenReady().then(async () => {
+  await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
   const settingsFileExists = stored !== null;
@@ -3520,7 +3617,7 @@ app.whenReady().then(async () => {
             },
             readProject,
             async restoreRecovery(projectPath) {
-              return (await openWithRecovery(projectPath, 'restore')).project;
+              return openWithRecovery(projectPath, 'restore');
             },
             async readSettings() {
               return structuredClone(settings);

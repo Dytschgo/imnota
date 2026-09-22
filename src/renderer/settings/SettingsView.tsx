@@ -368,6 +368,29 @@ export function SettingsView({
               </div>
             </div>
           </section>
+          <section className="settings-section" aria-labelledby="diagnostics-title">
+            <h2 id="diagnostics-title">Local diagnostics</h2>
+            <p>
+              Imnota keeps bounded local traces of saves, deletion requests, recovery, and missing files. They
+              contain operation references and error codes, not screenshot contents, text, or file paths.
+              Nothing is uploaded automatically.
+            </p>
+            <Button
+              variant="soft"
+              onClick={async () => {
+                setLegacyError('');
+                try {
+                  await window.imnota.openDiagnosticsFolder();
+                } catch {
+                  setLegacyError(
+                    'Local diagnostics are unavailable. Check free disk space and access to the application data folder.',
+                  );
+                }
+              }}
+            >
+              Open diagnostics folder
+            </Button>
+          </section>
           <AgentAccessSettings
             value={preferences.agentAccess}
             disabled={savingPreferences}

@@ -2,9 +2,27 @@
 import { describe, expect, it } from 'vitest';
 import type { DrawingRecord, TextBlockRecord } from '../src/shared/content-items.js';
 import { emptyProject } from '../src/shared/utils.js';
+import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 
 const timestamp = '2026-09-07T00:00:00.000Z';
+const screenshot: ScreenshotRecord = {
+  id: 'shot_a',
+  collectionId: '001-collection',
+  originalFilename: 'original.png',
+  storedFilename: 'original.png',
+  title: 'Evidence',
+  description: 'Keep this',
+  position: 0,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  priority: 'medium',
+  annotationFile: 'collections/001-collection/annotations/original.png.json',
+  descriptionFile: 'collections/001-collection/descriptions/original.png.md',
+  originalWidth: 100,
+  originalHeight: 100,
+  includeInExport: true,
+};
 
 function records(): [TextBlockRecord, DrawingRecord] {
   return [
@@ -38,6 +56,67 @@ function records(): [TextBlockRecord, DrawingRecord] {
 }
 
 describe('mixed metadata preservation', () => {
+  it.each([3, 4] as const)(
+    'rejects a stale screenshot list in schema %s without changing the trusted project',
+    (schemaVersion) => {
+      const current: ProjectData = {
+        ...emptyProject('Evidence', ''),
+        schemaVersion,
+        screenshots: [screenshot],
+        ...(schemaVersion === 4 ? { contentItems: [] } : {}),
+      };
+      const before = structuredClone(current);
+      expect(() => preserveMixedProjectMetadata(current, { ...current, screenshots: [] })).toThrow(
+        /screenshot list changed/,
+      );
+      expect(() =>
+        preserveMixedProjectMetadata(current, { ...current, screenshots: [{ ...screenshot, id: 'other' }] }),
+      ).toThrow(/screenshot list changed/);
+      expect(current).toEqual(before);
+    },
+  );
+
+  it('refuses native screenshot path and dimension changes but retains reorder and visibility edits', () => {
+    const current = {
+      ...emptyProject('Evidence', ''),
+      screenshots: [
+        screenshot,
+        {
+          ...screenshot,
+          id: 'shot_b',
+          storedFilename: 'b.png',
+          annotationFile: 'collections/001-collection/annotations/b.png.json',
+          descriptionFile: 'collections/001-collection/descriptions/b.png.md',
+          position: 1,
+        },
+      ],
+    };
+    for (const change of [
+      { collectionId: 'other' },
+      { storedFilename: 'other.png' },
+      { annotationFile: 'other.json' },
+      { descriptionFile: 'other.md' },
+      { originalWidth: 200 },
+    ]) {
+      expect(() =>
+        preserveMixedProjectMetadata(current, {
+          ...current,
+          screenshots: [{ ...screenshot, ...change }, current.screenshots[1]],
+        }),
+      ).toThrow(/identity or file locations/);
+    }
+    const saved = preserveMixedProjectMetadata(current, {
+      ...current,
+      screenshots: [
+        { ...current.screenshots[1], position: 0, includeInExport: false },
+        { ...screenshot, position: 1 },
+      ],
+    });
+    expect(saved.screenshots.map((shot) => [shot.id, shot.position, shot.includeInExport])).toEqual([
+      ['shot_b', 0, false],
+      ['shot_a', 1, true],
+    ]);
+  });
   it('preserves v4 records when a legacy v3 writer saves screenshot metadata', () => {
     const current = { ...emptyProject('Mixed', ''), schemaVersion: 4 as const, contentItems: records() };
     const candidate = { ...current, schemaVersion: 3 as const, contentItems: undefined };

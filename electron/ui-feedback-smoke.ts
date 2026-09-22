@@ -212,7 +212,8 @@ export async function exerciseUiFeedback(
     const position = getComputedStyle(error).position;
     return {
       passed: error.getAttribute('role') === 'alert' && position === 'fixed' &&
-        text === 'The clipboard does not contain an image. Copy a screenshot and try again.' &&
+        text?.startsWith('The clipboard does not contain an image. Copy a screenshot and try again. [Diagnostic reference: ') &&
+        /[a-f0-9-]{36}\\]$/.test(text) &&
         box.left >= 0 && box.top >= 0 && box.right <= innerWidth - 20 &&
         box.bottom <= innerHeight - 18 && box.width < innerWidth / 2,
       box: {left:box.left,top:box.top,right:box.right,bottom:box.bottom,width:box.width},
@@ -359,6 +360,10 @@ export async function exerciseUiFeedback(
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
+  await driver.waitFor({ text: 'Open diagnostics folder', exact: true });
+  await driver.evaluate(`document.querySelector('#diagnostics-title')?.scrollIntoView({ block: 'center' })`);
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'workspace-local-diagnostics.png'));
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
   await driver.resize({ width: 1080, height: 800 });
   await captureAgentAccess(driver, artifactDirectory, captures, 'agent-access-setup-prompt.png');

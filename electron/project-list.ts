@@ -8,9 +8,19 @@ import { assertNoLinks } from './files.js';
 import { projectRevisionForSource } from './project-watch.js';
 
 /** Stream directories and read bounded metadata one file at a time. Never migrate or hydrate content. */
-export async function listWorkspaceProjects(workspacePath: string): Promise<ProjectListItem[]> {
+export async function listWorkspaceProjects(
+  workspacePath: string,
+  report: (target: string, error: unknown) => Promise<unknown> = async () => undefined,
+): Promise<ProjectListItem[]> {
   await assertNoLinks(workspacePath);
-  const directory = await fs.opendir(workspacePath).catch(() => null);
+  const directory = await fs.opendir(workspacePath).catch(async (error: NodeJS.ErrnoException) => {
+    await report(workspacePath, error);
+    if (error.code === 'ENOENT') return null;
+    throw new Error(
+      'The workspace could not be read. Check that its drive is connected and you have access. Existing project files have not been changed.',
+      { cause: error },
+    );
+  });
   if (!directory) return [];
   const projects: ProjectListItem[] = [];
   for await (const entry of directory) {
@@ -23,7 +33,8 @@ export async function listWorkspaceProjects(workspacePath: string): Promise<Proj
         ...projectListItem(projectPath, project),
         projectRevision: projectRevisionForSource(source),
       });
-    } catch {
+    } catch (error) {
+      await report(projectPath, error);
       // A missing, unreadable, oversized or invalid project must not hide valid siblings.
       // Explicit Open retains the existing validation/recovery path for that folder.
     }
