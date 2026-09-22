@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
 import { ProjectIcon } from '../components/ProjectIcon';
+import { collectionDisplayName } from '../collection/collection-display-name';
 import { IconButton } from '../components/ui';
 import type { AppView } from '../store';
 import { relativeOpenedTime, resolveRecentCollections } from '../navigation-history';
@@ -266,10 +267,12 @@ export function SideNav({
                     aria-current={
                       isActiveCollection(collection.projectPath, collection.id) ? 'location' : undefined
                     }
-                    title={collection.name}
+                    title={collectionDisplayName(collection.name, collection.projectPath)}
                     onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
                   >
-                    <span className="side-nav-collection-name">{collection.name}</span>
+                    <span className="side-nav-collection-name">
+                      {collectionDisplayName(collection.name, collection.projectPath)}
+                    </span>
                     <small>
                       {collection.projectName} · {relativeOpenedTime(collection.openedAt)}
                     </small>
@@ -375,10 +378,12 @@ export function SideNav({
                                   ? 'location'
                                   : undefined
                               }
-                              title={`${project.name} / ${collection.name}`}
+                              title={collectionDisplayName(collection.name, project.projectPath)}
                               onClick={() => void onOpenCollection(project.projectPath, collection.id)}
                             >
-                              <span className="side-nav-collection-name">{collection.name}</span>
+                              <span className="side-nav-collection-name">
+                                {collectionDisplayName(collection.name, project.projectPath)}
+                              </span>
                             </button>
                           ))}
                         </div>

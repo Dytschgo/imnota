@@ -34,6 +34,7 @@ import type { CaptureDelaySeconds, CaptureDisplayOption } from '../shared/captur
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
+import { collectionDisplayName } from './collection/collection-display-name';
 import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
@@ -2457,13 +2458,13 @@ function Library({
                 className="project-row"
                 key={`${entry.projectPath}:${entry.id}`}
                 onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
-                title={entry.name}
+                title={collectionDisplayName(entry.name, entry.projectPath)}
               >
                 <div className="project-symbol">
                   <ProjectIcon icon={entry.icon} />
                 </div>
                 <div className="project-row-copy">
-                  <strong>{entry.name}</strong>
+                  <strong>{collectionDisplayName(entry.name, entry.projectPath)}</strong>
                   <span>{entry.projectName}</span>
                   <small>{relativeOpenedTime(entry.openedAt)}</small>
                 </div>
