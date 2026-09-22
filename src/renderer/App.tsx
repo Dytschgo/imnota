@@ -2457,7 +2457,7 @@ function Library({
                 className="project-row"
                 key={`${entry.projectPath}:${entry.id}`}
                 onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
-                title={`${entry.projectName} / ${entry.name}`}
+                title={entry.name}
               >
                 <div className="project-symbol">
                   <ProjectIcon icon={entry.icon} />

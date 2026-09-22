@@ -238,7 +238,7 @@ export function SideNav({
         <section className="side-nav-section" aria-labelledby="quick-access-heading">
           <div className="side-nav-section-heading">
             <h2 className="nav-label" id="quick-access-heading">
-              Quick access
+              Recent
             </h2>
             <button
               type="button"
@@ -266,7 +266,7 @@ export function SideNav({
                     aria-current={
                       isActiveCollection(collection.projectPath, collection.id) ? 'location' : undefined
                     }
-                    title={`${collection.projectName} / ${collection.name}`}
+                    title={collection.name}
                     onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
                   >
                     <span className="side-nav-collection-name">{collection.name}</span>
