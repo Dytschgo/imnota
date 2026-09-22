@@ -235,6 +235,16 @@ export function PromptBundleCard({
     }
   };
 
+  const showFallbacks = bundle.delivery === 'file-only' || Boolean(bundle.warning || bundle.error);
+  // Labels stay in the DOM for assistive tech and the native smoke; only the values are shown.
+  const facts: Array<[label: string, value: string]> = [
+    ['Content', bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'],
+    ['Text', bundle.textCount ? `${bundle.textCount} text` : ''],
+    ['Excluded', bundle.excludedCount ? `${bundle.excludedCount} excluded` : ''],
+    ['Canvas', bundle.width && bundle.height ? `${bundle.width} × ${bundle.height}` : ''],
+    ['Size', formatBytes(bundle.estimatedBytes)],
+  ].filter((fact): fact is [string, string] => Boolean(fact[1]));
+
   return (
     <article
       data-testid="prompt-bundle-card"
@@ -243,153 +253,34 @@ export function PromptBundleCard({
       aria-labelledby={`prompt-bundle-${bundle.bundleNumber}`}
       aria-busy={busy}
     >
-      <div className="prompt-bundle-media">
-        <button
-          type="button"
-          className="prompt-bundle-preview"
-          aria-label={`Open full-resolution preview for Bundle ${bundle.bundleNumber}`}
-          disabled={disabled || !onLoadPreview || busy || !bundle.pictureNumbers.length}
-          onClick={() => void onLoadPreview?.(request)}
-        >
-          {bundle.previewDataUrl ? (
-            <img src={bundle.previewDataUrl} alt={`First screenshot in Bundle ${bundle.bundleNumber}`} />
-          ) : (
-            <FileImage size={24} aria-hidden="true" />
-          )}
-          <span className="prompt-bundle-index" aria-hidden="true">
-            {String(bundle.bundleNumber).padStart(2, '0')}
-          </span>
-        </button>
-        <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
-          {bundle.delivery === 'clipboard' ? (
-            <div className="prompt-bundle-variants" role="group" aria-label="Copy format">
-              <Button
-                data-testid={`copy-bundle-${bundle.bundleNumber}`}
-                className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
-                variant="primary"
-                aria-label={variantLabels[primaryVariant].label}
-                busy={busy}
-                disabled={disabled || (primaryVariant !== 'rich' && !onCopyVariant)}
-                title={variantLabels[primaryVariant].detail}
-                onClick={() => void primaryCopy()}
-              >
-                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                <span>{variantLabels[primaryVariant].label}</span>
-                <small>{variantLabels[primaryVariant].detail}</small>
-              </Button>
-            </div>
-          ) : (
-            <Button
-              className="prompt-bundle-copy"
-              variant="primary"
-              busy={busy}
-              disabled={disabled}
-              onClick={() => void onPrepareFreshFiles(request)}
-            >
-              <FolderOpen size={15} aria-hidden="true" /> Prepare files
-            </Button>
-          )}
-          <div className="prompt-bundle-options" ref={optionsRef}>
-            <Button
-              variant="ghost"
-              aria-label="Copy options"
-              aria-haspopup="menu"
-              aria-expanded={optionsOpen}
-              aria-controls={optionsOpen ? optionsMenuId : undefined}
-              disabled={busy || disabled}
-              onClick={toggleOptions}
-            >
-              <ChevronDown size={14} aria-hidden="true" />
-            </Button>
-            {optionsOpen &&
-              menuPortal &&
-              createPortal(
-                <div
-                  ref={menuRef}
-                  id={optionsMenuId}
-                  className="prompt-bundle-options-menu"
-                  role="menu"
-                  aria-label={`Bundle ${bundle.bundleNumber} options`}
-                  onKeyDown={moveOptionFocus}
-                  style={menuPosition ? { left: menuPosition.left, top: menuPosition.top } : undefined}
-                >
-                  {supportsFileVariants && (
-                    <div className="prompt-bundle-options-heading">
-                      <strong>Default copy format</strong>
-                      <small>Changes the main button</small>
-                    </div>
-                  )}
-                  {supportsFileVariants &&
-                    (['files', 'files-rich', 'rich'] as const).map((variant) => (
-                      <button
-                        key={variant}
-                        type="button"
-                        role="menuitem"
-                        aria-label={variantLabels[variant].label}
-                        aria-current={primaryVariant === variant ? 'true' : undefined}
-                        disabled={!onSelectCopyVariant}
-                        onClick={() => runOption(() => onSelectCopyVariant?.(request, variant))}
-                      >
-                        {primaryVariant === variant ? (
-                          <Check size={14} aria-hidden="true" />
-                        ) : (
-                          <Copy size={14} aria-hidden="true" />
-                        )}
-                        <span>
-                          {variantLabels[variant].label}
-                          <small>{variantLabels[variant].detail}</small>
-                        </span>
-                      </button>
-                    ))}
-                  {supportsFileVariants && (
-                    <div className="prompt-bundle-options-separator" role="separator" />
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!onCopyMarkdown}
-                    onClick={() => runOption(onCopyMarkdown)}
-                  >
-                    <FileText size={14} aria-hidden="true" /> Copy Markdown
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!onCopyImage || !bundle.pictureNumbers.length}
-                    onClick={() => runOption(onCopyImage)}
-                  >
-                    <FileImage size={14} aria-hidden="true" /> Copy PNG
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!onCopyPaths}
-                    onClick={() => runOption(onCopyPaths)}
-                  >
-                    <Copy size={14} aria-hidden="true" /> Copy file paths
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!onOpenFiles}
-                    onClick={() => runOption(onOpenFiles)}
-                  >
-                    <FolderOpen size={14} aria-hidden="true" /> Open files
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => runOption(onPrepareFreshFiles)}>
-                    <FolderOpen size={14} aria-hidden="true" /> Prepare fresh files
-                  </button>
-                </div>,
-                menuPortal,
-              )}
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="prompt-bundle-preview"
+        aria-label={`Open full-resolution preview for Bundle ${bundle.bundleNumber}`}
+        disabled={disabled || !onLoadPreview || busy || !bundle.pictureNumbers.length}
+        onClick={() => void onLoadPreview?.(request)}
+      >
+        {bundle.previewDataUrl ? (
+          <img src={bundle.previewDataUrl} alt={`First screenshot in Bundle ${bundle.bundleNumber}`} />
+        ) : (
+          <FileImage size={22} aria-hidden="true" />
+        )}
+        <span className="prompt-bundle-index" aria-hidden="true">
+          {String(bundle.bundleNumber).padStart(2, '0')}
+        </span>
+      </button>
       <div className="prompt-bundle-body">
         <div className="prompt-bundle-heading">
           <div>
             <h3 id={`prompt-bundle-${bundle.bundleNumber}`}>Bundle {bundle.bundleNumber}</h3>
-            <p>{bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'}</p>
+            <dl className="prompt-bundle-facts">
+              {facts.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
           {bundle.outcome && (
             <span className="prompt-bundle-state prompt-bundle-state-success" role="status">
@@ -407,70 +298,6 @@ export function PromptBundleCard({
             </ul>
           </details>
         ) : null}
-        <div
-          className="prompt-bundle-fallbacks"
-          aria-label={`Bundle ${bundle.bundleNumber} fallback actions`}
-        >
-          <Button
-            variant="ghost"
-            disabled={busy || disabled || !onCopyMarkdown}
-            onClick={() => void onCopyMarkdown?.(request)}
-          >
-            <FileText size={14} aria-hidden="true" /> Copy Markdown only
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy || disabled || !onCopyImage || !bundle.pictureNumbers.length}
-            onClick={() => void onCopyImage?.(request)}
-          >
-            <FileImage size={14} aria-hidden="true" /> Copy image only
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy || disabled || !onOpenFiles}
-            onClick={() => void onOpenFiles?.(request)}
-          >
-            <FolderOpen size={14} aria-hidden="true" /> Open files
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy || disabled || !onCopyPaths}
-            onClick={() => void onCopyPaths?.(request)}
-          >
-            <Copy size={14} aria-hidden="true" /> Copy file paths
-          </Button>
-          {bundle.delivery === 'clipboard' && (
-            <Button
-              variant="ghost"
-              disabled={busy || disabled}
-              onClick={() => void onPrepareFreshFiles(request)}
-            >
-              <FolderOpen size={14} aria-hidden="true" /> Prepare fresh files
-            </Button>
-          )}
-        </div>
-        <details className="prompt-bundle-details">
-          <summary>Bundle details</summary>
-          <dl className="prompt-bundle-facts">
-            <div>
-              <dt>Visuals</dt>
-              <dd>{bundle.screenshotCount}</dd>
-            </div>
-            <div>
-              <dt>Text</dt>
-              <dd>{bundle.textCount ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Excluded</dt>
-              <dd>{bundle.excludedCount}</dd>
-            </div>
-            <div>
-              <dt>Canvas</dt>
-              <dd>{bundle.width && bundle.height ? `${bundle.width} × ${bundle.height}` : 'None'}</dd>
-            </div>
-          </dl>
-          <p className="prompt-bundle-size">{formatBytes(bundle.estimatedBytes)}</p>
-        </details>
         {(bundle.warning || bundle.delivery === 'file-only') && (
           <p className="prompt-bundle-warning">
             <AlertTriangle size={14} aria-hidden="true" />
@@ -485,6 +312,160 @@ export function PromptBundleCard({
             {bundle.error}
           </p>
         )}
+        {showFallbacks && (
+          <div
+            className="prompt-bundle-fallbacks"
+            aria-label={`Bundle ${bundle.bundleNumber} fallback actions`}
+          >
+            <Button
+              variant="ghost"
+              disabled={busy || disabled || !onCopyMarkdown}
+              onClick={() => void onCopyMarkdown?.(request)}
+            >
+              <FileText size={14} aria-hidden="true" /> Copy Markdown only
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy || disabled || !onCopyImage || !bundle.pictureNumbers.length}
+              onClick={() => void onCopyImage?.(request)}
+            >
+              <FileImage size={14} aria-hidden="true" /> Copy image only
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy || disabled || !onOpenFiles}
+              onClick={() => void onOpenFiles?.(request)}
+            >
+              <FolderOpen size={14} aria-hidden="true" /> Open files
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy || disabled || !onCopyPaths}
+              onClick={() => void onCopyPaths?.(request)}
+            >
+              <Copy size={14} aria-hidden="true" /> Copy file paths
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className={`prompt-bundle-primary${copied ? ' is-copied' : ''}`}>
+        {bundle.delivery === 'clipboard' ? (
+          <Button
+            data-testid={`copy-bundle-${bundle.bundleNumber}`}
+            className={`prompt-bundle-copy${copied ? ' is-copied' : ''}`}
+            variant="primary"
+            aria-label={variantLabels[primaryVariant].label}
+            busy={busy}
+            disabled={disabled || (primaryVariant !== 'rich' && !onCopyVariant)}
+            title={variantLabels[primaryVariant].detail}
+            onClick={() => void primaryCopy()}
+          >
+            {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+            <span>{variantLabels[primaryVariant].label}</span>
+          </Button>
+        ) : (
+          <Button
+            className="prompt-bundle-copy"
+            variant="primary"
+            busy={busy}
+            disabled={disabled}
+            onClick={() => void onPrepareFreshFiles(request)}
+          >
+            <FolderOpen size={15} aria-hidden="true" /> Prepare files
+          </Button>
+        )}
+        <div className="prompt-bundle-options" ref={optionsRef}>
+          <Button
+            variant="ghost"
+            aria-label="Copy options"
+            aria-haspopup="menu"
+            aria-expanded={optionsOpen}
+            aria-controls={optionsOpen ? optionsMenuId : undefined}
+            disabled={busy || disabled}
+            onClick={toggleOptions}
+          >
+            <ChevronDown size={14} aria-hidden="true" />
+          </Button>
+          {optionsOpen &&
+            menuPortal &&
+            createPortal(
+              <div
+                ref={menuRef}
+                id={optionsMenuId}
+                className="prompt-bundle-options-menu"
+                role="menu"
+                aria-label={`Bundle ${bundle.bundleNumber} options`}
+                onKeyDown={moveOptionFocus}
+                style={menuPosition ? { left: menuPosition.left, top: menuPosition.top } : undefined}
+              >
+                {supportsFileVariants && (
+                  <div className="prompt-bundle-options-heading">
+                    <strong>Default copy format</strong>
+                    <small>Changes the main button</small>
+                  </div>
+                )}
+                {supportsFileVariants &&
+                  (['files', 'files-rich', 'rich'] as const).map((variant) => (
+                    <button
+                      key={variant}
+                      type="button"
+                      role="menuitem"
+                      aria-label={variantLabels[variant].label}
+                      aria-current={primaryVariant === variant ? 'true' : undefined}
+                      disabled={!onSelectCopyVariant}
+                      onClick={() => runOption(() => onSelectCopyVariant?.(request, variant))}
+                    >
+                      {primaryVariant === variant ? (
+                        <Check size={14} aria-hidden="true" />
+                      ) : (
+                        <Copy size={14} aria-hidden="true" />
+                      )}
+                      <span>
+                        {variantLabels[variant].label}
+                        <small>{variantLabels[variant].detail}</small>
+                      </span>
+                    </button>
+                  ))}
+                {supportsFileVariants && <div className="prompt-bundle-options-separator" role="separator" />}
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyMarkdown}
+                  onClick={() => runOption(onCopyMarkdown)}
+                >
+                  <FileText size={14} aria-hidden="true" /> Copy Markdown
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyImage || !bundle.pictureNumbers.length}
+                  onClick={() => runOption(onCopyImage)}
+                >
+                  <FileImage size={14} aria-hidden="true" /> Copy PNG
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onCopyPaths}
+                  onClick={() => runOption(onCopyPaths)}
+                >
+                  <Copy size={14} aria-hidden="true" /> Copy file paths
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!onOpenFiles}
+                  onClick={() => runOption(onOpenFiles)}
+                >
+                  <FolderOpen size={14} aria-hidden="true" /> Open files
+                </button>
+                <button type="button" role="menuitem" onClick={() => runOption(onPrepareFreshFiles)}>
+                  <FolderOpen size={14} aria-hidden="true" /> Prepare fresh files
+                </button>
+              </div>,
+              menuPortal,
+            )}
+        </div>
       </div>
     </article>
   );

@@ -14,11 +14,11 @@
 
 .imnota-onboarding {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-  width: min(1180px, calc(100vw - 56px));
-  height: min(760px, calc(100vh - 56px));
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  width: min(1120px, calc(100vw - 56px));
+  height: min(720px, calc(100vh - 56px));
   min-width: 900px;
-  min-height: 620px;
+  min-height: 600px;
   overflow: hidden;
   border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
   border-radius: 16px;
@@ -28,12 +28,14 @@
   backdrop-filter: blur(var(--imnota-glass-blur, 0px)) saturate(var(--imnota-glass-saturation, 100%));
 }
 
+/* Header: title with an inline stepper, one quiet exit. */
 .imnota-onboarding-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 22px 26px 18px;
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.085));
 }
 
 .imnota-onboarding-header h1,
@@ -44,20 +46,60 @@
 }
 
 .imnota-onboarding-header h1 {
-  font-size: 21px;
+  font-size: 20px;
+  font-weight: 650;
   line-height: 1.25;
 }
 
-.imnota-onboarding-header p,
-.imnota-onboarding-instruction p {
+.imnota-onboarding-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 22px;
+  margin-top: 10px;
+}
+
+.imnota-onboarding-progress > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--ink-3, #7d8595);
-}
-
-.imnota-onboarding-header p {
-  margin: 6px 0 0;
   font-size: 12px;
+  font-weight: 550;
 }
 
+.imnota-onboarding-progress > div[data-current] {
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-onboarding-progress > div[data-complete] {
+  color: var(--ink-2, #b3bac8);
+}
+
+.imnota-onboarding-progress > div > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.imnota-onboarding-progress > div[data-current] > span {
+  border-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background: var(--imnota-accent, var(--indigo, #6857f5));
+  color: var(--imnota-on-accent, #ffffff);
+}
+
+.imnota-onboarding-progress > div[data-complete] > span {
+  border-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
+  color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+}
+
+/* Buttons */
 .imnota-onboarding-dismiss,
 .imnota-onboarding-back,
 .imnota-onboarding-primary,
@@ -67,15 +109,31 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
-  border-radius: 7px;
+  min-height: 36px;
+  border-radius: 8px;
   font: inherit;
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 600;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .imnota-onboarding-dismiss,
-.imnota-onboarding-back,
+.imnota-onboarding-back {
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-3, #7d8595);
+}
+
+.imnota-onboarding-dismiss:hover:not(:disabled),
+.imnota-onboarding-back:hover:not(:disabled) {
+  background: var(--surface-2, #191d27);
+  color: var(--ink, #f4f5f7);
+}
+
 .imnota-onboarding-secondary,
 .imnota-demo-tools button {
   border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
@@ -83,12 +141,6 @@
   color: var(--ink-2, #b3bac8);
 }
 
-.imnota-onboarding-dismiss {
-  padding: 0 10px;
-}
-
-.imnota-onboarding-dismiss:hover:not(:disabled),
-.imnota-onboarding-back:hover:not(:disabled),
 .imnota-onboarding-secondary:hover:not(:disabled),
 .imnota-demo-tools button:hover:not(:disabled) {
   border-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
@@ -96,11 +148,11 @@
 }
 
 .imnota-onboarding-primary {
-  padding: 0 13px;
+  padding: 0 14px;
   border: 1px solid var(--imnota-accent, var(--indigo, #6857f5));
   background: var(--imnota-accent, var(--indigo, #6857f5));
   color: var(--imnota-on-accent, #ffffff);
-  box-shadow: 0 5px 16px color-mix(in srgb, var(--imnota-accent, #6857f5) 24%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--imnota-accent, #6857f5) 22%, transparent);
 }
 
 .imnota-onboarding-primary:hover:not(:disabled) {
@@ -118,69 +170,12 @@
   opacity: 0.42;
 }
 
-.imnota-onboarding-progress {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-block: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-  background: var(--surface-2, #191d27);
+.imnota-onboarding :is(button, select, textarea):focus-visible {
+  outline: 2px solid var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  outline-offset: 2px;
 }
 
-.imnota-onboarding-progress > div {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 46px;
-  color: var(--ink-3, #7d8595);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.imnota-onboarding-progress > div + div {
-  border-left: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-}
-
-.imnota-onboarding-progress > div::after {
-  position: absolute;
-  right: 20%;
-  bottom: -1px;
-  left: 20%;
-  height: 2px;
-  background: transparent;
-  content: '';
-}
-
-.imnota-onboarding-progress > div[data-current] {
-  color: var(--ink, #f4f5f7);
-}
-
-.imnota-onboarding-progress > div[data-current]::after {
-  background: var(--imnota-accent, var(--indigo, #6857f5));
-}
-
-.imnota-onboarding-progress > div[data-complete] {
-  color: var(--ink-2, #b3bac8);
-}
-
-.imnota-onboarding-progress > div > span {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  border-radius: 50%;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-.imnota-onboarding-progress > div[data-current] > span,
-.imnota-onboarding-progress > div[data-complete] > span {
-  border-color: var(--imnota-accent, var(--indigo, #6857f5));
-  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
-  color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
-}
-
+/* Body */
 .imnota-onboarding-body {
   min-height: 0;
   overflow: hidden;
@@ -193,116 +188,96 @@
   min-height: 0;
 }
 
-.imnota-copy-step > .imnota-onboarding-instruction {
-  max-height: 100%;
-  overflow-y: auto;
+.imnota-onboarding-instruction h2 {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
 }
 
+.imnota-onboarding-instruction p {
+  max-width: 44ch;
+  margin: 10px 0 20px;
+  color: var(--ink-3, #7d8595);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Step 1: sample screenshot */
 .imnota-onboarding-intro {
   display: grid;
-  grid-template-columns: minmax(440px, 1.3fr) minmax(300px, 0.7fr);
+  grid-template-columns: minmax(420px, 1.25fr) minmax(300px, 0.75fr);
   align-items: center;
-  gap: 52px;
-  padding: 46px 64px;
+  gap: 56px;
+  padding: 40px 64px;
 }
 
 .imnota-sample-window {
-  position: relative;
   display: flex;
-  min-height: 300px;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  border-radius: 14px;
-  background: var(--input, #0f1218);
-  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.26);
-}
-
-.imnota-sample-window::before {
-  position: absolute;
-  inset: 34px 0 auto;
-  height: 1px;
-  background: var(--line, rgba(255, 255, 255, 0.085));
-  content: '';
-}
-
-.imnota-sample-window > div {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 34px;
-  padding-inline: 12px;
-}
-
-.imnota-sample-window i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-4, #545d6e);
-}
-
-.imnota-sample-window > span {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  color: var(--ink-3, #7d8595);
-  font-size: 10px;
-  transform: translateX(-50%);
-}
-
-.imnota-sample-window small {
-  color: var(--ink-3, #7d8595);
-  font-size: 11px;
+  gap: 12px;
+  margin: 0;
 }
 
 .imnota-sample-window > img {
   display: block;
-  width: calc(100% - 28px);
-  max-height: 240px;
-  margin-top: 34px;
-  border-radius: 7px;
+  width: 100%;
+  max-height: 380px;
+  border-radius: 12px;
   object-fit: contain;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  box-shadow:
+    0 0 0 1px var(--line-strong, rgba(255, 255, 255, 0.14)),
+    0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
-.imnota-onboarding-instruction h2 {
-  font-size: 18px;
-  line-height: 1.3;
-}
-
-.imnota-onboarding-instruction p {
-  max-width: 56ch;
-  margin: 9px 0 18px;
+.imnota-sample-window > small {
+  padding: 60px 0;
+  color: var(--ink-3, #7d8595);
   font-size: 12px;
-  line-height: 1.6;
+  text-align: center;
 }
 
+.imnota-sample-window > figcaption,
+.imnota-bundle-preview > figcaption {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--ink-3, #7d8595);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Step 2: annotate */
 .imnota-annotation-step {
   display: grid;
-  grid-template-columns: 286px minmax(0, 1fr);
+  grid-template-columns: 292px minmax(0, 1fr);
 }
 
 .imnota-annotation-step > aside {
   padding: 28px 24px;
   overflow-y: auto;
   border-right: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-  background: var(--surface-2, #191d27);
+}
+
+.imnota-annotation-step .imnota-onboarding-instruction h2 {
+  font-size: 18px;
+}
+
+.imnota-annotation-step .imnota-onboarding-instruction p {
+  margin-bottom: 16px;
+  font-size: 12.5px;
 }
 
 .imnota-demo-tools {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .imnota-demo-tools button {
-  padding: 0 9px;
+  justify-content: flex-start;
+  padding: 0 10px;
+  font-weight: 550;
 }
 
 .imnota-demo-tools button[aria-pressed='true'] {
@@ -313,23 +288,22 @@
 
 .imnota-onboarding-secondary {
   width: 100%;
-  margin-top: 8px;
 }
 
 .imnota-onboarding-tip {
   display: block;
-  margin-top: 12px;
-  color: var(--ink-3, #7d8595);
-  font-size: 10px;
+  margin-top: 10px;
+  color: var(--ink-4, #545d6e);
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .imnota-onboarding-explanation {
   display: grid;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 18px;
   color: var(--ink-2, #b3bac8);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -337,13 +311,14 @@
   width: 100%;
   resize: vertical;
   border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  border-radius: 7px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 9px 10px;
   background: var(--input, #0f1218);
   color: var(--ink, #f4f5f7);
   font: inherit;
+  font-size: 12.5px;
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .imnota-demo-canvas {
@@ -362,70 +337,137 @@
   font-size: 10px;
 }
 
+/* Step 3: copy */
 .imnota-copy-step {
   display: grid;
-  grid-template-columns: minmax(460px, 1.2fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(420px, 1.1fr) minmax(340px, 0.9fr);
   align-items: center;
-  gap: 44px;
-  padding: 32px 48px;
+  gap: 48px;
+  padding: 24px 48px;
+}
+
+.imnota-copy-step > .imnota-onboarding-instruction {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.imnota-copy-step .imnota-onboarding-instruction p {
+  margin: 8px 0 16px;
 }
 
 .imnota-bundle-preview {
-  overflow: hidden;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  border-radius: 12px;
-  background: var(--input, #0f1218);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.26);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
 }
 
 .imnota-bundle-preview img {
   display: block;
   width: 100%;
-  max-height: 340px;
+  max-height: 440px;
+  border-radius: 12px;
   object-fit: contain;
   background: #ffffff;
-}
-
-.imnota-bundle-preview > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 12px 14px;
-  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  box-shadow:
+    0 0 0 1px var(--line-strong, rgba(255, 255, 255, 0.14)),
+    0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
 .imnota-bundle-preview strong {
-  font-size: 11px;
+  color: var(--ink-2, #b3bac8);
+  font-weight: 600;
 }
 
-.imnota-bundle-preview span {
+.imnota-markdown-preview {
+  margin: 0 0 18px;
+  overflow: hidden;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border-radius: 10px;
+  background: var(--input, #0f1218);
+}
+
+.imnota-markdown-preview > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.085));
   color: var(--ink-3, #7d8595);
-  font-size: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
-.imnota-copy-step pre {
-  max-height: 188px;
-  margin: 0 0 16px;
+.imnota-markdown-preview pre {
+  max-height: 112px;
+  margin: 0;
   padding: 12px;
   overflow: auto;
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-  border-radius: 8px;
-  background: var(--input, #0f1218);
   color: var(--ink-2, #b3bac8);
   font:
-    10px/1.5 ui-monospace,
+    11px/1.6 ui-monospace,
     SFMono-Regular,
     Consolas,
     monospace;
   white-space: pre-wrap;
 }
 
+/* Split copy control: the dropdown chooses what the main button does. */
+.imnota-copy-split {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 12px;
+}
+
+.imnota-copy-split .imnota-onboarding-primary {
+  min-width: 150px;
+}
+
+.imnota-copy-split:has(.imnota-copy-split-select) .imnota-onboarding-primary {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.imnota-copy-split-select {
+  width: 34px;
+  min-height: 36px;
+  margin-left: -12px;
+  padding: 0;
+  border: 1px solid var(--imnota-accent, var(--indigo, #6857f5));
+  border-left-color: color-mix(in srgb, var(--imnota-on-accent, #ffffff) 28%, transparent);
+  border-radius: 0 8px 8px 0;
+  background-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  color: transparent;
+  font: inherit;
+  appearance: none;
+  cursor: pointer;
+}
+
+.imnota-copy-split-select:hover:not(:disabled) {
+  background-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+}
+
+.imnota-copy-split-select option {
+  background: var(--surface-2, #191d27);
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-copy-split > small {
+  color: var(--ink-3, #7d8595);
+  font-size: 12px;
+}
+
 .imnota-copy-success {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--success, #22c55e);
-  font-size: 11px;
+  margin-top: 14px;
+  color: var(--text-success, #4ade80);
+  font-size: 12.5px;
   font-weight: 600;
 }
 
@@ -433,127 +475,84 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 10px 0 0;
-  padding: 8px;
-  border-radius: 7px;
-  background: rgba(245, 158, 11, 0.09);
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
   color: var(--warning, #f59e0b);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
 }
 
 .imnota-copy-warning svg {
   flex: none;
-  margin-top: 1px;
-}
-
-.imnota-copy-variants {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.72fr);
-  gap: 7px;
-}
-
-.imnota-copy-variants.is-rich-only {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.imnota-copy-variants button {
-  flex-wrap: wrap;
-}
-
-.imnota-copy-variants button small {
-  flex-basis: 100%;
-  font-size: 10px;
-  font-weight: 500;
-  opacity: 0.8;
-}
-
-.imnota-copy-function-select {
-  display: grid;
-  gap: 4px;
-  color: var(--ink-3, #7d8595);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.imnota-copy-function-select select {
-  min-width: 0;
-  min-height: 34px;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  border-radius: 7px;
-  background: var(--surface-2, #191d27);
-  color: var(--ink, #f4f5f7);
-  font: inherit;
-  padding-inline: 8px;
-}
-
-.imnota-copy-variants .imnota-onboarding-secondary {
-  margin-top: 0;
+  margin-top: 2px;
 }
 
 .imnota-onboarding-fallbacks {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.085));
 }
 
-.imnota-onboarding-fallbacks.is-needed {
-  margin-top: 12px;
-  padding: 8px;
-  border: 1px solid
-    color-mix(in srgb, var(--warning, #f59e0b) 35%, var(--line-strong, rgba(255, 255, 255, 0.14)));
-  border-radius: 8px;
-}
-
-.imnota-onboarding-fallbacks button {
-  min-height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  background: var(--surface-2, #191d27);
-  color: var(--ink-2, #b3bac8);
-}
-
-.imnota-onboarding-checklist {
-  margin-top: 11px;
-  color: var(--ink-2, #b3bac8);
-  font-size: 10px;
-  line-height: 1.45;
-}
-
-.imnota-onboarding-checklist summary {
-  cursor: pointer;
+.imnota-onboarding-fallbacks > span {
+  color: var(--ink-4, #545d6e);
+  font-size: 11.5px;
   font-weight: 600;
 }
 
-.imnota-onboarding-checklist ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
+.imnota-onboarding-fallbacks > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin-left: -8px;
 }
 
+.imnota-onboarding-fallbacks button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2, #b3bac8);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.imnota-onboarding-fallbacks button:hover:not(:disabled) {
+  background: var(--surface-2, #191d27);
+  color: var(--ink, #f4f5f7);
+}
+
+.imnota-onboarding-fallbacks.is-needed > span {
+  color: var(--warning, #f59e0b);
+}
+
+/* Footer */
 .imnota-onboarding-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 62px;
-  padding: 12px 24px;
+  min-height: 64px;
+  padding: 12px 28px;
   border-top: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-  background: var(--surface-2, #191d27);
-}
-
-.imnota-onboarding-back {
-  padding: 0 10px;
 }
 
 .imnota-onboarding-error {
   margin: 0;
-  padding: 9px 24px;
+  padding: 9px 28px;
   border-top: 1px solid rgba(239, 68, 68, 0.22);
   background: rgba(239, 68, 68, 0.07);
   color: var(--danger, #ef4444);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -584,21 +583,25 @@
   .imnota-onboarding {
     width: calc(100vw - 36px);
     height: calc(100vh - 36px);
-    min-height: 570px;
+    min-height: 560px;
   }
 
   .imnota-onboarding-intro {
     grid-template-columns: minmax(380px, 1.15fr) minmax(290px, 0.85fr);
-    gap: 34px;
-    padding: 30px 42px;
+    gap: 36px;
+    padding: 28px 40px;
   }
 
-  .imnota-sample-window {
-    min-height: 250px;
+  .imnota-sample-window > img {
+    max-height: 300px;
   }
 
   .imnota-copy-step {
     gap: 30px;
-    padding: 24px 34px;
+    padding: 24px 32px;
+  }
+
+  .imnota-bundle-preview img {
+    max-height: 320px;
   }
 }

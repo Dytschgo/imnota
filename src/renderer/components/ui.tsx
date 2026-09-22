@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import './modal.css';
-import { LoaderCircle } from 'lucide-react';
+import { LoaderCircle, X } from 'lucide-react';
 
 export const Button = forwardRef<
   HTMLButtonElement,
@@ -156,7 +156,7 @@ export function Modal({
             {description && <p id={descriptionId}>{description}</p>}
           </div>
           <IconButton label="Close" data-testid={closeTestId} onClick={onClose}>
-            ×
+            <X size={16} aria-hidden="true" />
           </IconButton>
         </div>
         {children}

@@ -1,4 +1,4 @@
-import { ExternalLink, Sparkles } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import type { UpdateChannel } from '../../shared/types';
 import {
@@ -19,18 +19,27 @@ function FeatureCard({
   onAction?(action: WhatsNewAction): void;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(feature.imageSrc) && !imageFailed;
   return (
-    <article className="whats-new-card">
-      {feature.imageSrc && !imageFailed && (
-        <img src={feature.imageSrc} alt="" onError={() => setImageFailed(true)} />
+    <article className={`whats-new-card${showImage ? ' has-image' : ''}`}>
+      {showImage && (
+        <div className="whats-new-card-media">
+          <img src={feature.imageSrc} alt="" onError={() => setImageFailed(true)} />
+        </div>
       )}
-      <h3>{feature.title}</h3>
-      <p>{feature.description}</p>
-      {feature.action && (
-        <Button variant="soft" onClick={() => onAction?.(feature.action)}>
-          Try it now
-        </Button>
-      )}
+      <div className="whats-new-card-body">
+        <h3>{feature.title}</h3>
+        <p>{feature.description}</p>
+        {feature.action && (
+          <Button
+            variant="ghost"
+            className="whats-new-card-action"
+            onClick={() => onAction?.(feature.action)}
+          >
+            Try it now
+          </Button>
+        )}
+      </div>
     </article>
   );
 }
@@ -65,7 +74,7 @@ export function WhatsNewDialog({
   return (
     <Modal title={release.title} description={release.summary} onClose={onClose}>
       <div className="whats-new-dialog" data-testid="whats-new-dialog">
-        {release.preview && <p className="whats-new-preview">Nightly preview · feedback welcome</p>}
+        {release.preview && <p className="whats-new-preview">Nightly preview</p>}
         <FeatureCards release={release} onAction={onAction} />
         <div className="modal-actions">
           <Button variant="ghost" onClick={onLater}>
@@ -98,14 +107,11 @@ export function WhatsNewSettings({
   return (
     <section className="settings-section whats-new-settings" aria-labelledby="whats-new-title">
       <div className="whats-new-heading">
-        <div>
-          <h2 id="whats-new-title">What’s new</h2>
-          <p>
-            {version ? `Imnota ${version}` : 'Installed version unavailable'}
-            {installedChannel === 'nightly' ? ' · Nightly preview' : ' · Stable'}
-          </p>
-        </div>
-        <Sparkles size={18} aria-hidden="true" />
+        <h2 id="whats-new-title">What’s new</h2>
+        <p>
+          {version ? `Imnota ${version}` : 'Installed version unavailable'}
+          {installedChannel === 'nightly' ? ' · Nightly preview' : ' · Stable'}
+        </p>
       </div>
       {release ? (
         <>

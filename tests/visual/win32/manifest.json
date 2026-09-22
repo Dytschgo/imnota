@@ -69,13 +69,13 @@
       "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
     },
     "1280x800-onboarding-copy.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "dac26dfac04554462cb48bdd8994f39207235fc5",
+      "reviewedAt": "2026-09-22",
       "electron": "44.2.0",
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
+      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
       "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35540402921",
-      "review": "Baseline, packaged candidate and highlighted difference inspected. Onboarding explains native clipboard outcomes and labels single-format fallback actions explicitly. The instruction column scrolls while the primary project action stays visible. Packaged native onboarding clipboard and fallback checks passed. Strict tolerance is unchanged."
+      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
+      "devicePixelRatio": 1
     },
     "1280x800-workspace-dark.png": {
       "reviewedAt": "2026-09-21",
@@ -130,6 +130,24 @@
       "devicePixelRatio": 1,
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
       "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
+    },
+    "1280x800-onboarding-intro.png": {
+      "reviewedAt": "2026-09-22",
+      "electron": "44.2.0",
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
+      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
+      "platform": "win32",
+      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
+      "devicePixelRatio": 1
+    },
+    "1280x800-onboarding-annotate.png": {
+      "reviewedAt": "2026-09-22",
+      "electron": "44.2.0",
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
+      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
+      "platform": "win32",
+      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
+      "devicePixelRatio": 1
     }
   }
 }
