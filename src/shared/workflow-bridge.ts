@@ -44,6 +44,7 @@ export interface PreferenceSettingsUpdate {
   workbench?: Partial<PreferenceSettings['workbench']>;
   nativeCopy?: Partial<PreferenceSettings['nativeCopy']>;
   promptExport?: Partial<PreferenceSettings['promptExport']>;
+  exportPresets?: PreferenceSettings['exportPresets'];
   updates?: Partial<PreferenceSettings['updates']>;
   agentAccess?: Partial<PreferenceSettings['agentAccess']>;
 }
