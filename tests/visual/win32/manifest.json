@@ -24,13 +24,13 @@
   "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Recent navigation and drawing changes are documented in their capture entries. Four compact workspace captures record removal of the View caption; two backdrop captures record the consolidated drawing toolbar. Other captures remain unchanged. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
+      "reviewedAt": "2026-09-23",
+      "sourceRevision": "b06421f5b857c1fbb4e4b89496ba0cfbc17a4eec",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35785000618",
+      "review": "Candidate and highlighted difference inspected. The Features category appears between Shortcuts and Workspace; all seven category labels fit with the existing Appearance content aligned. The active Settings control has its intended neutral surface. Packaged Windows native verification passed in this run; its visual comparison failed solely on this expected Settings change. Strict tolerance is unchanged."
     },
     "1920x1080-workspace-light.png": {
       "reviewedAt": "2026-09-21",

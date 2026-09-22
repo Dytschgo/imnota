@@ -1174,3 +1174,31 @@
     gap: 6px;
   }
 }
+.feature-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.15));
+  border-radius: 999px;
+  color: var(--ink-3, #7d8595);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.feature-status.beta {
+  border-color: color-mix(in srgb, var(--imnota-accent, #6857f5) 50%, transparent);
+  color: var(--imnota-accent-hover, #8b7cf6);
+}
+
+.feature-detail {
+  display: block;
+  margin: -7px 0 12px;
+  color: var(--ink-3, #7d8595);
+  font-size: 11px;
+  line-height: 1.45;
+}

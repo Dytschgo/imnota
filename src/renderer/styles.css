@@ -2492,6 +2492,27 @@ button.icon-button.new-collection-button svg {
   font-size: 13px;
   line-height: 1.55;
 }
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.about-links a {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+  text-decoration: none;
+}
+.about-links a:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+}
 .muted {
   color: var(--ink-3);
   font-size: 11px;

@@ -96,7 +96,7 @@ export const preferenceSettingsSchema = z
       .strict(),
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
-    promptExport: promptExportPreferencesSchema.default({ includeRecognisedText: true }),
+    promptExport: promptExportPreferencesSchema.default({ includeRecognisedText: false }),
     exportPresets: exportPresetsSchema.default([]),
     updates: updatePreferencesSchema.default({}),
     agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),

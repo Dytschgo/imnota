@@ -460,7 +460,7 @@ export function CollectionRail({
             label: 'Take screenshot',
             description: captureEnabled
               ? 'Capture a region on a chosen display'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
             icon: Camera,
             run: () => onCapture(),
             disabled: !captureEnabled || captureInProgress,
@@ -470,7 +470,7 @@ export function CollectionRail({
             label: 'Take screenshot in 3 seconds',
             description: captureEnabled
               ? 'Wait so hover menus and tooltips can appear'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
             icon: Timer,
             run: () => onCapture(3),
             disabled: !captureEnabled || captureInProgress,
@@ -480,7 +480,7 @@ export function CollectionRail({
             label: 'Take screenshot in 5 seconds',
             description: captureEnabled
               ? 'Wait so hover menus and tooltips can appear'
-              : (captureDisabledLabel ?? 'Screen capture is experimental — enable it in Settings'),
+              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
             icon: Timer,
             run: () => onCapture(5),
             disabled: !captureEnabled || captureInProgress,

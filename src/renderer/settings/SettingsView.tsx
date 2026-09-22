@@ -1,4 +1,4 @@
-import { Copy, FolderOpen, ShieldCheck } from 'lucide-react';
+import { Copy, FolderOpen } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -35,6 +35,7 @@ import { findWhatsNewRelease, whatsNewReleaseUrl } from '../../shared/whats-new'
 export const SETTINGS_CATEGORIES = [
   'Appearance',
   'Shortcuts',
+  'Features',
   'Workspace',
   'Sharing',
   'Backups & history',
@@ -178,59 +179,6 @@ export function SettingsView({
             onChange={onShortcutChange}
             disabled={savingPreferences}
           />
-          <section className="settings-section" aria-labelledby="capture-settings-title">
-            <h2 id="capture-settings-title">Screen capture</h2>
-            <label className="settings-switch">
-              <span>
-                <strong>Capture a screen region</strong>
-                <small>
-                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
-                  Linux stays Import or Paste. Captures stay local. Windows lets you choose a display when
-                  more than one is attached and captures only that display; macOS uses the display under the
-                  pointer. Capture in 3 or 5 seconds waits after Imnota hides so hover menus and tooltips can
-                  appear. Press Escape during that wait to cancel; no overlay opens and no file is saved.
-                </small>
-                <small data-testid="capture-shortcut-summary">
-                  {captureShortcut ? (
-                    <>
-                      Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd> captures a
-                      region{' '}
-                      {globalCaptureShortcutRegistered
-                        ? 'even when Imnota is in the background'
-                        : 'while Imnota is focused. The background shortcut is not active'}
-                      {repeatLastShortcut ? (
-                        <>
-                          ; <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> recaptures the
-                          last region from this session
-                        </>
-                      ) : null}
-                      . Change these under Screenshots above.
-                    </>
-                  ) : (
-                    <>
-                      Shortcut: not set. The toolbar camera button and the Add menu still work.
-                      {repeatLastShortcut ? (
-                        <>
-                          {' '}
-                          <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> still recaptures
-                          the last region from this session while Imnota is focused.
-                        </>
-                      ) : null}
-                    </>
-                  )}
-                  {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                checked={preferences.capture.experimentalRegionCapture}
-                disabled={savingPreferences}
-                onChange={(event) =>
-                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
-                }
-              />
-            </label>
-          </section>
         </div>
         <div hidden={group !== 'Updates & about'}>
           <UpdateControl onInstall={onInstall} onDownload={onDownload} />
@@ -358,16 +306,6 @@ export function SettingsView({
               )}
             </div>
           </section>
-          <section className="settings-section" aria-labelledby="privacy-title">
-            <h2 id="privacy-title">Privacy</h2>
-            <div className="privacy-panel">
-              <ShieldCheck size={18} aria-hidden="true" />
-              <div>
-                <strong>Local-first</strong>
-                <p>No account, cloud storage, telemetry, or runtime AI service is required.</p>
-              </div>
-            </div>
-          </section>
           <section className="settings-section" aria-labelledby="diagnostics-title">
             <h2 id="diagnostics-title">Local diagnostics</h2>
             <p>
@@ -391,6 +329,80 @@ export function SettingsView({
               Open diagnostics folder
             </Button>
           </section>
+        </div>
+        <div hidden={group !== 'Features'}>
+          <section className="settings-section" aria-labelledby="features-title">
+            <h2 id="features-title">Features</h2>
+            <p>Enable or disable features for this device. Beta features start off.</p>
+            <label className="settings-switch">
+              <span>
+                <strong>
+                  Screen capture <span className="feature-status stable">Stable</span>
+                </strong>
+                <small>
+                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
+                  Linux stays Import or Paste. Captures stay local. Windows lets you choose a display when
+                  more than one is attached; macOS uses the display under the pointer.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Enable screen capture"
+                checked={preferences.capture.experimentalRegionCapture}
+                disabled={savingPreferences}
+                onChange={(event) =>
+                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
+                }
+              />
+            </label>
+            <small data-testid="capture-shortcut-summary" className="feature-detail">
+              {captureShortcut ? (
+                <>
+                  Shortcut: <kbd>{formatShortcut(captureShortcut, shortcutPlatform)}</kbd> captures a screen
+                  area{' '}
+                  {globalCaptureShortcutRegistered
+                    ? 'even when Imnota is in the background'
+                    : 'while Imnota is focused. The background shortcut is not active'}
+                  {repeatLastShortcut ? (
+                    <>
+                      ; <kbd>{formatShortcut(repeatLastShortcut, shortcutPlatform)}</kbd> recaptures the last
+                      area from this session
+                    </>
+                  ) : null}
+                  . Change these under Shortcuts.
+                </>
+              ) : (
+                <>Shortcut: not set. The toolbar camera button and the Add menu still work.</>
+              )}
+              {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
+            </small>
+          </section>
+          <section className="settings-section" aria-labelledby="prompt-markdown-title">
+            <h2 id="prompt-markdown-title">
+              Prompt Markdown <span className="feature-status beta">Beta</span>
+            </h2>
+            <label className="settings-switch">
+              <span>
+                <strong>Include recognised text in Markdown</strong>
+                <small>
+                  Copy Bundle can append on-device OCR under Visible text. Screenshots with blur or pixelate
+                  marks omit this section. Recognition never leaves this device. Off by default.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Include recognised text in Markdown"
+                checked={preferences.promptExport.includeRecognisedText}
+                disabled={savingPreferences || !onPromptExportChange}
+                onChange={(event) => {
+                  const includeRecognisedText = event.target.checked;
+                  void Promise.resolve()
+                    .then(() => onPromptExportChange?.({ includeRecognisedText }))
+                    .catch(() => undefined);
+                }}
+              />
+            </label>
+          </section>
           <AgentAccessSettings
             value={preferences.agentAccess}
             disabled={savingPreferences}
@@ -399,30 +411,6 @@ export function SettingsView({
         </div>
         {group === 'Sharing' && (
           <>
-            <section className="settings-section" aria-labelledby="prompt-markdown-title">
-              <h2 id="prompt-markdown-title">Prompt Markdown</h2>
-              <label className="settings-switch">
-                <span>
-                  <strong>Include recognised text in Markdown</strong>
-                  <small>
-                    Copy Bundle can append on-device OCR under Visible text. Screenshots with blur or pixelate
-                    marks omit this section. Recognition never leaves this device.
-                  </small>
-                </span>
-                <input
-                  type="checkbox"
-                  aria-label="Include recognised text in Markdown"
-                  checked={preferences.promptExport.includeRecognisedText}
-                  disabled={savingPreferences || !onPromptExportChange}
-                  onChange={(event) => {
-                    const includeRecognisedText = event.target.checked;
-                    void Promise.resolve()
-                      .then(() => onPromptExportChange?.({ includeRecognisedText }))
-                      .catch(() => undefined);
-                  }}
-                />
-              </label>
-            </section>
             {nativeCopyAvailable && (
               <section className="settings-section" aria-labelledby="native-copy-title">
                 <h2 id="native-copy-title">Native copy functions</h2>
@@ -485,7 +473,9 @@ function AgentAccessSettings({
   };
   return (
     <section className="settings-section" aria-labelledby="agent-access-title">
-      <h2 id="agent-access-title">Local agent access</h2>
+      <h2 id="agent-access-title">
+        MCP access <span className="feature-status beta">Beta</span>
+      </h2>
       <label className="settings-switch">
         <span>
           <strong>Allow local agent access</strong>

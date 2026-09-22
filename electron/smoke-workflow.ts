@@ -1752,6 +1752,7 @@ async function exerciseSharingPreferences(
   })()`);
   // Saving selects the new preset through the real UI. OS select popups do not
   // consistently receive webContents input; component tests cover selection changes.
+  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
   await driver.click({ selector: '[aria-label="Include recognised text in Markdown"]' });
   await driver.evaluate(`(async () => {
     const deadline = Date.now() + 10000;
@@ -1763,6 +1764,17 @@ async function exerciseSharingPreferences(
     throw new Error('Recognised-text option did not change before applying the preset.');
   })()`);
   await driver.waitFor({ selector: '[aria-label="Include recognised text in Markdown"]:not(:disabled)' });
+  await driver.click({ selector: '.settings-navigation button', text: 'Sharing', exact: true });
+  const reselected = await driver.evaluate<boolean>(`(() => {
+    const select = document.querySelector('[aria-label="Saved export preset"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Saved export preset selector is missing.');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    if (!setValue) throw new Error('Saved export preset selector cannot be restored.');
+    setValue.call(select, ${JSON.stringify(preset.id)});
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return select.value === ${JSON.stringify(preset.id)};
+  })()`);
+  if (!reselected) throw new Error('Saved export preset selection was lost when switching settings pages.');
   await driver.click({ text: 'Apply preset', exact: true });
   await driver.waitFor({ selector: '[aria-label="New export preset name"]:not(:disabled)' });
   const applied = await driver.evaluate<boolean>(`(async () => {
