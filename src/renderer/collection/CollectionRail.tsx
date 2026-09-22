@@ -78,7 +78,11 @@ export function CollectionControls({
   const pickerId = useId().replace(/:/g, '');
   const collections = project?.collections ?? [];
   const collectionLabel = (collection: (typeof collections)[number]) =>
-    collectionDisplayName(collection.name, store.snapshot!.projectPath);
+    collectionDisplayName(
+      collection.name,
+      store.snapshot!.projectPath,
+      collections.filter((other) => other.id !== collection.id).map((other) => other.name),
+    );
   const selectedIndex = Math.max(
     0,
     collections.findIndex((collection) => collection.id === current?.id),
