@@ -2142,6 +2142,25 @@ async function exerciseWatchAndConflict(
   host: SmokeWorkflowHost,
   projectPath: string,
 ): Promise<void> {
+  // The preceding pixel-export scenario opens another project. Deliberately
+  // display this fixture so external edits exercise renderer recovery on every OS.
+  const project = await host.readProject(projectPath);
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.click({ selector: '.project-row-main', text: project.name });
+  await driver.waitFor({ selector: '.crumb-muted', text: project.name, exact: true });
+  await driver.waitFor({ selector: '.konvajs-content' });
+  await driver.click({ selector: '.shot-select', text: project.screenshots[0].title });
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const field = document.querySelector('textarea[aria-label="Description"]');
+      if (field instanceof HTMLTextAreaElement && field.value === ${JSON.stringify(project.screenshots[0].description)}) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Watcher fixture screenshot did not load.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+  await driver.waitFor({ selector: '[data-testid="save-state"]', text: 'Saved', exact: true });
   const watch = await driver.evaluate<{ watchId: string; projectRevision: string }>(`(async () => {
     ${bridgePrelude()}
     window.__imnotaSmokeWatchEvents = [];
@@ -2151,7 +2170,6 @@ async function exerciseWatchAndConflict(
     });
     return unwrap(await workflow.startProjectWatch({ projectPath: ${JSON.stringify(projectPath)} }));
   })()`);
-  const project = await host.readProject(projectPath);
   const descriptionPath = path.join(projectPath, project.screenshots[0].descriptionFile);
   await fs.writeFile(descriptionPath, 'External watcher edit', 'utf8');
   await driver.evaluate(`new Promise((resolve, reject) => {
@@ -2201,13 +2219,23 @@ async function exerciseWatchAndConflict(
     window.__imnotaSmokeStopWatchEvents?.();
   })()`);
   const conflictBanner = { selector: '[data-testid="external-change-banner"]' };
-  if (await driver.exists(conflictBanner)) {
-    await clickAny(driver, [
-      { selector: `${conflictBanner.selector} button`, text: 'Discard local edits & reload' },
-      { selector: `${conflictBanner.selector} button`, text: 'Reload project' },
-    ]);
-    await driver.waitFor(conflictBanner, { absent: true });
-  }
+  await driver.waitFor(conflictBanner);
+  await clickAny(driver, [
+    { selector: `${conflictBanner.selector} button`, text: 'Discard local edits & reload' },
+    { selector: `${conflictBanner.selector} button`, text: 'Reload project' },
+  ]);
+  await driver.waitFor(conflictBanner, { absent: true });
+  await driver.waitFor({ selector: '[data-testid="save-state"]', text: 'Saved', exact: true });
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const field = document.querySelector('textarea[aria-label="Description"]');
+      if (field instanceof HTMLTextAreaElement && field.value === 'External watcher edit') return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Renderer retained stale screenshot content after conflict recovery.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
 }
 
 async function exerciseRecovery(
