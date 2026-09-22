@@ -23,6 +23,7 @@ export interface ProjectWatchDependencies {
     listener: (eventType: string, filename: string | Buffer | null) => void,
   ): WatchHandle;
   readProjectSource(projectPath: string): Promise<string>;
+  readWatchedFile(filePath: string): Promise<Uint8Array | null>;
   loadSnapshot(projectPath: string): Promise<ProjectRevisionSnapshot['snapshot']>;
   saveProject(projectPath: string, project: ProjectData): Promise<ProjectRevisionSnapshot['snapshot']>;
   emit(event: ProjectWatchEvent): void;
@@ -72,6 +73,7 @@ function defaultDependencies(
     ...dependencies,
     createWatch: (projectPath, listener) => fs.watch(projectPath, { recursive: true }, listener) as FSWatcher,
     readProjectSource: (projectPath) => fsPromises.readFile(path.join(projectPath, 'project.json'), 'utf8'),
+    readWatchedFile: (filePath) => fsPromises.readFile(filePath).catch(() => null),
     randomId: () => randomUUID(),
     schedule: (callback, milliseconds) => setTimeout(callback, milliseconds),
     cancelSchedule: (timer) => clearTimeout(timer),
@@ -238,9 +240,21 @@ export class ProjectWatchManager {
         const hasExpected = state.selfFileRevisions.has(relativePath);
         const expected = state.selfFileRevisions.get(relativePath);
         if (hasExpected) {
-          const source = await fsPromises
-            .readFile(path.join(state.projectPath, relativePath))
-            .catch(() => null);
+          const source = await this.dependencies.readWatchedFile(path.join(state.projectPath, relativePath));
+          const latestExpected = state.selfFileRevisions.get(relativePath);
+          if (latestExpected !== expected && state.selfFileRevisions.has(relativePath)) {
+            // A newer local write landed during the read. The bytes may be from either
+            // revision; check the latest marker or inspect the path on another flush.
+            if (
+              (source === null && latestExpected === null) ||
+              (source !== null &&
+                latestExpected !== null &&
+                projectRevisionForSource(source) === latestExpected)
+            )
+              continue;
+            this.recordChange(state.watchId, relativePath);
+            continue;
+          }
           if (
             (source === null && expected === null) ||
             (source !== null && expected !== null && projectRevisionForSource(source) === expected)
