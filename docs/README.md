@@ -23,6 +23,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Feedback follow-up](follow-up-plan-20260918.md) — small capture, shortcut and changelog follow-ups; proposal only.
 - [Feedback observations](feedback-plan-20260918.md) — historical planning snapshot from the September feedback round.
 - [Large-collection performance](large-collection-performance-plan.md) — measurement and scale plan; do not implement without budgets.
+- [Capture display matrix](capture-display-matrix.md) — real display-source evidence and outstanding overlay/alignment checks.
 - [Recovery unification](recovery-unification-plan.md) — recovery design plan; persistence changes require separate review.
 - [Windows copy comparison](windows-copy-comparison.md) — manual verification worksheet for the current clipboard/capture changes.
 

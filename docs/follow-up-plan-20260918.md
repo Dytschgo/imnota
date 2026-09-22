@@ -1,12 +1,14 @@
 # Follow-up plan — observations from the 2026-09-18 feedback round
 
-Status: proposal only. Nothing in this document is authorized work; each item needs its own decision and its own PR. It records what was noticed while implementing PRs #72–#76 but deliberately left out of them because it was outside the feedback.
+Status: dated observations, reconciled on 2026-09-22. The user authorized the selected shortcut, export-performance, recovery, preset and verification follow-ups; unrelated proposals still need their own decision. This document records what was noticed while implementing PRs #72–#76. Current behavior is documented in the [implementation status](implementation-plan.md).
 
 Items are sorted into **do**, **do only if the matrix shows it**, and **do not do**. Each "do" item is small enough for one PR.
 
 ## 1. Do
 
 ### 1.1 Change the macOS default capture shortcut
+
+Follow-up: [PR #114](https://github.com/Dytschgo/imnota/pull/114) changes the Mac default to Control+Shift+5 and preserves explicit overrides. Packaged macOS registration verification passed; a physical Mac keypress remains unverified here. The observations below describe the pre-fix default.
 
 - Observation: the default binding for `capture.region` is `Ctrl+Shift+5`, mapped to `⌘⇧5` on macOS (`src/shared/shortcuts.ts`). `⌘⇧5` is macOS's own screenshot-toolbar shortcut and is intercepted by the OS before the Imnota window sees it, so the default can never trigger Imnota capture on a Mac.
 - Proposal: keep `Ctrl+Shift+5` on Windows and Linux, and use a Mac-specific default that macOS does not reserve, for example `⌃⇧5` (Control rather than Command). `getDefaultShortcuts()` already special-cases `edit.deleteAnnotation` for Mac, so the change is one line plus a test.
@@ -29,6 +31,8 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 
 ### 1.4 Record the manual matrices as living documents
 
+Follow-up: [capture display matrix](capture-display-matrix.md) now records the available real-display probe and distinguishes it from overlay alignment verification. The [clipboard matrix](clipboard-receiver-matrix.md) separates receiver evidence from clipboard-write assertions.
+
 - Observation: `docs/clipboard-receiver-matrix.md` exists for clipboard, but there is no equivalent record for multi-display capture.
 - Proposal: add `docs/capture-display-matrix.md`, filled in per nightly build, with the exact build and OS; display count, arrangement and scaling; entry point; pointer and overlay displays; saved image dimensions; and whether the crop matches the selection. Link it from `docs/nightly-verification-audit.md`.
 - Why: #72 was reasoned from Electron's Windows fullscreen behaviour, not observed on a two-display machine. The matrix is the only way to close it.
@@ -49,7 +53,7 @@ Items are sorted into **do**, **do only if the matrix shows it**, and **do not d
 
 ### 2.3 Global (background) capture shortcut
 
-- Feedback mentioned that the shortcut "feels glitchy". Today it is a renderer-level shortcut and only works while Imnota is focused; the user guide says so. If the matrix shows that users expect it to work from other apps, that is a product decision (it needs `globalShortcut`, conflicts with OS shortcuts and an unregister path) and belongs in `docs/product-roadmap.md`, not in a fix PR.
+- Superseded: background capture and tray lifecycle support are implemented through the native global shortcut. The remaining work is real display/entry-point verification and the Mac default correction in PR #114. This is no longer an unimplemented product feature.
 
 ## 3. Do not do
 
