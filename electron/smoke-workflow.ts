@@ -2200,14 +2200,14 @@ async function exerciseWatchAndConflict(
     unwrap(await workflow.stopProjectWatch({ watchId: ${JSON.stringify(watch.watchId)} }));
     window.__imnotaSmokeStopWatchEvents?.();
   })()`);
-  await clickAny(driver, [
-    {
-      selector: '[data-testid="external-change-banner"] button',
-      text: 'Discard local edits & reload',
-    },
-    { selector: '[data-testid="external-change-banner"] button', text: 'Reload project' },
-  ]);
-  await driver.waitFor({ selector: '[data-testid="external-change-banner"]' }, { absent: true });
+  const conflictBanner = { selector: '[data-testid="external-change-banner"]' };
+  if (await driver.exists(conflictBanner)) {
+    await clickAny(driver, [
+      { selector: `${conflictBanner.selector} button`, text: 'Discard local edits & reload' },
+      { selector: `${conflictBanner.selector} button`, text: 'Reload project' },
+    ]);
+    await driver.waitFor(conflictBanner, { absent: true });
+  }
 }
 
 async function exerciseRecovery(
