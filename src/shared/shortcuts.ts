@@ -233,7 +233,9 @@ export function getDefaultShortcuts(platform: ShortcutPlatform): ResolvedShortcu
       actionId,
       platform === 'mac' && actionId === 'edit.deleteAnnotation'
         ? 'Backspace'
-        : (binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null),
+        : platform === 'mac' && actionId === 'capture.region'
+          ? 'Ctrl+Shift+5'
+          : (binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null),
     ]),
   ) as ResolvedShortcutBindings;
 }
