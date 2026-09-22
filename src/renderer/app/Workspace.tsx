@@ -197,46 +197,46 @@ export function Workspace(props: WorkspaceProps) {
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
-        <div className="workspace-toolbar">
-          {item ? (
-            <strong className="content-editor-heading">
-              {item.kind === 'drawing' ? 'Drawing' : 'Text block'}
-            </strong>
-          ) : (
-            <Toolbar
-              tool={props.tool}
-              setTool={props.onTool}
-              onUndo={props.onUndo}
-              onRedo={props.onRedo}
-              canUndo={props.canUndo}
-              canRedo={props.canRedo}
-              onZoom={props.onZoom}
-              onFit={props.onFit}
-              onActualSize={props.onActualSize}
-              onCapture={props.onCapture}
-              captureEnabled={props.captureEnabled}
-              captureInProgress={props.captureInProgress}
-              captureShortcut={props.captureShortcut}
-              captureDisabledLabel={props.captureDisabledLabel}
-              onColorSelect={props.onColor}
-              selectedColor={props.paletteColor}
-              shortcutLabels={props.shortcutLabels}
-            />
-          )}
-          {!store.rightPanelOpen && (
-            <IconButton
-              className="inspector-restore"
-              data-testid="inspector-toggle"
-              label="Expand inspector"
-              onClick={(event) => {
-                inspectorTriggerRef.current = event.currentTarget;
-                store.set({ rightPanelOpen: true });
-              }}
-            >
-              <PanelRight size={17} aria-hidden="true" />
-            </IconButton>
-          )}
-        </div>
+        {(!item || item.kind === 'text') && (
+          <div className="workspace-toolbar">
+            {item ? (
+              <strong className="content-editor-heading">Text block</strong>
+            ) : (
+              <Toolbar
+                tool={props.tool}
+                setTool={props.onTool}
+                onUndo={props.onUndo}
+                onRedo={props.onRedo}
+                canUndo={props.canUndo}
+                canRedo={props.canRedo}
+                onZoom={props.onZoom}
+                onFit={props.onFit}
+                onActualSize={props.onActualSize}
+                onCapture={props.onCapture}
+                captureEnabled={props.captureEnabled}
+                captureInProgress={props.captureInProgress}
+                captureShortcut={props.captureShortcut}
+                captureDisabledLabel={props.captureDisabledLabel}
+                onColorSelect={props.onColor}
+                selectedColor={props.paletteColor}
+                shortcutLabels={props.shortcutLabels}
+              />
+            )}
+            {!store.rightPanelOpen && (
+              <IconButton
+                className="inspector-restore"
+                data-testid="inspector-toggle"
+                label="Expand inspector"
+                onClick={(event) => {
+                  inspectorTriggerRef.current = event.currentTarget;
+                  store.set({ rightPanelOpen: true });
+                }}
+              >
+                <PanelRight size={17} aria-hidden="true" />
+              </IconButton>
+            )}
+          </div>
+        )}
         {item ? (
           props.contentLoading || !props.content || props.content.item.id !== item.id ? (
             <div role="status" className="content-loading">
@@ -254,6 +254,12 @@ export function Workspace(props: WorkspaceProps) {
                 key={item.id}
                 source={props.content.source ?? ''}
                 theme={props.resolvedTheme}
+                title={item.title}
+                showInspector={!store.rightPanelOpen}
+                onShowInspector={(trigger) => {
+                  inspectorTriggerRef.current = trigger;
+                  store.set({ rightPanelOpen: true });
+                }}
                 onChange={(source) => props.onContentChange?.({ source })}
               />
             </Suspense>
