@@ -18,8 +18,18 @@ import { contentItemRelativePaths } from './content-paths.js';
 import { recoverContentTrashTransactions } from './content-trash.js';
 import { BackupService } from './backup-service.js';
 import { DEFAULT_BACKUP_PREFERENCES } from '../src/shared/backups.js';
+import { atomicWrite } from './files.js';
+import { recoverScreenshotTransactions, replayScreenshotTransaction } from './screenshot-transactions.js';
 
 const temporary: string[] = [];
+const changedDrawingImage = {
+  filename: 'candidate.png',
+  width: 1,
+  height: 1,
+  dataUrl:
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWNQCFjwHwADtAIQHQGQNQAAAABJRU5ErkJggg==',
+};
+const changedDrawingSource = EMPTY_EXCALIDRAW_SOURCE.replace('#ffffff', '#2050a0');
 
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((entry) => fs.rm(entry, { recursive: true, force: true })));
@@ -53,6 +63,229 @@ async function fixture(beforeSchemaMigration?: (projectPath: string, project: Pr
 }
 
 describe('native mixed content persistence', () => {
+  it('preserves unexpected journal files and rejects a restored receipt without commit images', async () => {
+    const { projectPath, service, snapshot } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const deleted = await service.delete({ projectPath, itemId: created.project.contentItems![0].id });
+    const retrying = new ContentPersistenceService({
+      snapshot,
+      trashItem: (target) => fs.unlink(target),
+      trashOperations: {
+        write: atomicWrite,
+        removeDirectory: async () => {
+          throw new Error('cleanup blocked');
+        },
+      },
+    });
+    await retrying.undoDelete({ projectPath, undoToken: deleted.undoToken });
+    const journal = path.join(projectPath, '.imnota-content-undo', deleted.undoToken);
+    const extra = path.join(journal, 'unrelated.txt');
+    await fs.writeFile(extra, 'Preserve this file');
+    expect(await recoverContentTrashTransactions(projectPath)).toMatchObject([
+      { status: 'undo-committed', warning: expect.stringContaining('unknown path') },
+    ]);
+    expect(await fs.readFile(extra, 'utf8')).toBe('Preserve this file');
+    const manifestPath = path.join(journal, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    delete manifest.undoAfter;
+    await fs.writeFile(manifestPath, JSON.stringify(manifest));
+    await expect(recoverContentTrashTransactions(projectPath)).rejects.toThrow(/commit receipt/);
+    expect(await fs.readFile(extra, 'utf8')).toBe('Preserve this file');
+  });
+  it('preserves external edits after Undo committed but its completion marker could not be written', async () => {
+    const { projectPath, service, snapshot } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const item = created.project.contentItems![0];
+    const deleted = await service.delete({ projectPath, itemId: item.id });
+    const retrying = new ContentPersistenceService({
+      snapshot,
+      trashItem: (target) => fs.unlink(target),
+      trashOperations: {
+        write: async (target, bytes) => {
+          if (
+            path.basename(target) === 'manifest.json' &&
+            JSON.parse(Buffer.from(bytes).toString()).phase === 'restored'
+          )
+            throw new Error('completion marker blocked');
+          await atomicWrite(target, bytes);
+        },
+        removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+      },
+    });
+    await retrying.undoDelete({ projectPath, undoToken: deleted.undoToken });
+    const target = path.join(projectPath, contentItemRelativePaths(item).markdown!);
+    await fs.writeFile(target, 'External edit after Undo');
+    const metadata = await fs.readFile(path.join(projectPath, 'project.json'));
+    expect(await recoverContentTrashTransactions(projectPath)).toMatchObject([
+      { status: 'undo-committed', undoAvailable: false },
+    ]);
+    expect(await fs.readFile(target, 'utf8')).toBe('External edit after Undo');
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(metadata);
+  });
+
+  it('does not clean a completed receipt transplanted into a different project', async () => {
+    const { projectPath, service, snapshot } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const deleted = await service.delete({ projectPath, itemId: created.project.contentItems![0].id });
+    const retrying = new ContentPersistenceService({
+      snapshot,
+      trashItem: (target) => fs.unlink(target),
+      trashOperations: {
+        write: atomicWrite,
+        removeDirectory: async () => {
+          throw new Error('cleanup blocked');
+        },
+      },
+    });
+    await retrying.undoDelete({ projectPath, undoToken: deleted.undoToken });
+    const metadataPath = path.join(projectPath, 'project.json');
+    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+    metadata.id = 'different-project';
+    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    await expect(recoverContentTrashTransactions(projectPath)).rejects.toThrow(/another project/);
+    await expect(retrying.undoDelete({ projectPath, undoToken: deleted.undoToken })).rejects.toThrow(
+      /different project/,
+    );
+    expect(await fs.readdir(path.join(projectPath, '.imnota-content-undo'))).toContain(deleted.undoToken);
+  });
+  it.each(['text', 'drawing'] as const)(
+    'recovers completed %s Undo without overwriting later edits when cleanup was blocked',
+    async (kind) => {
+      const { projectPath, service, snapshot } = await fixture();
+      const created = await service.create({ projectPath, collectionId: '001-collection', kind });
+      const item = created.project.contentItems![0];
+      const deleted = await service.delete({ projectPath, itemId: item.id });
+      const blocked = {
+        write: atomicWrite,
+        removeDirectory: async () => {
+          throw new Error('cleanup blocked');
+        },
+      };
+      const retrying = new ContentPersistenceService({
+        snapshot,
+        trashItem: (target) => fs.unlink(target),
+        trashOperations: blocked,
+      });
+      await retrying.undoDelete({ projectPath, undoToken: deleted.undoToken });
+      const loaded = await service.load({ projectPath, itemId: item.id });
+      await service.save({
+        projectPath,
+        itemId: item.id,
+        contentRevision: loaded.contentRevision,
+        ...(kind === 'text'
+          ? { markdown: 'Later text must survive' }
+          : {
+              source: changedDrawingSource,
+              image: { ...changedDrawingImage, filename: loaded.image!.filename },
+            }),
+      });
+      const files = ['project.json', ...Object.values(contentItemRelativePaths(item))];
+      const read = () => Promise.all(files.map((file) => fs.readFile(path.join(projectPath, file))));
+      const before = await read();
+      expect(await recoverContentTrashTransactions(projectPath, blocked)).toMatchObject([
+        { status: 'undo-committed', undoAvailable: false, warning: expect.stringContaining('cleanup') },
+      ]);
+      expect(await read()).toEqual(before);
+      await expect(retrying.undoDelete({ projectPath, undoToken: deleted.undoToken })).resolves.toMatchObject(
+        { project: (await snapshot(projectPath)).project },
+      );
+      expect(await read()).toEqual(before);
+      expect(await recoverContentTrashTransactions(projectPath)).toMatchObject([
+        { status: 'undo-committed', undoAvailable: false },
+      ]);
+      expect(await read()).toEqual(before);
+      expect(await recoverContentTrashTransactions(projectPath)).toEqual([]);
+    },
+  );
+
+  it.each([
+    { kind: 'text' as const, boundary: 'markdown', rollbackFailure: false },
+    { kind: 'text' as const, boundary: 'project.json', rollbackFailure: false },
+    { kind: 'drawing' as const, boundary: 'source', rollbackFailure: false },
+    { kind: 'drawing' as const, boundary: 'image', rollbackFailure: false },
+    { kind: 'drawing' as const, boundary: 'project.json', rollbackFailure: false },
+    { kind: 'text' as const, boundary: 'project.json', rollbackFailure: true },
+    { kind: 'drawing' as const, boundary: 'project.json', rollbackFailure: true },
+  ])(
+    'recovers $kind after failure at $boundary (rollback failure: $rollbackFailure)',
+    async ({ kind, boundary, rollbackFailure }) => {
+      const { projectPath, service, snapshot } = await fixture();
+      const created = await service.create({ projectPath, collectionId: '001-collection', kind });
+      const item = created.project.contentItems![0];
+      const unrelated = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+      const paths = contentItemRelativePaths(item);
+      const failPath = path.join(
+        projectPath,
+        boundary === 'project.json' ? boundary : paths[boundary as keyof typeof paths]!,
+      );
+      const allFiles = [
+        'project.json',
+        ...unrelated.project.contentItems!.flatMap((entry) => Object.values(contentItemRelativePaths(entry))),
+      ];
+      const read = () => Promise.all(allFiles.map((file) => fs.readFile(path.join(projectPath, file))));
+      const baseline = await read();
+      let failed = false;
+      let rollbackBlocked = false;
+      const rollbackTarget = path.join(projectPath, paths.markdown ?? paths.source!);
+      const rollbackBytes = await fs.readFile(rollbackTarget);
+      const failing = new ContentPersistenceService({
+        snapshot,
+        trashItem: (target) => fs.unlink(target),
+        transactionOperations: {
+          write: async (target, bytes) => {
+            if (
+              failed &&
+              rollbackFailure &&
+              !rollbackBlocked &&
+              target === rollbackTarget &&
+              Buffer.from(bytes).equals(rollbackBytes)
+            ) {
+              rollbackBlocked = true;
+              throw new Error('injected rollback failure');
+            }
+            if (target === failPath && !failed) {
+              failed = true;
+              throw new Error('injected save failure');
+            }
+            await atomicWrite(target, bytes);
+          },
+          unlink: (target) => fs.unlink(target),
+          removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+        },
+      });
+      const loaded = await service.load({ projectPath, itemId: item.id });
+      await expect(
+        failing.save({
+          projectPath,
+          itemId: item.id,
+          contentRevision: loaded.contentRevision,
+          ...(kind === 'text'
+            ? { markdown: 'Recovered candidate' }
+            : {
+                source: changedDrawingSource,
+                image: { ...changedDrawingImage, filename: loaded.image!.filename },
+              }),
+        }),
+      ).rejects.toThrow();
+      expect(failed).toBe(true);
+      if (!rollbackFailure) expect(await read()).toEqual(baseline);
+      expect(rollbackBlocked).toBe(rollbackFailure);
+      const recovery = await recoverScreenshotTransactions(projectPath);
+      expect(await read()).toEqual(baseline);
+      expect(recovery).toHaveLength(1);
+      expect(recovery[0].candidateAvailable).toBe(true);
+      await replayScreenshotTransaction(projectPath, recovery[0].token);
+      const reopened = new ContentPersistenceService({ snapshot, trashItem: (target) => fs.unlink(target) });
+      const recovered = await reopened.load({ projectPath, itemId: item.id });
+      expect(kind === 'text' ? recovered.markdown : recovered.source).toBe(
+        kind === 'text' ? 'Recovered candidate' : changedDrawingSource,
+      );
+      if (kind === 'drawing') expect(recovered.image?.dataUrl).toBe(changedDrawingImage.dataUrl);
+      const after = await read();
+      for (let i = 1; i < allFiles.length; i++)
+        if (!Object.values(paths).includes(allFiles[i])) expect(after[i]).toEqual(baseline[i]);
+    },
+  );
   it('rejects deletion of an unknown item without changing project metadata or content', async () => {
     const { projectPath, service } = await fixture();
     const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });

@@ -180,6 +180,12 @@ function parseManifest(value: unknown, token: string): ContentTrashManifest {
     (input.undoAfter !== undefined && !isStoredBytes(input.undoAfter))
   )
     throw new ContentTrashError('invalid-manifest', 'Content Undo manifest failed validation.', token);
+  if (input.phase === 'restored' && (!input.undoBefore || !input.undoAfter))
+    throw new ContentTrashError(
+      'invalid-manifest',
+      'Completed content Undo is missing its commit receipt.',
+      token,
+    );
   const item = contentItemSchema.parse(input.item);
   const expected = relativePaths(item);
   const rawContent = input.content as Array<Record<string, unknown>>;
@@ -381,6 +387,20 @@ async function clean(directory: string, operations: ResolvedOperations): Promise
   await operations.removeDirectory(directory);
 }
 
+async function finishContentUndo(
+  directory: string,
+  manifest: ContentTrashManifest,
+  operations: ResolvedOperations,
+): Promise<string | undefined> {
+  try {
+    if (manifest.phase !== 'restored') await setPhase(directory, manifest, 'restored', operations);
+    await clean(directory, operations);
+    return undefined;
+  } catch (error) {
+    return `Content restored, but Undo cleanup is pending: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 async function restoreContent(
   projectPath: string,
   directory: string,
@@ -564,9 +584,19 @@ export async function undoContentItemDelete(
   validateProject(project);
   if (currentProject.id !== project.id)
     throw new ContentTrashError('baseline-changed', 'Undo belongs to a different project.', token);
-  if (manifest.undoAfter && (await classify(metadataPath, loaded.directory, manifest.undoAfter))) {
-    await clean(loaded.directory, operations);
-    return { project: validateProject(JSON.parse(currentMetadata.toString('utf8'))) };
+  const original = validateProject(
+    JSON.parse((await backupBytes(loaded.directory, manifest.metadataBefore))!.toString('utf8')),
+  );
+  if (currentProject.id !== original.id)
+    throw new ContentTrashError('baseline-changed', 'Undo belongs to a different project.', token);
+  if (
+    manifest.phase === 'restored' ||
+    (manifest.undoAfter && (await classify(metadataPath, loaded.directory, manifest.undoAfter)))
+  ) {
+    return {
+      project: currentProject,
+      warning: await finishContentUndo(loaded.directory, manifest, operations),
+    };
   }
   if (manifest.phase === 'undoing') {
     if (!manifest.undoBefore || !manifest.undoAfter)
@@ -655,14 +685,25 @@ export async function recoverContentTrashTransactions(
     const metadataPath = path.join(project, 'project.json');
     const metadata = await readOptional(metadataPath, MAX_PROJECT_BYTES);
     if (!metadata) throw new ContentTrashError('invalid-project', 'project.json is missing.', token);
-    if (manifest.undoAfter && (await classify(metadataPath, loaded.directory, manifest.undoAfter))) {
-      await restoreContent(project, loaded.directory, manifest, operations);
-      await clean(loaded.directory, operations);
+    const current = validateProject(JSON.parse(metadata.toString('utf8')));
+    const original = validateProject(
+      JSON.parse((await backupBytes(loaded.directory, manifest.metadataBefore))!.toString('utf8')),
+    );
+    if (current.id !== original.id)
+      throw new ContentTrashError('baseline-changed', 'Content Undo belongs to another project.', token);
+    if (
+      manifest.phase === 'restored' ||
+      (manifest.undoAfter && (await classify(metadataPath, loaded.directory, manifest.undoAfter)))
+    ) {
+      // Metadata committed after the content files. Never replay those backups:
+      // the user may have edited or deleted the restored item since that commit.
+      const warning = await finishContentUndo(loaded.directory, manifest, operations);
       results.push({
         undoToken: token,
         itemId: manifest.item.id,
         status: 'undo-committed',
         undoAvailable: false,
+        ...(warning ? { warning } : {}),
       });
       continue;
     }
@@ -677,16 +718,8 @@ export async function recoverContentTrashTransactions(
       });
       continue;
     }
-    const current = validateProject(JSON.parse(metadata.toString('utf8')));
     if (current.schemaVersion !== 4)
       throw new ContentTrashError('baseline-changed', 'Content Undo requires schema version 4.', token);
-    if (
-      current.id !==
-      validateProject(
-        JSON.parse((await backupBytes(loaded.directory, manifest.metadataBefore))!.toString('utf8')),
-      ).id
-    )
-      throw new ContentTrashError('baseline-changed', 'Content Undo belongs to another project.', token);
     if ((current.contentItems ?? []).some((entry) => entry.id === manifest.item.id))
       throw new ContentTrashError(
         'baseline-changed',
