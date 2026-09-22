@@ -3597,6 +3597,7 @@ app.whenReady().then(async () => {
       } else {
         result = await runSmokeWorkflow(
           {
+            diagnosticsHealth: () => diagnostics.health(),
             setWorkspace(workspacePath) {
               settings = { ...settings, workspacePath };
             },
@@ -3653,6 +3654,8 @@ app.whenReady().then(async () => {
     } catch (error) {
       exitCode = 1;
       const failureMessage = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      const diagnosticsHealth = diagnostics.health();
+      console.error('Local diagnostics health:', diagnosticsHealth);
       let failureArtifactDirectory: string | undefined;
       if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
         try {
@@ -3662,7 +3665,11 @@ app.whenReady().then(async () => {
           );
           await fs.writeFile(
             path.join(failureArtifactDirectory, 'verification-failure.json'),
-            JSON.stringify({ passed: false, version: app.getVersion(), error: failureMessage }, null, 2),
+            JSON.stringify(
+              { passed: false, version: app.getVersion(), error: failureMessage, diagnosticsHealth },
+              null,
+              2,
+            ),
             { flag: 'wx' },
           );
         } catch (artifactError) {
@@ -3694,6 +3701,7 @@ app.whenReady().then(async () => {
         version: app.getVersion(),
         error: failureMessage,
         rendererState,
+        diagnosticsHealth,
       };
       console.error(error);
       console.error('Renderer state:', rendererState);

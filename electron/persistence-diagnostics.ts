@@ -29,6 +29,30 @@ export function diagnosticErrorCode(error: unknown): string {
 }
 
 type Phase = 'begin' | 'complete' | 'failed' | 'observed';
+type StorageStage =
+  | 'idle'
+  | 'queued'
+  | 'directory'
+  | 'retention'
+  | 'inspect-log'
+  | 'rotate'
+  | 'open'
+  | 'write'
+  | 'sync'
+  | 'close';
+export interface DiagnosticsHealth {
+  state: 'ready' | 'stalled' | 'failed';
+  stage: StorageStage;
+  pending: number;
+  dropped: number;
+  stalls: number;
+  recoveries: number;
+  lastFailure?: {
+    reason: 'timeout' | 'io-error' | 'queue-full';
+    stage: StorageStage;
+    errorCode?: string;
+  };
+}
 interface TraceEvent {
   category: 'operation' | 'filesystem' | 'integrity' | 'lifecycle';
   action: string;
@@ -48,10 +72,29 @@ export class PersistenceDiagnostics {
   private readonly context = new AsyncLocalStorage<string>();
   private queue: Promise<void> = Promise.resolve();
   private pending = 0;
-  private unavailable = false;
+  private storageFailed = false;
+  private stalledWrite?: symbol;
+  private stage: StorageStage = 'idle';
+  private dropped = 0;
+  private stalls = 0;
+  private recoveries = 0;
+  private lastFailure?: DiagnosticsHealth['lastFailure'];
+
+  health(): DiagnosticsHealth {
+    return {
+      state: this.storageFailed ? 'failed' : this.stalledWrite ? 'stalled' : 'ready',
+      stage: this.stage,
+      pending: this.pending,
+      dropped: this.dropped,
+      stalls: this.stalls,
+      recoveries: this.recoveries,
+      ...(this.lastFailure ? { lastFailure: { ...this.lastFailure } } : {}),
+    };
+  }
 
   retryStorage(): void {
-    this.unavailable = false;
+    this.storageFailed = false;
+    this.stalledWrite = undefined;
   }
 
   constructor(
@@ -93,7 +136,19 @@ export class PersistenceDiagnostics {
   }
 
   async record(event: TraceEvent): Promise<boolean> {
-    if (this.unavailable || this.pending >= MAX_PENDING) return false;
+    if (this.storageFailed || this.stalledWrite || this.pending >= MAX_PENDING) {
+      this.dropped = Math.min(Number.MAX_SAFE_INTEGER, this.dropped + 1);
+      if (!this.storageFailed && !this.stalledWrite)
+        this.lastFailure = { reason: 'queue-full', stage: 'queued' };
+      return false;
+    }
+    const writeToken = Symbol();
+    let writeStage: StorageStage = 'queued';
+    let failureStage: StorageStage | undefined;
+    const setStage = (stage: StorageStage) => {
+      writeStage = stage;
+      this.stage = stage;
+    };
     const operationId = this.context.getStore();
     const line =
       JSON.stringify({
@@ -130,39 +185,66 @@ export class PersistenceDiagnostics {
     let stored = false;
     const work = this.queue
       .then(async () => {
+        setStage('directory');
         const directory = await this.openDirectory();
         if (!this.pruned) {
+          setStage('retention');
           await this.pruneInactiveSessions(directory);
           this.pruned = true;
         }
         const current = path.join(directory, `${this.prefix}.jsonl`);
         const previous = path.join(directory, `${this.prefix}.previous.jsonl`);
+        setStage('inspect-log');
         await assertNoLinks(current);
         const stat = await fs.stat(current).catch((error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') return null;
           throw error;
         });
         if ((stat?.size ?? 0) + Buffer.byteLength(line) > MAX_BYTES) {
+          setStage('rotate');
           await assertNoLinks(previous);
           await fs.unlink(previous).catch((error: NodeJS.ErrnoException) => {
             if (error.code !== 'ENOENT') throw error;
           });
           if (stat) await fs.rename(current, previous);
         }
+        setStage('open');
         const handle = await fs.open(current, 'a', 0o600);
         try {
+          setStage('write');
           await handle.writeFile(line, 'utf8');
+          setStage('sync');
           await handle.sync();
           stored = true;
+        } catch (error) {
+          failureStage = writeStage;
+          throw error;
         } finally {
-          await handle.close();
+          setStage('close');
+          await handle.close().catch((error: unknown) => {
+            failureStage = 'close';
+            throw error;
+          });
+        }
+        // Only this accepted write can clear its timeout. A later I/O failure
+        // remains latched, and no timed-out write is automatically retried.
+        if (this.stalledWrite === writeToken) {
+          this.stalledWrite = undefined;
+          this.recoveries = Math.min(Number.MAX_SAFE_INTEGER, this.recoveries + 1);
         }
       })
-      .catch(() => {
-        this.unavailable = true;
+      .catch((error: unknown) => {
+        this.storageFailed = true;
+        this.stalledWrite = undefined;
+        this.lastFailure = {
+          reason: 'io-error',
+          stage: failureStage ?? writeStage,
+          errorCode: diagnosticErrorCode(error),
+        };
       })
       .finally(() => {
         this.pending--;
+        this.stage = 'idle';
       });
     this.queue = work;
     // A broken diagnostics disk must not indefinitely block a save on another disk.
@@ -174,7 +256,11 @@ export class PersistenceDiagnostics {
           timeout = setTimeout(resolve, 1500);
         }),
       ]);
-      if (!stored) this.unavailable = true;
+      if (!stored && !this.storageFailed) {
+        this.stalledWrite = writeToken;
+        this.stalls = Math.min(Number.MAX_SAFE_INTEGER, this.stalls + 1);
+        this.lastFailure = { reason: 'timeout', stage: writeStage };
+      }
       return stored;
     } finally {
       clearTimeout(timeout);
