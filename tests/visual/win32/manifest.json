@@ -16,12 +16,12 @@
     "backdrop-collapsed.png"
   ],
   "devicePixelRatio": 1,
-  "reviewedAt": "2026-09-09",
+  "reviewedAt": "2026-09-22",
   "platform": "win32",
-  "sourceRevision": "64c65e137cd68a0c17f4b5b74a921b7351580ac6",
-  "electron": "39.8.10",
-  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/34327235444",
-  "environment": "GitHub Actions windows-latest, packaged Electron 39.8.10 at 1x scale; all seven changed captures and their difference images individually reviewed. Four light workspaces and three light onboarding scenes adopt stronger graphite ink, surfaces, borders, and the light scrim. Existing adaptive toolbar layout is preserved. Seven dark/settings/backdrop captures retained within the unchanged strict tolerance. Native verification passed.",
+  "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+  "electron": "44.2.0",
+  "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. The eleven captures from this update were reviewed individually with their highlighted differences. They reflect Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Other captures remain unchanged. Strict comparison tolerance is unchanged; packaged native verification passed.",
   "captureUpdates": {
     "1440x900-settings.png": {
       "reviewedAt": "2026-09-21",
@@ -148,6 +148,105 @@
       "platform": "win32",
       "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
       "devicePixelRatio": 1
+    },
+    "1280x800-workspace-dark": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1280x800-workspace-light": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1440x900-settings": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-dark": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1440x900-workspace-light": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1920x1080-workspace-dark": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "1920x1080-workspace-light": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "3440x1440-workspace-dark": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "3440x1440-workspace-light": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "backdrop-collapsed": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
+    },
+    "backdrop-workspace": {
+      "reviewedAt": "2026-09-22",
+      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
+      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
     }
   }
 }

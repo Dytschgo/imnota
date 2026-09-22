@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, FolderOpen, Heart, PanelLeft, Plus, Search, Sparkles } from 'lucide-react';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Button, IconButton } from '../components/ui';
+import { collectionDisplayName } from '../collection/collection-display-name';
 import { useAppStore, type AppView } from '../store';
 import { SideNav } from './SideNav';
 
@@ -129,8 +130,17 @@ export function AppShell({
             {store.snapshot && store.view !== 'settings' && (
               <>
                 <span className="crumb-separator">/</span>
-                <span className="crumb-current" title={activeCollection?.name}>
-                  {activeCollection?.name ?? 'Collection'}
+                <span
+                  className="crumb-current"
+                  title={
+                    activeCollection
+                      ? collectionDisplayName(activeCollection.name, store.snapshot!.projectPath)
+                      : undefined
+                  }
+                >
+                  {activeCollection
+                    ? collectionDisplayName(activeCollection.name, store.snapshot!.projectPath)
+                    : 'Collection'}
                 </span>
                 {saveState && (
                   <span className={`save-state ${saveState}`} data-testid="save-state" role="status">
