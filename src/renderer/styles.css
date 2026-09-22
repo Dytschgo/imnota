@@ -299,14 +299,14 @@ button.icon-button.new-collection-button {
   width: 24px;
   height: 24px;
   min-height: 24px;
-  border: 1px solid color-mix(in srgb, var(--success) 55%, transparent);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success);
+  background: transparent;
+  color: var(--ink-2);
 }
 .new-collection-button:hover:not(:disabled) {
-  border-color: var(--success);
-  background: color-mix(in srgb, var(--success) 26%, transparent);
+  border-color: var(--line-strong);
+  background: var(--surface-2);
   color: var(--ink);
 }
 button.icon-button.new-collection-button svg {

@@ -52,7 +52,7 @@ const PRIMARY_TOOLS: ToolDefinition[] = [
   {
     id: 'select',
     label: 'Select / Move',
-    description: 'Move annotations or drag empty canvas space to pan.',
+    description: 'Move annotations. Hold the middle mouse button and drag to pan the canvas.',
     icon: MousePointer2,
   },
   {
@@ -631,7 +631,6 @@ export function Toolbar({
 
       <div className="toolbar-divider" />
       <div className="tool-group annotation-view-tools" aria-label="View">
-        <span className="toolbar-group-label">View</span>
         {onCapture && (
           <div className="capture-delay" ref={captureDelayRef}>
             <IconButton
