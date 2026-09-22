@@ -58,7 +58,7 @@ export interface ShortcutPreferences {
   bindings: ShortcutBindings;
 }
 
-/** Kept opt-in until native Windows and macOS capture verification is complete. */
+/** Region capture is available by default on new Windows/macOS profiles; saved values remain per-profile. */
 export interface CapturePreferences {
   experimentalRegionCapture: boolean;
 }
@@ -123,7 +123,7 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     `  stdio: { "imnota": { "command": "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}", "args": ["--mcp"] } }`,
     'Tell me which file you changed. Do not ask me to paste configuration.',
     '',
-    'Requirements: Imnota must be running with "Allow local agent access" enabled in Settings → Workspace; otherwise the connection is refused. Nothing is uploaded and no hosted model is called.',
+    'Requirements: Imnota must be running with "Allow local agent access" enabled in Settings → Features; otherwise the connection is refused. Nothing is uploaded and no hosted model is called.',
     '',
     'Tools the server exposes (all read-only):',
     '- list_projects: active projects in the selected workspace (path, name, updated time).',
@@ -223,7 +223,7 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
 export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
 export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
-export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = { includeRecognisedText: true };
+export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = { includeRecognisedText: false };
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,

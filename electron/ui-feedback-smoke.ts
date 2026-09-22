@@ -480,6 +480,7 @@ export async function exerciseUiFeedback(
   await driver.evaluate(`document.querySelector('#diagnostics-title')?.scrollIntoView({ block: 'center' })`);
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'workspace-local-diagnostics.png'));
+  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
   await driver.resize({ width: 1080, height: 800 });
   await captureAgentAccess(driver, artifactDirectory, captures, 'agent-access-setup-prompt.png');

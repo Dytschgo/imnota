@@ -112,14 +112,13 @@ async function enableExperimentalCapture(
 ): Promise<NativeUiDriver> {
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.waitFor({ selector: '[data-testid="settings-view"]' });
-  await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
+  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
   const captureEnabled = await driver.evaluate<boolean>(`(() => {
-    const checkbox = document.querySelector('#capture-settings-title + label input[type="checkbox"]');
+    const checkbox = document.querySelector('[aria-label="Enable screen capture"]');
     if (!(checkbox instanceof HTMLInputElement)) throw new Error('Capture preference checkbox is missing.');
     return checkbox.checked;
   })()`);
-  if (!captureEnabled)
-    await driver.click({ selector: '#capture-settings-title + label input[type="checkbox"]' });
+  if (!captureEnabled) await driver.click({ selector: '[aria-label="Enable screen capture"]' });
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = async () => {

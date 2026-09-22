@@ -4,7 +4,7 @@ Optional, off by default. When enabled, any MCP-capable coding agent can read pr
 
 ## Turn it on
 
-1. Open **Settings → Workspace**.
+1. Open **Settings → Features**.
 2. Enable **Allow local agent access**.
 3. Choose **Copy prompt** and paste the setup prompt into your agent. The prompt names the server, both transports, and the tool list, and instructs the agent to write its own MCP configuration and report which file it changed. A **Configuration reference** disclosure holds generic `mcpServers` entries for HTTP and stdio if you prefer to edit the file yourself.
 4. Keep Imnota running, or spawn the Imnota executable with `--mcp` for stdio.

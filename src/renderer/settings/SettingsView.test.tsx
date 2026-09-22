@@ -28,9 +28,9 @@ describe('SettingsView category navigation', () => {
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('keeps local agent access off until the workspace toggle is enabled', () => {
+  it('keeps beta MCP access off until its feature toggle is enabled', () => {
     const onAgentAccessChange = vi.fn();
-    render(<SettingsView activeCategory="Workspace" onAgentAccessChange={onAgentAccessChange} />);
+    render(<SettingsView activeCategory="Features" onAgentAccessChange={onAgentAccessChange} />);
     const toggle = screen.getByTestId('agent-access-toggle');
     expect(toggle).not.toBeChecked();
     expect(screen.getByText('Allow local agent access')).toBeInTheDocument();
@@ -42,8 +42,8 @@ describe('SettingsView category navigation', () => {
   it('offers one agent-agnostic MCP setup prompt instead of editor-specific snippets', async () => {
     const copyText = vi.fn(async () => {});
     window.imnota = { copyText } as unknown as typeof window.imnota;
-    render(<SettingsView activeCategory="Workspace" />);
-    const section = screen.getByRole('region', { name: 'Local agent access' });
+    render(<SettingsView activeCategory="Features" />);
+    const section = screen.getByRole('region', { name: 'MCP access Beta' });
     expect(section).not.toHaveTextContent(/Claude|Cursor/);
     const prompt = screen.getByTestId('agent-access-prompt').textContent ?? '';
     expect(prompt).toContain('http://127.0.0.1:17384/mcp');

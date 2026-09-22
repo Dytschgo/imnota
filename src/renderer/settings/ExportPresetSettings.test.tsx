@@ -31,7 +31,7 @@ describe('export presets', () => {
             id: expect.any(String),
             name: 'Mac review',
             defaultFunction: 'rich',
-            includeRecognisedText: true,
+            includeRecognisedText: false,
           },
         ],
       }),
