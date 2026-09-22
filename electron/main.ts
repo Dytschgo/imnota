@@ -346,23 +346,29 @@ function resolvedWindowBackground(
 }
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await diagnostics.filesystem('write', filePath, () => writeAtomically(filePath, content));
+  await diagnostics.filesystem('write', filePath, async () => {
+    await writeAtomically(filePath, content);
+    projectWatchManager?.recordSelfWrite(filePath, content);
+  });
   projectSearchService?.invalidateForPath(filePath);
-  projectWatchManager?.recordSelfWrite(filePath, content);
   contentSearch.invalidatePath(filePath);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
-  await diagnostics.filesystem('copy', targetPath, () => fs.copyFile(filePath, targetPath));
+  await diagnostics.filesystem('copy', targetPath, async () => {
+    await fs.copyFile(filePath, targetPath);
+    projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
+  });
   projectSearchService?.invalidateForPath(targetPath);
-  projectWatchManager?.recordSelfWrite(targetPath, await fs.readFile(targetPath));
   contentSearch.invalidatePath(targetPath);
 }
 
 async function unlinkTracked(filePath: string): Promise<void> {
-  await diagnostics.filesystem('unlink', filePath, () => fs.unlink(filePath));
+  await diagnostics.filesystem('unlink', filePath, async () => {
+    await fs.unlink(filePath);
+    projectWatchManager?.recordSelfDelete(filePath);
+  });
   projectSearchService?.invalidateForPath(filePath);
-  projectWatchManager?.recordSelfDelete(filePath);
   contentSearch.invalidatePath(filePath);
 }
 
