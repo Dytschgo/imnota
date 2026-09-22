@@ -118,8 +118,7 @@ async function enableExperimentalCapture(
     if (!(checkbox instanceof HTMLInputElement)) throw new Error('Capture preference checkbox is missing.');
     return checkbox.checked;
   })()`);
-  if (!captureEnabled)
-    await driver.click({ selector: '[aria-label="Enable screen capture"]' });
+  if (!captureEnabled) await driver.click({ selector: '[aria-label="Enable screen capture"]' });
   await driver.evaluate(`new Promise((resolve, reject) => {
     const started = Date.now();
     const check = async () => {
