@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectWatchEvent } from '../src/shared/workflow-bridge.js';
 import { emptyProject } from '../src/shared/utils.js';
-import { ignoredProjectWatchPath, ProjectWatchManager } from './project-watch.js';
+import { ignoredProjectWatchPath, ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -72,6 +72,109 @@ describe('project file watch and compare-and-swap', () => {
     expect(events[0]).toMatchObject({ kind: 'external-change', changedPaths: ['project.json'] });
     manager.stopAll();
   });
+
+  it.each(['latest bytes', 'stale bytes'] as const)(
+    'does not misclassify a self write that advances during a read returning %s',
+    async (readResult) => {
+      const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-watch-race-')));
+      temporary.push(projectPath);
+      const projectFile = path.join(projectPath, 'project.json');
+      await fs.writeFile(projectFile, JSON.stringify(emptyProject('Watch', '')));
+      const callbacks: Array<{ run: () => void; timer: ReturnType<typeof setTimeout> }> = [];
+      let listener: (eventType: string, filename: string | Buffer | null) => void = () => undefined;
+      let releaseRead!: () => void;
+      const readGate = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      let readStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        readStarted = resolve;
+      });
+      let firstReadCompleted!: () => void;
+      const firstRead = new Promise<void>((resolve) => {
+        firstReadCompleted = resolve;
+      });
+      let secondReadCompleted!: () => void;
+      const secondRead = new Promise<void>((resolve) => {
+        secondReadCompleted = resolve;
+      });
+      let reads = 0;
+      let first = '';
+      const events: ProjectWatchEvent[] = [];
+      const project = emptyProject('Watch', '');
+      const manager = new ProjectWatchManager({
+        randomId: () => 'race-watch',
+        createWatch: (_target, callback) => {
+          listener = callback;
+          return { close: vi.fn(), on: vi.fn() };
+        },
+        readWatchedFile: async (filePath) => {
+          reads++;
+          if (reads === 1) {
+            readStarted();
+            await readGate;
+          }
+          const source =
+            reads === 1 && readResult === 'stale bytes'
+              ? Buffer.from(first)
+              : await fs.readFile(filePath).catch(() => null);
+          if (reads === 1) firstReadCompleted();
+          if (reads === 2) secondReadCompleted();
+          return source;
+        },
+        schedule: (run) => {
+          const timer = setTimeout(() => undefined, 60_000);
+          callbacks.push({ run, timer });
+          return timer;
+        },
+        cancelSchedule: (timer) => clearTimeout(timer),
+        loadSnapshot: async () => ({ projectPath, project, thumbnails: {}, recoveryFound: false }),
+        saveProject: async () => ({ projectPath, project, thumbnails: {}, recoveryFound: false }),
+        emit: (event) => events.push(event),
+      });
+      await manager.start(projectPath);
+      first = JSON.stringify({ revision: 'first self write' });
+      await fs.writeFile(projectFile, first);
+      manager.recordSelfWrite(projectFile, first);
+      listener('change', 'project.json');
+      const firstFlush = callbacks.shift()!;
+      clearTimeout(firstFlush.timer);
+      firstFlush.run();
+      await started;
+
+      const second = JSON.stringify({ revision: 'second self write' });
+      await fs.writeFile(projectFile, second);
+      manager.recordSelfWrite(projectFile, second);
+      releaseRead();
+      await firstRead;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (readResult === 'stale bytes') {
+        const recheck = callbacks.shift();
+        expect(recheck).toBeDefined();
+        clearTimeout(recheck!.timer);
+        recheck!.run();
+        await secondRead;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(events).toEqual([]);
+
+      const external = JSON.stringify({ revision: 'external edit' });
+      await fs.writeFile(projectFile, external);
+      listener('change', 'project.json');
+      const externalFlush = callbacks.shift()!;
+      clearTimeout(externalFlush.timer);
+      externalFlush.run();
+      await vi.waitFor(() =>
+        expect(events.filter((event) => event.kind === 'external-change')).toHaveLength(1),
+      );
+      expect(events[0]).toMatchObject({
+        kind: 'external-change',
+        projectRevision: projectRevisionForSource(external),
+        changedPaths: ['project.json'],
+      });
+      manager.stopAll();
+    },
+  );
 
   it('rejects stale CAS and returns a fresh revision after a successful save', async () => {
     const { manager, projectPath, projectFile, project } = await fixture();
