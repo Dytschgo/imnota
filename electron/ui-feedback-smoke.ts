@@ -3,7 +3,36 @@ import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 import { agentAccessSetupPrompt } from '../src/shared/preferences.js';
+import type { ImnotaBridge, ProjectSnapshot } from '../src/shared/types.js';
 import type { NativeUiDriver, SmokeCapture } from './smoke-native-driver.js';
+
+type FeedbackFixtureMethod =
+  | 'createProject'
+  | 'pasteImage'
+  | 'loadScreenshotContent'
+  | 'saveScreenshotContent'
+  | 'createContentItem'
+  | 'loadContentItem'
+  | 'saveContentItem'
+  | 'editCollection';
+
+async function feedbackFixtureStep<Method extends FeedbackFixtureMethod>(
+  driver: NativeUiDriver,
+  step: string,
+  method: Method,
+  args: Parameters<ImnotaBridge[Method]>,
+): Promise<Awaited<ReturnType<ImnotaBridge[Method]>>> {
+  // Each native operation keeps the driver's normal deadline. The outer smoke
+  // process still bounds the complete walkthrough, including this fixture.
+  try {
+    return await driver.evaluate<Awaited<ReturnType<ImnotaBridge[Method]>>>(
+      `window.imnota[${JSON.stringify(method)}](...${JSON.stringify(args)})`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Feedback fixture ${step} failed: ${message}`, { cause: error });
+  }
+}
 
 async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
   // Reopening clears the previous query/results in an effect. That changes the
@@ -123,33 +152,120 @@ export async function exerciseUiFeedback(
   const minimumWindowSize = driver.browserWindow.getMinimumSize();
   const image = nativeImage.createFromBitmap(Buffer.alloc(64 * 64 * 4, 180), { width: 64, height: 64 });
   await nativeClipboard.writeImage(image);
-  const fixture = await driver.evaluate<{
-    projectPath: string;
-    projectId: string;
-    itemId: string;
-  }>(`(async () => {
-    let snapshot = await window.imnota.createProject({name:'Feedback Verification',description:'Local UI checks',icon:'rocket'});
-    const projectPath = snapshot.projectPath;
-    snapshot = await window.imnota.pasteImage(projectPath, snapshot.project.collections[0].id);
-    const screenshot = snapshot.project.screenshots[0];
-    const content = await window.imnota.loadScreenshotContent({projectPath,screenshot});
-    await window.imnota.saveScreenshotContent({projectPath,screenshot,contentRevision:content.contentRevision,
-      annotations:[{id:'feedback-search-note',kind:'text',x:900,y:600,width:180,height:70,text:'quartzannotationprobe',fontSize:20,fill:'#ef4444',zIndex:0}]});
-    snapshot = await window.imnota.createContentItem({projectPath,collectionId:screenshot.collectionId,kind:'text'});
-    const item = snapshot.project.contentItems.find(item => item.kind === 'text');
-    const text = await window.imnota.loadContentItem({projectPath,itemId:item.id});
-    await window.imnota.saveContentItem({projectPath,itemId:item.id,contentRevision:text.contentRevision,
-      markdown:'# Search fixture\\n\\n' + 'Ordinary content. '.repeat(600) + '\\nquartzmarkdownprobe'});
-    const additional = await window.imnota.editCollection({projectPath,action:'create'});
-    const archived = additional.project.collections.find(collection => collection.id !== screenshot.collectionId);
-    if (!archived) throw new Error('Archived collection fixture was not created.');
-    await window.imnota.editCollection({projectPath,action:'rename',collectionId:archived.id,name:'Archived feedback'});
-    await window.imnota.editCollection({projectPath,action:'archive',collectionId:archived.id});
-    await window.imnota.editCollection({projectPath,action:'restore',collectionId:screenshot.collectionId});
-    await window.imnota.editCollection({projectPath,action:'rename',collectionId:screenshot.collectionId,
-      name:'Current feedback collection with a deliberately long name'});
-    return {projectPath,projectId:snapshot.project.id,itemId:item.id};
-  })()`);
+  const created = await feedbackFixtureStep(driver, 'create project', 'createProject', [
+    { name: 'Feedback Verification', description: 'Local UI checks', icon: 'rocket' },
+  ]);
+  const projectPath = created.projectPath;
+  const collection = created.project.collections[0];
+  if (!projectPath || !created.project.id || created.project.name !== 'Feedback Verification' || !collection)
+    throw new Error('Feedback fixture create project returned an unexpected project or no collection.');
+  const verifyProject = (snapshot: ProjectSnapshot, step: string): void => {
+    if (snapshot.projectPath !== projectPath || snapshot.project.id !== created.project.id)
+      throw new Error(`Feedback fixture ${step} returned a different project.`);
+  };
+  const pasted = await feedbackFixtureStep(driver, 'paste screenshot', 'pasteImage', [
+    projectPath,
+    collection.id,
+  ]);
+  verifyProject(pasted, 'paste screenshot');
+  const screenshot = pasted.project.screenshots[0];
+  if (!screenshot || screenshot.collectionId !== collection.id)
+    throw new Error('Feedback fixture paste screenshot did not populate the expected collection.');
+  const content = await feedbackFixtureStep(driver, 'load screenshot', 'loadScreenshotContent', [
+    { projectPath, screenshot },
+  ]);
+  const savedScreenshot = await feedbackFixtureStep(driver, 'save annotation', 'saveScreenshotContent', [
+    {
+      projectPath,
+      screenshot,
+      contentRevision: content.contentRevision,
+      annotations: [
+        {
+          id: 'feedback-search-note',
+          kind: 'text',
+          x: 900,
+          y: 600,
+          width: 180,
+          height: 70,
+          text: 'quartzannotationprobe',
+          fontSize: 20,
+          fill: '#ef4444',
+          zIndex: 0,
+        },
+      ],
+    },
+  ]);
+  if (
+    savedScreenshot.savedScreenshotId !== screenshot.id ||
+    savedScreenshot.conflictCreated ||
+    savedScreenshot.project.id !== created.project.id
+  )
+    throw new Error(
+      'Feedback fixture save annotation did not save the expected screenshot without a conflict.',
+    );
+  const withText = await feedbackFixtureStep(driver, 'create text item', 'createContentItem', [
+    { projectPath, collectionId: collection.id, kind: 'text' },
+  ]);
+  verifyProject(withText, 'create text item');
+  const item = withText.project.contentItems?.find((candidate) => candidate.kind === 'text');
+  if (!item || item.collectionId !== collection.id)
+    throw new Error('Feedback fixture create text item did not populate the expected collection.');
+  const text = await feedbackFixtureStep(driver, 'load text item', 'loadContentItem', [
+    { projectPath, itemId: item.id },
+  ]);
+  if (text.item.id !== item.id || text.item.kind !== 'text')
+    throw new Error('Feedback fixture load text item returned a different item.');
+  const savedText = await feedbackFixtureStep(driver, 'save markdown', 'saveContentItem', [
+    {
+      projectPath,
+      itemId: item.id,
+      contentRevision: text.contentRevision,
+      markdown: '# Search fixture\n\n' + 'Ordinary content. '.repeat(600) + '\nquartzmarkdownprobe',
+    },
+  ]);
+  verifyProject(savedText.snapshot, 'save markdown');
+  if (savedText.itemId !== item.id || savedText.conflictCreated)
+    throw new Error('Feedback fixture save markdown did not save the expected item without a conflict.');
+  const additional = await feedbackFixtureStep(driver, 'create second collection', 'editCollection', [
+    { projectPath, action: 'create' },
+  ]);
+  verifyProject(additional, 'create second collection');
+  const archived = additional.project.collections.find((candidate) => candidate.id !== collection.id);
+  if (!archived) throw new Error('Feedback fixture create second collection did not create a collection.');
+  const renamed = await feedbackFixtureStep(driver, 'rename second collection', 'editCollection', [
+    { projectPath, action: 'rename', collectionId: archived.id, name: 'Archived feedback' },
+  ]);
+  verifyProject(renamed, 'rename second collection');
+  if (
+    renamed.project.collections.find((candidate) => candidate.id === archived.id)?.name !==
+    'Archived feedback'
+  )
+    throw new Error('Feedback fixture rename second collection did not retain its name.');
+  const archivedSnapshot = await feedbackFixtureStep(driver, 'archive second collection', 'editCollection', [
+    { projectPath, action: 'archive', collectionId: archived.id },
+  ]);
+  verifyProject(archivedSnapshot, 'archive second collection');
+  if (
+    archivedSnapshot.project.collections.find((candidate) => candidate.id === archived.id)?.archived !== true
+  )
+    throw new Error('Feedback fixture archive second collection did not retain its archived state.');
+  const restored = await feedbackFixtureStep(driver, 'restore current collection', 'editCollection', [
+    { projectPath, action: 'restore', collectionId: collection.id },
+  ]);
+  verifyProject(restored, 'restore current collection');
+  if (restored.project.collections.find((candidate) => candidate.id === collection.id)?.archived !== false)
+    throw new Error('Feedback fixture restore current collection did not retain its active state.');
+  const currentName = 'Current feedback collection with a deliberately long name';
+  const finalSnapshot = await feedbackFixtureStep(driver, 'rename current collection', 'editCollection', [
+    { projectPath, action: 'rename', collectionId: collection.id, name: currentName },
+  ]);
+  verifyProject(finalSnapshot, 'rename current collection');
+  if (
+    finalSnapshot.project.collections.find((candidate) => candidate.id === collection.id)?.name !==
+    currentName
+  )
+    throw new Error('Feedback fixture rename current collection did not retain its name.');
+  const fixture = { projectPath, projectId: created.project.id, itemId: item.id };
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
   await driver.click({ selector: '.project-row-main', text: 'Feedback Verification' });
