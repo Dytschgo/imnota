@@ -1740,6 +1740,7 @@ async function exerciseSharingPreferences(
   })()`);
   // Saving selects the new preset through the real UI. OS select popups do not
   // consistently receive webContents input; component tests cover selection changes.
+  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
   await driver.click({ selector: '[aria-label="Include recognised text in Markdown"]' });
   await driver.evaluate(`(async () => {
     const deadline = Date.now() + 10000;
@@ -1751,6 +1752,7 @@ async function exerciseSharingPreferences(
     throw new Error('Recognised-text option did not change before applying the preset.');
   })()`);
   await driver.waitFor({ selector: '[aria-label="Include recognised text in Markdown"]:not(:disabled)' });
+  await driver.click({ selector: '.settings-navigation button', text: 'Sharing', exact: true });
   await driver.click({ text: 'Apply preset', exact: true });
   await driver.waitFor({ selector: '[aria-label="New export preset name"]:not(:disabled)' });
   const applied = await driver.evaluate<boolean>(`(async () => {
