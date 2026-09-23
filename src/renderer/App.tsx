@@ -1931,6 +1931,9 @@ export default function App() {
           <SettingsView
             activeCategory={settingsCategory}
             onCategoryChange={setSettingsCategory}
+            onExitSettings={() =>
+              navigationStack.back.length > 1 ? void restoreNavigation('back') : void navigate('projects')
+            }
             preferences={preferences.settings}
             effectiveAppearance={appearance}
             savingPreferences={preferences.saving}

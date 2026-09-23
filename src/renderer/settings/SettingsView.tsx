@@ -1,4 +1,4 @@
-import { Copy, FolderOpen } from 'lucide-react';
+import { ArrowLeft, Copy, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -43,9 +43,20 @@ export const SETTINGS_CATEGORIES = [
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
+const CATEGORY_ICONS = {
+  Appearance: Monitor,
+  Shortcuts: Keyboard,
+  Features: Grid2X2,
+  Workspace: FolderOpen,
+  Sharing: Users,
+  'Backups & history': History,
+  'Updates & about': Info,
+} as const;
+
 export interface SettingsViewProps {
   activeCategory?: SettingsCategory;
   onCategoryChange?(category: SettingsCategory): void;
+  onExitSettings?(): void;
   preferences?: PreferenceSettings;
   effectiveAppearance?: EffectiveAppearance;
   savingPreferences?: boolean;
@@ -77,6 +88,7 @@ export interface SettingsViewProps {
 export function SettingsView({
   activeCategory,
   onCategoryChange,
+  onExitSettings = () => undefined,
   preferences = DEFAULT_PREFERENCE_SETTINGS,
   effectiveAppearance = {
     theme: 'dark',
@@ -121,6 +133,7 @@ export function SettingsView({
   const captureShortcutNote = captureShortcut
     ? describeCommonShortcut(captureShortcut, shortcutPlatform)
     : null;
+  const PageIcon = CATEGORY_ICONS[group];
   const selectCategory = (category: SettingsCategory) => {
     if (activeCategory === undefined) setUncontrolledCategory(category);
     onCategoryChange?.(category);
@@ -134,26 +147,64 @@ export function SettingsView({
     }
   };
   return (
-    <section className="settings-view" data-testid="settings-view">
-      <div className="settings-heading">
-        <h1>Settings</h1>
-        <p>
-          Control the app, workspace, shortcuts, and sharing defaults without moving project files out of your
-          local workspace.
-        </p>
-      </div>
+    <section className="settings-view" data-testid="settings-view" data-settings-category={group}>
       <nav className="settings-navigation" aria-label="Settings categories">
-        {SETTINGS_CATEGORIES.map((name) => (
+        <div className="settings-navigation-title">
+          <h1>Settings</h1>
           <button
-            key={name}
             type="button"
-            aria-current={group === name ? 'page' : undefined}
-            onClick={() => selectCategory(name)}
+            className="settings-exit"
+            aria-label="Back to workspace"
+            title="Back to workspace"
+            onClick={onExitSettings}
           >
-            {name}
+            <ArrowLeft size={15} aria-hidden="true" />
           </button>
-        ))}
+        </div>
+        {SETTINGS_CATEGORIES.map((name) => {
+          const Icon = CATEGORY_ICONS[name];
+          return (
+            <button
+              key={name}
+              type="button"
+              aria-current={group === name ? 'page' : undefined}
+              onClick={() => selectCategory(name)}
+            >
+              <Icon size={16} aria-hidden="true" />
+              <span>{name}</span>
+            </button>
+          );
+        })}
       </nav>
+      <header className="settings-page-heading">
+        <div>
+          <div className="settings-page-title">
+            <h2>{group}</h2>
+            <PageIcon size={17} aria-hidden="true" />
+          </div>
+          {group === 'Features' && <p>Enable or disable features for this device.</p>}
+          {group === 'Appearance' && (
+            <p>Choose how Imnota looks on this device. Exports keep their neutral white background.</p>
+          )}
+          {group === 'Workspace' && (
+            <p>Control where Imnota keeps its local files and view local diagnostics.</p>
+          )}
+          {group === 'Sharing' && (
+            <p>
+              Manage export presets, your display name, and shared links. Everything stays on this device.
+            </p>
+          )}
+          {group === 'Backups & history' && (
+            <p>
+              Keep validated project snapshots on this device. Exports and recovery caches are not duplicated.
+            </p>
+          )}
+          {group === 'Updates & about' && (
+            <p>Keep Imnota up to date, learn what’s new, and find helpful resources.</p>
+          )}
+          {group === 'Shortcuts' && <p>Change keyboard actions while keeping mouse controls available.</p>}
+        </div>
+      </header>
       {(preferenceError || legacyError) && (
         <p className="settings-error" role="alert">
           {preferenceError || legacyError}
@@ -171,6 +222,7 @@ export function SettingsView({
             }
             effectiveAppearance={effectiveAppearance}
             disabled={savingPreferences}
+            showHeading={false}
           />
         </div>
         <div hidden={group !== 'Shortcuts'}>

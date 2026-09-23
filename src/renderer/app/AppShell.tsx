@@ -70,7 +70,7 @@ export function AppShell({
   return (
     <div
       ref={shellRef}
-      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''} ${store.navigationOpen ? '' : 'navigation-hidden'}`}
+      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''} ${store.navigationOpen ? '' : 'navigation-hidden'} ${store.view === 'settings' ? 'settings-focused' : ''}`}
       data-testid="app-shell"
       onDragOver={(event) => {
         if (store.snapshot && onDropFiles) event.preventDefault();
