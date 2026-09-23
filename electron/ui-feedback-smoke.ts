@@ -159,6 +159,35 @@ export async function exerciseUiFeedback(
   const collection = created.project.collections[0];
   if (!projectPath || !created.project.id || created.project.name !== 'Feedback Verification' || !collection)
     throw new Error('Feedback fixture create project returned an unexpected project or no collection.');
+  if (!collection.name.endsWith(' / Collection 01'))
+    throw new Error('Generated collection fixture did not include its workspace prefix.');
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
+  await driver.click({ selector: '.project-row-main', text: 'Feedback Verification' });
+  await driver.waitFor({ selector: '[data-testid="workspace"]' });
+  await driver.waitFor({ selector: '.crumb-current', text: 'Collection 01', exact: true });
+  await driver.waitFor({
+    selector: '#quick-access-collections .side-nav-collection.active[title="Collection 01"]',
+  });
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.waitFor({ selector: '[role="menuitemradio"]', text: 'Collection 01', exact: true });
+  const generatedLabels = await driver.evaluate<boolean>(`(() => {
+    const picker = document.querySelector('[data-testid="collection-picker"]');
+    const recent = document.querySelector('#quick-access-collections .side-nav-collection.active');
+    return picker?.textContent.trim() === 'Collection 01' &&
+      recent?.getAttribute('title') === 'Collection 01' &&
+      recent.querySelector('.side-nav-collection-name')?.textContent.trim() === 'Collection 01';
+  })()`);
+  if (!generatedLabels) throw new Error('Generated collection labels still expose the workspace prefix.');
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-generated-collection-name.png'));
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
+  const persistedName = await driver.evaluate<string>(`(async () => {
+    const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+    return snapshot.project.collections.find(entry => entry.id === ${JSON.stringify(collection.id)}).name;
+  })()`);
+  if (persistedName !== collection.name) throw new Error('Displaying a collection changed its stored name.');
   const verifyProject = (snapshot: ProjectSnapshot, step: string): void => {
     if (snapshot.projectPath !== projectPath || snapshot.project.id !== created.project.id)
       throw new Error(`Feedback fixture ${step} returned a different project.`);

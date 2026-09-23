@@ -281,6 +281,62 @@ describe('feedback controls', () => {
     expect(loadProject).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'uses workspace labels consistently with an unvisited archived collision: %s',
+    async (collision) => {
+      const current = structuredClone(snapshot);
+      current.projectPath = 'C:/Work/Imnota/imnota-feedback';
+      current.project.name = 'Imnota Feedback';
+      current.project.favourite = true;
+      current.project.collections[0]!.name = 'Imnota / Collection 01';
+      if (collision)
+        current.project.collections.push({
+          ...current.project.collections[0]!,
+          id: 'archived',
+          name: 'Collection 01',
+          archived: true,
+        });
+      const label = collision ? 'Imnota / Collection 01' : 'Collection 01';
+      const original = structuredClone(current.project);
+      useAppStore.setState({
+        recentCollections: [
+          {
+            projectPath: current.projectPath,
+            collectionId: '001-collection',
+            openedAt: '2026-01-01',
+          },
+        ],
+      });
+      renderApp({
+        listProjects: async () => [{ ...current.project, projectPath: current.projectPath }],
+        loadProject: async () => current,
+      });
+      await screen.findByTestId('library-full-search');
+      act(() => useAppStore.getState().setProject(current));
+      expect(document.querySelector('.crumb-current')).toHaveTextContent(label);
+      expect(screen.getByTestId('collection-picker')).toHaveTextContent(label);
+      const recent = within(document.getElementById('quick-access-collections')!);
+      expect(recent.getByRole('button', { name: /Imnota Feedback/ })).toHaveAttribute('title', label);
+      const favourites = within(document.getElementById('favourite-projects')!);
+      expect(favourites.getByRole('button', { name: label })).toHaveAttribute('title', label);
+      fireEvent.click(screen.getByTestId('collection-picker'));
+      expect(
+        within(screen.getByRole('menu', { name: 'Collections' })).getByRole('menuitemradio', {
+          name: label,
+        }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitem', { name: `Rename ${label}` }));
+      expect(screen.getByDisplayValue('Imnota / Collection 01')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+      await screen.findByRole('heading', { name: 'Recent collections' });
+      const row = document.querySelector('.library .project-row')!;
+      expect(row.querySelector('strong')).toHaveTextContent(label);
+      expect(row).toHaveAttribute('title', label);
+      expect(current.project).toEqual(original);
+    },
+  );
+
   it('opens a collection from the full Recent page and records only a successful visit', async () => {
     const second = { ...snapshot.project.collections[0], id: 'second', name: 'Review two' };
     const project = { ...snapshot.project, collections: [...snapshot.project.collections, second] };

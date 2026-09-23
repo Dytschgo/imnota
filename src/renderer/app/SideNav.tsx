@@ -270,12 +270,7 @@ export function SideNav({
                     title={collectionDisplayName(
                       collection.name,
                       collection.projectPath,
-                      recentCollections
-                        .filter(
-                          (other) =>
-                            other.projectPath === collection.projectPath && other.id !== collection.id,
-                        )
-                        .map((other) => other.name),
+                      collection.otherCollectionNames,
                     )}
                     onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
                   >
@@ -283,12 +278,7 @@ export function SideNav({
                       {collectionDisplayName(
                         collection.name,
                         collection.projectPath,
-                        recentCollections
-                          .filter(
-                            (other) =>
-                              other.projectPath === collection.projectPath && other.id !== collection.id,
-                          )
-                          .map((other) => other.name),
+                        collection.otherCollectionNames,
                       )}
                     </span>
                     <small>
@@ -399,7 +389,7 @@ export function SideNav({
                               title={collectionDisplayName(
                                 collection.name,
                                 project.projectPath,
-                                openCollections
+                                project.collections
                                   .filter((other) => other.id !== collection.id)
                                   .map((other) => other.name),
                               )}
@@ -409,7 +399,7 @@ export function SideNav({
                                 {collectionDisplayName(
                                   collection.name,
                                   project.projectPath,
-                                  openCollections
+                                  project.collections
                                     .filter((other) => other.id !== collection.id)
                                     .map((other) => other.name),
                                 )}

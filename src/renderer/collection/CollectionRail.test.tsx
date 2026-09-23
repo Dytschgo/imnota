@@ -469,6 +469,7 @@ describe('CollectionRail', () => {
   });
   it('keeps collection picker actions distinct when a shortened name would collide', async () => {
     const snapshot = projectSnapshot();
+    snapshot.projectPath = '/work/project/feedback';
     snapshot.project.collections[0]!.name = 'project / Collection 01';
     snapshot.project.collections[1]!.name = 'Collection 01';
     useAppStore.setState({ snapshot });
