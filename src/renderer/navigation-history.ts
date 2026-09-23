@@ -121,6 +121,9 @@ export function resolveRecentCollections(projects: ProjectListItem[], history: R
             ...entry,
             id: collection.id,
             name: collection.name,
+            otherCollectionNames: project.collections
+              .filter((other) => other.id !== collection.id)
+              .map((other) => other.name),
             projectName: project.name,
             icon: project.icon,
           },

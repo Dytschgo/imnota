@@ -6,6 +6,8 @@ Imnota turns screenshots, Markdown text blocks and drawings in one collection in
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.
 
+Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent, Favourites and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
+
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
 - Creating a newer collection archives the previous one. Archived collections remain available in the chooser and can be restored. Each row of the chooser carries a status icon (outlined while active, filled once archived) and its own rename and archive or restore buttons.
