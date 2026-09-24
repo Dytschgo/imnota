@@ -1,6 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
+import { waitForStableCanvasSample } from './stable-canvas.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -706,23 +707,42 @@ async function exerciseThumbnailMemoryFixtures(
   }
 }
 
-async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
-  return driver.evaluate<CanvasGeometry>(`(() => {
+async function sampleCanvasGeometry(
+  driver: NativeUiDriver,
+  expectedScreenshot?: { id: string; width: number; height: number },
+): Promise<CanvasGeometry | null> {
+  const expectedSelector = expectedScreenshot
+    ? `.shot-item.active [data-testid="screenshot-${expectedScreenshot.id}"]`
+    : null;
+  return driver.evaluate<CanvasGeometry | null>(`(() => {
     const wrap = document.querySelector('[data-testid="annotation-canvas"], .canvas-wrap');
     const stage = document.querySelector('.konvajs-content');
-    if (!wrap || !stage) throw new Error('Annotation canvas geometry is unavailable');
+    if (!wrap || !stage) return null;
+    const expectedSelector = ${JSON.stringify(expectedSelector)};
+    if (expectedSelector && !document.querySelector(expectedSelector)) return null;
     const bounds = stage.getBoundingClientRect();
     const scale = Number(wrap.dataset.imageScale);
     const x = bounds.x + Number(wrap.dataset.imageX) + Number(wrap.dataset.sourceX ?? 0) * scale;
     const y = bounds.y + Number(wrap.dataset.imageY) + Number(wrap.dataset.sourceY ?? 0) * scale;
     const meta = document.querySelector('.canvas-meta > span:first-child')?.textContent ?? '';
     const dimensions = meta.match(/(\\d+)\\s*[×x]\\s*(\\d+)/);
-    if (!dimensions || !Number.isFinite(scale)) throw new Error('Canvas dimensions are unavailable');
+    if (!dimensions || !Number.isFinite(scale) || scale <= 0 || bounds.width <= 0 || bounds.height <= 0)
+      return null;
+    const expectedWidth = ${expectedScreenshot?.width ?? 'null'};
+    const expectedHeight = ${expectedScreenshot?.height ?? 'null'};
+    if (expectedWidth !== null && (Number(dimensions[1]) !== expectedWidth || Number(dimensions[2]) !== expectedHeight))
+      return null;
     return {
       stage: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
       image: { x, y, width: Number(wrap.dataset.sourceWidth ?? dimensions[1]) * scale, height: Number(wrap.dataset.sourceHeight ?? dimensions[2]) * scale, scale }
     };
   })()`);
+}
+
+async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
+  const geometry = await sampleCanvasGeometry(driver);
+  if (!geometry) throw new Error('Annotation canvas geometry is unavailable');
+  return geometry;
 }
 
 const ANNOTATION_TOOL_TEST_IDS: Record<string, string> = {
@@ -747,19 +767,11 @@ async function selectTool(driver: NativeUiDriver, label: string): Promise<void> 
   await driver.click(tool);
 }
 
-async function waitForStableCanvas(driver: NativeUiDriver): Promise<void> {
-  let previous = '';
-  let unchangedSince = Date.now();
-  const started = Date.now();
-  while (Date.now() - started < 10_000) {
-    const current = JSON.stringify(await canvasGeometry(driver));
-    if (current !== previous) {
-      previous = current;
-      unchangedSince = Date.now();
-    } else if (Date.now() - unchangedSince >= 400) return;
-    await delay(50);
-  }
-  throw new Error('Canvas layout did not settle before native interaction.');
+async function waitForStableCanvas(
+  driver: NativeUiDriver,
+  expectedScreenshot?: { id: string; width: number; height: number },
+): Promise<void> {
+  await waitForStableCanvasSample(() => sampleCanvasGeometry(driver, expectedScreenshot), delay);
 }
 
 async function exerciseNativeCanvas(
@@ -1528,7 +1540,11 @@ async function exercisePreferencesAndChannel(
     await driver.waitFor({ selector: '.workspace' });
     await waitForScreenshotCanvas();
     await driver.resize(SMOKE_VIEWPORTS[0]);
-    await waitForStableCanvas(driver);
+    await waitForStableCanvas(driver, {
+      id: screenshot.id,
+      width: screenshot.originalWidth,
+      height: screenshot.originalHeight,
+    });
     await driver.evaluate(`(() => {
       for (const panel of document.querySelectorAll('.sidebar, .topbar, .shot-rail, .inspector')) {
         if (getComputedStyle(panel).backgroundImage !== 'none')
