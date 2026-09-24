@@ -19,11 +19,13 @@ afterEach(async () => {
 });
 
 describe('capture insertion transaction', () => {
-  it('writes image, sidecars, and metadata together through the capture journal', async () => {
+  it('restores an archived collection with its captured image in one commit', async () => {
     const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-')));
     fixtures.push(directory);
-    const projectBefore = Buffer.from('{"screenshots":[]}');
-    const projectAfter = Buffer.from('{"screenshots":["capture"]}');
+    const projectBefore = Buffer.from('{"collections":[{"id":"001","archived":true}],"screenshots":[]}');
+    const projectAfter = Buffer.from(
+      '{"collections":[{"id":"001","archived":false}],"screenshots":["capture"]}',
+    );
     await atomicWrite(path.join(directory, 'project.json'), projectBefore);
     const staged = await stageScreenshotTransaction(directory, {
       kind: 'capture',
@@ -55,6 +57,43 @@ describe('capture insertion transaction', () => {
       fs.readFile(path.join(directory, 'collections/001/screenshots/capture.png')),
     ).resolves.toEqual(Buffer.from('png'));
     await expect(fs.readFile(path.join(directory, 'project.json'))).resolves.toEqual(projectAfter);
+  });
+
+  it('leaves the collection archived when captured-image metadata cannot commit', async () => {
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-capture-')));
+    fixtures.push(directory);
+    const metadataPath = path.join(directory, 'project.json');
+    const projectBefore = Buffer.from('{"collections":[{"id":"001","archived":true}],"screenshots":[]}');
+    const projectAfter = Buffer.from(
+      '{"collections":[{"id":"001","archived":false}],"screenshots":["capture"]}',
+    );
+    await atomicWrite(metadataPath, projectBefore);
+    const staged = await stageScreenshotTransaction(directory, {
+      kind: 'capture',
+      writes: [
+        {
+          relativePath: 'collections/001/screenshots/capture.png',
+          after: Buffer.from('png'),
+          expectedBefore: screenshotTransactionBaseline(null),
+        },
+        {
+          relativePath: 'project.json',
+          after: projectAfter,
+          expectedBefore: screenshotTransactionBaseline(projectBefore),
+        },
+      ],
+    });
+    await expect(
+      commitScreenshotTransaction(directory, staged.token, {
+        write: async (target, contents) => {
+          if (target === metadataPath) throw new Error('metadata write failed');
+          await atomicWrite(target, contents);
+        },
+        unlink: (target) => fs.unlink(target),
+        removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+      }),
+    ).rejects.toThrow('metadata write failed');
+    await expect(fs.readFile(metadataPath)).resolves.toEqual(projectBefore);
   });
 
   it('does not stage files or rewrite project metadata when admission is revoked during baseline read', async () => {
