@@ -23,6 +23,10 @@ export async function exerciseNextFeatures(
     captures.push(await driver.capture(artifactDirectory, filename));
   };
   await driver.resize({ width: 1280, height: 800 });
+  if (await driver.exists({ selector: '.settings-view' }))
+    await driver.click({ selector: '[aria-label="Back to workspace"]' });
+  await driver.waitFor({ selector: '.settings-view' }, { absent: true });
+  await driver.waitFor({ selector: '.workspace, .library' });
   await driver.click({ selector: '.nav-item', text: 'Projects', exact: true });
   await driver.click({ selector: '[data-testid="new-project-button"]' });
   await driver.fill({ selector: '[data-testid="project-name-input"]' }, 'Feature verification');
@@ -120,7 +124,7 @@ export async function captureNextFeatureLightViews(
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Backups & history', exact: true });
   await driver.waitFor({ selector: '[aria-label="Project snapshots"][aria-busy="false"]' });
-  await driver.evaluate('document.querySelector(".settings-view").scrollTop = 0');
+  await driver.evaluate('document.querySelector(".settings-view > .settings-grid").scrollTop = 0');
   await capture('next-history-light.png');
   await driver.click({ selector: '.imnota-history-row', text: 'Mixed Content Verification' });
   await driver.waitFor({
@@ -129,6 +133,7 @@ export async function captureNextFeatureLightViews(
     exact: true,
   });
   await capture('next-history-detail-light.png');
+  await driver.click({ selector: '[aria-label="Back to workspace"]' });
   await driver.click({ selector: '.nav-item', text: 'Projects', exact: true });
   await driver.fill({ selector: '[aria-label="Search projects"]' }, 'orbital lantern');
   await driver.waitFor({ selector: '.content-search-result', text: 'Feature verification' });

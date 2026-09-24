@@ -40,6 +40,24 @@
   background: color-mix(in srgb, var(--surface) 66%, var(--bg));
 }
 
+.platform-mac.settings-focused .settings-navigation {
+  padding-top: 64px;
+}
+
+.platform-mac.settings-focused .settings-navigation::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 48px;
+  content: '';
+  -webkit-app-region: drag;
+}
+
+.platform-mac.settings-focused .settings-navigation button {
+  -webkit-app-region: no-drag;
+}
+
 .settings-navigation-title {
   display: flex;
   align-items: center;
@@ -345,6 +363,10 @@
     padding: 8px 12px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .platform-mac.settings-focused .settings-navigation {
+    padding-top: 56px;
   }
 
   .settings-navigation-title {

@@ -477,7 +477,7 @@ export async function exerciseUiFeedback(
 
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
-  await driver.click({ selector: '.topbar [aria-label="Back"]' });
+  await driver.click({ selector: '[aria-label="Back to workspace"]' });
   await driver.waitFor({ selector: '[data-image-scale]' });
   await driver.click({ selector: '.topbar [aria-label="Forward"]' });
   await driver.waitFor({
@@ -485,7 +485,7 @@ export async function exerciseUiFeedback(
     text: 'Shortcuts',
     exact: true,
   });
-  await driver.click({ selector: '.topbar [aria-label="Back"]' });
+  await driver.click({ selector: '[aria-label="Back to workspace"]' });
   await driver.waitFor({ selector: '[data-image-scale]' });
 
   // Exercise the same revision-protected contracts used by project row actions.
@@ -624,7 +624,7 @@ export async function exerciseUiFeedback(
   await driver.evaluate(`(() => {
     const navigation=document.querySelector('.settings-navigation');
     if(['sticky','fixed'].includes(getComputedStyle(navigation).position)) throw new Error('Settings categories still stick to the viewport.');
-    document.querySelector('.settings-view').scrollTop=0;
+    document.querySelector('.settings-view > .settings-grid').scrollTop=0;
   })()`);
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'feedback-light-backdrop.png'));

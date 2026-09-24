@@ -445,7 +445,7 @@ export default function App() {
       itemId: current.activeScreenshotId,
       search: current.search,
       settingsCategory: current.view === 'settings' ? settingsCategory : undefined,
-      scrollTop: document.querySelector<HTMLElement>('.library, [data-testid="settings-view"], .workspace')
+      scrollTop: document.querySelector<HTMLElement>('.library, .settings-view > .settings-grid, .workspace')
         ?.scrollTop,
     };
   }, [settingsCategory]);
@@ -738,7 +738,7 @@ export default function App() {
         if (target.scrollTop !== undefined)
           window.requestAnimationFrame(() => {
             const container = document.querySelector<HTMLElement>(
-              '.library, [data-testid="settings-view"], .workspace',
+              '.library, .settings-view > .settings-grid, .workspace',
             );
             if (container) container.scrollTop = target.scrollTop!;
           });

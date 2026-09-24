@@ -191,7 +191,8 @@ export function SettingsView({
           )}
           {group === 'Sharing' && (
             <p>
-              Manage export presets, your display name, and shared links. Everything stays on this device.
+              Manage export presets, your display name, and shared links. Shared links are created only when
+              you choose to share.
             </p>
           )}
           {group === 'Backups & history' && (
