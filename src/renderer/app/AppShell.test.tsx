@@ -189,11 +189,13 @@ describe('AppShell navigation', () => {
     fireEvent.click(disclosure);
     expect(document.getElementById('quick-access-collections')).toHaveAttribute('hidden');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    expect(screen.queryByRole('button', { name: 'Recent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Favourites/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand quick access' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View all recent' }));
     expect(onNavigate).toHaveBeenCalledWith('recent');
     expect(onOpenCollection).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expand quick access' }));
     fireEvent.click(
       within(document.getElementById('quick-access-collections')!).getByRole('button', {
         name: /Latest review/,

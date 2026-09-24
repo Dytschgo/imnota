@@ -109,8 +109,7 @@
 }
 
 .side-nav-collection.active {
-  border-left-color: var(--imnota-accent);
-  background: var(--imnota-accent-soft);
+  background: var(--surface-2);
   color: var(--ink);
   font-weight: 650;
 }
@@ -193,14 +192,13 @@
   text-align: left;
 }
 
-.side-nav-project-button:hover:not(:disabled),
-.side-nav-project.active-project .side-nav-project-button {
+.side-nav-project-button:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--ink);
 }
 
 .side-nav-project.active-project .side-nav-project-button {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--imnota-accent) 55%, transparent);
+  color: var(--ink);
 }
 
 .side-nav-project-row .nav-disclosure {

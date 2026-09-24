@@ -21,62 +21,8 @@
   "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
   "electron": "44.2.0",
   "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Recent navigation and drawing changes are documented in their capture entries. Four compact workspace captures record removal of the View caption; two backdrop captures record the consolidated drawing toolbar. Other captures remain unchanged. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
+  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. Thirteen captures now show the simplified primary navigation and neutral quick collection selection; wide workspace captures also record the inherited View-caption removal from PR124. The collapsed backdrop capture remains unchanged. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
-    "1440x900-settings.png": {
-      "reviewedAt": "2026-09-23",
-      "sourceRevision": "b06421f5b857c1fbb4e4b89496ba0cfbc17a4eec",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35785000618",
-      "review": "Candidate and highlighted difference inspected. The Features category appears between Shortcuts and Workspace; all seven category labels fit with the existing Appearance content aligned. The active Settings control has its intended neutral surface. Packaged Windows native verification passed in this run; its visual comparison failed solely on this expected Settings change. Strict tolerance is unchanged."
-    },
-    "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "3440x1440-workspace-light.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "3440x1440-workspace-dark.png": {
-      "reviewedAt": "2026-09-16",
-      "sourceRevision": "fec3ddbe484b52acf75d500c3e9ced31dae462f1",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35125889010",
-      "review": "Baseline, candidate and highlighted pixel differences reviewed. The collection action now reads Add screenshot with a separate menu chevron. All four workspace sizes in both themes and both backdrop states preserve the surrounding layout; minor dark toolbar edge rasterization is unchanged in function. Packaged native smoke passed. Strict comparison tolerance is unchanged."
-    },
-    "1280x800-onboarding-copy.png": {
-      "reviewedAt": "2026-09-22",
-      "electron": "44.2.0",
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
-      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
-      "platform": "win32",
-      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
-      "devicePixelRatio": 1
-    },
     "backdrop-collapsed.png": {
       "reviewedAt": "2026-09-21",
       "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
@@ -85,33 +31,6 @@
       "devicePixelRatio": 1,
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
       "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
-    },
-    "backdrop-workspace.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "d7bbaabe9bae6796e27d1ca2e48f6462ecd7422c",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35633205335",
-      "review": "Packaged candidate and highlighted differences individually reviewed. Settings, About and update controls form a compact icon row; the active Settings underline remains visible. Surrounding workspace and settings content remain intact. Wider workspace captures also incorporate the existing capture toolbar spacing. Packaged native verification passed. Strict comparison tolerance is unchanged."
-    },
-    "1280x800-onboarding-intro.png": {
-      "reviewedAt": "2026-09-22",
-      "electron": "44.2.0",
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
-      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
-      "platform": "win32",
-      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
-      "devicePixelRatio": 1
-    },
-    "1280x800-onboarding-annotate.png": {
-      "reviewedAt": "2026-09-22",
-      "electron": "44.2.0",
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35666734920",
-      "sourceRevision": "f124e11f61b5c3cbe97a9da5e1aebe1e0180dda9",
-      "platform": "win32",
-      "review": "Packaged runner capture and highlighted difference individually reviewed. The compact stepper, annotation tools, preview and copy split button remain visible without clipping. Copy fallbacks are hidden before the first attempt as intended. Only the three redesigned onboarding baselines change; eleven other captures pass unchanged. This source run stopped later at an outdated bundle fallback selector; full native acceptance requires the follow-up run. Strict tolerance is unchanged.",
-      "devicePixelRatio": 1
     },
     "1280x800-workspace-dark": {
       "reviewedAt": "2026-09-22",
@@ -212,41 +131,122 @@
       "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35782465670",
       "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
     },
-    "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+    "1280x800-onboarding-annotate.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
+    },
+    "1280x800-onboarding-copy.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
+    },
+    "1280x800-onboarding-intro.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
     },
     "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
     },
-    "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+    "1280x800-workspace-light.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+    },
+    "1440x900-settings.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Settings categories and Appearance content remain aligned and unchanged."
     },
     "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-      "review": "Packaged Windows candidate and highlighted difference individually reviewed. Removing the View caption consolidates drawing and canvas controls into one row in compact workspace sizes; selection, drawing controls, screenshot, and inspector remain visible. Packaged native walkthrough passed; strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+    },
+    "1440x900-workspace-light.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+    },
+    "1920x1080-workspace-dark.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+    },
+    "1920x1080-workspace-light.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+    },
+    "3440x1440-workspace-dark.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+    },
+    "3440x1440-workspace-light.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+    },
+    "backdrop-workspace.png": {
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
+      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Bundled backdrop and drawing controls are unchanged."
     }
   }
 }
