@@ -52,7 +52,7 @@ const project: ProjectListItem = {
 };
 
 describe('capture destination', () => {
-  it('uses the current collection when it is still a live collection', () => {
+  it('uses the current collection, including an archived collection restored by a successful capture', () => {
     expect(currentCaptureDestination(snapshot, '001-collection')).toEqual({
       projectPath: '/workspace/project',
       collectionId: '001-collection',
@@ -66,7 +66,7 @@ describe('capture destination', () => {
         },
         '001-collection',
       ),
-    ).toBeNull();
+    ).toEqual({ projectPath: '/workspace/project', collectionId: '001-collection' });
   });
 
   it('restores the last-used current collection and otherwise lists remaining choices', () => {
@@ -94,12 +94,12 @@ describe('capture destination', () => {
         { ...snapshot, project: { ...snapshot.project, collections: [archived, other] } },
         'archived',
       ) ?? lastUsedCurrentDestination(projects, recents),
-    ).toEqual({ projectPath: snapshot.projectPath, collectionId: '002-collection' });
+    ).toEqual({ projectPath: snapshot.projectPath, collectionId: 'archived' });
     expect(
       captureDestinationChoices(projects, [], {
         ...snapshot,
         project: { ...snapshot.project, collections: [archived, other] },
       }).map((choice) => choice.collectionId),
-    ).toEqual(['002-collection']);
+    ).toEqual(['archived', '002-collection']);
   });
 });

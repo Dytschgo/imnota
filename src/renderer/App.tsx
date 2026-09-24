@@ -811,25 +811,60 @@ export default function App() {
   async function importPaths(paths: string[]) {
     const current = useAppStore.getState();
     if (!current.snapshot || !paths.length) return;
+    const identity = navigationIdentity.current;
+    const projectPath = current.snapshot.projectPath;
+    const collectionId = current.activeCollectionId;
+    const isCurrentProject = () =>
+      identity === navigationIdentity.current && useAppStore.getState().snapshot?.projectPath === projectPath;
+    const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
     const nativeMutationToken = await beginCurrentProjectMutation();
     if (nativeMutationToken === null) return;
+    if (!isCurrentProject()) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      return;
+    }
     try {
-      const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
       const snapshot = await window.imnota.importImageFiles({
-        projectPath: current.snapshot.projectPath,
-        collectionId: current.activeCollectionId,
+        projectPath,
+        collectionId,
         paths,
       });
       const newest = snapshot.project.screenshots
-        .filter((shot) => shot.collectionId === current.activeCollectionId && !existingIds.has(shot.id))
+        .filter((shot) => shot.collectionId === collectionId && !existingIds.has(shot.id))
         .sort((left, right) => left.position - right.position)
         .at(-1);
       if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id, nativeMutationToken))) return;
       await refreshProjects();
       showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
     } catch (reason) {
+      const importError = reason instanceof Error ? reason.message : 'The screenshots could not be imported.';
+      let partialImport = false;
+      if (isCurrentProject()) {
+        try {
+          const reloaded = await window.imnota.loadProject(projectPath);
+          if (
+            isCurrentProject() &&
+            reloaded.projectPath === projectPath &&
+            reloaded.project.screenshots.some((shot) => !existingIds.has(shot.id))
+          ) {
+            partialImport = await persistence.adoptAuthoritativeSnapshot(
+              reloaded,
+              nativeMutationToken,
+              isCurrentProject,
+            );
+            if (partialImport && isCurrentProject()) await refreshProjects();
+          }
+        } catch {
+          // The native import error is still the actionable failure if recovery cannot reload.
+        }
+      }
       await persistence.cancelNativeMutation(nativeMutationToken);
-      setError(reason instanceof Error ? reason.message : 'The screenshots could not be imported.');
+      if (isCurrentProject())
+        setError(
+          partialImport
+            ? `${importError} Some screenshots were added before the import stopped.`
+            : importError,
+        );
     }
   }
   async function pasteImage() {
@@ -902,8 +937,8 @@ export default function App() {
     }
     const snapshot = useAppStore.getState().snapshot;
     const collection = snapshot?.project.collections.find((item) => item.id === destination.collectionId);
-    if (!snapshot || snapshot.projectPath !== destination.projectPath || !collection || collection.archived) {
-      setError('Choose a current collection before capturing.');
+    if (!snapshot || snapshot.projectPath !== destination.projectPath || !collection) {
+      setError('Choose a collection before capturing.');
       return false;
     }
     if (useAppStore.getState().activeCollectionId !== destination.collectionId)
@@ -1007,8 +1042,7 @@ export default function App() {
           afterSnapshot.projectPath !== target.projectPath ||
           afterSnapshot.project.id !== target.projectId ||
           afterFlush.activeCollectionId !== target.collectionId ||
-          !activeCollection ||
-          activeCollection.archived
+          !activeCollection
         ) {
           await persistence.cancelNativeMutation(nativeMutationToken);
           nativeMutationToken = null;
@@ -1049,8 +1083,7 @@ export default function App() {
           chosenSnapshot.projectPath !== target.projectPath ||
           chosenSnapshot.project.id !== target.projectId ||
           afterChoice.activeCollectionId !== target.collectionId ||
-          !chosenCollection ||
-          chosenCollection.archived
+          !chosenCollection
         )
           return;
         nativeMutationToken = await beginCurrentProjectMutation();
@@ -1066,8 +1099,7 @@ export default function App() {
           afterSnapshot.projectPath !== target.projectPath ||
           afterSnapshot.project.id !== target.projectId ||
           afterFlush.activeCollectionId !== target.collectionId ||
-          !activeCollection ||
-          activeCollection.archived
+          !activeCollection
         ) {
           await persistence.cancelNativeMutation(nativeMutationToken);
           nativeMutationToken = null;
@@ -1695,12 +1727,12 @@ export default function App() {
   const captureEnabled =
     preferences.settings.capture.experimentalRegionCapture &&
     platform !== 'linux' &&
-    Boolean(activeCaptureCollection && !activeCaptureCollection.archived);
+    Boolean(activeCaptureCollection);
   const captureDisabledLabel =
     platform === 'linux'
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
-      : !activeCaptureCollection || activeCaptureCollection.archived
-        ? 'Choose a current collection before capturing'
+      : !activeCaptureCollection
+        ? 'Choose a collection before capturing'
         : 'Screen capture is off — enable it in Settings → Features';
   const orderedShots = useMemo(
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),

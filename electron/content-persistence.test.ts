@@ -63,6 +63,56 @@ async function fixture(beforeSchemaMigration?: (projectPath: string, project: Pr
 }
 
 describe('native mixed content persistence', () => {
+  it.each(['text', 'drawing'] as const)(
+    'restores an archived collection only when a %s creation commits',
+    async (kind) => {
+      const { projectPath, project, service, snapshot } = await fixture();
+      project.collections[0]!.archived = true;
+      const projectFile = path.join(projectPath, 'project.json');
+      await fs.writeFile(projectFile, JSON.stringify(project, null, 2));
+      const created = await service.create({ projectPath, collectionId: '001-collection', kind });
+      expect(created.project.collections[0]?.archived).toBe(false);
+      expect((await snapshot(projectPath)).project.collections[0]?.archived).toBe(false);
+
+      const archived = (await snapshot(projectPath)).project;
+      archived.collections[0]!.archived = true;
+      await fs.writeFile(projectFile, JSON.stringify(archived, null, 2));
+      const duplicated = await service.duplicate({
+        projectPath,
+        itemId: created.project.contentItems![0]!.id,
+      });
+      expect(duplicated.project.collections[0]?.archived).toBe(false);
+      expect(duplicated.project.contentItems).toHaveLength(2);
+      expect((await snapshot(projectPath)).project.collections[0]?.archived).toBe(false);
+    },
+  );
+
+  it('keeps an archived collection archived when creation cannot commit its project metadata', async () => {
+    const { projectPath, project, snapshot } = await fixture();
+    project.collections[0]!.archived = true;
+    const projectFile = path.join(projectPath, 'project.json');
+    await fs.writeFile(projectFile, JSON.stringify(project, null, 2));
+    const before = await fs.readFile(projectFile);
+    const failing = new ContentPersistenceService({
+      snapshot,
+      trashItem: (target) => fs.unlink(target),
+      transactionOperations: {
+        write: async (target, bytes) => {
+          if (target === projectFile) throw new Error('metadata write failed');
+          await atomicWrite(target, bytes);
+        },
+        unlink: (target) => fs.unlink(target),
+        removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+      },
+    });
+    await expect(
+      failing.create({ projectPath, collectionId: '001-collection', kind: 'text' }),
+    ).rejects.toThrow('metadata write failed');
+    expect(await fs.readFile(projectFile)).toEqual(before);
+    expect((await snapshot(projectPath)).project.collections[0]?.archived).toBe(true);
+    expect((await snapshot(projectPath)).project.contentItems ?? []).toHaveLength(0);
+  });
+
   it('preserves unexpected journal files and rejects a restored receipt without commit images', async () => {
     const { projectPath, service, snapshot } = await fixture();
     const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });

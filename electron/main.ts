@@ -892,7 +892,7 @@ async function importOne(
   const collection = project.collections.find(
     (item) => item.id === (collectionId ?? project.collections.find((candidate) => !candidate.archived)?.id),
   );
-  if (!collection || collection.archived) throw new Error('Choose a current collection before importing.');
+  if (!collection) throw new Error('Choose a collection before importing.');
   await ensureCollection(projectPath, collection.id);
   const storedFilename = await uniqueStoredName(projectPath, originalFilename);
   await atomicWrite(
@@ -921,6 +921,7 @@ async function importOne(
   await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
   await atomicWrite(path.join(projectPath, added.descriptionFile), '');
   project.updatedAt = timestamp;
+  collection.archived = false;
   await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));
 }
 
@@ -1349,10 +1350,10 @@ async function insertCapturedPng(
   );
   const project = baseline.project;
   const collection = project.collections.find((candidate) => candidate.id === collectionId);
-  if (!collection || collection.archived)
+  if (!collection)
     throw new NativeWorkflowError(
       'collection-not-found',
-      'The active collection is no longer available. Choose a current collection and try again.',
+      'The active collection is no longer available. Choose a collection and try again.',
     );
   await ensureCollection(projectPath, collection.id);
   assertAdmission();
@@ -1380,6 +1381,7 @@ async function insertCapturedPng(
     includeInExport: true,
   };
   project.screenshots.push(screenshot);
+  collection.archived = false;
   project.updatedAt = timestamp;
   const savedProject = validateProject(project);
   const projectSource = Buffer.from(JSON.stringify(savedProject, null, 2));
@@ -2267,11 +2269,8 @@ function registerIpc(): void {
       safeProjectPath = await assertProjectPath(input.projectPath);
       const beforeCapture = await readProjectMetadata(safeProjectPath);
       const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-      if (!beforeCollection || beforeCollection.archived)
-        throw new NativeWorkflowError(
-          'collection-not-found',
-          'Choose a current collection before capturing.',
-        );
+      if (!beforeCollection)
+        throw new NativeWorkflowError('collection-not-found', 'Choose a collection before capturing.');
     }
     // The renderer flushes before it invokes this workflow and rechecks its
     // project/collection identity. Recheck the originating renderer here as
@@ -2472,8 +2471,8 @@ function registerIpc(): void {
     const safeProjectPath = await assertProjectPath(input.projectPath);
     const beforeCapture = await readProjectMetadata(safeProjectPath);
     const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-    if (!beforeCollection || beforeCollection.archived)
-      throw new NativeWorkflowError('collection-not-found', 'Choose a current collection before capturing.');
+    if (!beforeCollection)
+      throw new NativeWorkflowError('collection-not-found', 'Choose a collection before capturing.');
     assertLiveCaptureAdmission(event, admission);
     const resolved = lastCaptureRegionMemory.resolve(screen.getAllDisplays());
     if (!resolved.ok)
@@ -3108,6 +3107,8 @@ function registerIpc(): void {
     const project = await readProject(safePath);
     const source = project.screenshots.find((s) => s.id === input.screenshot.id);
     if (!source) throw new Error('Screenshot not found.');
+    const collection = project.collections.find((item) => item.id === source.collectionId);
+    if (!collection) throw new Error('Screenshot collection not found.');
     const ext = path.extname(source.storedFilename);
     const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
     await assertNoLinks(screenshotPath(safePath, source));
@@ -3142,6 +3143,7 @@ function registerIpc(): void {
       descriptionFile: `collections/${source.collectionId}/descriptions/${name}.md`,
     });
     project.updatedAt = timestamp;
+    collection.archived = false;
     await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     return makeSnapshot(safePath);
   });
