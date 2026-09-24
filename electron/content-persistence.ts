@@ -435,8 +435,7 @@ export class ContentPersistenceService {
     filenameSchema.parse(input.collectionId);
     const baseline = await this.baseline(input.projectPath);
     const collection = baseline.project.collections.find((entry) => entry.id === input.collectionId);
-    if (!collection || collection.archived)
-      throw new Error('Choose a current collection before adding content.');
+    if (!collection) throw new Error('Choose a collection before adding content.');
     if (baseline.project.schemaVersion === 3)
       await this.dependencies.beforeSchemaMigration?.(input.projectPath, baseline.project);
     const identifier = `${input.kind}_${this.randomId()}`;
@@ -503,7 +502,17 @@ export class ContentPersistenceService {
       (baseline.project.contentItems ?? []).some((entry) => entry.id === item.id)
     )
       throw new Error('Content identifier collision. Try again.');
-    const next = withMixedInsertion({ ...baseline.project, updatedAt: timestamp }, item, input.afterItemId);
+    const next = withMixedInsertion(
+      {
+        ...baseline.project,
+        collections: baseline.project.collections.map((entry) =>
+          entry.id === collection.id ? { ...entry, archived: false } : entry,
+        ),
+        updatedAt: timestamp,
+      },
+      item,
+      input.afterItemId,
+    );
     const projectAfter = Buffer.from(JSON.stringify(next, null, 2));
     const backupPath = 'project.v3.backup.json';
     const writes = [...contentWrites];
@@ -787,7 +796,17 @@ export class ContentPersistenceService {
             createdAt: timestamp,
             updatedAt: timestamp,
           };
-    const next = withMixedInsertion({ ...baseline.project, updatedAt: timestamp }, duplicate, source.id);
+    const next = withMixedInsertion(
+      {
+        ...baseline.project,
+        collections: baseline.project.collections.map((entry) =>
+          entry.id === source.collectionId ? { ...entry, archived: false } : entry,
+        ),
+        updatedAt: timestamp,
+      },
+      duplicate,
+      source.id,
+    );
     const paths = contentItemRelativePaths(duplicate);
     const writes: ScreenshotTransactionWrite[] =
       duplicate.kind === 'drawing'

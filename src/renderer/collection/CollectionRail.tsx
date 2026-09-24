@@ -435,7 +435,6 @@ export function CollectionRail({
   const addMenuId = useId().replace(/:/g, '');
   const project = store.snapshot?.project;
   const shots = project ? orderedCollectionItems(project, store.activeCollectionId) : [];
-  const collection = project?.collections.find((item) => item.id === store.activeCollectionId);
   const captureIsPrimary = capturePrimary && captureEnabled && Boolean(onCapture);
   const addItemOptions: Array<{
     id: string;
@@ -717,14 +716,9 @@ export function CollectionRail({
                 <div className="add-item-primary">
                   <Button
                     variant="primary"
-                    disabled={collection?.archived || (captureIsPrimary && captureInProgress)}
+                    disabled={captureIsPrimary && captureInProgress}
                     busy={captureIsPrimary && captureInProgress}
                     data-testid="add-screenshot"
-                    title={
-                      collection?.archived
-                        ? 'Choose a current collection before adding screenshots'
-                        : undefined
-                    }
                     onClick={captureIsPrimary ? () => onCapture?.() : onImport}
                   >
                     {captureIsPrimary ? (
@@ -738,7 +732,6 @@ export function CollectionRail({
                     ref={addMenuTriggerRef}
                     data-testid="add-item-trigger"
                     variant="soft"
-                    disabled={collection?.archived}
                     aria-label="More ways to add"
                     aria-expanded={addMenuOpen}
                     aria-haspopup="menu"
@@ -765,7 +758,6 @@ export function CollectionRail({
                   ref={addMenuTriggerRef}
                   data-testid="add-item-trigger"
                   variant="primary"
-                  disabled={collection?.archived}
                   aria-expanded={addMenuOpen}
                   aria-haspopup="menu"
                   aria-controls={addMenuId}
@@ -848,7 +840,7 @@ export function CollectionRail({
                 </div>
               )}
             </div>
-            <Button variant="ghost" disabled={collection?.archived} onClick={() => void onPaste()}>
+            <Button variant="ghost" onClick={() => void onPaste()}>
               <Clipboard size={15} aria-hidden="true" />
               Paste from clipboard
             </Button>

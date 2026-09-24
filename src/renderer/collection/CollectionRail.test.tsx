@@ -540,9 +540,9 @@ describe('CollectionRail', () => {
     });
     expect(onSnapshot).toHaveBeenNthCalledWith(1, expect.any(Object), 'alpha');
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
-    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeDisabled();
-    expect(screen.getByTestId('add-item-trigger')).toBeDisabled();
-    expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeEnabled();
+    expect(screen.getByTestId('add-item-trigger')).toBeEnabled();
+    expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeEnabled();
 
     const restore = within(menu).getByRole('menuitem', { name: 'Restore Collection A' });
     restore.focus();
