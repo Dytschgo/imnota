@@ -1240,10 +1240,13 @@ async function excludeScreenshotThroughUi(
 async function captureWorkspaceMatrix(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
+  projectPath: string,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<void> {
   if (!artifactDirectory) return;
+  const screenshot = (await host.readProject(projectPath)).screenshots[0];
+  if (!screenshot) throw new Error('Workspace visual fixture has no screenshot.');
   for (const theme of ['light', 'dark'] as const) {
     if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
       await clickAny(driver, SMOKE_UI_CONTRACT.settings);
@@ -1278,6 +1281,23 @@ async function captureWorkspaceMatrix(
     driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      const check = () => {
+        const selected = document.querySelector(
+          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
+        );
+        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
+        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
+        const rendered = canvas?.querySelector('.konvajs-content canvas');
+        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
+            rendered?.width > 0 && rendered.height > 0) return resolve(true);
+        if (Date.now() >= deadline)
+          return reject(new Error('Workspace visual fixture did not render selected screenshot ${screenshot.id}.'));
+        requestAnimationFrame(check);
+      };
+      check();
+    })`);
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
       artifacts.push(
@@ -1849,7 +1869,7 @@ async function waitForNewPromptSet(
     if (added) return added;
     await delay(50);
   } while (Date.now() - started < timeoutMs);
-  throw new Error('Fresh prompt action did not publish a new export set.');
+  throw new Error('First prompt copy did not publish an export set.');
 }
 
 async function verifyPromptSet(projectPath: string, set: PromptSet, bundleCount: number): Promise<void> {
@@ -1931,7 +1951,7 @@ interface PromptWorkflowOptions {
   artifactDirectory?: string;
   artifacts: SmokeCapture[];
   expectedExcludedPicture?: number;
-  freshActions: number;
+  copyActions: number;
   requireSplit: boolean;
   verifyWindowsCopyVariants?: boolean;
 }
@@ -1995,6 +2015,34 @@ async function assertPromptRichClipboard(
   return { text, png: image.toPNG() };
 }
 
+async function waitForPromptCopyClipboard(
+  driver: NativeUiDriver,
+  set: PromptSet,
+  cardIndex: number,
+  variant: WindowsCopyVariantId,
+): Promise<void> {
+  const [markdownPath, pngPath] = await promptBundlePaths(set, cardIndex);
+  const expectedMarkdown = await fs.readFile(markdownPath, 'utf8');
+  const started = Date.now();
+  do {
+    if (process.platform === 'win32' && (variant === 'files' || variant === 'files-rich')) {
+      const files = await readWindowsClipboardFilesForSmoke(
+        driver.browserWindow.getNativeWindowHandle(),
+        `Waiting for Prompt ${promptCopyLabels[variant]}`,
+      );
+      const names = files.map((filePath) => path.basename(filePath).toLowerCase());
+      if (
+        names.length === 2 &&
+        names.includes(path.basename(markdownPath).toLowerCase()) &&
+        names.includes(path.basename(pngPath).toLowerCase())
+      )
+        return;
+    } else if ((await nativeClipboard.readText()) === expectedMarkdown) return;
+    await delay(50);
+  } while (Date.now() - started < 30_000);
+  throw new Error(`Prompt ${promptCopyLabels[variant]} did not place the selected bundle on the clipboard.`);
+}
+
 async function exercisePromptWorkflow(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
@@ -2031,14 +2079,14 @@ async function exercisePromptWorkflow(
     process.platform === 'win32' && options.verifyWindowsCopyVariants
       ? ['files', 'rich', 'files-rich']
       : process.platform === 'win32'
-        ? Array.from({ length: options.freshActions }, () => 'rich' as const)
+        ? Array.from({ length: options.copyActions }, () => 'rich' as const)
         : [];
   if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
     const defaultFunction = await selectedPromptCopyFunction(driver, copiedIndex);
     if (defaultFunction.label !== 'Copy files' || defaultFunction.preference !== 'files')
       throw new Error('Production prompt copy did not start with the persisted Copy files default.');
   }
-  const actionCount = Math.max(options.freshActions, windowsVariants.length);
+  const actionCount = Math.max(options.copyActions, windowsVariants.length);
   let latestSet: PromptSet | undefined;
   let latestRichClipboard: { text: string; png: Buffer } | undefined;
   let latestWindowsVariant: WindowsCopyVariantId | undefined;
@@ -2047,18 +2095,24 @@ async function exercisePromptWorkflow(
     if (process.platform === 'win32') latestWindowsVariant = variant;
     if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
       await choosePromptCopyFunction(driver, copiedIndex, variant);
+    await nativeClipboard.writeText(`Imnota smoke: waiting for prompt copy ${action + 1}`);
     await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
-    // A stress collection renders every native-resolution bundle twice (preflight and publication).
-    // Keep a bounded deadline proportional to work, rather than the small-fixture UI timeout.
-    latestSet = await waitForNewPromptSet(
-      host,
-      projectPath,
-      existingNames,
-      Math.max(30_000, cards.length * 3_000),
-    );
-    existingNames.add(latestSet.name);
+    if (action === 0) {
+      // The first copy prepares every native-resolution bundle. Later copies must reuse this set.
+      latestSet = await waitForNewPromptSet(
+        host,
+        projectPath,
+        existingNames,
+        Math.max(30_000, cards.length * 3_000),
+      );
+      existingNames.add(latestSet.name);
+    }
+    if (!latestSet) throw new Error('Prompt copy has no finalized export set.');
+    await waitForPromptCopyClipboard(driver, latestSet, copiedIndex, variant);
     await waitForPromptGrants(driver, cards.length);
-    await promptSets(host, projectPath);
+    const settledSets = await promptSets(host, projectPath);
+    if (settledSets.length !== existingNames.size || settledSets.some((set) => !existingNames.has(set.name)))
+      throw new Error('Repeated prompt copy generated another export set.');
     await verifyPromptSet(projectPath, latestSet, cards.length);
     if (process.platform === 'win32' && (variant === 'files' || variant === 'files-rich'))
       await assertPromptFileClipboard(driver, latestSet, copiedIndex, `Prompt ${promptCopyLabels[variant]}`);
@@ -2069,7 +2123,7 @@ async function exercisePromptWorkflow(
         `Prompt ${promptCopyLabels[variant]}`,
       );
   }
-  if (!latestSet) throw new Error('Prompt workflow did not execute a fresh action.');
+  if (!latestSet) throw new Error('Prompt workflow did not publish its first export set.');
   if (!latestRichClipboard)
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
   if (process.platform === 'win32') {
@@ -2545,7 +2599,7 @@ export async function runSmokeWorkflow(
     await installDeterministicExportAnnotations(driver, projectPath);
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
-  await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
+  await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
@@ -2559,7 +2613,7 @@ export async function runSmokeWorkflow(
     artifactDirectory,
     artifacts,
     expectedExcludedPicture: excludedPicture,
-    freshActions: 2,
+    copyActions: 2,
     requireSplit: true,
     verifyWindowsCopyVariants: true,
   });
@@ -2573,7 +2627,7 @@ export async function runSmokeWorkflow(
     ...promptMemory,
   });
   assertions.push(
-    'fresh collection prompt actions, complete PNG/Markdown grants, split layout, and exact Windows files/rich clipboard variants',
+    'first prompt copy publishes complete PNG/Markdown grants; repeat and Windows variants reuse the set with exact clipboard content',
   );
   await closePromptDialog(driver);
 
@@ -2596,7 +2650,7 @@ export async function runSmokeWorkflow(
       throw new Error('DPR 2 export fixture was not applied.');
     pixelPrompt = await exercisePromptWorkflow(driver, host, pixelFixture.projectPath, {
       artifacts,
-      freshActions: 1,
+      copyActions: 1,
       requireSplit: false,
     });
   } finally {
@@ -2680,7 +2734,7 @@ export async function runSmokeWorkflow(
         throw new Error('Stress reopen did not activate the latest 20-image fixture.');
       const promptRender = await exercisePromptWorkflow(driver, host, benchmark.projectPath, {
         artifacts,
-        freshActions: 1,
+        copyActions: 1,
         requireSplit: true,
       });
       const promptMemory = await memoryMegabytes(driver.browserWindow);
@@ -2708,7 +2762,7 @@ export async function runSmokeWorkflow(
       throw new Error('Stress reopen did not activate the latest 100-image fixture.');
     const stressPromptTiming = await exercisePromptWorkflow(driver, host, stressProject, {
       artifacts,
-      freshActions: 1,
+      copyActions: 1,
       requireSplit: true,
     });
     const stressMemory = await memoryMegabytes(driver.browserWindow);
@@ -2740,7 +2794,7 @@ export async function runSmokeWorkflow(
     const denseProfile = await profileMemoryDuring(driver.browserWindow, () =>
       exercisePromptWorkflow(driver, host, denseBenchmark.projectPath, {
         artifacts,
-        freshActions: 1,
+        copyActions: 1,
         requireSplit: true,
       }),
     );
