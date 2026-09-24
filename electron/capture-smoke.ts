@@ -334,11 +334,22 @@ export async function exerciseRegionCapture(
       if (!hud) throw new Error('Capture countdown did not become visible.');
       const hudDriver = new NativeUiDriver(hud);
       await hudDriver.waitFor({ selector: '.capture-countdown' });
+      const chip = await hudDriver.evaluate<{ text: string; accessible: string; clipped: boolean }>(`(() => {
+        const countdown = document.querySelector('.capture-countdown');
+        const number = countdown?.querySelector('[data-remaining]');
+        return {
+          text: countdown?.textContent.trim() ?? '',
+          accessible: countdown?.getAttribute('aria-label') ?? '',
+          clipped: !countdown || countdown.scrollWidth > countdown.clientWidth ||
+            countdown.scrollHeight > countdown.clientHeight || !number,
+        };
+      })()`);
+      if (!/^[0-5]$/.test(chip.text) || !chip.accessible.includes('Press Escape to cancel') || chip.clipped)
+        throw new Error(`Capture countdown chip is not a visible number: ${JSON.stringify(chip)}`);
       if (captureOverlayWindows(driver.browserWindow).length)
         throw new Error('Selection opened before the countdown elapsed.');
       if (cancel) {
-        if (seconds === 3) await hudDriver.click({ selector: '[data-action="cancel"]' });
-        else await hudDriver.press('Escape');
+        await hudDriver.press('Escape');
         await waitForClosed(hud, 'Cancelled countdown');
       } else {
         const selectedOverlay = await waitForCaptureOverlay(driver.browserWindow);

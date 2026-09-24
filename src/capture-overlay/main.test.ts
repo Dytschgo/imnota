@@ -126,9 +126,14 @@ it('shows a delay countdown without the region overlay', async () => {
   await import('./main');
   expect(document.querySelector('.capture-overlay')).toBeNull();
   countdownHandler!({ remainingSeconds: 3 });
-  expect(document.querySelector('[data-remaining]')!.textContent).toBe('3');
-  document.querySelector<HTMLButtonElement>('[data-action=cancel]')!.click();
-  expect(window.imnotaCapture.cancel).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('.capture-countdown')!.textContent).toBe('3');
+  expect(document.querySelector('.capture-countdown')).toHaveAttribute(
+    'aria-label',
+    'Capture in 3 seconds. Press Escape to cancel.',
+  );
+  const cancellations = vi.mocked(window.imnotaCapture.cancel).mock.calls.length;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  expect(vi.mocked(window.imnotaCapture.cancel).mock.calls.length).toBeGreaterThan(cancellations);
 });
 
 it('reports uncapped pointer-capture coordinates for a cross-monitor reverse drag', async () => {

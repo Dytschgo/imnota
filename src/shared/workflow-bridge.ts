@@ -211,6 +211,7 @@ export interface WorkflowBridge {
     crop?: { x: number; y: number; width: number; height: number };
   }): Promise<WorkflowResult<{ text: string }>>;
   listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
+  openCapturePermissionSettings(): Promise<WorkflowResult<void>>;
   startRegionCapture(input: {
     projectPath?: string;
     collectionId?: string;

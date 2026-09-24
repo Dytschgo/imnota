@@ -57,7 +57,7 @@ export function captureOverlayFreezeAppearance(): {
   };
 }
 
-export const CAPTURE_DELAY_HUD_SIZE = { width: 288, height: 72 };
+export const CAPTURE_DELAY_HUD_SIZE = { width: 64, height: 64 };
 
 /** Small countdown chip; must not cover the display so hover menus can appear. */
 export function captureDelayHudWindowOptions(displayBounds: CaptureRectangle): CaptureRectangle {

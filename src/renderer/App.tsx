@@ -30,7 +30,11 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { CaptureDelaySeconds, CaptureDisplayOption } from '../shared/capture';
+import {
+  MAC_CAPTURE_PERMISSION_GUIDANCE,
+  type CaptureDelaySeconds,
+  type CaptureDisplayOption,
+} from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -131,6 +135,7 @@ export default function App() {
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
+  const [capturePermissionError, setCapturePermissionError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastNotification | null>(null);
   const toastTimer = useRef<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -1115,6 +1120,11 @@ export default function App() {
         nativeMutationToken = null;
       }
       if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'capture-cancelled') return;
+      setCapturePermissionError(
+        reason instanceof WorkflowRequestError && reason.workflowError.code === 'capture-permission-denied'
+          ? reason.workflowError.message
+          : null,
+      );
       setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
     } finally {
       captureBusyRef.current = false;
@@ -2172,10 +2182,28 @@ export default function App() {
         <div className="toast error-toast" role="alert" data-testid="error-toast">
           <CircleAlert size={16} aria-hidden="true" />
           <span>{userFacingErrorMessage(visibleError)}</span>
+          {detectShortcutPlatform() === 'mac' &&
+            capturePermissionError &&
+            visibleError.includes(capturePermissionError) && (
+              <button
+                type="button"
+                onClick={() => {
+                  void window.imnota.openCapturePermissionSettings().then((result) => {
+                    if (!result.ok)
+                      setError(
+                        `${MAC_CAPTURE_PERMISSION_GUIDANCE} Open Settings could not be opened automatically.`,
+                      );
+                  });
+                }}
+              >
+                Open Settings
+              </button>
+            )}
           <IconButton
             label="Dismiss error"
             onClick={() => {
               setError('');
+              setCapturePermissionError(null);
               persistence.clearError();
               preferences.clearError();
             }}

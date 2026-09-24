@@ -155,10 +155,20 @@ import {
 } from '../src/shared/backups.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
 import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
-import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
+import {
+  CAPTURE_OVERLAY_MODES,
+  MAC_CAPTURE_PERMISSION_GUIDANCE,
+  MAX_CAPTURE_DIMENSION,
+  MAX_CAPTURE_PIXELS,
+} from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
+import {
+  listMacCaptureWindows,
+  waitForMacCaptureWindowHidden,
+  type MacCaptureHelperLocation,
+} from './macos-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
   CaptureOverlaySession,
@@ -314,7 +324,7 @@ function createAppTray(): void {
   appTray.setContextMenu(
     Menu.buildFromTemplate(
       captureTrayTemplate({
-        windowCapture: process.platform === 'win32',
+        windowCapture: process.platform === 'win32' || process.platform === 'darwin',
         onCapture: (mode) => requestCapture({ source: 'tray', mode }),
         onOpen: () => {
           if (!mainWindow || mainWindow.isDestroyed())
@@ -1072,7 +1082,7 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
-  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
+  return { ...capability, windowCandidateCount: (await listIdentifiableCaptureWindows(displays)).length };
 }
 
 function cancelCaptureDelay(): void {
@@ -1187,8 +1197,36 @@ function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverla
   return captureDisplaysHaveStableGeometry(active.displays, relevant);
 }
 
-function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
+function macCaptureHelperLocation(): MacCaptureHelperLocation {
+  return {
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    sourcePath: path.join(__dirname, '../../native/macos-capture-helper.swift'),
+  };
+}
+
+async function waitForHiddenMainWindowForCapture(): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  const mediaSourceId = process.platform === 'darwin' ? mainWindow.getMediaSourceId() : null;
+  mainWindow.hide();
+  if (mediaSourceId)
+    try {
+      await waitForMacCaptureWindowHidden(macCaptureHelperLocation(), mediaSourceId);
+    } catch {
+      throw new NativeWorkflowError(
+        'capture-sources-unavailable',
+        'Imnota could not confirm that its window was hidden before capture. Try again, or use Import or Paste.',
+        true,
+      );
+    }
+}
+
+async function listIdentifiableCaptureWindows(
+  displays: readonly CaptureDisplay[],
+): Promise<CaptureWindowCandidate[]> {
   if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  if (process.platform === 'darwin')
+    return listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => []);
   return identifiableCaptureWindows(
     tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
     displays,
@@ -2174,6 +2212,15 @@ function registerIpc(): void {
     z.tuple([]).parse(args);
     raiseMainWindow();
   });
+  handleWorkflow('workflow:capture:open-permission-settings', async (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (process.platform !== 'darwin')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen Recording settings are available only on macOS.',
+      );
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  });
   handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
     if (!windowsOcrAvailable()) return { text: '' };
     const [input] = z
@@ -2257,10 +2304,7 @@ function registerIpc(): void {
     if (process.platform === 'darwin') {
       const permission = systemPreferences.getMediaAccessStatus('screen');
       if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
+        throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_GUIDANCE);
     }
     let safeProjectPath: string | undefined;
     if (input.projectPath && input.collectionId) {
@@ -2295,7 +2339,7 @@ function registerIpc(): void {
     try {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
-      if (wasVisible) mainWindow?.hide();
+      if (wasVisible) await waitForHiddenMainWindowForCapture();
       if (input.delaySeconds) {
         let remainingSeconds: number = input.delaySeconds;
         const sendTick = (seconds: number) => {
@@ -2357,10 +2401,7 @@ function registerIpc(): void {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
+            throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_GUIDANCE);
           throw new NativeWorkflowError(
             error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
             `${error.message} Use Import or Paste instead.`,
@@ -2378,7 +2419,7 @@ function registerIpc(): void {
       try {
         outcome = await chooseCaptureRegion(
           captured,
-          listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+          await listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
           input.overlayMode ?? 'region',
         );
       } catch (error) {
@@ -2464,10 +2505,7 @@ function registerIpc(): void {
     if (process.platform === 'darwin') {
       const permission = systemPreferences.getMediaAccessStatus('screen');
       if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
+        throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_GUIDANCE);
     }
     const safeProjectPath = await assertProjectPath(input.projectPath);
     const beforeCapture = await readProjectMetadata(safeProjectPath);
@@ -2485,7 +2523,7 @@ function registerIpc(): void {
     const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
     const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
     try {
-      if (wasVisible) mainWindow?.hide();
+      if (wasVisible) await waitForHiddenMainWindowForCapture();
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
@@ -2505,10 +2543,7 @@ function registerIpc(): void {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
+            throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_GUIDANCE);
           throw new NativeWorkflowError(
             error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
             `${error.message} Use Import or Paste instead.`,
