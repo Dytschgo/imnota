@@ -16,7 +16,7 @@ export function currentCaptureDestination(
   activeCollectionId: string,
 ): CaptureDestination | null {
   const collection = snapshot?.project.collections.find((item) => item.id === activeCollectionId);
-  if (!snapshot || !collection || collection.archived) return null;
+  if (!snapshot || !collection) return null;
   return { projectPath: snapshot.projectPath, collectionId: collection.id };
 }
 
@@ -45,10 +45,8 @@ export function captureDestinationChoices(
   for (const recent of resolveRecentCollections([...projects], [...recentCollections]))
     add(recent.projectPath, recent.id, recent.projectName, recent.name);
   if (snapshot && snapshot.project.status !== 'archived') {
-    for (const collection of snapshot.project.collections) {
-      if (!collection.archived)
-        add(snapshot.projectPath, collection.id, snapshot.project.name, collection.name);
-    }
+    for (const collection of snapshot.project.collections)
+      add(snapshot.projectPath, collection.id, snapshot.project.name, collection.name);
   }
   return choices;
 }
