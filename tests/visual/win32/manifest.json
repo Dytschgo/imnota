@@ -21,16 +21,16 @@
   "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
   "electron": "44.2.0",
   "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. Thirteen captures now show the simplified primary navigation and neutral quick collection selection; wide workspace captures also record the inherited View-caption removal from PR124. The collapsed backdrop capture remains unchanged. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
+  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. The Settings and two backdrop captures now record the Settings rail and the Forward history entry created when leaving Settings. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
     "backdrop-collapsed.png": {
-      "reviewedAt": "2026-09-21",
-      "sourceRevision": "a0091a3391a09520d5f7d9e97985326be878539b",
+      "reviewedAt": "2026-09-24",
+      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35549542151",
-      "review": "Baseline, hosted packaged candidate and highlighted difference individually reviewed, with independent visual acceptance. The capture delay split control causes the compact toolbar to wrap View controls onto a second row; wider and collapsed layouts retain their responsive single-row overflow. All controls remain reachable and unclipped. Packaged native verification passed all 22 groups. The other eight baselines pass unchanged. Strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
+      "review": "Hosted packaged capture and highlighted difference inspected. The new Forward history control appears after returning from Settings and shifts the breadcrumb right. Backdrop, image, annotations, inspector, collapsed navigation and other controls match the prior baseline. Native smoke passed all 27 groups; strict tolerance is unchanged."
     },
     "1280x800-workspace-dark": {
       "reviewedAt": "2026-09-22",
@@ -178,12 +178,12 @@
     },
     "1440x900-settings.png": {
       "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Settings categories and Appearance content remain aligned and unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
+      "review": "Hosted packaged capture and highlighted difference inspected. Settings now shows its own left category rail, active Appearance heading and grouped content across the available width; the former global sidebar and topbar are replaced in this view. Controls and text remain visible at 1440x900. Native smoke passed all 27 groups; strict tolerance is unchanged."
     },
     "1440x900-workspace-dark.png": {
       "reviewedAt": "2026-09-24",
@@ -241,12 +241,12 @@
     },
     "backdrop-workspace.png": {
       "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Bundled backdrop and drawing controls are unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
+      "review": "Hosted packaged capture and highlighted difference inspected. The new Forward history control appears after returning from Settings and shifts the breadcrumb right. Backdrop, selected image, annotation, inspector, sidebar and remaining controls match the prior baseline. Native smoke passed all 27 groups; strict tolerance is unchanged."
     }
   }
 }
