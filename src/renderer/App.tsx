@@ -848,7 +848,9 @@ export default function App() {
             isCurrentProject() &&
             reloaded.projectPath === projectPath &&
             reloaded.project.id === projectId &&
-            reloaded.project.screenshots.some((shot) => !existingIds.has(shot.id))
+            reloaded.project.screenshots.some(
+              (shot) => shot.collectionId === collectionId && !existingIds.has(shot.id),
+            )
           ) {
             partialImport = await persistence.adoptAuthoritativeSnapshot(
               reloaded,

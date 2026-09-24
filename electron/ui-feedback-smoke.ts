@@ -192,14 +192,51 @@ export async function exerciseUiFeedback(
     if (snapshot.projectPath !== projectPath || snapshot.project.id !== created.project.id)
       throw new Error(`Feedback fixture ${step} returned a different project.`);
   };
+  const archivedBeforePaste = await feedbackFixtureStep(
+    driver,
+    'archive paste destination',
+    'editCollection',
+    [{ projectPath, action: 'archive', collectionId: collection.id }],
+  );
+  verifyProject(archivedBeforePaste, 'archive paste destination');
+  if (archivedBeforePaste.project.collections.find((entry) => entry.id === collection.id)?.archived !== true)
+    throw new Error('Archiving the paste destination did not persist.');
+  clipboard.clear();
+  if (!(await nativeClipboard.readImage()).isEmpty())
+    throw new Error('The clipboard was not empty before the rejected paste check.');
+  const emptyPasteError = await driver.evaluate<string | null>(`(async () => {
+    try {
+      await window.imnota.pasteImage(${JSON.stringify(projectPath)}, ${JSON.stringify(collection.id)});
+      return null;
+    } catch (reason) {
+      return reason instanceof Error ? reason.message : String(reason);
+    }
+  })()`);
+  if (!emptyPasteError?.includes('clipboard does not contain an image'))
+    throw new Error(`Empty-clipboard paste did not fail as expected: ${emptyPasteError}`);
+  const unchangedAfterFailedPaste = await driver.evaluate<ProjectSnapshot>(
+    `window.imnota.loadProject(${JSON.stringify(projectPath)})`,
+  );
+  verifyProject(unchangedAfterFailedPaste, 'failed paste');
+  if (
+    unchangedAfterFailedPaste.project.collections.find((entry) => entry.id === collection.id)?.archived !==
+      true ||
+    unchangedAfterFailedPaste.project.screenshots.length !== 0
+  )
+    throw new Error('Failed paste changed the archived collection or added a screenshot.');
+  await nativeClipboard.writeImage(image);
   const pasted = await feedbackFixtureStep(driver, 'paste screenshot', 'pasteImage', [
     projectPath,
     collection.id,
   ]);
   verifyProject(pasted, 'paste screenshot');
   const screenshot = pasted.project.screenshots[0];
-  if (!screenshot || screenshot.collectionId !== collection.id)
-    throw new Error('Feedback fixture paste screenshot did not populate the expected collection.');
+  if (
+    !screenshot ||
+    screenshot.collectionId !== collection.id ||
+    pasted.project.collections.find((entry) => entry.id === collection.id)?.archived !== false
+  )
+    throw new Error('Pasting into the archived collection did not add a screenshot and restore it.');
   const content = await feedbackFixtureStep(driver, 'load screenshot', 'loadScreenshotContent', [
     { projectPath, screenshot },
   ]);

@@ -2406,6 +2406,44 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeCollectionId).toBe('another-collection');
   });
 
+  it('does not report an unrelated collection addition as a partial import', async () => {
+    const persisted: { current?: ProjectSnapshot } = {};
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(async () => {
+      throw new Error('Image import failed');
+    });
+    const loadProject = vi.fn(async () => persisted.current!);
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      loadProject,
+      getDroppedFilePath: (file) => file.name,
+    });
+    persisted.current = {
+      ...editingSnapshot,
+      project: {
+        ...editingSnapshot.project,
+        collections: [
+          ...editingSnapshot.project.collections,
+          { ...editingSnapshot.project.collections[0]!, id: 'other-collection', name: 'Other' },
+        ],
+        screenshots: [
+          ...editingSnapshot.project.screenshots,
+          {
+            ...editingSnapshot.project.screenshots[0]!,
+            id: 'unrelated-shot',
+            collectionId: 'other-collection',
+          },
+        ],
+      },
+    };
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(['first'], 'first.png')] },
+    });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Image import failed'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Some screenshots were added');
+    expect(loadProject).toHaveBeenCalledWith(editingSnapshot.projectPath);
+    expect(useAppStore.getState().snapshot?.project.screenshots).toEqual(editingSnapshot.project.screenshots);
+  });
+
   it('does not misreport a library refresh failure as a partial image import', async () => {
     const persisted: { current?: ProjectSnapshot } = {};
     const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(async () => persisted.current!);
