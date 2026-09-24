@@ -1240,10 +1240,13 @@ async function excludeScreenshotThroughUi(
 async function captureWorkspaceMatrix(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
+  projectPath: string,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<void> {
   if (!artifactDirectory) return;
+  const screenshot = (await host.readProject(projectPath)).screenshots[0];
+  if (!screenshot) throw new Error('Workspace visual fixture has no screenshot.');
   for (const theme of ['light', 'dark'] as const) {
     if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
       await clickAny(driver, SMOKE_UI_CONTRACT.settings);
@@ -1278,6 +1281,23 @@ async function captureWorkspaceMatrix(
     driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      const check = () => {
+        const selected = document.querySelector(
+          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
+        );
+        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
+        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
+        const rendered = canvas?.querySelector('.konvajs-content canvas');
+        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
+            rendered?.width > 0 && rendered.height > 0) return resolve(true);
+        if (Date.now() >= deadline)
+          return reject(new Error('Workspace visual fixture did not render selected screenshot ${screenshot.id}.'));
+        requestAnimationFrame(check);
+      };
+      check();
+    })`);
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
       artifacts.push(
@@ -2579,7 +2599,7 @@ export async function runSmokeWorkflow(
     await installDeterministicExportAnnotations(driver, projectPath);
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
-  await captureWorkspaceMatrix(driver, host, artifactDirectory, artifacts);
+  await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
