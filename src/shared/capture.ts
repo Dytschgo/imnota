@@ -28,6 +28,9 @@ export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
 export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
   'Imnota could not identify windows on this device. Choose Area to select manually.';
 
+export const MAC_CAPTURE_PERMISSION_GUIDANCE =
+  'Allow Imnota to record the screen in System Settings → Privacy & Security → Screen & System Audio Recording, then try again. You can also use Import or Paste.';
+
 /** Last successful region from this app session. Bounds are DIP, relative to that display. */
 export interface LastCaptureRegion {
   displayId: number;

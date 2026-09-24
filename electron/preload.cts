@@ -16,6 +16,7 @@ const bridge: ImnotaBridge = {
       ? ipcRenderer.invoke('workflow:ocr:recognize', input)
       : Promise.resolve({ ok: true, value: { text: '' } }),
   listCaptureDisplays: () => ipcRenderer.invoke('workflow:capture:displays'),
+  openCapturePermissionSettings: () => ipcRenderer.invoke('workflow:capture:open-permission-settings'),
   startRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:region', input),
   repeatLastRegionCapture: (input) => ipcRenderer.invoke('workflow:capture:repeat-last-region', input),
   commitBufferedCapture: (input) => ipcRenderer.invoke('workflow:capture:commit-buffered', input),

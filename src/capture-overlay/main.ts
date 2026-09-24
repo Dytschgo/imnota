@@ -42,16 +42,18 @@ if (new URLSearchParams(location.search).has('countdown')) setupCaptureDelayCoun
 else setupRegionSelection();
 
 function setupCaptureDelayCountdown() {
-  root.innerHTML = `<main class="capture-countdown" aria-label="Capture delay"><strong>Capturing in <span data-remaining>0</span>s</strong><span>Press Escape to cancel</span><button type="button" data-action="cancel">Cancel</button></main>`;
+  root.innerHTML = `<main class="capture-countdown" role="timer" aria-label="Capture in 0 seconds. Press Escape to cancel."><strong data-remaining>0</strong></main>`;
+  const countdown = root.querySelector<HTMLElement>('.capture-countdown')!;
   const remaining = root.querySelector<HTMLElement>('[data-remaining]')!;
-  root.querySelector<HTMLButtonElement>('[data-action="cancel"]')!.addEventListener('click', () => {
-    void window.imnotaCapture.cancel();
-  });
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') void window.imnotaCapture.cancel();
   });
   window.imnotaCapture.onCountdown((payload) => {
     remaining.textContent = String(payload.remainingSeconds);
+    countdown.setAttribute(
+      'aria-label',
+      `Capture in ${payload.remainingSeconds} seconds. Press Escape to cancel.`,
+    );
   });
 }
 

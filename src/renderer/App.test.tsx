@@ -4,6 +4,7 @@ import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
 import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
+import { MAC_CAPTURE_PERMISSION_GUIDANCE } from '../shared/capture';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
 import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
@@ -105,6 +106,7 @@ describe('feedback controls', () => {
         value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
       raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
+      openCapturePermissionSettings: async () => ({ ok: true as const, value: undefined }),
       listCaptureDisplays: async () => ({
         ok: true,
         value: [
@@ -1388,6 +1390,36 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
+  it('offers a fixed macOS Settings action only for a capture permission failure', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    const openCapturePermissionSettings = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            capture: { experimentalRegionCapture: true },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+      startRegionCapture: async () => ({
+        ok: false,
+        error: {
+          code: 'capture-permission-denied',
+          message: MAC_CAPTURE_PERMISSION_GUIDANCE,
+          retryable: false,
+        },
+      }),
+      openCapturePermissionSettings,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Privacy & Security');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    await waitFor(() => expect(openCapturePermissionSettings).toHaveBeenCalledOnce());
+  });
+
   it('restores an annotation tool chosen with its keyboard shortcut after Annotate', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const capturedSnapshotRef: { current?: ProjectSnapshot } = {};
@@ -2043,8 +2075,7 @@ describe('feedback controls', () => {
       ok: false as const,
       error: {
         code: 'capture-permission-denied' as const,
-        message:
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+        message: MAC_CAPTURE_PERMISSION_GUIDANCE,
         retryable: false,
       },
     }));
@@ -2062,7 +2093,7 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Allow Screen Recording');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Screen & System Audio Recording');
   });
 
   it('buffers a capture without a current collection and restores the last-used collection', async () => {
