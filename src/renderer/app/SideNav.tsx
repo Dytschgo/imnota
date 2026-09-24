@@ -1,15 +1,4 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  Heart,
-  Info,
-  Archive,
-  Layers3,
-  PanelLeft,
-  Plus,
-  Settings2,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Archive, Layers3, PanelLeft, Plus, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
@@ -203,15 +192,6 @@ export function SideNav({
             </IconButton>
           </div>
           <button
-            className={`nav-item ${view === 'recent' ? 'active' : ''}`}
-            aria-current={view === 'recent' ? 'page' : undefined}
-            title={navigationShortcuts?.recent ? `Recent (${navigationShortcuts.recent})` : 'Recent'}
-            onClick={() => void onNavigate('recent')}
-          >
-            <Clock size={16} aria-hidden="true" />
-            <span>Recent</span>
-          </button>
-          <button
             className={`nav-item ${view === 'archived' ? 'active' : ''}`}
             aria-current={view === 'archived' ? 'page' : undefined}
             title={navigationShortcuts?.archived ? `Archived (${navigationShortcuts.archived})` : 'Archived'}
@@ -219,20 +199,6 @@ export function SideNav({
           >
             <Archive size={16} aria-hidden="true" />
             <span>Archived</span>
-          </button>
-          <button
-            className={`nav-item ${view === 'favourites' ? 'active' : ''}`}
-            aria-current={view === 'favourites' ? 'page' : undefined}
-            title={
-              navigationShortcuts?.favourites
-                ? `Favourites (${navigationShortcuts.favourites})`
-                : 'Favourites'
-            }
-            onClick={() => void onNavigate('favourites')}
-          >
-            <Heart size={16} aria-hidden="true" />
-            <span>Favourites</span>
-            {favouriteProjects.length > 0 && <span className="nav-count">{favouriteProjects.length}</span>}
           </button>
         </nav>
 
@@ -286,14 +252,20 @@ export function SideNav({
                     </small>
                   </button>
                 ))}
-                <button type="button" className="side-nav-view-all" onClick={() => void onNavigate('recent')}>
-                  View all recent
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
               </>
             ) : (
               <p className="side-nav-empty">No recently opened collections.</p>
             )}
+            <button
+              type="button"
+              className="side-nav-view-all"
+              aria-current={view === 'recent' ? 'page' : undefined}
+              title={navigationShortcuts?.recent ? `Recent (${navigationShortcuts.recent})` : 'Recent'}
+              onClick={() => void onNavigate('recent')}
+            >
+              View all recent
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
           </div>
         </section>
 
@@ -413,18 +385,24 @@ export function SideNav({
                     </div>
                   );
                 })}
-                <button
-                  type="button"
-                  className="side-nav-view-all"
-                  onClick={() => void onNavigate('favourites')}
-                >
-                  View all favourites
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
               </>
             ) : (
               <p className="side-nav-empty">No favourite projects yet.</p>
             )}
+            <button
+              type="button"
+              className="side-nav-view-all"
+              aria-current={view === 'favourites' ? 'page' : undefined}
+              title={
+                navigationShortcuts?.favourites
+                  ? `Favourites (${navigationShortcuts.favourites})`
+                  : 'Favourites'
+              }
+              onClick={() => void onNavigate('favourites')}
+            >
+              View all favourites
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
           </div>
         </section>
       </div>

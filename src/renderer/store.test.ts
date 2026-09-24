@@ -91,6 +91,18 @@ it('keeps project-list entries display-only after a project edit', () => {
   expect(useAppStore.getState().snapshot?.project).toBe(project);
 });
 
+it('updates sidebar collections immediately when authoritative snapshots archive and restore them', () => {
+  const original = snapshot();
+  useAppStore.getState().set({ projects: [projectListItem(original.projectPath, original.project)] });
+  for (const archived of [true, false]) {
+    const next = structuredClone(original);
+    next.project.collections[0]!.archived = archived;
+    useAppStore.getState().setProject(next);
+    expect(useAppStore.getState().projects[0]!.collections[0]!.archived).toBe(archived);
+    expect(useAppStore.getState().projects[0]).not.toHaveProperty('contentItems');
+  }
+});
+
 it('remembers the last opened collection locally and selects its first sorted screenshot on reopen', () => {
   const value = snapshot();
   useAppStore.getState().setProject(value);

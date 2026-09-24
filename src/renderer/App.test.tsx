@@ -328,7 +328,7 @@ describe('feedback controls', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: `Rename ${label}` }));
       expect(screen.getByDisplayValue('Imnota / Collection 01')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+      fireEvent.click(screen.getByRole('button', { name: 'View all recent' }));
       await screen.findByRole('heading', { name: 'Recent collections' });
       const row = document.querySelector('.library .project-row')!;
       expect(row.querySelector('strong')).toHaveTextContent(label);
@@ -336,6 +336,51 @@ describe('feedback controls', () => {
       expect(current.project).toEqual(original);
     },
   );
+
+  it('updates quick collections immediately after archiving and restoring in the picker', async () => {
+    let current = structuredClone(snapshot);
+    current.project.favourite = true;
+    const listProjects = vi.fn(async () => [
+      { ...snapshot.project, favourite: true, projectPath: snapshot.projectPath },
+    ]);
+    useAppStore.setState({
+      recentCollections: [
+        { projectPath: current.projectPath, collectionId: '001-collection', openedAt: '2026-01-01' },
+      ],
+    });
+    renderApp({
+      listProjects,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: current, projectRevision: 'project-edited' },
+      }),
+      editCollection: async ({ action }) => {
+        current = structuredClone(current);
+        current.project.collections[0]!.archived = action === 'archive';
+        return current;
+      },
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => useAppStore.getState().setProject(current));
+    const recent = within(document.getElementById('quick-access-collections')!);
+    const favourites = within(document.getElementById('favourite-projects')!);
+    expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible();
+    fireEvent.click(screen.getByTestId('collection-picker'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive Collection 01' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(true));
+    await waitFor(() =>
+      expect(favourites.queryByRole('button', { name: 'Collection 01' })).not.toBeInTheDocument(),
+    );
+    expect(recent.queryByRole('button', { name: /Collection 01/ })).not.toBeInTheDocument();
+    expect(useAppStore.getState().recentCollections).toHaveLength(1);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Restore Collection 01' }));
+    await waitFor(() =>
+      expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(false),
+    );
+    await waitFor(() => expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible());
+    expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible();
+    expect(listProjects).toHaveBeenCalledTimes(1);
+  });
 
   it('opens a collection from the full Recent page and records only a successful visit', async () => {
     const second = { ...snapshot.project.collections[0], id: 'second', name: 'Review two' };
@@ -348,7 +393,7 @@ describe('feedback controls', () => {
     });
     renderApp({ listProjects: async () => [{ ...project, projectPath: snapshot.projectPath }], loadProject });
     await screen.findByTestId('library-full-search');
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View all recent' }));
     await screen.findByRole('heading', { name: 'Recent collections' });
     const row = document.querySelector<HTMLButtonElement>('.library .project-row')!;
     expect(row).toHaveTextContent('Review two');
@@ -370,7 +415,7 @@ describe('feedback controls', () => {
       },
     });
     await screen.findByTestId('library-full-search');
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View all recent' }));
     await screen.findByRole('heading', { name: 'Recent collections' });
     fireEvent.click(document.querySelector<HTMLButtonElement>('.library .project-row')!);
     expect(await screen.findByRole('alert')).toHaveTextContent('Project moved');
@@ -2831,8 +2876,8 @@ describe('feedback controls', () => {
 
   it('opens global search from Recent without changing the active library filter', async () => {
     renderApp();
-    await screen.findByRole('button', { name: 'Recent' });
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    await screen.findByRole('button', { name: 'View all recent' });
+    fireEvent.click(screen.getByRole('button', { name: 'View all recent' }));
     const search = await screen.findByRole('textbox', { name: 'Filter recent collections' });
     fireEvent.change(search, { target: { value: 'recent filter' } });
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
