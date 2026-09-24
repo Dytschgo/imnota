@@ -28,7 +28,7 @@ The new-project dialog also has five optional templates: Bug report, UI review, 
 
 ## Navigate and search
 
-The toolbar **Back** button returns to earlier app locations, including the project, collection and item you were viewing before Settings. **Forward** becomes available after going back; navigating somewhere new clears the forward history. Navigation saves pending work before leaving it.
+The toolbar **Back** button returns to earlier app locations. Settings has its own category rail and a back arrow beside its title; that arrow returns to the prior location, including the project, collection and item you were viewing. **Forward** becomes available after going back; navigating somewhere new clears the forward history. Navigation saves pending work before leaving it.
 
 Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope.
 

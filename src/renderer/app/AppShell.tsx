@@ -54,6 +54,7 @@ export function AppShell({
   const store = useAppStore();
   const shellRef = useRef<HTMLDivElement>(null);
   const previousNavigationOpen = useRef(store.navigationOpen);
+  const previousView = useRef(store.view);
   useLayoutEffect(() => {
     if (previousNavigationOpen.current !== store.navigationOpen) {
       shellRef.current
@@ -62,6 +63,19 @@ export function AppShell({
       previousNavigationOpen.current = store.navigationOpen;
     }
   }, [store.navigationOpen]);
+  useLayoutEffect(() => {
+    if (previousView.current === store.view) return;
+    const target =
+      store.view === 'settings'
+        ? '.settings-navigation .settings-exit'
+        : previousView.current === 'settings'
+          ? store.navigationOpen
+            ? '.side-nav [data-testid="settings-button"]'
+            : '.navigation-restore'
+          : null;
+    if (target) shellRef.current?.querySelector<HTMLButtonElement>(target)?.focus();
+    previousView.current = store.view;
+  }, [store.navigationOpen, store.view]);
   const recentCollections = store.recentCollections;
   const activeProjectPath = store.snapshot?.projectPath;
   const activeCollection = store.snapshot?.project.collections.find(
@@ -70,7 +84,7 @@ export function AppShell({
   return (
     <div
       ref={shellRef}
-      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''} ${store.navigationOpen ? '' : 'navigation-hidden'}`}
+      className={`app-shell ${navigator.platform.toLowerCase().includes('mac') ? 'platform-mac' : ''} ${store.navigationOpen ? '' : 'navigation-hidden'} ${store.view === 'settings' ? 'settings-focused' : ''}`}
       data-testid="app-shell"
       onDragOver={(event) => {
         if (store.snapshot && onDropFiles) event.preventDefault();

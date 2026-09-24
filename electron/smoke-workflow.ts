@@ -1333,16 +1333,54 @@ async function captureWorkspaceMatrix(
     }
   }
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
+  await assertMacSettingsTitlebarClearance(driver);
   await driver.resize(SMOKE_VIEWPORTS[1]);
   artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png'));
+}
+
+async function assertMacSettingsTitlebarClearance(driver: NativeUiDriver): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  await driver.evaluate(`(() => {
+    const navigation = document.querySelector('.settings-navigation');
+    const title = navigation?.querySelector('h1');
+    const exit = navigation?.querySelector('.settings-exit');
+    if (!navigation || !title || !exit) throw new Error('Settings titlebar controls are missing.');
+    if (title.getBoundingClientRect().top < 48 || exit.getBoundingClientRect().top < 48)
+      throw new Error('Settings controls overlap the macOS window controls.');
+    if (getComputedStyle(navigation, '::before').getPropertyValue('-webkit-app-region') !== 'drag' ||
+        getComputedStyle(exit).getPropertyValue('-webkit-app-region') !== 'no-drag')
+      throw new Error('Settings titlebar drag region or interactive control is missing.');
+  })()`);
 }
 
 async function exercisePreferencesAndChannel(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
+  projectPath: string,
   artifactDirectory?: string,
   artifacts: SmokeCapture[] = [],
 ): Promise<void> {
+  const screenshot = (await host.readProject(projectPath)).screenshots[0];
+  if (!screenshot) throw new Error('Preference smoke fixture has no screenshot.');
+  const waitForScreenshotCanvas = async () => {
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      const check = () => {
+        const selected = document.querySelector(
+          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
+        );
+        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
+        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
+        const rendered = canvas?.querySelector('.konvajs-content canvas');
+        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
+            rendered?.width > 0 && rendered.height > 0) return resolve(true);
+        if (Date.now() >= deadline)
+          return reject(new Error('Preference smoke did not render selected screenshot ${screenshot.id}.'));
+        requestAnimationFrame(check);
+      };
+      check();
+    })`);
+  };
   // Reopened local smoke windows may be hidden. Present this isolated fixture so
   // native focus and screenshot paint reflect the same settings state as the DOM.
   driver.browserWindow.show();
@@ -1369,6 +1407,7 @@ async function exercisePreferencesAndChannel(
   if (!(await driver.exists({ selector: '.settings-view, [data-testid="settings-view"]' })))
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
+  await assertMacSettingsTitlebarClearance(driver);
   for (const preset of BACKDROP_PRESETS) {
     await driver.click({ selector: `[data-testid="backdrop-preset-${preset}"]` });
     await driver.evaluate(`new Promise((resolve, reject) => {
@@ -1438,8 +1477,11 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({
     selector: '[aria-label="Uploaded backdrops"] .imnota-backdrop-preset[aria-pressed="true"]:not(:disabled)',
   });
+  await driver.click({ selector: '[aria-label="Back to workspace"]' });
+  await driver.waitFor({ selector: '.workspace' });
   await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
   await driver.waitFor({ selector: '.workspace' });
+  await waitForScreenshotCanvas();
   await driver.click({ selector: '[aria-label="Collapse quick access"]' });
   const quickAccessHidden = await driver.evaluate<boolean>(
     `getComputedStyle(document.querySelector('#quick-access-collections')).display === 'none'`,
@@ -1480,8 +1522,11 @@ async function exercisePreferencesAndChannel(
       `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
+    await driver.click({ selector: '[aria-label="Back to workspace"]' });
+    await driver.waitFor({ selector: '.workspace' });
     await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
     await driver.waitFor({ selector: '.workspace' });
+    await waitForScreenshotCanvas();
     await driver.resize(SMOKE_VIEWPORTS[0]);
     await waitForStableCanvas(driver);
     await driver.evaluate(`(() => {
@@ -2600,7 +2645,7 @@ export async function runSmokeWorkflow(
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
   await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
-  await exercisePreferencesAndChannel(driver, host, artifactDirectory, artifacts);
+  await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
   assertions.push(

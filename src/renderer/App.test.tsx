@@ -2616,6 +2616,36 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().view).toBe('projects');
   });
 
+  it('returns from Settings to the selected workspace and restores its page on Forward', async () => {
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' }],
+      loadProject: async () => snapshot,
+    });
+    await screen.findByTestId('library-full-search');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.project-row-main')!);
+    await waitFor(() => expect(useAppStore.getState().view).toBe('workspace'));
+
+    fireEvent.click(screen.getByTestId('settings-button'));
+    await screen.findByTestId('settings-view');
+    expect(screen.getByRole('button', { name: 'Back to workspace' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    document.querySelector<HTMLElement>('.settings-view > .settings-grid')!.scrollTop = 137;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to workspace' }));
+    await waitFor(() => expect(useAppStore.getState().view).toBe('workspace'));
+    expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath);
+    expect(useAppStore.getState().activeCollectionId).toBe('001-collection');
+    expect(screen.getByTestId('settings-button')).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    await screen.findByTestId('settings-view');
+    expect(screen.getByRole('button', { name: 'Shortcuts' })).toHaveAttribute('aria-current', 'page');
+    await waitFor(() =>
+      expect(document.querySelector<HTMLElement>('.settings-view > .settings-grid')?.scrollTop).toBe(137),
+    );
+    expect(screen.getByRole('button', { name: 'Back to workspace' })).toHaveFocus();
+  });
+
   it('restores a history project from disk when it is absent from the cached project list', async () => {
     let listed = [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' as const }];
     const listProjects = vi.fn(async () => listed);

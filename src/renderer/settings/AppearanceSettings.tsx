@@ -27,6 +27,7 @@ export interface AppearanceSettingsProps {
   onChange: (next: AppearancePreferences) => void | Promise<void>;
   effectiveAppearance?: EffectiveAppearance;
   disabled?: boolean;
+  showHeading?: boolean;
 }
 
 const THEMES: Array<{ value: AppearanceMode; label: string; icon: typeof Monitor }> = [
@@ -110,6 +111,7 @@ export function AppearanceSettings({
   onChange,
   effectiveAppearance,
   disabled = false,
+  showHeading = true,
 }: AppearanceSettingsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -204,13 +206,19 @@ export function AppearanceSettings({
         : null;
 
   return (
-    <section className="imnota-preference-section" aria-labelledby="appearance-settings-title">
-      <header className="imnota-preference-heading">
-        <div>
-          <h2 id="appearance-settings-title">Appearance</h2>
-          <p>Choose how Imnota looks on this device. Exports keep their neutral white background.</p>
-        </div>
-      </header>
+    <section
+      className="imnota-preference-section"
+      aria-labelledby={showHeading ? 'appearance-settings-title' : undefined}
+      aria-label={showHeading ? undefined : 'Appearance settings'}
+    >
+      {showHeading && (
+        <header className="imnota-preference-heading">
+          <div>
+            <h2 id="appearance-settings-title">Appearance</h2>
+            <p>Choose how Imnota looks on this device. Exports keep their neutral white background.</p>
+          </div>
+        </header>
+      )}
 
       <div className="imnota-preference-row">
         <div className="imnota-preference-copy">
