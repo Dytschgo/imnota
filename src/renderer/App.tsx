@@ -813,9 +813,17 @@ export default function App() {
     if (!current.snapshot || !paths.length) return;
     const identity = navigationIdentity.current;
     const projectPath = current.snapshot.projectPath;
+    const projectId = current.snapshot.project.id;
     const collectionId = current.activeCollectionId;
-    const isCurrentProject = () =>
-      identity === navigationIdentity.current && useAppStore.getState().snapshot?.projectPath === projectPath;
+    const isCurrentProject = () => {
+      const state = useAppStore.getState();
+      return (
+        identity === navigationIdentity.current &&
+        state.snapshot?.projectPath === projectPath &&
+        state.snapshot.project.id === projectId &&
+        state.activeCollectionId === collectionId
+      );
+    };
     const existingIds = new Set(current.snapshot.project.screenshots.map((shot) => shot.id));
     const nativeMutationToken = await beginCurrentProjectMutation();
     if (nativeMutationToken === null) return;
@@ -823,19 +831,13 @@ export default function App() {
       await persistence.cancelNativeMutation(nativeMutationToken);
       return;
     }
+    let snapshot: ProjectSnapshot;
     try {
-      const snapshot = await window.imnota.importImageFiles({
+      snapshot = await window.imnota.importImageFiles({
         projectPath,
         collectionId,
         paths,
       });
-      const newest = snapshot.project.screenshots
-        .filter((shot) => shot.collectionId === collectionId && !existingIds.has(shot.id))
-        .sort((left, right) => left.position - right.position)
-        .at(-1);
-      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id, nativeMutationToken))) return;
-      await refreshProjects();
-      showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
     } catch (reason) {
       const importError = reason instanceof Error ? reason.message : 'The screenshots could not be imported.';
       let partialImport = false;
@@ -845,6 +847,7 @@ export default function App() {
           if (
             isCurrentProject() &&
             reloaded.projectPath === projectPath &&
+            reloaded.project.id === projectId &&
             reloaded.project.screenshots.some((shot) => !existingIds.has(shot.id))
           ) {
             partialImport = await persistence.adoptAuthoritativeSnapshot(
@@ -865,6 +868,20 @@ export default function App() {
             ? `${importError} Some screenshots were added before the import stopped.`
             : importError,
         );
+      return;
+    }
+    try {
+      const newest = snapshot.project.screenshots
+        .filter((shot) => shot.collectionId === collectionId && !existingIds.has(shot.id))
+        .sort((left, right) => left.position - right.position)
+        .at(-1);
+      if (!(await persistence.acceptMutationSnapshot(snapshot, newest?.id, nativeMutationToken))) return;
+      await refreshProjects();
+      showToast(`${paths.length} screenshot${paths.length === 1 ? '' : 's'} added`);
+    } catch (reason) {
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      if (isCurrentProject())
+        setError(reason instanceof Error ? reason.message : 'The project list could not be refreshed.');
     }
   }
   async function pasteImage() {

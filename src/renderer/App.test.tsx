@@ -2364,6 +2364,85 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().snapshot?.project.screenshots).toEqual(editingSnapshot.project.screenshots);
   });
 
+  it('does not adopt partial imports from a project replaced at the same path', async () => {
+    let rejectImport!: (reason: Error) => void;
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(
+      () => new Promise<ProjectSnapshot>((_resolve, reject) => (rejectImport = reject)),
+    );
+    const loadProject = vi.fn(async () => snapshot);
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      loadProject,
+      getDroppedFilePath: (file) => file.name,
+    });
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(['first'], 'first.png')] },
+    });
+    await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
+    const replacement: ProjectSnapshot = {
+      ...editingSnapshot,
+      project: { ...editingSnapshot.project, id: 'replacement-project' },
+    };
+    act(() => useAppStore.getState().setProject(replacement));
+    await act(async () => rejectImport(new Error('Original import failed')));
+    expect(loadProject).not.toHaveBeenCalled();
+    expect(useAppStore.getState().snapshot?.project.id).toBe('replacement-project');
+  });
+
+  it('does not adopt a failed import over a newly selected collection', async () => {
+    let rejectImport!: (reason: Error) => void;
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(
+      () => new Promise<ProjectSnapshot>((_resolve, reject) => (rejectImport = reject)),
+    );
+    const loadProject = vi.fn(async () => snapshot);
+    await renderEditingProject({ importImageFiles, loadProject, getDroppedFilePath: (file) => file.name });
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(['first'], 'first.png')] },
+    });
+    await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
+    act(() => useAppStore.getState().set({ activeCollectionId: 'another-collection' }));
+    await act(async () => rejectImport(new Error('Original import failed')));
+    expect(loadProject).not.toHaveBeenCalled();
+    expect(useAppStore.getState().activeCollectionId).toBe('another-collection');
+  });
+
+  it('does not misreport a library refresh failure as a partial image import', async () => {
+    const persisted: { current?: ProjectSnapshot } = {};
+    const importImageFiles = vi.fn<ImnotaBridge['importImageFiles']>(async () => persisted.current!);
+    const loadProject = vi.fn(async () => persisted.current!);
+    const listProjects = vi
+      .fn<ImnotaBridge['listProjects']>()
+      .mockResolvedValueOnce([])
+      .mockRejectedValue(new Error('Project list unavailable'));
+    const { editingSnapshot } = await renderEditingProject({
+      importImageFiles,
+      loadProject,
+      listProjects,
+      getDroppedFilePath: (file) => file.name,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted.current!, projectRevision: 'project-import-2' },
+      }),
+    });
+    persisted.current = {
+      ...editingSnapshot,
+      project: {
+        ...editingSnapshot.project,
+        screenshots: [
+          ...editingSnapshot.project.screenshots,
+          { ...editingSnapshot.project.screenshots[0]!, id: 'imported', position: 1 },
+        ],
+      },
+    };
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(['first'], 'first.png')] },
+    });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Project list unavailable'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Some screenshots were added');
+    expect(loadProject).not.toHaveBeenCalled();
+    expect(useAppStore.getState().snapshot?.project.screenshots.map((shot) => shot.id)).toContain('imported');
+  });
+
   it('defers context autosave during a slow import and rebases it onto the import revision', async () => {
     let resolveImport!: (value: ProjectSnapshot) => void;
     const importedRef: { current?: ProjectSnapshot } = {};
