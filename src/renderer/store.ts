@@ -111,6 +111,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (snapshot && selectedItem) remember(`imnota:last-collection:${snapshot.project.id}`, collectionId);
     set({
       snapshot,
+      projects: snapshot
+        ? get().projects.map((item) =>
+            item.projectPath === snapshot.projectPath
+              ? projectListItem(snapshot.projectPath, snapshot.project)
+              : item,
+          )
+        : get().projects,
       activeCollectionId: collectionId,
       activeScreenshotId:
         (snapshot ? orderedCollectionItems(snapshot.project, collectionId) : []).find(
