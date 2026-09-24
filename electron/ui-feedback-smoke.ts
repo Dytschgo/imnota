@@ -188,6 +188,55 @@ export async function exerciseUiFeedback(
     return snapshot.project.collections.find(entry => entry.id === ${JSON.stringify(collection.id)}).name;
   })()`);
   if (persistedName !== collection.name) throw new Error('Displaying a collection changed its stored name.');
+  await driver.click({ selector: '.topbar [aria-label="Add to favourites"]' });
+  await driver.waitFor({
+    selector: '#favourite-projects .side-nav-collection',
+    text: 'Collection 01',
+    exact: true,
+  });
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.click({ selector: '[role="menuitem"][aria-label="Archive Collection 01"]' });
+  await driver.waitFor({ selector: '[role="menuitem"][aria-label="Restore Collection 01"]' });
+  await driver.waitFor(
+    { selector: '#favourite-projects .side-nav-collection', text: 'Collection 01', exact: true },
+    { absent: true },
+  );
+  await driver.waitFor(
+    { selector: '#quick-access-collections .side-nav-collection.active' },
+    { absent: true },
+  );
+  await driver.click({ selector: '[role="menuitem"][aria-label="Restore Collection 01"]' });
+  await driver.waitFor({
+    selector: '#favourite-projects .side-nav-collection',
+    text: 'Collection 01',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: '#quick-access-collections .side-nav-collection.active[title="Collection 01"]',
+  });
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
+  const primaryDestinations = await driver.evaluate<string[]>(
+    `[...document.querySelectorAll('.side-nav-primary .nav-item')].map(button => button.textContent.trim())`,
+  );
+  if (JSON.stringify(primaryDestinations) !== JSON.stringify(['Projects', 'Archived']))
+    throw new Error('Duplicate Recent or Favourites destinations remain in primary navigation.');
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-quick-collections-restored.png'));
+  await driver.click({ selector: '.topbar [aria-label="Remove from favourites"]' });
+  await driver.waitFor({ selector: '.topbar [aria-label="Add to favourites"]' });
+  // The following fixture calls write directly through the bridge. Leave the open project first
+  // so its queued favourite edit is flushed and no stale renderer metadata remains to save later.
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
+  const settledProject = await driver.evaluate<ProjectSnapshot>(
+    `window.imnota.loadProject(${JSON.stringify(projectPath)})`,
+  );
+  if (
+    settledProject.project.favourite ||
+    settledProject.project.collections.find((candidate) => candidate.id === collection.id)?.archived !== false
+  )
+    throw new Error('Feedback quick collection edits were not saved before direct fixture writes.');
   const verifyProject = (snapshot: ProjectSnapshot, step: string): void => {
     if (snapshot.projectPath !== projectPath || snapshot.project.id !== created.project.id)
       throw new Error(`Feedback fixture ${step} returned a different project.`);
@@ -295,7 +344,6 @@ export async function exerciseUiFeedback(
   )
     throw new Error('Feedback fixture rename current collection did not retain its name.');
   const fixture = { projectPath, projectId: created.project.id, itemId: item.id };
-  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Verification' });
   await driver.click({ selector: '.project-row-main', text: 'Feedback Verification' });
   await driver.waitFor({ selector: '[data-testid="workspace"]' });
