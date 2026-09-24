@@ -1276,14 +1276,101 @@ export class PromptBundleControllerEngine {
   }
 
   async copyFresh(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    return this.fresh(selectionNumber(selection), true);
+    return this.copyWithReusableArtifact(selection, 'rich');
   }
 
   async copyVariant(
     selection: PromptBundleSelection,
     variant: WindowsCopyVariantId,
   ): Promise<PromptBundleControllerActionResult> {
-    return this.fresh(selectionNumber(selection), true, variant);
+    return this.copyWithReusableArtifact(selection, variant);
+  }
+
+  private async copyWithReusableArtifact(
+    selection: PromptBundleSelection,
+    target: WindowsCopyVariantId,
+  ): Promise<PromptBundleControllerActionResult> {
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt export to finish.', true).detail,
+      };
+    const bundleNumber = selectionNumber(selection);
+    const artifact = this.latestArtifact;
+    if (typeof selection !== 'number' && selection.artifactSessionId) {
+      if (selection.planId !== artifact?.planId || selection.artifactSessionId !== artifact.sessionId)
+        return this.resultError(
+          failure(
+            'invalid-bundle',
+            'These files belong to an older export session. Use the latest prompt card.',
+            true,
+          ),
+        );
+    }
+    const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
+    const matchesCurrentCard =
+      typeof selection === 'number' ||
+      Boolean(
+        card && card.planId === selection.planId && card.artifactSessionId === selection.artifactSessionId,
+      );
+    if (!matchesCurrentCard)
+      return this.resultError(
+        failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+      );
+    if (
+      this.pendingCleanup ||
+      !artifact ||
+      bundleNumber === undefined ||
+      !artifact.grants.has(bundleNumber) ||
+      (typeof selection !== 'number' && !selection.artifactSessionId) ||
+      (typeof selection === 'number' && card?.artifactSessionId !== artifact.sessionId)
+    )
+      return this.fresh(bundleNumber, true, target);
+
+    let run: ActiveRun | undefined;
+    try {
+      run = this.beginRun();
+      const metadata = await this.prepareMetadata(run, artifact);
+      this.assertActive(run);
+      if ('kind' in metadata) throw failure('no-content', metadata.message, true);
+      if (JSON.stringify(metadata.input) !== JSON.stringify(artifact.input)) {
+        this.activeRun = undefined;
+        return this.fresh(bundleNumber, true, target);
+      }
+      if (card?.delivery === 'file-only')
+        throw failure(
+          'native-failure',
+          card.warning ?? 'This prompt exceeds safe clipboard limits. Use its saved PNG and Markdown files.',
+          true,
+          true,
+          'clipboard-limit',
+        );
+      await this.validateArtifactContext(artifact, run.controller.signal);
+      this.assertActive(run);
+      this.setCardState(bundleNumber, 'copying');
+      this.emit({
+        error: undefined,
+        progress: { phase: 'copying', bundleNumber, message: `Copying Bundle ${bundleNumber}` },
+      });
+      const copy = await this.bridge.copyPromptExportBundle({
+        sessionId: artifact.sessionId,
+        bundleNumber,
+        target,
+      });
+      if (!copy.ok) throw nativeFailure(copy.error, true);
+      this.assertActive(run);
+      const delivery = describeCopyDelivery(
+        target,
+        copy.value.placed,
+        Boolean(artifact.grants.get(bundleNumber)?.pngFilename),
+      );
+      this.deliveryCompleted(bundleNumber, delivery.outcome, true, delivery.warning);
+      this.activeRun = undefined;
+      return { ok: true, sessionId: artifact.sessionId, bundleNumber };
+    } catch (error) {
+      if (bundleNumber !== undefined) this.setCardState(bundleNumber, 'error', publicError(error).message);
+      return this.resultError(error, run);
+    }
   }
 
   async prepareFreshFiles(selection?: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
