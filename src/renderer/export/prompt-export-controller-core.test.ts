@@ -884,6 +884,100 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({ outcome: 'image', warning: undefined });
   });
 
+  test('repeated rich and Windows variant copies reuse the finalized bundle without rendering or writing again', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const compose = vi.spyOn(renderer.rendering, 'compose');
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    await controller.open();
+    const first = await controller.copyFresh(controller.getState().cards[0]);
+    const renderCount = compose.mock.calls.length;
+    const card = controller.getState().cards[0];
+    const second = await controller.copyFresh(card);
+    const variant = await controller.copyVariant(controller.getState().cards[0], 'files-rich');
+    const shortcut = await controller.copyFresh(1);
+
+    expect(first).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(second).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(variant).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(shortcut).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(native.starts).toHaveLength(1);
+    expect(native.writes).toHaveLength(1);
+    expect(compose).toHaveBeenCalledTimes(renderCount);
+    expect(native.copies.map((copy) => copy.target)).toEqual(['rich', 'rich', 'files-rich', 'rich']);
+    expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'combined' });
+  });
+
+  test('a changed source creates a new bundle before another primary copy', async () => {
+    let revision = 'first';
+    const native = fakeBridge({ revisionForLoad: () => revision });
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    revision = 'second';
+
+    expect(await controller.copyFresh(controller.getState().cards[0])).toMatchObject({
+      ok: true,
+      sessionId: 'session-2',
+    });
+    expect(native.starts).toHaveLength(2);
+    expect(native.writes).toHaveLength(2);
+    expect(native.copies.map((copy) => copy.sessionId)).toEqual(['session-1', 'session-2']);
+  });
+
+  test('a second click during a reused copy reports busy without changing the active card', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const copy = native.bridge.copyPromptExportBundle;
+    let entered!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    native.bridge.copyPromptExportBundle = async (input) => {
+      entered();
+      await gate;
+      return copy(input);
+    };
+
+    const pending = controller.copyFresh(controller.getState().cards[0]);
+    await started;
+    const busy = await controller.copyFresh(controller.getState().cards[0]);
+    expect(busy).toMatchObject({ ok: false, error: { code: 'busy' } });
+    expect(controller.getState().cards[0].state).toBe('copying');
+    expect(controller.getState().progress).toMatchObject({ phase: 'copying' });
+    resume();
+    expect(await pending).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(controller.getState().cards[0].state).toBe('copied');
+  });
+
+  test('an older card cannot copy a retained bundle after a newer session is finalized', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const oldCard = controller.getState().cards[0];
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+
+    expect(await controller.copyFresh(oldCard)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid-bundle' },
+    });
+    expect(native.copies).toHaveLength(1);
+    expect(native.starts).toHaveLength(2);
+  });
+
   test('reports image-only Windows retention without claiming Markdown + image', async () => {
     const native = fakeBridge({ placed: { text: false, html: false, image: true, files: false } });
     const renderer = fakeRendering();

@@ -53,6 +53,10 @@ A disposable Electron harness invoked the production `nativeClipboard.writeConte
 
 File-pair reception, Cursor/VS Code, browser assistants, text-only/mixed/split receiver cases, and a version-pinned macOS rerun remain unverified. The browser automation connector could not open the installed Edge browser in this session. No editor installation, account login, or external message submission was performed. Local synthetic verification tabs/canvas were left unsaved; existing documents were preserved.
 
+## T3 Code composer source check — 2026-09-24
+
+T3 Code's [composer paste handler](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/ChatComposer.tsx#L5617-L5635) reads both clipboard files and plain text. When an image file is present, it prevents the default paste, adds the image attachment and returns without inserting the text. Its [classification function](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/composerAttachmentFiles.ts#L159-L177) and [test](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/composerAttachmentFiles.test.ts#L341-L350) explicitly choose the image path even when plain text is present. This is a source-based explanation for a reported image-only T3 paste if macOS exposes Imnota's PNG as a clipboard file. It is not a version-pinned macOS receiver observation. Use **Copy Markdown only** to paste text into T3 Code, then **Copy image only** if the image is also needed.
+
 ## Cases that do not count as proof
 
 - `clipboard.readText()` / `clipboard.readImage()` inside Imnota or the smoke driver
