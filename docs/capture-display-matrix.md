@@ -10,7 +10,20 @@ Starting a screenshot must open selection overlays on every connected display wi
 
 Keep evidence levels separate: coordinate/composition unit tests, synthetic overlay IPC, OS mouse input over synthetic display images, and real source capture. A cross-display IPC call alone cannot verify native pointer capture across window or scale boundaries. Equal-scale hardware evidence does not establish mixed-DPI behavior.
 
-## Available evidence — 2026-09-22
+## Two-display evidence — 2026-09-25
+
+Windows build 26200; unpackaged Electron application reporting Imnota 0.2.8, compiled from `c84e04f1943bc236c15e29f5fbb97322255c97d0` ([PR #137](https://github.com/Dytschgo/imnota/pull/137)). The native walkthrough passed all 27 assertion groups with both displays connected. This is source-build evidence, not a published nightly verification.
+
+| Display    | Bounds in DIP           | Scale | Real source | In-memory crop |
+| ---------- | ----------------------- | ----- | ----------- | -------------- |
+| 3472346605 | x=-3440, y=0, 3440×1440 | 100%  | 3440×1440   | 240×160        |
+| 866171562  | x=0, y=0, 3440×1440     | 100%  | 3440×1440   | 240×160        |
+
+The walkthrough opened both overlays directly and exercised toolbar, background shortcut, delays, cancellation, secondary-display capture, repeat and tray capture. Windows OS mouse input dragged from (-160,640) to (160,800) across the display boundary. The saved synthetic PNG was 320×160; decoded samples matched both displays' distinct source colors. Repeat produced byte-identical PNG content. The native report records `capture.crossDisplay.input = native-pointer`, the selection, dimensions and repeat result. The capture overlay artifact was visually inspected.
+
+A separate `real-memory-only` capability probe verified each real source and crop dimension in the table without persisting desktop pixels. It does not establish real desktop crop alignment, mixed-DPI behavior, or macOS external-display placement. Keep those evidence limits separate from the successful synthetic-pixel walkthrough.
+
+## Earlier single-display evidence — 2026-09-22
 
 Windows build 26200; unpackaged Electron application reporting Imnota 0.2.8, compiled from `65d44c1` (export optimization, capture unchanged from `a3f576e`). `IMNOTA_SMOKE_CAPTURE_CAPABILITY=real-memory-only` with the existing native runner passed. No desktop pixels were persisted.
 
@@ -22,12 +35,12 @@ The probe confirmed exact display-source identity and in-memory crop dimensions 
 
 ## Remaining manual matrix
 
-| Configuration                                                 | Entry points                                                  | Status                                                                 |
-| ------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Windows, one display, 100%                                    | Toolbar, focused shortcut, background shortcut, repeat region | Real source/crop dimensions verified; overlay alignment unverified     |
-| Windows, two displays, equal scale, including negative origin | Same, pointer on each display                                 | Hardware unavailable in this session                                   |
-| Windows, mixed 100%/150%/200% scales                          | Same, pointer crossing display boundaries                     | Hardware unavailable in this session                                   |
-| macOS, Retina and external display                            | Same, permission denial/recovery, Control+Shift+5             | Hardware unavailable in this session; packaged CI is separate evidence |
+| Configuration                                                 | Entry points                                                  | Status                                                                   |
+| ------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Windows, one display, 100%                                    | Toolbar, focused shortcut, background shortcut, repeat region | Real source/crop dimensions verified; overlay alignment unverified       |
+| Windows, two displays, equal scale, including negative origin | Same, including OS mouse input across the boundary            | Native synthetic-pixel save and repeat passed; see September 25 evidence |
+| Windows, mixed 100%/150%/200% scales                          | Same, pointer crossing display boundaries                     | Hardware unavailable in this session                                     |
+| macOS, Retina and external display                            | Same, permission denial/recovery, Control+Shift+5             | Hardware unavailable in this session; packaged CI is separate evidence   |
 
 Use a synthetic scene with visible corner markers, select a known rectangle, and compare the saved pixels and dimensions to that selection. Repeat from another foreground app and after tray/window transitions. Record the exact candidate rather than carrying a result forward to another build. Keep unrelated desktop content out of committed artifacts.
 
