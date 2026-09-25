@@ -8,6 +8,15 @@ import {
 } from '../whats-new';
 
 describe('what’s new releases', () => {
+  it('describes direct capture only in builds after the previous published release', () => {
+    expect(findWhatsNewRelease('0.2.9-nightly.20260924.36070290089')?.features.at(-1)?.id).toBe(
+      'capture-choose-display',
+    );
+    expect(findWhatsNewRelease('0.2.9-nightly.20260925.1')?.features[0]?.id).toBe('capture-all-displays');
+    expect(findWhatsNewRelease('0.2.8')?.features.at(-1)?.id).toBe('capture-display');
+    expect(findWhatsNewRelease('0.2.9')?.features[0]?.id).toBe('capture-all-displays');
+  });
+
   it('orders Imnota stable and nightly versions without using lexical comparison', () => {
     expect(compareWhatsNewVersions('0.2.10', '0.2.9')).toBeGreaterThan(0);
     expect(compareWhatsNewVersions('0.2.7', '0.2.7-nightly.20260919.1')).toBeGreaterThan(0);
