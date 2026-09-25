@@ -619,6 +619,20 @@ export async function exerciseRegionCapture(
       if (!hud) throw new Error('Capture countdown did not become visible.');
       const hudDriver = new NativeUiDriver(hud);
       await hudDriver.waitFor({ selector: '.capture-countdown' });
+      await hudDriver.evaluate(`(() => {
+        const countdown = document.querySelector('.capture-countdown');
+        if (!(countdown instanceof HTMLElement)) throw new Error('Capture countdown is missing.');
+        for (const control of countdown.children) {
+          if (!(control instanceof HTMLElement)) throw new Error('Countdown control is missing.');
+          const bounds = control.getBoundingClientRect();
+          if (bounds.width <= 0 || bounds.height <= 0 || bounds.left < 0 || bounds.top < 0 ||
+              bounds.right > innerWidth || bounds.bottom > innerHeight ||
+              control.scrollWidth > control.clientWidth || control.scrollHeight > control.clientHeight)
+            throw new Error('Capture countdown clips ' + control.textContent);
+        }
+      })()`);
+      if (artifactDirectory && seconds === 3 && cancel)
+        artifacts.push(await hudDriver.capture(artifactDirectory, 'capture-countdown.png'));
       if (captureOverlayWindows(driver.browserWindow).length)
         throw new Error('Selection opened before the countdown elapsed.');
       if (cancel) {

@@ -164,9 +164,12 @@ button {
 }
 .capture-countdown {
   box-sizing: border-box;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: center;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   width: 100%;
   height: 100%;
   padding: 0 14px;
@@ -176,14 +179,24 @@ button {
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
   color: #e5e7eb;
   font-size: 13px;
+  line-height: 18px;
   white-space: nowrap;
   user-select: none;
+}
+.capture-countdown > strong {
+  grid-column: 1;
+  grid-row: 1;
+}
+.capture-countdown > span {
+  grid-column: 1;
+  grid-row: 2;
 }
 .capture-countdown span {
   color: #cbd5e1;
 }
 .capture-countdown button {
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1 / 3;
   border: 0;
   border-radius: 7px;
   padding: 7px 10px;
