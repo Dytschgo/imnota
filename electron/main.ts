@@ -1808,7 +1808,9 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay;
     if (!active) throw new Error('Capture overlay is no longer available.');
-    active.selection.applyLastRegion(lastCaptureRegionMemory.peek());
+    const source = active.overlays.find(({ window }) => window.webContents.id === event.sender.id);
+    if (!source) throw new Error('Capture overlay is no longer available.');
+    active.selection.applyLastRegion(lastCaptureRegionMemory.peek(), source.capture.display.id);
     broadcastCaptureSelection();
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {

@@ -142,23 +142,24 @@ export class CaptureSelectionCoordinator {
     return this.current();
   }
 
-  applyLastRegion(remembered: LastCaptureRegion | null): CaptureSelectionState {
+  applyLastRegion(remembered: LastCaptureRegion | null, preferredDisplayId?: number): CaptureSelectionState {
     if (!remembered) return this.current();
     const resolved = resolveLastCaptureRegion(remembered, this.displays);
     if (!resolved.ok) return this.current();
     this.start = null;
     this.mode = 'region';
+    const intersecting = this.displays.filter(
+      (display) =>
+        resolved.selection.x < display.bounds.x + display.bounds.width &&
+        resolved.selection.x + resolved.selection.width > display.bounds.x &&
+        resolved.selection.y < display.bounds.y + display.bounds.height &&
+        resolved.selection.y + resolved.selection.height > display.bounds.y,
+    );
     this.state = {
       selection: resolved.selection,
       complete: true,
       actionsDisplayId:
-        this.displays.find(
-          (display) =>
-            resolved.selection.x < display.bounds.x + display.bounds.width &&
-            resolved.selection.x + resolved.selection.width > display.bounds.x &&
-            resolved.selection.y < display.bounds.y + display.bounds.height &&
-            resolved.selection.y + resolved.selection.height > display.bounds.y,
-        )?.id ?? null,
+        (intersecting.find((display) => display.id === preferredDisplayId) ?? intersecting[0])?.id ?? null,
       windowTitle: null,
     };
     return this.current();

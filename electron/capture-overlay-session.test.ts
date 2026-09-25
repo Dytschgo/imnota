@@ -247,6 +247,17 @@ describe('capture overlay session', () => {
     ).toEqual(regionState({ x: -100, y: 120, width: 400, height: 250 }, true, 1));
   });
 
+  it('keeps cross-display Last area actions on the clicked overlay despite display order', () => {
+    const right = { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 };
+    const left = { id: 2, bounds: { x: -1920, y: -200, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const displays = [right, left];
+    const remembered = { displays, bounds: { x: -100, y: 120, width: 400, height: 250 } };
+    const coordinator = new CaptureSelectionCoordinator(displays);
+    expect(coordinator.applyLastRegion(remembered, left.id)).toMatchObject({ actionsDisplayId: left.id });
+    expect(coordinator.applyLastRegion(remembered, right.id)).toMatchObject({ actionsDisplayId: right.id });
+    expect(coordinator.applyLastRegion(remembered, 999)).toMatchObject({ actionsDisplayId: right.id });
+  });
+
   it('records the overlay mode with a selected region', async () => {
     const session = new CaptureOverlaySession();
     expect(session.settle({ x: 1, y: 2, width: 3, height: 4 }, 'window')).toBe(true);
