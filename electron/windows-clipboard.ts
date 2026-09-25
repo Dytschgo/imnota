@@ -37,7 +37,9 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
   'Shell IDList Array',
   'Chromium Web Custom MIME Data Format',
 ]);
-
+// OLE ownership metadata points back to the previous clipboard owner. EmptyClipboard
+// releases that owner, so a byte clone cannot recreate these broker references.
+const TRANSIENT_OLE_FORMATS = new Set(['dataobject', 'ole private data', 'wine marshalled dataobject']);
 type NativeHandle = unknown;
 
 interface KoffiLibrary {
@@ -347,6 +349,7 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
   const snapshot: ClipboardMemory[] = [];
   let previous = 0;
   let totalBytes = 0;
+  let hasTransientOleFormat = false;
   try {
     while (true) {
       api.setLastError(0);
@@ -359,6 +362,11 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
       previous = format;
       if (snapshot.length >= MAX_SNAPSHOT_FORMATS)
         throw new Error('The existing clipboard contains too many formats to restore safely.');
+      const registeredName = format >= REGISTERED_FORMAT_MIN ? registeredFormatName(api, format) : '';
+      if (TRANSIENT_OLE_FORMATS.has(registeredName.toLowerCase())) {
+        hasTransientOleFormat = true;
+        continue;
+      }
       const source = api.getClipboardData(format);
       if (!truthyHandle(source)) throw new Error(`Clipboard format ${format} could not be captured.`);
       if (format === CF_BITMAP) {
@@ -380,7 +388,6 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
         snapshot.push({ format, handle: bitmap, kind: 'bitmap' });
         continue;
       }
-      const registeredName = format >= REGISTERED_FORMAT_MIN ? registeredFormatName(api, format) : '';
       if (
         !STANDARD_GLOBAL_FORMATS.has(format) &&
         !(format >= REGISTERED_FORMAT_MIN && SAFE_REGISTERED_GLOBAL_FORMATS.has(registeredName))
@@ -398,6 +405,8 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
         throw new Error('The existing clipboard is too large to restore safely.');
       snapshot.push({ format, handle: cloneGlobal(api, source), kind: 'global' });
     }
+    if (hasTransientOleFormat && !snapshot.length)
+      throw new Error('The existing OLE clipboard has no content format to restore safely.');
     return snapshot;
   } catch (error) {
     for (const memory of snapshot) freeMemory(api, memory);

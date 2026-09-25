@@ -234,7 +234,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
     },
     async copyPromptExportBundle(input) {
       copies.push(structuredClone(input));
-      if (options.failContextCopy && input.target === 'rich')
+      if (options.failContextCopy && (input.target === 'rich' || input.target === 'files'))
         return {
           ok: false,
           error: {
@@ -908,6 +908,30 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'combined' });
   });
 
+  test('reopening unchanged sharing cards reuses the finalized files after a clipboard failure', async () => {
+    const native = fakeBridge({ failContextCopy: true });
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    await controller.open();
+    expect(await controller.copyVariant(controller.getState().cards[0], 'files')).toMatchObject({
+      ok: false,
+    });
+    expect(native.starts).toHaveLength(1);
+    controller.close();
+    await controller.open();
+    const reopened = controller.getState().cards[0];
+    expect(reopened.artifactSessionId).toBe('session-1');
+    expect(await controller.copyVariant(reopened, 'files')).toMatchObject({
+      ok: false,
+    });
+    expect(native.starts).toHaveLength(1);
+    expect(native.writes).toHaveLength(1);
+    expect(native.copies).toHaveLength(2);
+  });
+
   test('a changed source creates a new bundle before another primary copy', async () => {
     let revision = 'first';
     const native = fakeBridge({ revisionForLoad: () => revision });
@@ -1285,8 +1309,10 @@ describe('prompt export controller orchestration', () => {
     const native = fakeBridge();
     const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
     const renderer = fakeRendering();
-    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    let context = savedContext([screenshot(0)]);
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
     await controller.prepareFreshFiles();
+    context = savedContext([screenshot(0), screenshot(1)]);
     await controller.open();
     const freshPlanCard = controller.getState().cards[0];
 
