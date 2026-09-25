@@ -1197,7 +1197,7 @@
 
 .feature-detail {
   display: block;
-  margin: -7px 0 12px;
+  margin: 8px 0 12px;
   color: var(--ink-3, #7d8595);
   font-size: 11px;
   line-height: 1.45;
