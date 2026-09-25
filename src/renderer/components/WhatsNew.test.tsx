@@ -1,9 +1,22 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WhatsNewDialog, WhatsNewSettings } from './WhatsNew';
-import type { WhatsNewRelease } from '../../shared/whats-new';
+import { findWhatsNewRelease, type WhatsNewRelease } from '../../shared/whats-new';
 
 afterEach(() => cleanup());
+
+it('routes the single capture card in current nightly notes to Shortcuts', () => {
+  const nightlyRelease = findWhatsNewRelease('0.2.9-nightly.20260925.36150670647');
+  expect(nightlyRelease).toBeDefined();
+  const onAction = vi.fn();
+  render(
+    <WhatsNewDialog release={nightlyRelease!} onClose={vi.fn()} onLater={vi.fn()} onAction={onAction} />,
+  );
+  expect(screen.getByText('Start selecting immediately')).toBeInTheDocument();
+  expect(document.querySelectorAll('[data-whats-new-feature]')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Try it now' }));
+  expect(onAction).toHaveBeenCalledExactlyOnceWith({ kind: 'settings', category: 'Shortcuts' });
+});
 
 const release: WhatsNewRelease = {
   afterVersion: '0.2.7',

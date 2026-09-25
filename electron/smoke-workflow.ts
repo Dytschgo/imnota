@@ -500,7 +500,8 @@ async function exerciseWhatsNew(
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<void> {
-  if (!findWhatsNewRelease(version)) return;
+  const release = findWhatsNewRelease(version);
+  if (!release) return;
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png'));
   await driver.click({ text: 'Later', exact: true });
@@ -509,17 +510,44 @@ async function exerciseWhatsNew(
   await driver.click({ text: 'Updates & about', exact: true });
   await driver.click({ text: 'Replay what’s new', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
-  // The middle card is the guided handoff. Its action must close this dialog before opening onboarding.
-  await driver.evaluate(
-    `Array.from(document.querySelectorAll('[data-testid="whats-new-dialog"] .whats-new-card button'))[1]?.click()`,
-  );
-  await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
-  await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
-  await clickAny(driver, [{ selector: '.imnota-onboarding-dismiss' }, { text: 'Skip guide', exact: true }]);
-  await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' }, { absent: true });
+  const actionableFeatures = release.features.filter((feature) => feature.action);
+  for (const [index, feature] of actionableFeatures.entries()) {
+    if (index > 0) {
+      await driver.click({ text: 'Updates & about', exact: true });
+      await driver.click({ text: 'Replay what’s new', exact: true });
+      await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
+    }
+    await driver.click({
+      selector: `[data-testid="whats-new-dialog"] [data-whats-new-feature=${JSON.stringify(feature.id)}] button`,
+    });
+    await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
+    if (feature.action?.kind === 'onboarding') {
+      await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
+      await clickAny(driver, [
+        { selector: '.imnota-onboarding-dismiss' },
+        { text: 'Skip guide', exact: true },
+      ]);
+      await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' }, { absent: true });
+    } else if (feature.action?.kind === 'settings') {
+      await driver.waitFor({
+        selector: `[data-testid="settings-view"][data-settings-category=${JSON.stringify(feature.action.category)}]`,
+      });
+    }
+  }
+  if (actionableFeatures.length === 0) {
+    await driver.click({ text: 'Got it', exact: true });
+    await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
+  }
   driver.setWindow(await host.reopenWindow());
   await driver.waitFor({ selector: '.workspace' });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
+  const acknowledgedVersion = await driver.evaluate<string | undefined>(`(async () => {
+    const result = await window.imnota.getPreferenceSettings();
+    if (!result.ok) throw new Error('Could not read release-notes acknowledgement.');
+    return result.value.settings.updates.whatsNewAcknowledgedVersion;
+  })()`);
+  if (acknowledgedVersion !== version)
+    throw new Error(`Release notes acknowledgement did not persist for ${version}.`);
 }
 
 async function importImages(

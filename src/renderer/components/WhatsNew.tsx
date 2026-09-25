@@ -21,7 +21,7 @@ function FeatureCard({
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = Boolean(feature.imageSrc) && !imageFailed;
   return (
-    <article className={`whats-new-card${showImage ? ' has-image' : ''}`}>
+    <article className={`whats-new-card${showImage ? ' has-image' : ''}`} data-whats-new-feature={feature.id}>
       {showImage && (
         <div className="whats-new-card-media">
           <img src={feature.imageSrc} alt="" onError={() => setImageFailed(true)} />
