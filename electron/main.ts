@@ -1202,7 +1202,10 @@ async function chooseCaptureRegion(
   const session = new CaptureOverlaySession();
   const readiness = createOverlayReadinessGuard(() => failCaptureOverlay(), CAPTURE_OVERLAY_READY_TIMEOUT_MS);
   const selection = new CaptureSelectionCoordinator(displays, windows);
-  if (initialMode !== 'region') selection.setMode(initialMode);
+  if (initialMode !== 'region') {
+    const pointerDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id;
+    selection.setMode(initialMode, pointerDisplayId);
+  }
   const overlays: Array<{ window: BrowserWindow; capture: CapturedDisplayImage; ready: boolean }> = [];
   try {
     for (const capture of captures) {
@@ -1724,8 +1727,10 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     const active = captureOverlay;
     if (!active) throw new Error('Capture overlay is no longer available.');
+    const source = active.overlays.find(({ window }) => window.webContents.id === event.sender.id);
+    if (!source) throw new Error('Capture overlay is no longer available.');
     const mode = z.enum(CAPTURE_OVERLAY_MODES).parse(raw);
-    active.selection.setMode(mode);
+    active.selection.setMode(mode, source.capture.display.id);
     broadcastCaptureSelection();
   });
   function assertTrustedCaptureOverlay(

@@ -128,6 +128,28 @@ describe('capture overlay session', () => {
     });
   });
 
+  it('selects the clicked overlay display, can switch displays, and retains that choice on Retake', () => {
+    const left = { id: 2, bounds: { x: -1920, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const right = { id: 1, bounds: { x: 0, y: 0, width: 3440, height: 1440 }, scaleFactor: 1 };
+    const coordinator = new CaptureSelectionCoordinator([left, right]);
+    expect(coordinator.setMode('display', right.id)).toMatchObject({
+      selection: right.bounds,
+      actionsDisplayId: right.id,
+    });
+    expect(coordinator.update(left.id, 'end', { x: 500, y: 500 })).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+    expect(coordinator.update(left.id, 'reset')).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+    expect(coordinator.setMode('display', 999)).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+  });
+
   it('explains missing window identity and keeps Region available', () => {
     const coordinator = new CaptureSelectionCoordinator([
       { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },

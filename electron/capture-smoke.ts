@@ -70,6 +70,22 @@ async function waitForCaptureOverlay(mainWindow: BrowserWindow): Promise<Browser
   );
 }
 
+async function waitForCaptureActionsOverlay(mainWindow: BrowserWindow): Promise<NativeUiDriver> {
+  const started = Date.now();
+  do {
+    for (const window of captureOverlayWindows(mainWindow)) {
+      if (window.isDestroyed()) continue;
+      const driver = new NativeUiDriver(window);
+      const visible = await driver.evaluate<boolean>(
+        `document.querySelector('.capture-actions') instanceof HTMLElement && !document.querySelector('.capture-actions').hidden`,
+      );
+      if (visible) return driver;
+    }
+    await delay(50);
+  } while (Date.now() - started < 15_000);
+  throw new Error('No capture overlay displayed selection actions.');
+}
+
 async function waitForClosed(window: BrowserWindow, label: string): Promise<void> {
   const started = Date.now();
   do {
@@ -501,6 +517,46 @@ async function verifySyntheticCrossDisplayPng(
   }
 }
 
+async function verifySyntheticDisplayPng(
+  projectPath: string,
+  captured: ProjectData['screenshots'][number],
+  display: Display,
+  displays: readonly Display[],
+): Promise<void> {
+  const png = await fs.readFile(screenshotPath(projectPath, captured));
+  const image = nativeImage.createFromBuffer(png);
+  const expected =
+    process.platform === 'win32'
+      ? screen.dipToScreenRect(null, display.bounds)
+      : {
+          width: Math.round(display.bounds.width * display.scaleFactor),
+          height: Math.round(display.bounds.height * display.scaleFactor),
+        };
+  const size = image.getSize();
+  if (
+    image.isEmpty() ||
+    size.width !== expected.width ||
+    size.height !== expected.height ||
+    captured.originalWidth !== expected.width ||
+    captured.originalHeight !== expected.height
+  )
+    throw new Error(
+      `Display mode saved ${size.width}x${size.height} instead of clicked display ${display.id} at ${expected.width}x${expected.height}.`,
+    );
+  const displayIndex = [...displays]
+    .sort((left, right) => left.id - right.id)
+    .findIndex((candidate) => candidate.id === display.id);
+  const color = syntheticCaptureColor(displayIndex);
+  const bitmap = image.toBitmap();
+  const offset = (Math.floor(size.height / 2) * size.width + Math.floor(size.width / 2)) * 4;
+  const actual = [...bitmap.subarray(offset, offset + 4)];
+  const expectedColor = [color.blue, color.green, color.red, color.alpha];
+  if (actual.some((channel, index) => Math.abs(channel! - expectedColor[index]!) > 1))
+    throw new Error(
+      `Display mode saved pixels from another display: ${actual.join(',')} instead of ${expectedColor.join(',')}.`,
+    );
+}
+
 async function waitForScreenshotCount(
   host: CaptureSmokeHost,
   projectPath: string,
@@ -706,7 +762,14 @@ export async function exerciseRegionCapture(
   });
   await driver.waitFor({ selector: '.canvas-meta', text: 'Tool: rectangle' });
 
-  overlay = await startCapture(driver);
+  await startCapture(driver);
+  const availableDisplays = screen.getAllDisplays();
+  const clickedDisplay = availableDisplays[1] ?? availableDisplays[0]!;
+  const clickedWindow = (await waitForCaptureOverlays(driver.browserWindow)).find(
+    (window) => screen.getDisplayMatching(window.getBounds()).id === clickedDisplay.id,
+  );
+  if (!clickedWindow) throw new Error('Display-mode target overlay did not open.');
+  overlay = new NativeUiDriver(clickedWindow);
   await overlay.click({ selector: '[data-mode="display"]' });
   await overlay.waitFor({ selector: '.capture-actions' });
   const displayOverlay = overlay.browserWindow;
@@ -714,7 +777,12 @@ export async function exerciseRegionCapture(
   await waitForClosed(displayOverlay, 'Saved display capture overlay');
   await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Saved display capture');
   await waitForPaint(driver);
-  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  const afterDisplay = await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 3);
+  const displayScreenshot = afterDisplay.screenshots.find(
+    (shot) => !afterAnnotate.screenshots.some((previous) => previous.id === shot.id),
+  );
+  if (!displayScreenshot) throw new Error('Display mode did not save a screenshot.');
+  await verifySyntheticDisplayPng(projectPath, displayScreenshot, clickedDisplay, screen.getAllDisplays());
   await driver.waitFor({ selector: 'button[aria-label^="Capture area"]:not(:disabled)' });
 
   // Full-display capture must not replace the remembered region. Repeat uses the
@@ -739,7 +807,7 @@ export async function exerciseRegionCapture(
 
   overlay = await startCapture(driver);
   await overlay.click({ selector: '[data-action="last-region"]' });
-  await overlay.waitFor({ selector: '.capture-actions' });
+  overlay = await waitForCaptureActionsOverlay(driver.browserWindow);
   const repeatOverlay = overlay.browserWindow;
   await overlay.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
@@ -794,8 +862,8 @@ export async function exerciseRegionCapture(
   }
 
   const reopenedFromTray = await host.captureFromTray('display');
-  const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
-  const trayOverlayDriver = new NativeUiDriver(trayOverlay);
+  const trayOverlayDriver = await waitForCaptureActionsOverlay(reopenedFromTray);
+  const trayOverlay = trayOverlayDriver.browserWindow;
   await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
   await trayOverlayDriver.click({ selector: '[data-action="cancel"]' });
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
