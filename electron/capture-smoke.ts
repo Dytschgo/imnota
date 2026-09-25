@@ -631,7 +631,7 @@ export async function exerciseRegionCapture(
             throw new Error('Capture countdown clips ' + control.textContent);
         }
       })()`);
-      if (artifactDirectory && seconds === 3 && cancel)
+      if (artifactDirectory && seconds === 5 && cancel)
         artifacts.push(await hudDriver.capture(artifactDirectory, 'capture-countdown.png'));
       if (captureOverlayWindows(driver.browserWindow).length)
         throw new Error('Selection opened before the countdown elapsed.');
