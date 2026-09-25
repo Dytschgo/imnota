@@ -1,6 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
+import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
@@ -2289,6 +2290,12 @@ async function exercisePromptWorkflow(
   const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
+  if (process.platform === 'win32' && options.verifyWindowsCopyVariants)
+    await exerciseOleClipboardSmoke(
+      driver.browserWindow.getNativeWindowHandle(),
+      await promptBundlePaths(latestSet, copiedIndex),
+      (stage) => console.info(`Windows OLE clipboard smoke: ${stage}.`),
+    );
   return {
     bundleCount: cards.length,
     renderMs: Math.round(performance.now() - renderStarted),
