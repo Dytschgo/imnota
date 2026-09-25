@@ -2188,6 +2188,12 @@ async function exercisePromptWorkflow(
   let latestRichClipboard: { text: string; png: Buffer } | undefined;
   let latestWindowsVariant: WindowsCopyVariantId | undefined;
   for (let action = 0; action < actionCount; action += 1) {
+    if (action === 1) {
+      await closePromptDialog(driver);
+      await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
+      await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
+      await waitForPromptGrants(driver, cards.length);
+    }
     const variant = windowsVariants[action] ?? 'rich';
     if (process.platform === 'win32') latestWindowsVariant = variant;
     if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
