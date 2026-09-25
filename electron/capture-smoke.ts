@@ -838,6 +838,10 @@ export async function exerciseRegionCapture(
     const crossFile = path.relative(projectPath, screenshotPath(projectPath, crossScreenshot));
     await verifySyntheticCrossDisplayPng(projectPath, crossFile, crossScreenshot, displays, crossDisplayPlan);
     await waitForPaint(driver);
+    // The project file can be committed before the renderer accepts the new
+    // snapshot and releases its capture guard. Wait for that visible state.
+    await driver.waitFor({ selector: `.shot-item.active [data-testid="screenshot-${crossScreenshot.id}"]` });
+    await driver.waitFor({ selector: 'button[aria-label^="Capture area"]:not(:disabled)' });
     await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
     const afterCrossRepeat = await waitForScreenshotCount(
       host,
