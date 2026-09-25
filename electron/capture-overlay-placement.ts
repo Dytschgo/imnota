@@ -30,7 +30,7 @@ export function captureOverlayWindowOptions(
     width: Math.round(displayBounds.width),
     height: Math.round(displayBounds.height),
   };
-  if (platform === 'win32')
+  if (platform === 'win32' || platform === 'darwin')
     return {
       ...bounds,
       fullscreen: false,
@@ -38,7 +38,7 @@ export function captureOverlayWindowOptions(
       simpleFullscreen: false,
       roundedCorners: false,
     };
-  return { ...bounds, fullscreen: true, fullscreenable: true, simpleFullscreen: platform === 'darwin' };
+  return { ...bounds, fullscreen: true, fullscreenable: true, simpleFullscreen: false };
 }
 
 /**

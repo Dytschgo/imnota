@@ -1,12 +1,43 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createWindowsSmokePointer,
   sendWindowsSmokeCaptureShortcut,
   windowsKeyboardInputs,
   type WindowsSendInputApi,
 } from './windows-smoke-input.js';
 
 describe('Windows native smoke input', () => {
+  it('moves to negative screen coordinates and sends native mouse press/release', () => {
+    const setCursorPosition = vi.fn(() => true);
+    const sendInput = vi.fn<(count: number, inputs: Buffer, inputSize: number) => number>(() => 1);
+    const pointer = createWindowsSmokePointer({ setCursorPosition, sendInput, getLastError: () => 0 });
+    pointer.move({ x: -200, y: 300 });
+    pointer.down();
+    pointer.up();
+    expect(setCursorPosition).toHaveBeenCalledWith(-200, 300);
+    const unionOffset = process.arch === 'ia32' ? 4 : 8;
+    const press = sendInput.mock.calls[0]!;
+    const release = sendInput.mock.calls[1]!;
+    expect(press[0]).toBe(1);
+    expect(press[1].readUInt32LE(0)).toBe(0);
+    expect(press[1].readUInt32LE(unionOffset + 12)).toBe(2);
+    expect(release[1].readUInt32LE(unionOffset + 12)).toBe(4);
+    expect(press[1].length).toBe(press[2]);
+  });
+
+  it('surfaces cursor and button failures rather than claiming a native drag happened', () => {
+    const pointer = createWindowsSmokePointer({
+      setCursorPosition: () => false,
+      sendInput: () => 0,
+      getLastError: () => 5,
+    });
+    expect(() => pointer.move({ x: 0.5, y: 10 })).toThrow('integer physical coordinates');
+    expect(() => pointer.move({ x: -100, y: 10 })).toThrow('cursor move failed (5)');
+    expect(() => pointer.down()).toThrow('mouse press failed (5)');
+    expect(() => pointer.up()).toThrow('mouse release failed (5)');
+  });
+
   it('lays out 64-bit keyboard INPUT records at the native stride', () => {
     const inputs = windowsKeyboardInputs([{ virtualKey: 0x11 }, { virtualKey: 0x11, keyUp: true }], 8);
     expect(inputs.inputSize).toBe(40);

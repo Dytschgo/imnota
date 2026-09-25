@@ -1,7 +1,7 @@
 import { FolderOpen } from 'lucide-react';
 import { Button, Modal } from '../components/ui';
 import type { CaptureDestination, CaptureDestinationChoice } from './capture-destination';
-import './capture-display-dialog.css';
+import './capture-destination-dialog.css';
 
 export function CaptureDestinationDialog({
   choices,
@@ -19,26 +19,26 @@ export function CaptureDestinationDialog({
       onClose={onCancel}
       closeTestId="capture-destination-cancel"
     >
-      <div className="capture-display-list" data-testid="capture-destination-dialog">
+      <div className="capture-destination-list" data-testid="capture-destination-dialog">
         {choices.map((choice, index) => (
           <button
             key={`${choice.projectPath}:${choice.collectionId}`}
             type="button"
-            className="capture-display-option"
+            className="capture-destination-option"
             data-autofocus={index === 0 ? true : undefined}
             aria-label={`Save to ${choice.collectionName} in ${choice.projectName}`}
             onClick={() => onSelect(choice)}
           >
-            <span className="capture-display-icon" aria-hidden="true">
+            <span className="capture-destination-icon" aria-hidden="true">
               <FolderOpen size={22} />
             </span>
-            <span className="capture-display-copy">
+            <span className="capture-destination-copy">
               <strong>{choice.collectionName}</strong>
               <span>{choice.projectName}</span>
             </span>
           </button>
         ))}
-        <div className="modal-actions capture-display-actions">
+        <div className="modal-actions capture-destination-actions">
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>

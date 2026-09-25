@@ -205,23 +205,24 @@ describe('capture overlay session', () => {
     });
   });
 
-  it('applies a remembered region on the matching display and ignores a missing display', () => {
-    const coordinator = new CaptureSelectionCoordinator([
+  it('applies a remembered cross-display region and ignores a changed layout', () => {
+    const displays = [
       { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },
       { id: 2, bounds: { x: -1920, y: -200, width: 1920, height: 1080 }, scaleFactor: 1.5 },
-    ]);
+    ];
+    const coordinator = new CaptureSelectionCoordinator(displays);
     expect(
       coordinator.applyLastRegion({
-        displayId: 2,
-        bounds: { x: 200, y: 120, width: 400, height: 250 },
+        displays,
+        bounds: { x: -100, y: 120, width: 400, height: 250 },
       }),
-    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+    ).toEqual(regionState({ x: -100, y: 120, width: 400, height: 250 }, true, 1));
     expect(
       coordinator.applyLastRegion({
-        displayId: 9,
+        displays: [{ ...displays[0]!, id: 9 }],
         bounds: { x: 10, y: 10, width: 40, height: 40 },
       }),
-    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+    ).toEqual(regionState({ x: -100, y: 120, width: 400, height: 250 }, true, 1));
   });
 
   it('records the overlay mode with a selected region', async () => {

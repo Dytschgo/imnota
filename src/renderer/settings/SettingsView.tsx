@@ -394,8 +394,8 @@ export function SettingsView({
                 </strong>
                 <small>
                   On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
-                  Linux stays Import or Paste. Captures stay local. Windows lets you choose a display when
-                  more than one is attached; macOS uses the display under the pointer.
+                  Linux stays Import or Paste. Captures stay local. Area selection opens across all connected
+                  displays on Windows and macOS.
                 </small>
               </span>
               <input

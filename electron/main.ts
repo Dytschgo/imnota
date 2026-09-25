@@ -178,11 +178,10 @@ import {
   overlayCoversDisplay,
 } from './capture-overlay-placement.js';
 import {
-  captureDisplayOptions,
+  captureAllDisplaysWithStableGeometry,
   captureDisplayMetricsInvalidateSelection,
   captureDisplaysHaveStableGeometry,
   captureDisplayWithStableGeometry,
-  selectedCaptureDisplay,
 } from './capture-display-selection.js';
 import { probeCaptureDisplays } from './capture-capability.js';
 import { CaptureAdmissionGate, type CaptureAdmission } from './capture-admission.js';
@@ -1181,11 +1180,7 @@ function captureOverlayIds(): number[] | undefined {
 }
 
 function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverlay>): boolean {
-  const current = screen.getAllDisplays();
-  const relevant = current.filter((display) =>
-    active.displays.some((captured) => captured.id === display.id),
-  );
-  return captureDisplaysHaveStableGeometry(active.displays, relevant);
+  return captureDisplaysHaveStableGeometry(active.displays, screen.getAllDisplays());
 }
 
 function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
@@ -1253,7 +1248,7 @@ async function chooseCaptureRegion(
           displayId: capture.display.id,
           displayBounds,
           imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
-          lastRegion: lastCaptureRegionForDisplay(remembered, capture.display.id),
+          lastRegion: lastCaptureRegionForDisplay(remembered, capture.display),
           lastRegionAvailable: remembered !== null,
         });
       });
@@ -2203,27 +2198,6 @@ function registerIpc(): void {
       }),
     };
   });
-  handleWorkflow('workflow:capture:displays', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
-    if (process.platform !== 'win32')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Display selection is only available for Windows capture.',
-      );
-    const displays = captureDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
-    if (displays.length === 0)
-      throw new NativeWorkflowError(
-        'capture-sources-unavailable',
-        'Windows did not report an available display to capture. Use Import or Paste instead.',
-        true,
-      );
-    return displays;
-  });
   handleCaptureWorkflow('workflow:capture:region', async (event, admission, ...args) => {
     const [input] = z
       .tuple([
@@ -2231,7 +2205,6 @@ function registerIpc(): void {
           .object({
             projectPath: pathInput.optional(),
             collectionId: filenameSchema.optional(),
-            displayId: z.number().int().optional(),
             overlayMode: z.enum(CAPTURE_OVERLAY_MODES).optional(),
             delaySeconds: z.union([z.literal(3), z.literal(5)]).optional(),
           })
@@ -2276,16 +2249,11 @@ function registerIpc(): void {
     // project/collection identity. Recheck the originating renderer here as
     // well because this request may have waited in the shared IPC queue.
     assertLiveCaptureAdmission(event, admission);
-    const selectedDisplay =
-      process.platform === 'win32'
-        ? selectedCaptureDisplay(screen.getAllDisplays(), input.displayId)
-        : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    if (!selectedDisplay)
+    const displays = screen.getAllDisplays();
+    if (!displays.length)
       throw new NativeWorkflowError(
         'capture-sources-unavailable',
-        input.displayId === undefined
-          ? 'Choose a display before selecting a region.'
-          : 'The selected display is no longer available. Choose an available display and try again.',
+        'No display is available to capture. Use Import or Paste instead.',
         true,
       );
     assertLiveCaptureAdmission(event, admission);
@@ -2311,12 +2279,8 @@ function registerIpc(): void {
           },
           () => delay.cancel(),
         );
-        void openCaptureDelayHud({
-          x: selectedDisplay.bounds.x,
-          y: selectedDisplay.bounds.y,
-          width: selectedDisplay.bounds.width,
-          height: selectedDisplay.bounds.height,
-        })
+        const hudDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        void openCaptureDelayHud(hudDisplay.bounds)
           .then((hud) => {
             if (hud && !hud.isDestroyed()) {
               hud.once('closed', () => delay.cancel());
@@ -2338,20 +2302,18 @@ function registerIpc(): void {
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
-        const stableCapture = await captureDisplayWithStableGeometry(
-          selectedDisplay,
-          (display) => service.captureDisplay(display),
+        const stableCapture = await captureAllDisplaysWithStableGeometry(
+          displays,
+          (current) => service.captureDisplays(current),
           () => screen.getAllDisplays(),
         );
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            process.platform === 'win32'
-              ? 'The selected display changed while the capture was being prepared. Choose an available display and try again.'
-              : 'The display layout changed while capture was being prepared. Try again after the displays settle.',
+            'The display layout changed while capture was being prepared. Try again after the displays settle.',
             true,
           );
-        captured = [stableCapture];
+        captured = stableCapture;
       } catch (error) {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
@@ -2400,7 +2362,7 @@ function registerIpc(): void {
         throw new NativeWorkflowError(
           'capture-failed',
           outcome.reason === 'misplaced'
-            ? 'The selection window could not cover the selected display. Choose the display again, or use Import or Paste instead.'
+            ? 'The selection window could not cover a display. Try again, or use Import or Paste instead.'
             : outcome.reason === 'display-changed'
               ? 'The display layout changed during capture. Try again after the displays settle.'
               : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
@@ -2423,7 +2385,11 @@ function registerIpc(): void {
           true,
         );
       }
-      lastCaptureRegionMemory.remember(captured[0]!.display, selection, outcome.mode);
+      lastCaptureRegionMemory.remember(
+        captured.map(({ display }) => display),
+        selection,
+        outcome.mode,
+      );
       assertLiveCaptureAdmission(event, admission);
       if (!safeProjectPath || !input.collectionId) {
         pendingCapturePng = png;
@@ -2488,18 +2454,18 @@ function registerIpc(): void {
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
-        const stableCapture = await captureDisplayWithStableGeometry(
-          resolved.display,
-          (display) => service.captureDisplay(display),
+        const stableCapture = await captureAllDisplaysWithStableGeometry(
+          resolved.displays,
+          (displays) => service.captureDisplays(displays),
           () => screen.getAllDisplays(),
         );
         if (!stableCapture)
           throw new NativeWorkflowError(
             'capture-sources-unavailable',
-            'The display used for the last area changed while the capture was being prepared. Capture a new area, or reconnect that display.',
+            'The display layout changed while the last area was being prepared. Capture a new area, or reconnect the displays.',
             true,
           );
-        captured = [stableCapture];
+        captured = stableCapture;
       } catch (error) {
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
@@ -2537,7 +2503,11 @@ function registerIpc(): void {
           true,
         );
       }
-      lastCaptureRegionMemory.remember(captured[0]!.display, resolved.selection, 'region');
+      lastCaptureRegionMemory.remember(
+        captured.map(({ display }) => display),
+        resolved.selection,
+        'region',
+      );
       assertLiveCaptureAdmission(event, admission);
       return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
         assertLiveCaptureAdmission(event, admission),

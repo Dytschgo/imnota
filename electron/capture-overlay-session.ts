@@ -145,7 +145,14 @@ export class CaptureSelectionCoordinator {
     this.state = {
       selection: resolved.selection,
       complete: true,
-      actionsDisplayId: resolved.display.id,
+      actionsDisplayId:
+        this.displays.find(
+          (display) =>
+            resolved.selection.x < display.bounds.x + display.bounds.width &&
+            resolved.selection.x + resolved.selection.width > display.bounds.x &&
+            resolved.selection.y < display.bounds.y + display.bounds.height &&
+            resolved.selection.y + resolved.selection.height > display.bounds.y,
+        )?.id ?? null,
       windowTitle: null,
     };
     return this.current();

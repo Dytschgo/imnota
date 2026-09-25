@@ -30,7 +30,7 @@ import type {
   UpdateStatus,
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { CaptureDelaySeconds, CaptureDisplayOption } from '../shared/capture';
+import type { CaptureDelaySeconds } from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -66,7 +66,6 @@ import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from 
 import './app/project-management.css';
 import { ContentSearchResults } from './search/ContentSearchResults';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
-import { CaptureDisplayDialog } from './capture/CaptureDisplayDialog';
 import { CaptureDestinationDialog } from './capture/CaptureDestinationDialog';
 import {
   captureDestinationChoices,
@@ -160,18 +159,12 @@ export default function App() {
   } | null>(null);
   const captureBusyRef = useRef(false);
   const [capturing, setCapturing] = useState(false);
-  const captureDisplayResolver = useRef<((displayId: number | null) => void) | null>(null);
   const captureDestinationResolver = useRef<((destination: CaptureDestination | null) => void) | null>(null);
-  const [captureDisplayChoices, setCaptureDisplayChoices] = useState<readonly CaptureDisplayOption[] | null>(
-    null,
-  );
   const [captureDestinationOptions, setCaptureDestinationOptions] = useState<
     readonly CaptureDestinationChoice[] | null
   >(null);
   useEffect(
     () => () => {
-      captureDisplayResolver.current?.(null);
-      captureDisplayResolver.current = null;
       captureDestinationResolver.current?.(null);
       captureDestinationResolver.current = null;
     },
@@ -912,28 +905,11 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The clipboard does not contain an image.');
     }
   }
-  function settleCaptureDisplayChoice(displayId: number | null) {
-    const resolve = captureDisplayResolver.current;
-    captureDisplayResolver.current = null;
-    setCaptureDisplayChoices(null);
-    resolve?.(displayId);
-  }
   function settleCaptureDestinationChoice(destination: CaptureDestination | null) {
     const resolve = captureDestinationResolver.current;
     captureDestinationResolver.current = null;
     setCaptureDestinationOptions(null);
     resolve?.(destination);
-  }
-  async function chooseCaptureDisplay(): Promise<number | null | undefined> {
-    if (detectShortcutPlatform() !== 'windows') return undefined;
-    const displays = workflowValue(await window.imnota.listCaptureDisplays());
-    if (displays.length === 0) throw new Error('Windows did not report an available display to capture.');
-    if (displays.length === 1) return displays[0]!.id;
-    workflowValue(await window.imnota.raiseMainWindow());
-    return new Promise<number | null>((resolve) => {
-      captureDisplayResolver.current = resolve;
-      setCaptureDisplayChoices(displays);
-    });
   }
   async function chooseCaptureDestination(
     choices: readonly CaptureDestinationChoice[],
@@ -1082,8 +1058,6 @@ export default function App() {
         if (!accepted) return;
         return;
       }
-      const displayId = await chooseCaptureDisplay();
-      if (displayId === null) return;
       if (destination && current.snapshot) {
         const target = {
           projectPath: destination.projectPath,
@@ -1128,7 +1102,6 @@ export default function App() {
           await window.imnota.startRegionCapture({
             projectPath: target.projectPath,
             collectionId: target.collectionId,
-            displayId,
             overlayMode,
             ...(delaySeconds ? { delaySeconds } : {}),
           }),
@@ -1152,7 +1125,6 @@ export default function App() {
       }
       const result = workflowValue(
         await window.imnota.startRegionCapture({
-          displayId,
           overlayMode,
           ...(delaySeconds ? { delaySeconds } : {}),
         }),
@@ -2257,13 +2229,6 @@ export default function App() {
           setProjectToDelete(null);
         }}
       />
-      {captureDisplayChoices && (
-        <CaptureDisplayDialog
-          displays={captureDisplayChoices}
-          onSelect={(displayId) => settleCaptureDisplayChoice(displayId)}
-          onCancel={() => settleCaptureDisplayChoice(null)}
-        />
-      )}
       {captureDestinationOptions && (
         <CaptureDestinationDialog
           choices={captureDestinationOptions}

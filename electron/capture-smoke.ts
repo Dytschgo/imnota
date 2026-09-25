@@ -1,11 +1,21 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, nativeImage, screen, type Display } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData } from '../src/shared/types.js';
+import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
 import { nativeClipboard } from './native-clipboard.js';
+import {
+  planCrossDisplaySmokeSelection,
+  syntheticCaptureColor,
+  type CrossDisplaySmokeSelection,
+} from './capture-smoke-contract.js';
 import { screenshotPath } from './collections.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
-import { sendWindowsSmokeCaptureShortcut, WINDOWS_SMOKE_CAPTURE_SHORTCUT } from './windows-smoke-input.js';
+import {
+  createWindowsSmokePointer,
+  sendWindowsSmokeCaptureShortcut,
+  WINDOWS_SMOKE_CAPTURE_SHORTCUT,
+} from './windows-smoke-input.js';
 
 export interface CaptureSmokeHost {
   reopenWindow(): Promise<BrowserWindow>;
@@ -18,6 +28,13 @@ export interface CaptureSmokeHost {
 export interface CaptureSmokeResult {
   artifacts: SmokeCapture[];
   skipped: boolean;
+  displays: CaptureDisplay[];
+  crossDisplay: null | {
+    input: 'native-pointer' | 'overlay-ipc';
+    selection: CaptureRectangle;
+    output: { width: number; height: number };
+    repeatedPixelsEqual: true;
+  };
 }
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -34,14 +51,23 @@ async function waitForPaint(driver: NativeUiDriver): Promise<void> {
   );
 }
 
-async function waitForCaptureOverlay(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+async function waitForCaptureOverlays(mainWindow: BrowserWindow): Promise<BrowserWindow[]> {
   const started = Date.now();
   do {
     const overlays = captureOverlayWindows(mainWindow);
-    if (overlays.length === 1 && overlays[0] && overlays[0].isVisible()) return overlays[0];
+    if (overlays.length === screen.getAllDisplays().length && overlays.every((window) => window.isVisible()))
+      return overlays;
     await delay(50);
   } while (Date.now() - started < 15_000);
-  throw new Error('Synthetic capture overlay did not open.');
+  throw new Error('Synthetic capture overlays did not open on every display.');
+}
+
+async function waitForCaptureOverlay(mainWindow: BrowserWindow): Promise<BrowserWindow> {
+  const overlays = await waitForCaptureOverlays(mainWindow);
+  const preferred = screen.getDisplayMatching(mainWindow.getBounds()).id;
+  return (
+    overlays.find((window) => screen.getDisplayMatching(window.getBounds()).id === preferred) ?? overlays[0]!
+  );
 }
 
 async function waitForClosed(window: BrowserWindow, label: string): Promise<void> {
@@ -226,13 +252,6 @@ async function startCapture(
       focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
       sendWindowsSmokeCaptureShortcut();
     } else await driver.click({ selector: 'button[aria-label^="Capture area"]' });
-    if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-      await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-      const displays = screen.getAllDisplays();
-      const primaryId = screen.getPrimaryDisplay().id;
-      const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
-      await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
-    }
     overlay = await waitForCaptureOverlay(driver.browserWindow);
   } finally {
     if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
@@ -258,13 +277,227 @@ async function startCapture(
   return overlayDriver;
 }
 
-async function chooseCaptureDisplay(driver: NativeUiDriver): Promise<void> {
-  if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-    await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-    const displays = screen.getAllDisplays();
-    const primaryId = screen.getPrimaryDisplay().id;
-    const chosen = displays.find((display) => display.id !== primaryId) ?? displays[0]!;
-    await driver.click({ selector: `[data-display-id="${chosen.id}"]` });
+async function selectCrossDisplayRegion(
+  overlays: readonly NativeUiDriver[],
+  displays: readonly Display[],
+  plan: CrossDisplaySmokeSelection,
+): Promise<NativeUiDriver> {
+  const overlayFor = (displayId: number) =>
+    overlays.find((overlay) => screen.getDisplayMatching(overlay.browserWindow.getBounds()).id === displayId);
+  const origin = overlayFor(plan.origin.id);
+  const destination = overlayFor(plan.destination.id);
+  if (!origin || !destination)
+    throw new Error('Cross-display capture overlays do not match the display plan.');
+  const local = (display: Display, point: { x: number; y: number }) => ({
+    x: point.x - display.bounds.x,
+    y: point.y - display.bounds.y,
+  });
+  const originDisplay = displays.find((display) => display.id === plan.origin.id)!;
+  const destinationDisplay = displays.find((display) => display.id === plan.destination.id)!;
+  const probe = {
+    x: plan.start.x + Math.sign(plan.end.x - plan.start.x) * 8,
+    y: plan.start.y + Math.sign(plan.end.y - plan.start.y) * 8,
+  };
+
+  // Use the isolated overlay preload bridge rather than OS pointer injection.
+  // Waiting for the renderer's selection paint acknowledges the main-process
+  // coordinator before the destination overlay sends the final endpoint.
+  await origin.evaluate(
+    `window.imnotaCapture.pointer(${JSON.stringify({ phase: 'begin', point: local(originDisplay, plan.start) })})`,
+  );
+  await origin.evaluate(
+    `window.imnotaCapture.pointer(${JSON.stringify({ phase: 'move', point: local(originDisplay, probe) })})`,
+  );
+  await origin.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const selection = document.querySelector('.capture-selection');
+      if (selection instanceof HTMLElement && !selection.hidden) return resolve(true);
+      if (Date.now() - started > 5000) return reject(new Error('Origin overlay did not paint the coordinated selection.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+  await destination.evaluate(
+    `window.imnotaCapture.pointer(${JSON.stringify({ phase: 'end', point: local(destinationDisplay, plan.end) })})`,
+  );
+  await destination.evaluate(`new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const actions = document.querySelector('.capture-actions');
+      if (actions instanceof HTMLElement && !actions.hidden) return resolve(true);
+      if (Date.now() - started > 5000) return reject(new Error('Destination overlay did not receive the coordinated selection.'));
+      requestAnimationFrame(check);
+    };
+    check();
+  })`);
+
+  const expectedDimensions = `${Math.round(plan.selection.width)} × ${Math.round(plan.selection.height)} points`;
+  for (const [label, overlay] of [
+    ['origin', origin],
+    ['destination', destination],
+  ] as const) {
+    const state = await overlay.evaluate<{
+      selectionHidden: boolean;
+      actionsHidden: boolean;
+      dimensions: string;
+    }>(
+      `(() => ({
+        selectionHidden: document.querySelector('.capture-selection')?.hidden !== false,
+        actionsHidden: document.querySelector('.capture-actions')?.hidden !== false,
+        dimensions: document.querySelector('.capture-dimensions')?.textContent ?? ''
+      }))()`,
+    );
+    if (state.selectionHidden || state.dimensions !== expectedDimensions)
+      throw new Error(`${label} overlay did not render the complete cross-display selection.`);
+    if (state.actionsHidden !== (label === 'origin'))
+      throw new Error('Cross-display actions were not assigned to the destination overlay.');
+  }
+  return destination;
+}
+
+async function selectCrossDisplayRegionWithNativePointer(
+  overlays: readonly NativeUiDriver[],
+  plan: CrossDisplaySmokeSelection,
+): Promise<NativeUiDriver> {
+  const origin = overlays.find(
+    (overlay) => screen.getDisplayMatching(overlay.browserWindow.getBounds()).id === plan.origin.id,
+  );
+  const destination = overlays.find(
+    (overlay) => screen.getDisplayMatching(overlay.browserWindow.getBounds()).id === plan.destination.id,
+  );
+  if (!origin || !destination)
+    throw new Error('Cross-display overlays do not match the native pointer plan.');
+  const pointer = createWindowsSmokePointer();
+  const restore = screen.getCursorScreenPoint();
+  let pressed = false;
+  try {
+    pointer.move(screen.dipToScreenPoint(plan.start));
+    const atStart = screen.getCursorScreenPoint();
+    if (Math.abs(atStart.x - plan.start.x) > 1 || Math.abs(atStart.y - plan.start.y) > 1)
+      throw new Error('Native pointer did not reach the cross-display origin.');
+    pointer.down();
+    pressed = true;
+    const probe = {
+      x: plan.start.x + Math.sign(plan.end.x - plan.start.x) * 8,
+      y: plan.start.y + Math.sign(plan.end.y - plan.start.y) * 8,
+    };
+    pointer.move(screen.dipToScreenPoint(probe));
+    await origin.evaluate(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const selection = document.querySelector('.capture-selection');
+        if (selection instanceof HTMLElement && !selection.hidden) return resolve(true);
+        if (Date.now() - started > 5000) return reject(new Error('Native drag did not start on origin overlay.'));
+        requestAnimationFrame(check);
+      }; check();
+    })`);
+    pointer.move(screen.dipToScreenPoint(plan.end));
+    const atEnd = screen.getCursorScreenPoint();
+    if (Math.abs(atEnd.x - plan.end.x) > 1 || Math.abs(atEnd.y - plan.end.y) > 1)
+      throw new Error('Native pointer did not cross to the destination display.');
+    pointer.up();
+    pressed = false;
+    await destination.evaluate(`new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const actions = document.querySelector('.capture-actions');
+        if (actions instanceof HTMLElement && !actions.hidden) return resolve(true);
+        if (Date.now() - started > 5000) return reject(new Error('Native cross-display drag did not finish.'));
+        requestAnimationFrame(check);
+      }; check();
+    })`);
+    const expectedDimensions = `${Math.round(plan.selection.width)} × ${Math.round(plan.selection.height)} points`;
+    for (const overlay of [origin, destination]) {
+      const dimensions = await overlay.evaluate<string>(
+        `document.querySelector('.capture-dimensions')?.textContent ?? ''`,
+      );
+      if (dimensions !== expectedDimensions)
+        throw new Error('Native drag did not select the complete cross-display area.');
+    }
+    return destination;
+  } finally {
+    if (pressed) pointer.up();
+    pointer.move(screen.dipToScreenPoint(restore));
+  }
+}
+
+function intersect(left: CaptureRectangle, right: CaptureRectangle): CaptureRectangle | null {
+  const x = Math.max(left.x, right.x);
+  const y = Math.max(left.y, right.y);
+  const edgeX = Math.min(left.x + left.width, right.x + right.width);
+  const edgeY = Math.min(left.y + left.height, right.y + right.height);
+  return edgeX > x && edgeY > y ? { x, y, width: edgeX - x, height: edgeY - y } : null;
+}
+
+async function verifySyntheticCrossDisplayPng(
+  projectPath: string,
+  relativeFile: string,
+  captured: ProjectData['screenshots'][number],
+  displays: readonly Display[],
+  plan: CrossDisplaySmokeSelection,
+): Promise<void> {
+  const intersected = displays.flatMap((display) => {
+    const area = intersect(plan.selection, display.bounds);
+    if (!area) return [];
+    const physical =
+      process.platform === 'win32'
+        ? screen.dipToScreenRect(null, display.bounds)
+        : {
+            width: Math.round(display.bounds.width * display.scaleFactor),
+            height: Math.round(display.bounds.height * display.scaleFactor),
+          };
+    return [
+      {
+        display,
+        area,
+        scaleX: physical.width / display.bounds.width,
+        scaleY: physical.height / display.bounds.height,
+      },
+    ];
+  });
+  const scaleX = Math.max(...intersected.map((part) => part.scaleX));
+  const scaleY = Math.max(...intersected.map((part) => part.scaleY));
+  const expected = {
+    width: Math.ceil(plan.selection.width * scaleX),
+    height: Math.ceil(plan.selection.height * scaleY),
+  };
+  const png = await fs.readFile(path.join(projectPath, relativeFile));
+  const image = nativeImage.createFromBuffer(png);
+  const size = image.getSize();
+  if (
+    image.isEmpty() ||
+    size.width !== expected.width ||
+    size.height !== expected.height ||
+    captured.originalWidth !== expected.width ||
+    captured.originalHeight !== expected.height
+  )
+    throw new Error(
+      `Cross-display PNG dimensions are ${size.width}x${size.height}; expected ${expected.width}x${expected.height}.`,
+    );
+  const bitmap = image.toBitmap();
+  for (const target of [plan.origin, plan.destination]) {
+    const part = intersected.find(({ display }) => display.id === target.id);
+    if (!part) throw new Error('Cross-display PNG is missing one selected display.');
+    const sample = {
+      x: part.area.x + part.area.width / 2,
+      y: part.area.y + part.area.height / 2,
+    };
+    const pixel = {
+      x: Math.min(size.width - 1, Math.max(0, Math.floor((sample.x - plan.selection.x) * scaleX))),
+      y: Math.min(size.height - 1, Math.max(0, Math.floor((sample.y - plan.selection.y) * scaleY))),
+    };
+    const offset = (pixel.y * size.width + pixel.x) * 4;
+    const actual = [...bitmap.subarray(offset, offset + 4)];
+    const displayIndex = [...displays]
+      .sort((left, right) => left.id - right.id)
+      .findIndex((display) => display.id === target.id);
+    const color = syntheticCaptureColor(displayIndex);
+    const expectedColor = [color.blue, color.green, color.red, color.alpha];
+    if (actual.some((channel, index) => Math.abs(channel! - expectedColor[index]!) > 1))
+      throw new Error(
+        `Cross-display PNG color mismatch for display ${target.id}: ${actual.join(',')} instead of ${expectedColor.join(',')}.`,
+      );
   }
 }
 
@@ -292,7 +525,7 @@ export async function exerciseRegionCapture(
   host: CaptureSmokeHost,
   artifactDirectory?: string,
 ): Promise<CaptureSmokeResult> {
-  if (!smokeCaptureIsEnabled()) return { artifacts: [], skipped: true };
+  if (!smokeCaptureIsEnabled()) return { artifacts: [], skipped: true, displays: [], crossDisplay: null };
   if (!['win32', 'darwin'].includes(process.platform))
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
@@ -316,10 +549,6 @@ export async function exerciseRegionCapture(
         text: `Capture in ${seconds} seconds`,
         exact: true,
       });
-      if (process.platform === 'win32' && screen.getAllDisplays().length > 1) {
-        await driver.waitFor({ selector: '[data-testid="capture-display-dialog"]' });
-        await driver.click({ selector: `[data-display-id="${screen.getPrimaryDisplay().id}"]` });
-      }
       let hud: BrowserWindow | undefined;
       while (Date.now() - started < 5000) {
         hud = BrowserWindow.getAllWindows().find(
@@ -516,8 +745,55 @@ export async function exerciseRegionCapture(
   await waitForClosed(repeatOverlay, 'Cancelled remembered-region preview');
   await waitForScreenshotCount(host, projectPath, baseline.screenshots.length + 4);
 
+  const displays = screen.getAllDisplays();
+  const crossDisplayPlan = planCrossDisplaySmokeSelection(displays);
+  let crossDisplay: CaptureSmokeResult['crossDisplay'] = null;
+  if (crossDisplayPlan) {
+    const beforeCross = await host.readProject(projectPath);
+    await startCapture(driver);
+    const overlayDrivers = (await waitForCaptureOverlays(driver.browserWindow)).map(
+      (window) => new NativeUiDriver(window),
+    );
+    const crossOverlay =
+      process.platform === 'win32'
+        ? await selectCrossDisplayRegionWithNativePointer(overlayDrivers, crossDisplayPlan)
+        : await selectCrossDisplayRegion(overlayDrivers, displays, crossDisplayPlan);
+    if (artifactDirectory)
+      artifacts.push(await crossOverlay.capture(artifactDirectory, 'capture-cross-display-synthetic.png'));
+    await crossOverlay.click({ selector: '[data-action="save"]' });
+    await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Cross-display capture');
+    const afterCross = await waitForScreenshotCount(host, projectPath, beforeCross.screenshots.length + 1);
+    const crossScreenshot = afterCross.screenshots.find(
+      (shot) => !beforeCross.screenshots.some((previous) => previous.id === shot.id),
+    );
+    if (!crossScreenshot) throw new Error('Cross-display capture did not save a screenshot.');
+    const crossFile = path.relative(projectPath, screenshotPath(projectPath, crossScreenshot));
+    await verifySyntheticCrossDisplayPng(projectPath, crossFile, crossScreenshot, displays, crossDisplayPlan);
+    await waitForPaint(driver);
+    await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
+    const afterCrossRepeat = await waitForScreenshotCount(
+      host,
+      projectPath,
+      beforeCross.screenshots.length + 2,
+    );
+    const repeatedCross = afterCrossRepeat.screenshots.find(
+      (shot) => !afterCross.screenshots.some((previous) => previous.id === shot.id),
+    );
+    if (!repeatedCross) throw new Error('Cross-display repeat did not save a screenshot.');
+    const [firstPng, repeatedPng] = await Promise.all([
+      fs.readFile(screenshotPath(projectPath, crossScreenshot)),
+      fs.readFile(screenshotPath(projectPath, repeatedCross)),
+    ]);
+    if (!firstPng.equals(repeatedPng)) throw new Error('Cross-display repeat changed the captured pixels.');
+    crossDisplay = {
+      input: process.platform === 'win32' ? 'native-pointer' : 'overlay-ipc',
+      selection: crossDisplayPlan.selection,
+      output: { width: crossScreenshot.originalWidth, height: crossScreenshot.originalHeight },
+      repeatedPixelsEqual: true,
+    };
+  }
+
   const reopenedFromTray = await host.captureFromTray('display');
-  await chooseCaptureDisplay(new NativeUiDriver(reopenedFromTray));
   const trayOverlay = await waitForCaptureOverlay(reopenedFromTray);
   const trayOverlayDriver = new NativeUiDriver(trayOverlay);
   await trayOverlayDriver.waitFor({ selector: '[data-mode="display"][aria-checked="true"]' });
@@ -525,5 +801,5 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
-  return { artifacts, skipped: false };
+  return { artifacts, skipped: false, displays, crossDisplay };
 }

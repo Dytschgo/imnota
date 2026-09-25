@@ -1,6 +1,5 @@
 import type { NativeCopyFunction, PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
 import type { ProjectData, ProjectSnapshot } from './types.js';
-import type { CaptureDisplayOption } from './capture.js';
 
 export type WorkflowErrorCode =
   | 'invalid-input'
@@ -210,12 +209,10 @@ export interface WorkflowBridge {
     pngDataUrl: string;
     crop?: { x: number; y: number; width: number; height: number };
   }): Promise<WorkflowResult<{ text: string }>>;
-  listCaptureDisplays(): Promise<WorkflowResult<readonly CaptureDisplayOption[]>>;
   startRegionCapture(input: {
     projectPath?: string;
     collectionId?: string;
     /** Required for Windows when more than one display is attached. */
-    displayId?: number;
     overlayMode?: 'region' | 'window' | 'display';
     /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
     delaySeconds?: 3 | 5;
