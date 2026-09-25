@@ -12,11 +12,6 @@ export interface CaptureDisplay {
   scaleFactor: number;
 }
 
-/** Non-pixel display metadata shown before a Windows region capture begins. */
-export interface CaptureDisplayOption extends CaptureDisplay {
-  position: string;
-}
-
 /** Seconds the capture start path waits so hover menus and tooltips can appear. */
 export const CAPTURE_DELAY_SECONDS = [3, 5] as const;
 export type CaptureDelaySeconds = (typeof CAPTURE_DELAY_SECONDS)[number];
@@ -28,17 +23,17 @@ export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
 export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
   'Imnota could not identify windows on this device. Choose Area to select manually.';
 
-/** Last successful region from this app session. Bounds are DIP, relative to that display. */
+/** Last successful region from this app session in global DIP coordinates. */
 export interface LastCaptureRegion {
-  displayId: number;
   bounds: CaptureRectangle;
+  displays: CaptureDisplay[];
 }
 
 export const LAST_CAPTURE_REGION_UNAVAILABLE_MESSAGE =
   'Capture an area first. Repeat last area uses the last successful area from this session.';
 
 export const LAST_CAPTURE_REGION_DISPLAY_GONE_MESSAGE =
-  'The display used for the last area is no longer connected. Capture a new area, or reconnect that display.';
+  'The display layout used for the last area is no longer available. Capture a new area, or reconnect the displays.';
 
 export const LAST_CAPTURE_REGION_INVALID_MESSAGE =
   'The last captured area no longer fits that display. Capture a new area.';

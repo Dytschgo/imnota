@@ -145,6 +145,38 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       },
     ],
   },
+  {
+    afterVersion: '0.2.9-nightly.20260924.36070290089',
+    channel: 'nightly',
+    title: 'Select an area across your screens',
+    summary: 'Screenshot capture opens every connected screen directly, with no monitor chooser.',
+    preview: true,
+    features: [
+      {
+        id: 'capture-all-displays',
+        title: 'Start selecting immediately',
+        description:
+          'Drag an area on any screen or across screen boundaries. Repeat last area keeps the complete selection. Capture pixels stay local.',
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
+    ],
+  },
+  {
+    afterVersion: '0.2.8',
+    channel: 'stable',
+    title: 'Select an area across your screens',
+    summary: 'Screenshot capture opens every connected screen directly, with no monitor chooser.',
+    preview: false,
+    features: [
+      {
+        id: 'capture-all-displays',
+        title: 'Start selecting immediately',
+        description:
+          'Drag an area on any screen or across screen boundaries. Repeat last area keeps the complete selection. Capture pixels stay local.',
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
+    ],
+  },
 ];
 
 export function findWhatsNewRelease(version: string | undefined) {

@@ -95,6 +95,7 @@ export interface SmokeWorkflowReport {
   timings: SmokeTiming[];
   assertions: string[];
   diagnosticsHealth: ReturnType<PersistenceDiagnostics['health']>;
+  capture?: Awaited<ReturnType<typeof exerciseRegionCapture>>;
 }
 
 interface FixtureSource {
@@ -2915,7 +2916,7 @@ export async function runSmokeWorkflow(
     artifacts.push(...captureSmoke.artifacts);
     const captureTriggers =
       process.platform === 'win32'
-        ? 'toolbar and OS-injected Ctrl+Alt+Shift+F9 while the main window is minimized and a synthetic target is focused; the registered global callback opens the display chooser and overlay'
+        ? 'toolbar and OS-injected Ctrl+Alt+Shift+F9 while the main window is minimized and a synthetic target is focused; the registered global callback opens overlays across all displays'
         : 'toolbar overlay';
     assertions.push(
       `synthetic-only capture ${captureTriggers}; Window mode presents availability feedback, Copy reads back while the overlay remains open, Cancel leaves no files, and Save/Annotate select and export the result`,
@@ -2931,6 +2932,7 @@ export async function runSmokeWorkflow(
     timings,
     assertions,
     diagnosticsHealth: host.diagnosticsHealth(),
+    capture: captureSmoke,
   };
   await writeReportArtifact(artifactDirectory, report);
   return report;

@@ -31,12 +31,13 @@ describe('capture overlay placement', () => {
     });
   });
 
-  it('keeps macOS simple fullscreen on the captured display', () => {
+  it('places a macOS overlay at the exact secondary display bounds', () => {
     expect(captureOverlayWindowOptions(secondary, 'darwin')).toEqual({
       ...secondary,
-      fullscreen: true,
-      fullscreenable: true,
-      simpleFullscreen: true,
+      fullscreen: false,
+      fullscreenable: false,
+      simpleFullscreen: false,
+      roundedCorners: false,
     });
   });
 

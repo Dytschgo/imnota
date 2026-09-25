@@ -106,6 +106,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
 /** Coordinates pointer capture across one exact-bound overlay per display. */
 export class CaptureSelectionCoordinator {
   private readonly desktop: CaptureRectangle;
+  private activeDisplayId: number;
   private start: { x: number; y: number } | null = null;
   private mode: CaptureOverlayMode = 'region';
   private state: {
@@ -126,26 +127,39 @@ export class CaptureSelectionCoordinator {
   ) {
     if (!displays.length) throw new Error('Capture selection needs at least one display.');
     this.desktop = desktopBounds(displays);
+    this.activeDisplayId = displays[0]!.id;
   }
 
-  setMode(mode: CaptureOverlayMode): CaptureSelectionState {
+  setMode(mode: CaptureOverlayMode, displayId?: number): CaptureSelectionState {
     this.start = null;
     this.mode = mode;
-    if (mode === 'display') return this.restoreDisplaySelection();
+    if (mode === 'display') {
+      if (displayId !== undefined && this.displays.some((display) => display.id === displayId))
+        this.activeDisplayId = displayId;
+      return this.restoreDisplaySelection();
+    }
     this.clearSelection();
     return this.current();
   }
 
-  applyLastRegion(remembered: LastCaptureRegion | null): CaptureSelectionState {
+  applyLastRegion(remembered: LastCaptureRegion | null, preferredDisplayId?: number): CaptureSelectionState {
     if (!remembered) return this.current();
     const resolved = resolveLastCaptureRegion(remembered, this.displays);
     if (!resolved.ok) return this.current();
     this.start = null;
     this.mode = 'region';
+    const intersecting = this.displays.filter(
+      (display) =>
+        resolved.selection.x < display.bounds.x + display.bounds.width &&
+        resolved.selection.x + resolved.selection.width > display.bounds.x &&
+        resolved.selection.y < display.bounds.y + display.bounds.height &&
+        resolved.selection.y + resolved.selection.height > display.bounds.y,
+    );
     this.state = {
       selection: resolved.selection,
       complete: true,
-      actionsDisplayId: resolved.display.id,
+      actionsDisplayId:
+        (intersecting.find((display) => display.id === preferredDisplayId) ?? intersecting[0])?.id ?? null,
       windowTitle: null,
     };
     return this.current();
@@ -175,7 +189,10 @@ export class CaptureSelectionCoordinator {
       y: clamp(translated.y, this.desktop.y, this.desktop.y + this.desktop.height),
     };
     if (this.mode === 'window') return this.updateWindow(displayId, phase, point);
-    if (this.mode === 'display') return this.restoreDisplaySelection();
+    if (this.mode === 'display') {
+      if (phase === 'end') this.selectDisplay(displayId);
+      return this.current();
+    }
     if (phase === 'begin') {
       this.start = point;
       this.clearSelection();
@@ -241,6 +258,7 @@ export class CaptureSelectionCoordinator {
       this.clearSelection();
       return;
     }
+    this.activeDisplayId = display.id;
     this.state = {
       selection: { ...display.bounds },
       complete: true,
@@ -250,7 +268,7 @@ export class CaptureSelectionCoordinator {
   }
 
   private restoreDisplaySelection(): CaptureSelectionState {
-    this.selectDisplay(this.displays[0]!.id);
+    this.selectDisplay(this.activeDisplayId);
     return this.current();
   }
 

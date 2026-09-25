@@ -1,10 +1,10 @@
-.capture-display-list {
+.capture-destination-list {
   display: grid;
   gap: 10px;
   padding: 18px 22px 22px;
 }
 
-.capture-display-option {
+.capture-destination-option {
   display: flex;
   align-items: center;
   gap: 13px;
@@ -17,13 +17,13 @@
   text-align: left;
 }
 
-.capture-display-option:hover,
-.capture-display-option:focus-visible {
+.capture-destination-option:hover,
+.capture-destination-option:focus-visible {
   border-color: var(--accent);
   background: var(--surface-3);
 }
 
-.capture-display-icon {
+.capture-destination-icon {
   display: grid;
   flex: 0 0 42px;
   height: 34px;
@@ -33,22 +33,22 @@
   color: var(--accent);
 }
 
-.capture-display-copy {
+.capture-destination-copy {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.capture-display-copy strong {
+.capture-destination-copy strong {
   font-size: 13px;
 }
 
-.capture-display-copy span,
-.capture-display-copy small {
+.capture-destination-copy span,
+.capture-destination-copy small {
   color: var(--ink-3);
   font-size: 11px;
 }
 
-.capture-display-actions {
+.capture-destination-actions {
   margin-top: 4px;
 }

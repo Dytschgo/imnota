@@ -22,6 +22,47 @@ export interface WindowsSendInputApi {
   getLastError(): number;
 }
 
+export interface WindowsSmokePointerApi extends WindowsSendInputApi {
+  setCursorPosition(x: number, y: number): boolean;
+}
+
+/** OS input for fixture overlays; points are physical virtual-desktop pixels. */
+export function createWindowsSmokePointer(api?: WindowsSmokePointerApi): {
+  move(point: { x: number; y: number }): void;
+  down(): void;
+  up(): void;
+} {
+  if (!api) {
+    const sendInputApi = loadWindowsSendInputApi();
+    const user32 = loadKoffi().load('user32.dll');
+    const setCursorPos = user32.func('SetCursorPos', 'int', ['int', 'int']);
+    api = {
+      ...sendInputApi,
+      setCursorPosition: (x, y) => Boolean(setCursorPos(x, y)),
+    };
+  }
+  const native = api;
+  function button(up: boolean): void {
+    const inputSize = process.arch === 'ia32' ? 28 : 40;
+    const unionOffset = process.arch === 'ia32' ? 4 : 8;
+    const buffer = Buffer.alloc(inputSize);
+    // INPUT_MOUSE (zero); MOUSEINPUT.dwFlags follows dx, dy and mouseData.
+    buffer.writeUInt32LE(up ? 0x0004 : 0x0002, unionOffset + 12);
+    if (native.sendInput(1, buffer, inputSize) !== 1)
+      throw new Error(`Windows smoke mouse ${up ? 'release' : 'press'} failed (${native.getLastError()}).`);
+  }
+  return {
+    move(point) {
+      if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y))
+        throw new Error('Windows smoke pointer requires integer physical coordinates.');
+      if (!native.setCursorPosition(point.x, point.y))
+        throw new Error(`Windows smoke cursor move failed (${native.getLastError()}).`);
+    },
+    down: () => button(false),
+    up: () => button(true),
+  };
+}
+
 interface KeyboardInput {
   virtualKey: number;
   keyUp?: boolean;

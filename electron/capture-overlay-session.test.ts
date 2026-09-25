@@ -128,6 +128,28 @@ describe('capture overlay session', () => {
     });
   });
 
+  it('selects the clicked overlay display, can switch displays, and retains that choice on Retake', () => {
+    const left = { id: 2, bounds: { x: -1920, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const right = { id: 1, bounds: { x: 0, y: 0, width: 3440, height: 1440 }, scaleFactor: 1 };
+    const coordinator = new CaptureSelectionCoordinator([left, right]);
+    expect(coordinator.setMode('display', right.id)).toMatchObject({
+      selection: right.bounds,
+      actionsDisplayId: right.id,
+    });
+    expect(coordinator.update(left.id, 'end', { x: 500, y: 500 })).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+    expect(coordinator.update(left.id, 'reset')).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+    expect(coordinator.setMode('display', 999)).toMatchObject({
+      selection: left.bounds,
+      actionsDisplayId: left.id,
+    });
+  });
+
   it('explains missing window identity and keeps Region available', () => {
     const coordinator = new CaptureSelectionCoordinator([
       { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },
@@ -205,23 +227,35 @@ describe('capture overlay session', () => {
     });
   });
 
-  it('applies a remembered region on the matching display and ignores a missing display', () => {
-    const coordinator = new CaptureSelectionCoordinator([
+  it('applies a remembered cross-display region and ignores a changed layout', () => {
+    const displays = [
       { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 },
       { id: 2, bounds: { x: -1920, y: -200, width: 1920, height: 1080 }, scaleFactor: 1.5 },
-    ]);
+    ];
+    const coordinator = new CaptureSelectionCoordinator(displays);
     expect(
       coordinator.applyLastRegion({
-        displayId: 2,
-        bounds: { x: 200, y: 120, width: 400, height: 250 },
+        displays,
+        bounds: { x: -100, y: 120, width: 400, height: 250 },
       }),
-    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+    ).toEqual(regionState({ x: -100, y: 120, width: 400, height: 250 }, true, 1));
     expect(
       coordinator.applyLastRegion({
-        displayId: 9,
+        displays: [{ ...displays[0]!, id: 9 }],
         bounds: { x: 10, y: 10, width: 40, height: 40 },
       }),
-    ).toEqual(regionState({ x: -1720, y: -80, width: 400, height: 250 }, true, 2));
+    ).toEqual(regionState({ x: -100, y: 120, width: 400, height: 250 }, true, 1));
+  });
+
+  it('keeps cross-display Last area actions on the clicked overlay despite display order', () => {
+    const right = { id: 1, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 };
+    const left = { id: 2, bounds: { x: -1920, y: -200, width: 1920, height: 1080 }, scaleFactor: 1.5 };
+    const displays = [right, left];
+    const remembered = { displays, bounds: { x: -100, y: 120, width: 400, height: 250 } };
+    const coordinator = new CaptureSelectionCoordinator(displays);
+    expect(coordinator.applyLastRegion(remembered, left.id)).toMatchObject({ actionsDisplayId: left.id });
+    expect(coordinator.applyLastRegion(remembered, right.id)).toMatchObject({ actionsDisplayId: right.id });
+    expect(coordinator.applyLastRegion(remembered, 999)).toMatchObject({ actionsDisplayId: right.id });
   });
 
   it('records the overlay mode with a selected region', async () => {
