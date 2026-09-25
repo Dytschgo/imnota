@@ -73,7 +73,11 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
     getClipboardData: (format) => clipboard.get(format) ?? null,
     setClipboardData,
     registerClipboardFormat: (name) => (name === 'HTML Format' ? 0xc001 : 0xc002),
-    getClipboardFormatName: () => 0,
+    getClipboardFormatName: (format, output) => {
+      const name = format === 0xc003 ? 'DataObject' : format === 0xc004 ? 'Ole Private Data' : '';
+      output.write(name, 'utf16le');
+      return name.length;
+    },
     isClipboardFormatAvailable: (format) => clipboard.has(format),
     getLastError: () => 0,
     setLastError: () => undefined,
@@ -347,12 +351,58 @@ describe('Windows clipboard payloads', () => {
     expect(native.closeClipboard).toHaveBeenCalledOnce();
   });
 
+  it('copies over OLE broker metadata and restores its materialized content after a partial write failure', async () => {
+    const prior = windowsUnicodeTextBuffer('prior OLE text');
+    const native = nativeMock([
+      [13, prior],
+      [0xc003, Buffer.from('stale clipboard owner handle')],
+      [0xc004, Buffer.from('stale OLE enumeration')],
+    ]);
+    native.failSetFormat = 0xc001;
+    await expect(
+      writeWindowsClipboard(
+        hwnd(),
+        {
+          filePaths: pair,
+          markdown: '# Prompt',
+          html: '<p>Prompt</p>',
+          png: Buffer.from('png'),
+          dibV5: Buffer.from('dib'),
+        },
+        native.api,
+      ),
+    ).rejects.toThrow(/rejected clipboard format/i);
+    expect([...native.clipboard.keys()]).toEqual([13]);
+    expect(native.memory.get(native.clipboard.get(13)!)).toEqual(prior);
+
+    native.failSetFormat = undefined;
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).resolves.toBeUndefined();
+    expect([...native.clipboard.keys()]).toEqual([15]);
+  });
+
+  it('does not clear an OLE clipboard with no materialized content to restore', async () => {
+    const native = nativeMock([[0xc003, Buffer.from('clipboard owner handle')]]);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
+      /no content format to restore safely/i,
+    );
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+  });
+
   it('fails closed on a prior handle format that cannot be restored safely', async () => {
     const native = nativeMock([[3, Buffer.from('metafile handle')]]);
     await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
       /cannot be restored safely/i,
     );
     expect(native.emptyClipboard).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unsupported registered content format untouched', async () => {
+    const native = nativeMock([[0xc005, Buffer.from('unknown content')]]);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
+      /cannot be restored safely/i,
+    );
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect([...native.clipboard.keys()]).toEqual([0xc005]);
   });
 
   it('bounds file-list readback before allocating path buffers', () => {

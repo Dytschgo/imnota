@@ -1,6 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
+import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
@@ -1349,6 +1350,41 @@ async function captureWorkspaceMatrix(
   await assertMacSettingsTitlebarClearance(driver);
   await driver.resize(SMOKE_VIEWPORTS[1]);
   artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png'));
+  for (const viewport of [{ width: 1080, height: 680 }, SMOKE_VIEWPORTS[1]]) {
+    await driver.resize(viewport);
+    await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
+    await driver.waitFor({ selector: '#features-title' });
+    await driver.evaluate(`(() => {
+      const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
+      const row = document.querySelector('[aria-label="Enable screen capture"]')?.closest('label');
+      if (!detail || !row) throw new Error('Capture feature controls are missing.');
+      const detailBounds = detail.getBoundingClientRect();
+      const rowBounds = row.getBoundingClientRect();
+      if (detailBounds.top < rowBounds.bottom || detailBounds.height <= 0 ||
+          detail.scrollWidth > detail.clientWidth)
+        throw new Error('Capture shortcut help overlaps or overflows its feature row.');
+    })()`);
+    artifacts.push(
+      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-features.png`),
+    );
+    await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
+    await driver.waitFor({ selector: '#workspace-settings-title' });
+    await driver.evaluate(`(() => {
+      const field = document.querySelector('#workspace-settings-title')?.parentElement?.querySelector('.workspace-path');
+      if (!field) throw new Error('Workspace path field is missing.');
+      const fieldBounds = field.getBoundingClientRect();
+      const center = (fieldBounds.top + fieldBounds.bottom) / 2;
+      for (const child of field.children) {
+        const bounds = child.getBoundingClientRect();
+        if (bounds.height <= 0 || Math.abs((bounds.top + bounds.bottom) / 2 - center) > 1)
+          throw new Error('Workspace path icon or text is not vertically centered.');
+      }
+    })()`);
+    artifacts.push(
+      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-workspace.png`),
+    );
+  }
+  await driver.click({ selector: '.settings-navigation button', text: 'Appearance', exact: true });
 }
 
 async function assertMacSettingsTitlebarClearance(driver: NativeUiDriver): Promise<void> {
@@ -2153,6 +2189,12 @@ async function exercisePromptWorkflow(
   let latestRichClipboard: { text: string; png: Buffer } | undefined;
   let latestWindowsVariant: WindowsCopyVariantId | undefined;
   for (let action = 0; action < actionCount; action += 1) {
+    if (action === 1) {
+      await closePromptDialog(driver);
+      await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
+      await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
+      await waitForPromptGrants(driver, cards.length);
+    }
     const variant = windowsVariants[action] ?? 'rich';
     if (process.platform === 'win32') latestWindowsVariant = variant;
     if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
@@ -2248,6 +2290,12 @@ async function exercisePromptWorkflow(
   const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
+  if (process.platform === 'win32' && options.verifyWindowsCopyVariants)
+    await exerciseOleClipboardSmoke(
+      driver.browserWindow.getNativeWindowHandle(),
+      await promptBundlePaths(latestSet, copiedIndex),
+      (stage) => console.info(`Windows OLE clipboard smoke: ${stage}.`),
+    );
   return {
     bundleCount: cards.length,
     renderMs: Math.round(performance.now() - renderStarted),

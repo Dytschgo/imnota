@@ -1252,6 +1252,24 @@ export class PromptBundleControllerEngine {
         this.activeRun = undefined;
         return { ok: true };
       }
+      const artifact = this.latestArtifact;
+      const reusablePlan = this.latestPlan;
+      if (
+        artifact &&
+        reusablePlan?.planId === artifact.planId &&
+        artifact.projectPath === metadata.context.snapshot.projectPath &&
+        artifact.projectId === metadata.context.snapshot.project.id &&
+        JSON.stringify(metadata.input) === JSON.stringify(artifact.input)
+      ) {
+        const cards =
+          this.state.cards.length === reusablePlan.plan.bundles.length &&
+          this.state.cards.every((card) => card.planId === artifact.planId)
+            ? this.state.cards
+            : cardsForPlan(reusablePlan, undefined, artifact);
+        this.emit({ cards, progress: undefined, noContentMessage: undefined });
+        this.activeRun = undefined;
+        return { ok: true };
+      }
       const prepared = this.planMetadata(metadata);
       this.latestPlan = prepared;
       this.emit({ cards: cardsForPlan(prepared), progress: undefined, noContentMessage: undefined });

@@ -286,6 +286,7 @@
 }
 
 .settings-view > .settings-grid .settings-section .workspace-path {
+  align-items: center;
   min-height: 39px;
   margin: 12px 0;
   padding: 0 11px;
