@@ -212,7 +212,6 @@ export interface WorkflowBridge {
   startRegionCapture(input: {
     projectPath?: string;
     collectionId?: string;
-    /** Required for Windows when more than one display is attached. */
     overlayMode?: 'region' | 'window' | 'display';
     /** Wait 3s or 5s after hiding Imnota so hover menus can appear. */
     delaySeconds?: 3 | 5;
