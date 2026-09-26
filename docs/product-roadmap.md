@@ -148,6 +148,10 @@ The current drawing editor uses Excalidraw technology and an Excalidraw-compatib
 
 Do not claim full compatibility until import -> edit -> export round trips preserve supported content and unknown data according to the published contract.
 
+## Proposed: next capture and hand-off features
+
+The [next features plan](next-features-plan.md) sequences a quick-access overlay, on-device OCR on macOS and Linux, redaction suggestions, agent hand-off through MCP and a CLI, scrolling capture, short clips reduced to key frames, a browser-context extension and issue creation. The browser extension and issue creation add new surfaces and need a product decision recorded here before implementation.
+
 ## Explicitly not planned in this roadmap
 
 Cloud sync, team accounts, real-time collaboration, hosted AI integrations, telemetry by default, monetisation, mobile layouts and two-way Markdown synchronisation remain outside this roadmap. They require separate product decisions and would change Imnota’s local-first boundary.

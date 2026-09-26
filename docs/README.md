@@ -20,6 +20,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 
 ## Proposal-only or validation plans
 
+- [Next features plan](next-features-plan.md) — quick-access overlay, OCR on all platforms, redaction, agent hand-off, scrolling capture, browser context, issue creation and clip key frames; proposal only.
 - [Improvement plan](improvement-plan.md) — completed release/process work and conditional engineering candidates; listing a task does not authorize implementation.
 - [Large-collection performance](large-collection-performance-plan.md) — measurement and scale plan; do not implement without budgets.
 - [Capture display matrix](capture-display-matrix.md) — real display-source evidence and outstanding overlay/alignment checks.
