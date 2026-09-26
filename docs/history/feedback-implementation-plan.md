@@ -1,6 +1,6 @@
 # Imnota Feedback Implementation Plan
 
-> Historical record for the schema-2 feedback-round release. The current product contract uses collections, one Description, Low/Medium/High priority and current-collection-only prompt bundles. See [the user guide](user-guide.md). Statements and validation counts below describe that earlier revision only.
+> Historical record for the schema-2 feedback-round release. The current product contract uses collections, one Description, Low/Medium/High priority and current-collection-only prompt bundles. See [the user guide](../user-guide.md). Statements and validation counts below describe that earlier revision only.
 
 ## Implementation status
 

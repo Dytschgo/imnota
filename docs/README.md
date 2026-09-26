@@ -20,10 +20,8 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 
 ## Proposal-only or validation plans
 
-- [Engineering follow-up](engineering-follow-up-20260918.md) — Phase 0 housekeeping is complete; later extraction and native-evidence phases remain proposals.
+- [Next features plan](next-features-plan.md) — quick-access overlay, OCR on all platforms, redaction, agent hand-off, scrolling capture, browser context, issue creation and clip key frames; proposal only.
 - [Improvement plan](improvement-plan.md) — completed release/process work and conditional engineering candidates; listing a task does not authorize implementation.
-- [Feedback follow-up](follow-up-plan-20260918.md) — small capture, shortcut and changelog follow-ups; proposal only.
-- [Feedback observations](feedback-plan-20260918.md) — historical planning snapshot from the September feedback round.
 - [Large-collection performance](large-collection-performance-plan.md) — measurement and scale plan; do not implement without budgets.
 - [Capture display matrix](capture-display-matrix.md) — real display-source evidence and outstanding overlay/alignment checks.
 - [Recovery unification](recovery-unification-plan.md) — recovery design plan; persistence changes require separate review.
@@ -31,11 +29,12 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 
 ## Historical evidence
 
-- [History index](history/README.md) — finished execution plans moved out of the repository root.
-- [Repository review](repository-review-2026-09-08.md) — dated disposition of older plans and dependency work.
-- [Implementation verification](implementation-verification.md) — historical schema-3 benchmark and its limits.
-- [Engineering audit](engineering-audit.md), [PR review](pr-review-2026-09-05.md) and [feedback implementation plan](feedback-implementation-plan.md) — older audits and release records.
-- [Collection 16 plan](collection-16-plan.md), [stable/nightly design](stable-nightly-release-plan.md) and [backdrop records](backdrop-artwork.md) — dated implementation and design evidence.
+- [History index](history/README.md) — finished execution plans, dated reviews and superseded proposals moved out of the documentation root.
+- [Engineering follow-up](history/engineering-follow-up-20260918.md), [feedback follow-up](history/follow-up-plan-20260918.md), [feedback observations](history/feedback-plan-20260918.md) and [September 21 feedback record](history/feedback-record-2026-09-21.md) — September planning snapshots.
+- [Repository review](history/repository-review-2026-09-08.md) — dated disposition of older plans and dependency work.
+- [Implementation verification](history/implementation-verification.md) — historical schema-3 benchmark and its limits.
+- [Engineering audit](history/engineering-audit.md), [PR review](history/pr-review-2026-09-05.md) and [feedback implementation plan](history/feedback-implementation-plan.md) — older audits and release records.
+- [Collection 4 review](history/imnota-collection-04-review.md), [collection 16 plan](history/collection-16-plan.md), [stable/nightly design](history/stable-nightly-release-plan.md) and [backdrop records](backdrop-artwork.md) — dated implementation and design evidence.
 
 Historical documents can contain old versions, branches, test counts or proposed behaviour. Use the current documents above when they disagree.
 
