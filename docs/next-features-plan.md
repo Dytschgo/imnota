@@ -2,7 +2,7 @@
 
 Status: proposal, drafted 2026-09-26 against v0.3.0. This plan does not authorize implementation. Each feature needs its own scope decision, and items marked **roadmap decision** also need an entry in the [product roadmap](product-roadmap.md) before work starts, because they add a new product surface or an outward-facing action (see [AGENTS.md](../AGENTS.md#scope-and-safety)).
 
-The seven features extend the existing workflow rather than replace it:
+The eight features extend the existing workflow rather than replace it:
 
 ```text
 Capture (region, window, display, scrolling, clip) -> redact -> explain -> hand off (copy, agent, issue, link)
