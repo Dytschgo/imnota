@@ -2756,9 +2756,7 @@ export async function runSmokeWorkflow(
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
-  assertions.push(
-    'Sharing sender name and export presets persist across reopen; presets restore current options',
-  );
+  assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });

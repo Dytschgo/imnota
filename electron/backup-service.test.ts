@@ -707,6 +707,7 @@ describe('BackupService', () => {
       else expect((await fs.stat(added)).isDirectory()).toBe(true);
       expect(await publishedSnapshotIds()).toContain(first.snapshotId);
     },
+    DURABLE_FILESYSTEM_TIMEOUT,
   );
 
   it.each(['invalid journal', 'invalid snapshot', 'missing publication', 'occupied quarantine'] as const)(
