@@ -63,6 +63,22 @@ it('reports completed exports at 100% regardless of the last bundle number', () 
   expect(screen.getByRole('status')).not.toHaveTextContent(/preparing/i);
 });
 
+it('shows repeat copying without a generation percentage', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      progress={{ phase: 'copying', bundleNumber: 1, totalBundles: 4, message: 'Copying Bundle 1' }}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('status')).toHaveTextContent('Copying Bundle 1');
+  expect(screen.getByRole('status')).not.toHaveTextContent(/preparing|%/i);
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'true');
+});
+
 it.each([
   ['cancelled', 'Export cancelled'],
   ['error', 'Export failed'],

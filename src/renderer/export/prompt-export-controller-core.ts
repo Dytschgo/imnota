@@ -547,6 +547,7 @@ export class PromptBundleControllerEngine {
     outcome: PromptDeliveryOutcome | undefined,
     primaryCopy = false,
     warning?: string,
+    showExportProgress = true,
   ): void {
     this.emit({
       error: undefined,
@@ -555,7 +556,9 @@ export class PromptBundleControllerEngine {
           ? { ...card, state: primaryCopy ? 'copied' : 'idle', outcome, error: undefined, warning }
           : card,
       ),
-      progress: { phase: 'complete', bundleNumber, totalBundles: this.state.cards.length },
+      progress: showExportProgress
+        ? { phase: 'complete', bundleNumber, totalBundles: this.state.cards.length }
+        : undefined,
     });
   }
 
@@ -646,8 +649,10 @@ export class PromptBundleControllerEngine {
   private async prepareMetadata(
     run: ActiveRun,
     artifact?: PromptExportArtifact,
+    reuseCheck = false,
   ): Promise<PreparedPromptMetadata | PromptBundleNoContent> {
-    this.emit({ error: undefined, noContentMessage: undefined, progress: { phase: 'planning' } });
+    if (!reuseCheck)
+      this.emit({ error: undefined, noContentMessage: undefined, progress: { phase: 'planning' } });
     const context = await this.readSavedContext(run.controller.signal);
     this.assertActive(run);
     if (artifact) this.assertArtifactContext(artifact, context);
@@ -730,12 +735,13 @@ export class PromptBundleControllerEngine {
             );
           // Drawing PNGs already contain their final white crop/padding. Screenshot
           // preflight adds annotation margins that resolvePicture does not render again.
-          measured.push({
-            screenshotId: item.id,
-            width: loaded.image.width,
-            height: loaded.image.height,
-            estimatedPngCharacters: loaded.image.dataUrl.length,
-          });
+          if (!reuseCheck)
+            measured.push({
+              screenshotId: item.id,
+              width: loaded.image.width,
+              height: loaded.image.height,
+              estimatedPngCharacters: loaded.image.dataUrl.length,
+            });
           const sourceFilename = item.sourceFilename ?? `${item.id}.json`;
           if (loaded.source)
             sourceByItemId.set(item.id, {
@@ -782,14 +788,16 @@ export class PromptBundleControllerEngine {
         });
         this.assertActive(run);
         const annotations = cloneAndFreeze(loaded.annotations) as readonly Annotation[];
-        const dimensions = await this.rendering.preflight(loaded.image, annotations, run.controller.signal);
-        this.assertActive(run);
-        measured.push({
-          screenshotId: screenshot.id,
-          width: dimensions.width,
-          height: dimensions.height,
-          estimatedPngCharacters: dimensions.estimatedPngCharacters,
-        });
+        if (!reuseCheck) {
+          const dimensions = await this.rendering.preflight(loaded.image, annotations, run.controller.signal);
+          this.assertActive(run);
+          measured.push({
+            screenshotId: screenshot.id,
+            width: dimensions.width,
+            height: dimensions.height,
+            estimatedPngCharacters: dimensions.estimatedPngCharacters,
+          });
+        }
         this.assertActive(run);
         const visibleText = await recognisedScreenshotText({
           includeRecognisedText: this.getIncludeRecognisedText(),
@@ -831,8 +839,12 @@ export class PromptBundleControllerEngine {
       screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
       items: hasMixedContentItems ? promptItems : undefined,
     }) as Readonly<PromptCollectionInput>;
-    const initial = planPromptBundles(input, measured);
-    if (initial.kind === 'no-content') return initial;
+    // A reused copy only compares the saved input with its artifact. Changed input
+    // takes the fresh path, which performs full measurement and no-content checks.
+    if (!reuseCheck) {
+      const initial = planPromptBundles(input, measured);
+      if (initial.kind === 'no-content') return initial;
+    }
     return {
       context,
       input,
@@ -1348,7 +1360,13 @@ export class PromptBundleControllerEngine {
     let run: ActiveRun | undefined;
     try {
       run = this.beginRun();
-      const metadata = await this.prepareMetadata(run, artifact);
+      this.emit({
+        error: undefined,
+        noContentMessage: undefined,
+        progress: { phase: 'copying', bundleNumber, message: `Copying Bundle ${bundleNumber}` },
+      });
+      this.setCardState(bundleNumber, 'copying');
+      const metadata = await this.prepareMetadata(run, artifact, true);
       this.assertActive(run);
       if ('kind' in metadata) throw failure('no-content', metadata.message, true);
       if (JSON.stringify(metadata.input) !== JSON.stringify(artifact.input)) {
@@ -1365,11 +1383,6 @@ export class PromptBundleControllerEngine {
         );
       await this.validateArtifactContext(artifact, run.controller.signal);
       this.assertActive(run);
-      this.setCardState(bundleNumber, 'copying');
-      this.emit({
-        error: undefined,
-        progress: { phase: 'copying', bundleNumber, message: `Copying Bundle ${bundleNumber}` },
-      });
       const copy = await this.bridge.copyPromptExportBundle({
         sessionId: artifact.sessionId,
         bundleNumber,
@@ -1382,7 +1395,7 @@ export class PromptBundleControllerEngine {
         copy.value.placed,
         Boolean(artifact.grants.get(bundleNumber)?.pngFilename),
       );
-      this.deliveryCompleted(bundleNumber, delivery.outcome, true, delivery.warning);
+      this.deliveryCompleted(bundleNumber, delivery.outcome, true, delivery.warning, false);
       this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
@@ -1559,7 +1572,17 @@ export class PromptBundleControllerEngine {
       }
       const { artifact, bundleNumber } = this.artifactSelection(selection);
       run = this.beginRun();
-      const metadata = await this.prepareMetadata(run, artifact);
+      this.emit({
+        error: undefined,
+        noContentMessage: undefined,
+        progress: {
+          phase: 'copying',
+          bundleNumber,
+          message: outcome === 'files' ? 'Opening generated files' : `Copying ${outcome}`,
+        },
+      });
+      this.setCardState(bundleNumber, 'copying');
+      const metadata = await this.prepareMetadata(run, artifact, true);
       this.assertActive(run);
       if ('kind' in metadata || JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
         throw failure(
@@ -1568,15 +1591,6 @@ export class PromptBundleControllerEngine {
           true,
           true,
         );
-      this.setCardState(bundleNumber, 'copying');
-      this.emit({
-        error: undefined,
-        progress: {
-          phase: 'copying',
-          bundleNumber,
-          message: outcome === 'files' ? 'Opening generated files' : 'Preparing clipboard',
-        },
-      });
       const actionRun = run;
       const validate = async () => {
         await this.validateArtifactContext(artifact, actionRun.controller.signal);
@@ -1586,7 +1600,7 @@ export class PromptBundleControllerEngine {
       const result = await action(artifact.sessionId, bundleNumber, validate);
       if (!result.ok) throw nativeFailure(result.error, true);
       this.assertActive(run);
-      this.deliveryCompleted(bundleNumber, outcome);
+      this.deliveryCompleted(bundleNumber, outcome, false, undefined, false);
       this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
