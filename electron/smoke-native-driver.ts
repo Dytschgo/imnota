@@ -352,17 +352,46 @@ export class NativeUiDriver {
 
   async drag(from: SmokePoint, to: SmokePoint, steps = 8): Promise<void> {
     const contents = this.window.webContents;
-    contents.sendInputEvent({ type: 'mouseMove', ...from });
-    contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1 });
-    for (let index = 1; index <= steps; index += 1) {
-      const point = {
-        x: Math.round(from.x + ((to.x - from.x) * index) / steps),
-        y: Math.round(from.y + ((to.y - from.y) * index) / steps),
+    await this.evaluate(`(() => {
+      const target = ${JSON.stringify(to)};
+      let finish;
+      let frame;
+      const ready = new Promise(resolve => { finish = resolve; });
+      const moved = event => {
+        if (!event.isTrusted || !(event.buttons & 1) || event.clientX !== target.x || event.clientY !== target.y) return;
+        document.removeEventListener('pointermove', moved, true);
+        frame = requestAnimationFrame(() => {
+          frame = requestAnimationFrame(() => finish(true));
+        });
       };
-      contents.sendInputEvent({ type: 'mouseMove', ...point, movementX: 1, movementY: 1 });
-      await wait(16);
+      document.addEventListener('pointermove', moved, true);
+      window.__imnotaSmokeDrag = { ready, dispose() {
+        document.removeEventListener('pointermove', moved, true);
+        cancelAnimationFrame(frame);
+        finish(false);
+      } };
+    })()`);
+    try {
+      contents.sendInputEvent({ type: 'mouseMove', ...from });
+      contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1 });
+      for (let index = 1; index <= steps; index += 1) {
+        const point = {
+          x: Math.round(from.x + ((to.x - from.x) * index) / steps),
+          y: Math.round(from.y + ((to.y - from.y) * index) / steps),
+        };
+        contents.sendInputEvent({ type: 'mouseMove', ...point, movementX: 1, movementY: 1 });
+        await wait(16);
+      }
+      // Native moves may be coalesced or delivered after the process yields. Do not
+      // commit the gesture until its endpoint has reached the renderer and painted.
+      await this.evaluate('window.__imnotaSmokeDrag.ready');
+    } finally {
+      contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1 });
+      await this.evaluate(`(() => {
+        window.__imnotaSmokeDrag?.dispose();
+        delete window.__imnotaSmokeDrag;
+      })()`);
     }
-    contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1 });
     await wait(80);
   }
 
