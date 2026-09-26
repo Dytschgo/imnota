@@ -129,6 +129,7 @@ import {
 } from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
+import { IpcRouter } from './ipc-router.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
 import { WorkspaceContentSearch } from './content-search.js';
@@ -1419,8 +1420,6 @@ async function insertCapturedPng(
 }
 
 function registerIpc(): void {
-  // One queue prevents concurrent read/modify/write handlers from losing updates.
-  let pending: Promise<unknown> = Promise.resolve();
   const screenshotInput = z.object({ projectPath: pathInput, screenshot: screenshotSchema });
   const png = z
     .string()
@@ -1821,53 +1820,17 @@ function registerIpc(): void {
       throw new Error('Untrusted capture overlay sender.');
     settleCaptureOverlay(null);
   });
-  const handle: typeof ipcMain.handle = (channel, listener) => {
-    ipcMain.handle(channel, (event, ...args) => {
-      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
-        throw new Error('Untrusted IPC sender.');
-      const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
-      if (channel.startsWith('update:')) return listener(event, ...validated);
-      if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
-      // Search is read-only and owns a single cancellable scan. Do not queue obsolete queries
-      // behind mutations or block saves while the workspace text is being indexed.
-      if (channel === 'projects:search-content') return listener(event, ...validated);
-      const invoke = () => listener(event, ...validated);
-      const result = pending.then(() =>
-        tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke(),
-      );
-      pending = result.catch(() => undefined);
-      return result;
-    });
-  };
-  const handleConcurrent: typeof ipcMain.handle = (channel, listener) => {
-    ipcMain.handle(channel, (event, ...args) => {
-      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
-        throw new Error('Untrusted IPC sender.');
-      const validated = (contracts[channel] ?? z.tuple([pathInput])).parse(args);
-      if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
-      return listener(event, ...validated);
-    });
-  };
-  const handleWorkflow = (
-    channel: string,
-    listener: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown> | unknown,
-    queued = false,
-  ) => {
-    ipcMain.handle(channel, (event, ...args) =>
-      workflowOutcome(async () => {
-        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
-          throw new Error('Untrusted IPC sender.');
-        if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
-        const invoke = () => listener(event, ...args);
-        if (!queued) return tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke();
-        const result = pending.then(() =>
-          tracesPersistenceChannel(channel) ? diagnostics.run(channel, invoke) : invoke(),
-        );
-        pending = result.catch(() => undefined);
-        return result;
-      }),
-    );
-  };
+  const router = new IpcRouter({
+    register: (channel, listener) => ipcMain.handle(channel, listener),
+    trustedSender: (event) =>
+      event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame,
+    updateInstallPending: () => updateInstallPending,
+    contracts,
+    defaultContract: z.tuple([pathInput]),
+    tracesChannel: tracesPersistenceChannel,
+    trace: (channel, run) => diagnostics.run(channel, run),
+  });
+  const { handle, handleConcurrent, handleWorkflow } = router;
   handleWorkflow('workflow:capture:renderer-ready', (event) => {
     const request = captureRequests.rendererReady(event.sender);
     if (request) sendCaptureRequest(request);
@@ -1885,9 +1848,7 @@ function registerIpc(): void {
   ) => {
     ipcMain.handle(channel, (event, ...args) =>
       workflowOutcome(async () => {
-        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
-          throw new Error('Untrusted IPC sender.');
-        if (updateInstallPending) throw new Error('Imnota is restarting to install an update.');
+        router.assertCallable(event);
         const admission = captureAdmissionGate.acquire();
         if (!admission)
           throw new NativeWorkflowError(
@@ -1902,11 +1863,9 @@ function registerIpc(): void {
         event.sender.once('destroyed', revoke);
         event.sender.once('render-process-gone', revoke);
         try {
-          const result = pending.then(() =>
+          return await router.enqueue(() =>
             diagnostics.run(channel, () => listener(event, admission, ...args)),
           );
-          pending = result.catch(() => undefined);
-          return await result;
         } finally {
           event.sender.removeListener('destroyed', revoke);
           event.sender.removeListener('render-process-gone', revoke);
@@ -3371,7 +3330,7 @@ function registerIpc(): void {
     updateInstallPending = true;
     try {
       // Close admission before draining all file work accepted before restart.
-      await pending;
+      await router.drain();
       await updateController.install();
     } catch (error) {
       updateInstallPending = false;
