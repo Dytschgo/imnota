@@ -12,10 +12,8 @@ import {
   shell,
   session,
   screen,
-  systemPreferences,
   Tray,
 } from 'electron';
-import os from 'node:os';
 import { nativeClipboard } from './native-clipboard.js';
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
@@ -26,67 +24,34 @@ import {
   promptHandoffRoot,
   TemporaryFileHandoffStore,
 } from './onboarding-handoff.js';
-import { desktopMaterial } from './desktop-glass.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import JSZip from 'jszip';
 import { z } from 'zod';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
 import type {
-  ExportRequest,
   ImagePayload,
   ProjectData,
   ProjectSnapshot,
   ScreenshotRecord,
   WorkspaceSettings,
 } from '../src/shared/types.js';
-import type { ProjectIconKey } from '../src/shared/project-icons.js';
 import type { AppearanceMode, PreferenceSettingsResult } from '../src/shared/preferences.js';
-import {
-  mergePreferenceSettings,
-  preferenceSettingsEnvelope,
-  preferenceSettingsUpdateSchema,
-  resolvePreferenceSettings,
-} from '../src/shared/preference-settings.js';
+import { preferenceSettingsEnvelope, resolvePreferenceSettings } from '../src/shared/preference-settings.js';
 import type {
   ClipboardFormatsReport,
-  PreferenceSettingsUpdate,
   ProjectWatchEvent,
   WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
-import {
-  DEFAULT_EXPORT_PREFERENCES,
-  emptyProject,
-  nowIso,
-  sanitizeFilename,
-  slugify,
-} from '../src/shared/utils.js';
-import {
-  validateProject,
-  parseProjectFile,
-  projectSchema,
-  annotationSchema,
-  notesSchema,
-  filenameSchema,
-} from '../src/shared/schema.js';
+import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
+import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
-import {
-  ensureCollection,
-  addEmptyCollection,
-  migrateProjectWithBackup,
-  screenshotPath,
-} from './collections.js';
-import {
-  deleteScreenshotToTrash,
-  recoverScreenshotTrashTransactions,
-  undoScreenshotDelete,
-  type ScreenshotTrashOperations,
-} from './screenshot-trash.js';
+import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
+import { recoverScreenshotTrashTransactions, type ScreenshotTrashOperations } from './screenshot-trash.js';
 import {
   discardScreenshotTransaction,
   recoverScreenshotTransactions,
@@ -99,11 +64,9 @@ import {
 import {
   commitScreenshotFileTransaction,
   nextProjectMutationTimestamp,
-  prepareConflictTransactionWrites,
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
-import { collectHostedShareArtifacts, hostedPngDimensionsAreSafe } from './hosted-share-artifacts.js';
 import { clipboardContextHtml, clipboardPngDimensions } from '../src/shared/clipboard-context.js';
 import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
@@ -112,38 +75,30 @@ import { prepareTerminalUpdate } from './terminal-update.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
-import { nativePerformanceProfile } from './native-performance.js';
-import { windowsFileClipboardAvailable } from './windows-clipboard.js';
-import {
-  MAX_OCR_DATA_URL_CHARACTERS,
-  recognizeOnDevicePngDataUrl,
-  windowsOcrAvailable,
-  type OcrCropRect,
-} from './windows-ocr.js';
+import { type OcrCropRect } from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
 import { IpcRouter } from './ipc-router.js';
-import {
-  contracts,
-  pathInput,
-  projectInput,
-  workflowBundleNumber,
-  workflowManifest,
-  workflowSessionId,
-} from './ipc-contracts.js';
+import { registerCaptureIpc } from './ipc-capture.js';
+import { registerProjectWatchIpc } from './ipc-project-watch.js';
+import { registerHostedShareIpc } from './ipc-hosted-share.js';
+import { registerPromptExportIpc } from './ipc-prompt-export.js';
+import { registerPreferenceIpc } from './ipc-preferences.js';
+import { registerSystemIpc } from './ipc-system.js';
+import { registerContentIpc } from './ipc-content.js';
+import { registerScreenshotIpc } from './ipc-screenshots.js';
+import { registerProjectIpc } from './ipc-projects.js';
+import { registerSettingsIpc } from './ipc-settings.js';
+import { contracts, pathInput } from './ipc-contracts.js';
 import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
 import { WorkspaceContentSearch } from './content-search.js';
-import { listWorkspaceProjects } from './project-list.js';
 import { LocalMcpServer } from './mcp-server.js';
 import { assertProjectPath as authorizeProjectPath } from './project-path.js';
-import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
 import { ProjectSearchService } from './project-search.js';
-import { createTemplateProject } from './template-project.js';
 import { BackupService } from './backup-service.js';
-import { openCommittedBackupRestore } from './backup-restore-result.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
 import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
@@ -161,7 +116,7 @@ import {
   type CaptureOverlayFailure,
   type CaptureOverlayOutcome,
 } from './capture-overlay-session.js';
-import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
+import { CaptureDelaySession } from './capture-delay.js';
 import {
   captureDelayHudWindowOptions,
   captureOverlayFreezeAppearance,
@@ -169,7 +124,6 @@ import {
   overlayCoversDisplay,
 } from './capture-overlay-placement.js';
 import {
-  captureAllDisplaysWithStableGeometry,
   captureDisplayMetricsInvalidateSelection,
   captureDisplaysHaveStableGeometry,
   captureDisplayWithStableGeometry,
@@ -206,6 +160,7 @@ let onboardingHandoffWorkflow: OnboardingHandoffWorkflow | undefined;
 let hostedShareClient: HostedShareClient | undefined;
 let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
+let contentPersistence: ContentPersistenceService;
 let localMcpServer: LocalMcpServer | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
@@ -1408,6 +1363,191 @@ async function insertCapturedPng(
   return { snapshot: await makeSnapshot(projectPath), screenshotId: screenshot.id };
 }
 
+async function mutateProjectMetadata(
+  projectPath: string,
+  expectedRevision: string,
+  mutate: (project: ProjectData) => ProjectData,
+): Promise<ProjectSnapshot> {
+  const safePath = await assertProjectPath(projectPath);
+  const baseline = await readProjectMutationBaseline(safePath);
+  if (baseline.projectRevision !== expectedRevision)
+    throw new Error('The project changed before this update. Reload it and try again.');
+  const next = validateProject({
+    ...mutate(baseline.project),
+    id: baseline.project.id,
+    updatedAt: nextProjectMutationTimestamp(baseline.project.updatedAt),
+  });
+  await assertProjectRevision(safePath, expectedRevision);
+  await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
+  return makeSnapshot(safePath);
+}
+
+// Acquire before this request joins the shared IPC queue. Otherwise two rapid
+// toolbar/shortcut invocations can each wait for a previous operation and
+// subsequently create separate overlays.
+function captureWorkflowRegistrar(router: IpcRouter) {
+  return (
+    channel: 'workflow:capture:region' | 'workflow:capture:repeat-last-region',
+    listener: (
+      event: IpcMainInvokeEvent,
+      admission: CaptureAdmission,
+      ...args: unknown[]
+    ) => Promise<unknown> | unknown,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) =>
+      workflowOutcome(async () => {
+        router.assertCallable(event);
+        const admission = captureAdmissionGate.acquire();
+        if (!admission)
+          throw new NativeWorkflowError(
+            'capture-unavailable',
+            'A screen capture is already in progress. Finish or cancel it before starting another.',
+          );
+        const revoke = () => {
+          captureAdmissionGate.revoke(admission);
+          cancelCaptureDelay();
+          settleCaptureOverlay(null);
+        };
+        event.sender.once('destroyed', revoke);
+        event.sender.once('render-process-gone', revoke);
+        try {
+          return await router.enqueue(() =>
+            diagnostics.run(channel, () => listener(event, admission, ...args)),
+          );
+        } finally {
+          event.sender.removeListener('destroyed', revoke);
+          event.sender.removeListener('render-process-gone', revoke);
+          captureAdmissionGate.release(admission);
+        }
+      }),
+    );
+  };
+}
+export type CaptureWorkflowRegistrar = ReturnType<typeof captureWorkflowRegistrar>;
+
+// ipc-host:start
+/** Main-process state and helpers shared with the domain IPC modules. */
+function createIpcHost() {
+  return {
+    assertLiveCaptureAdmission,
+    assertProjectPath,
+    assertProjectRevision,
+    atomicWrite,
+    captureAdmissionGate,
+    captureGlobalShortcut,
+    captureRequests,
+    captureService,
+    chooseCaptureRegion,
+    clipboardImage,
+    closeCaptureDelayHud,
+    commitFileTransaction,
+    contentRevision,
+    contentSearch,
+    copyBundleToClipboard,
+    copyFile,
+    copyImageToClipboard,
+    copyTextToClipboard,
+    cropPngForOcr,
+    diagnostics,
+    importOne,
+    insertCapturedPng,
+    lastCaptureRegionMemory,
+    listIdentifiableCaptureWindows,
+    loadImage,
+    makeSnapshot,
+    mutateProjectMetadata,
+    nextScreenshotPosition,
+    openCaptureDelayHud,
+    openWithRecovery,
+    persistApplicationSettings,
+    raiseMainWindow,
+    readOptionalFile,
+    readProject,
+    readProjectMetadata,
+    readProjectMutationBaseline,
+    readScreenshotFiles,
+    resolvedWindowBackground,
+    screenshotTrashOperations,
+    sendCaptureRequest,
+    uniqueProjectFolder,
+    uniqueStoredName,
+    withSnapshotWarnings,
+    withinProjectCreationQueue,
+    workspaceOrThrow,
+    get backupService() {
+      return backupService;
+    },
+    get captureDelayHud() {
+      return captureDelayHud;
+    },
+    get captureDelaySession() {
+      return captureDelaySession;
+    },
+    set captureDelaySession(value: typeof captureDelaySession) {
+      captureDelaySession = value;
+    },
+    get contentPersistence() {
+      return contentPersistence;
+    },
+    get hostedShareClient() {
+      return hostedShareClient;
+    },
+    get lastOverlayCommit() {
+      return lastOverlayCommit;
+    },
+    get mainWindow() {
+      return mainWindow;
+    },
+    get onboardingHandoffWorkflow() {
+      return onboardingHandoffWorkflow;
+    },
+    get pendingCapturePng() {
+      return pendingCapturePng;
+    },
+    set pendingCapturePng(value: typeof pendingCapturePng) {
+      pendingCapturePng = value;
+    },
+    get preferenceSettingsResult() {
+      return preferenceSettingsResult;
+    },
+    get projectSearchService() {
+      return projectSearchService;
+    },
+    get projectWatchManager() {
+      return projectWatchManager;
+    },
+    get promptBundleWorkflow() {
+      return promptBundleWorkflow;
+    },
+    get settings() {
+      return settings;
+    },
+    get smokeBackupRestorePath() {
+      return smokeBackupRestorePath;
+    },
+    set smokeBackupRestorePath(value: typeof smokeBackupRestorePath) {
+      smokeBackupRestorePath = value;
+    },
+    get smokeProjectDeletionPath() {
+      return smokeProjectDeletionPath;
+    },
+    set smokeProjectDeletionPath(value: typeof smokeProjectDeletionPath) {
+      smokeProjectDeletionPath = value;
+    },
+    get updateController() {
+      return updateController;
+    },
+    get updateInstallPending() {
+      return updateInstallPending;
+    },
+    set updateInstallPending(value: typeof updateInstallPending) {
+      updateInstallPending = value;
+    },
+  };
+}
+export type IpcHost = ReturnType<typeof createIpcHost>;
+// ipc-host:end
+
 function registerIpc(): void {
   // The selection window is not the main renderer. It receives no general
   // bridge and these handlers accept only its current webContents instance.
@@ -1598,50 +1738,9 @@ function registerIpc(): void {
     tracesChannel: tracesPersistenceChannel,
     trace: (channel, run) => diagnostics.run(channel, run),
   });
-  const { handle, handleConcurrent, handleWorkflow } = router;
-  handleWorkflow('workflow:capture:renderer-ready', (event) => {
-    const request = captureRequests.rendererReady(event.sender);
-    if (request) sendCaptureRequest(request);
-  });
-  // Acquire before this request joins the shared IPC queue. Otherwise two rapid
-  // toolbar/shortcut invocations can each wait for a previous operation and
-  // subsequently create separate overlays.
-  const handleCaptureWorkflow = (
-    channel: 'workflow:capture:region' | 'workflow:capture:repeat-last-region',
-    listener: (
-      event: IpcMainInvokeEvent,
-      admission: CaptureAdmission,
-      ...args: unknown[]
-    ) => Promise<unknown> | unknown,
-  ) => {
-    ipcMain.handle(channel, (event, ...args) =>
-      workflowOutcome(async () => {
-        router.assertCallable(event);
-        const admission = captureAdmissionGate.acquire();
-        if (!admission)
-          throw new NativeWorkflowError(
-            'capture-unavailable',
-            'A screen capture is already in progress. Finish or cancel it before starting another.',
-          );
-        const revoke = () => {
-          captureAdmissionGate.revoke(admission);
-          cancelCaptureDelay();
-          settleCaptureOverlay(null);
-        };
-        event.sender.once('destroyed', revoke);
-        event.sender.once('render-process-gone', revoke);
-        try {
-          return await router.enqueue(() =>
-            diagnostics.run(channel, () => listener(event, admission, ...args)),
-          );
-        } finally {
-          event.sender.removeListener('destroyed', revoke);
-          event.sender.removeListener('render-process-gone', revoke);
-          captureAdmissionGate.release(admission);
-        }
-      }),
-    );
-  };
+  const host = createIpcHost();
+  const handleCaptureWorkflow = captureWorkflowRegistrar(router);
+  registerCaptureIpc(router, handleCaptureWorkflow, host);
 
   projectWatchManager = new ProjectWatchManager({
     loadSnapshot: (projectPath) => makeSnapshot(projectPath),
@@ -1679,7 +1778,7 @@ function registerIpc(): void {
     getWorkspace: () => workspaceOrThrow(),
     getPreferences: () => preferenceSettingsResult.settings.backups,
   });
-  const contentPersistence = new ContentPersistenceService({
+  contentPersistence = new ContentPersistenceService({
     snapshot: makeSnapshot,
     beforeSchemaMigration: async (projectPath) => {
       if (preferenceSettingsResult.settings.backups.enabled)
@@ -1761,1350 +1860,15 @@ function registerIpc(): void {
         cache: 'no-store',
       }),
   );
-  handle('settings:get', () => settings);
-  handle('diagnostics:open-folder', async () => {
-    diagnostics.retryStorage();
-    if (
-      !(await diagnostics.record({ category: 'lifecycle', action: 'diagnostics-check', phase: 'observed' }))
-    )
-      throw new Error(
-        'Local diagnostics could not be written. Check free space and application data folder access.',
-      );
-    const error = await shell.openPath(await diagnostics.openDirectory());
-    if (error) throw new Error('The diagnostics folder could not be opened.');
-  });
-  handle('settings:choose-workspace', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Choose Imnota workspace',
-      defaultPath: settings.workspacePath || app.getPath('documents'),
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    contentSearch.invalidate();
-    settings.workspacePath = result.filePaths[0];
-    await persistApplicationSettings(settings);
-    return settings;
-  });
-  handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
-    const next = { ...settings, ...input };
-    const persist = async () => {
-      await persistApplicationSettings(next);
-    };
-    if (next.updateChannel !== settings.updateChannel)
-      await updateController.switchChannel(next.updateChannel, persist);
-    else await persist();
-    return settings;
-  });
-  handle('backups:list', () => backupService!.listSnapshots());
-  handle('backups:choose-location', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Choose local history location',
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
-  handle('backups:create', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    return backupService!.createSnapshot(safePath, 'manual');
-  });
-  handle('backups:inspect', (_event, input) => backupService!.inspectSnapshot(input.snapshotId));
-  handle('backups:export', async (_event, input) => {
-    const inspection = await backupService!.inspectSnapshot(input.snapshotId);
-    const result = await dialog.showSaveDialog(mainWindow!, {
-      title: 'Export backup archive',
-      defaultPath: `${sanitizeFilename(inspection.summary.sourceProjectName, 'imnota-backup')} ${inspection.summary.createdAt.slice(0, 10)}.imnota-backup.zip`,
-      filters: [{ name: 'Imnota backup archive', extensions: ['zip'] }],
-    });
-    if (result.canceled || !result.filePath) return { cancelled: true };
-    await backupService!.exportSnapshot(input.snapshotId, result.filePath);
-    return { cancelled: false, filePath: result.filePath };
-  });
-  handle('backups:restore', async (_event, input) => {
-    if (input.mode === 'new') {
-      const restored = await backupService!.restoreNew(input.snapshotId);
-      const warnings = restored.warnings ?? [];
-      return openCommittedBackupRestore(
-        { mode: 'new', projectPath: restored.projectPath, warnings },
-        async (projectPath) => withSnapshotWarnings(await openWithRecovery(projectPath), warnings),
-      );
-    }
-    const safePath = await assertProjectPath(input.projectPath);
-    const inspection = await backupService!.inspectSnapshot(input.snapshotId);
-    const smokeApproved = process.env.IMNOTA_SMOKE === '1' && smokeBackupRestorePath === safePath;
-    smokeBackupRestorePath = null;
-    const answer = smokeApproved
-      ? { response: 1 }
-      : await dialog.showMessageBox(mainWindow!, {
-          type: 'warning',
-          buttons: ['Cancel', 'Restore in place'],
-          defaultId: 0,
-          cancelId: 0,
-          message: `Replace ${inspection.summary.sourceProjectName} with this snapshot?`,
-          detail:
-            'Imnota will create a safety snapshot first. The selected historical files then replace the current project in its existing folder.',
-        });
-    if (answer.response !== 1) throw new Error('Restore in place cancelled.');
-    projectWatchManager?.stopProject(safePath);
-    const restored = await backupService!.restoreInPlace(input.snapshotId, safePath);
-    const warnings = [
-      `The full pre-restore project remains recoverable at ${restored.rollbackPath}.`,
-      ...(restored.warnings ?? []),
-    ];
-    return openCommittedBackupRestore(
-      {
-        mode: 'in-place',
-        projectPath: restored.projectPath,
-        safetySnapshotId: restored.safetySnapshotId,
-        rollbackPath: restored.rollbackPath,
-        warnings,
-      },
-      async (projectPath) => withSnapshotWarnings(await openWithRecovery(projectPath), warnings),
-    );
-  });
-  handleWorkflow('workflow:preferences:get', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    return preferenceSettingsResult;
-  });
-  handleWorkflow(
-    'workflow:preferences:set',
-    async (_event, ...args) => {
-      const [input] = z.tuple([preferenceSettingsUpdateSchema]).parse(args);
-      const next = mergePreferenceSettings(
-        preferenceSettingsResult.settings,
-        input as PreferenceSettingsUpdate,
-      );
-      await persistApplicationSettings(settings, next);
-      return preferenceSettingsResult;
-    },
-    true,
-  );
-  handleWorkflow('workflow:performance:get', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    return nativePerformanceProfile();
-  });
-  handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    return {
-      windowsFileClipboard: windowsFileClipboardAvailable(),
-      globalCaptureShortcutRegistered: captureGlobalShortcut.registeredAccelerator !== null,
-    };
-  });
-  handleWorkflow('workflow:window:raise', (_event, ...args) => {
-    z.tuple([]).parse(args);
-    raiseMainWindow();
-  });
-  handleWorkflow('workflow:ocr:recognize', async (_event, ...args) => {
-    if (!windowsOcrAvailable()) return { text: '' };
-    const [input] = z
-      .tuple([
-        z
-          .object({
-            pngDataUrl: z.string().max(MAX_OCR_DATA_URL_CHARACTERS),
-            crop: z
-              .object({
-                x: z.number().int().nonnegative(),
-                y: z.number().int().nonnegative(),
-                width: z.number().int().positive(),
-                height: z.number().int().positive(),
-              })
-              .strict()
-              .optional(),
-          })
-          .strict(),
-      ])
-      .parse(args);
-    return {
-      text: await recognizeOnDevicePngDataUrl(input.pngDataUrl, {
-        crop: input.crop,
-        cropPng: cropPngForOcr,
-      }),
-    };
-  });
-  handleCaptureWorkflow('workflow:capture:region', async (event, admission, ...args) => {
-    const [input] = z
-      .tuple([
-        z
-          .object({
-            projectPath: pathInput.optional(),
-            collectionId: filenameSchema.optional(),
-            overlayMode: z.enum(CAPTURE_OVERLAY_MODES).optional(),
-            delaySeconds: z.union([z.literal(3), z.literal(5)]).optional(),
-          })
-          .strict()
-          .refine((value) => Boolean(value.projectPath) === Boolean(value.collectionId)),
-      ])
-      .parse(args);
-    assertLiveCaptureAdmission(event, admission);
-    pendingCapturePng = null;
-    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
-    if (process.platform === 'linux')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Screen capture is unavailable on Linux in this experimental release. Use Import or Paste instead.',
-      );
-    if (process.platform !== 'win32' && process.platform !== 'darwin')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Screen capture is unavailable on this platform. Use Import or Paste instead.',
-      );
-    if (process.platform === 'darwin') {
-      const permission = systemPreferences.getMediaAccessStatus('screen');
-      if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
-    }
-    let safeProjectPath: string | undefined;
-    if (input.projectPath && input.collectionId) {
-      safeProjectPath = await assertProjectPath(input.projectPath);
-      const beforeCapture = await readProjectMetadata(safeProjectPath);
-      const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-      if (!beforeCollection)
-        throw new NativeWorkflowError('collection-not-found', 'Choose a collection before capturing.');
-    }
-    // The renderer flushes before it invokes this workflow and rechecks its
-    // project/collection identity. Recheck the originating renderer here as
-    // well because this request may have waited in the shared IPC queue.
-    assertLiveCaptureAdmission(event, admission);
-    const displays = screen.getAllDisplays();
-    if (!displays.length)
-      throw new NativeWorkflowError(
-        'capture-sources-unavailable',
-        'No display is available to capture. Use Import or Paste instead.',
-        true,
-      );
-    assertLiveCaptureAdmission(event, admission);
-    const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
-    const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
-    try {
-      // Capture before creating the overlay; otherwise the selection UI would
-      // be present in the image. Hiding the main window prevents self-capture.
-      if (wasVisible) mainWindow?.hide();
-      if (input.delaySeconds) {
-        let remainingSeconds: number = input.delaySeconds;
-        const sendTick = (seconds: number) => {
-          remainingSeconds = seconds;
-          if (captureDelayHud && !captureDelayHud.isDestroyed())
-            captureDelayHud.webContents.send('capture-overlay:countdown', { remainingSeconds: seconds });
-        };
-        const delay = new CaptureDelaySession(input.delaySeconds, undefined, sendTick);
-        captureDelaySession = delay;
-        const unbindDelayCancel = bindCaptureDelayCancel(
-          (accelerator, callback) => globalShortcut.register(accelerator, callback),
-          (accelerator) => {
-            globalShortcut.unregister(accelerator);
-          },
-          () => delay.cancel(),
-        );
-        const hudDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-        void openCaptureDelayHud(hudDisplay.bounds)
-          .then((hud) => {
-            if (hud && !hud.isDestroyed()) {
-              hud.once('closed', () => delay.cancel());
-              sendTick(remainingSeconds);
-            }
-          })
-          .catch(() => undefined);
-        try {
-          if (!captureAdmissionGate.isActive(admission)) delay.cancel();
-          if ((await delay.result) === 'cancelled')
-            throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
-        } finally {
-          unbindDelayCancel();
-          if (captureDelaySession === delay) captureDelaySession = null;
-          await closeCaptureDelayHud();
-        }
-        assertLiveCaptureAdmission(event, admission);
-      }
-      let captured: CapturedDisplayImage[];
-      const service = captureService();
-      try {
-        const stableCapture = await captureAllDisplaysWithStableGeometry(
-          displays,
-          (current) => service.captureDisplays(current),
-          () => screen.getAllDisplays(),
-        );
-        if (!stableCapture)
-          throw new NativeWorkflowError(
-            'capture-sources-unavailable',
-            'The display layout changed while capture was being prepared. Try again after the displays settle.',
-            true,
-          );
-        captured = stableCapture;
-      } catch (error) {
-        if (error instanceof NativeWorkflowError) throw error;
-        if (error instanceof CaptureServiceError) {
-          if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
-          throw new NativeWorkflowError(
-            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            true,
-          );
-        }
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The screen capture source could not be read. Use Import or Paste instead.',
-          true,
-        );
-      }
-      assertLiveCaptureAdmission(event, admission);
-      let outcome: CaptureOverlayOutcome;
-      try {
-        outcome = await chooseCaptureRegion(
-          captured,
-          listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
-          input.overlayMode ?? 'region',
-        );
-      } catch (error) {
-        if (error instanceof CaptureServiceError)
-          throw new NativeWorkflowError(
-            'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            true,
-          );
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The screen selection window could not be opened. Use Import or Paste instead.',
-          true,
-        );
-      }
-      assertLiveCaptureAdmission(event, admission);
-      if (outcome.kind === 'cancelled')
-        throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
-      if (outcome.kind === 'failed')
-        throw new NativeWorkflowError(
-          'capture-failed',
-          outcome.reason === 'misplaced'
-            ? 'The selection window could not cover a display. Try again, or use Import or Paste instead.'
-            : outcome.reason === 'display-changed'
-              ? 'The display layout changed during capture. Try again after the displays settle.'
-              : 'The screen selection window stopped before it was ready. Use Import or Paste instead.',
-          true,
-        );
-      const selection = outcome.selection;
-      let png: Buffer;
-      try {
-        png = service.compose(captured, selection);
-      } catch (error) {
-        if (error instanceof CaptureServiceError)
-          throw new NativeWorkflowError(
-            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            error.kind !== 'empty-region',
-          );
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The selected screen area could not be prepared. Use Import or Paste instead.',
-          true,
-        );
-      }
-      lastCaptureRegionMemory.remember(
-        captured.map(({ display }) => display),
-        selection,
-        outcome.mode,
-      );
-      assertLiveCaptureAdmission(event, admission);
-      if (!safeProjectPath || !input.collectionId) {
-        pendingCapturePng = png;
-        return { buffered: true as const, overlayAction: lastOverlayCommit };
-      }
-      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
-        assertLiveCaptureAdmission(event, admission),
-      );
-      return { ...inserted, overlayAction: lastOverlayCommit };
-    } finally {
-      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        if (wasFocused) mainWindow.focus();
-      }
-    }
-  });
-  handleCaptureWorkflow('workflow:capture:repeat-last-region', async (event, admission, ...args) => {
-    const [input] = z
-      .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
-      .parse(args);
-    assertLiveCaptureAdmission(event, admission);
-    if (!preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
-    if (process.platform === 'linux')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Screen capture is unavailable on Linux in this experimental release. Use Import or Paste instead.',
-      );
-    if (process.platform !== 'win32' && process.platform !== 'darwin')
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Screen capture is unavailable on this platform. Use Import or Paste instead.',
-      );
-    if (process.platform === 'darwin') {
-      const permission = systemPreferences.getMediaAccessStatus('screen');
-      if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
-    }
-    const safeProjectPath = await assertProjectPath(input.projectPath);
-    const beforeCapture = await readProjectMetadata(safeProjectPath);
-    const beforeCollection = beforeCapture.collections.find((item) => item.id === input.collectionId);
-    if (!beforeCollection)
-      throw new NativeWorkflowError('collection-not-found', 'Choose a collection before capturing.');
-    assertLiveCaptureAdmission(event, admission);
-    const resolved = lastCaptureRegionMemory.resolve(screen.getAllDisplays());
-    if (!resolved.ok)
-      throw new NativeWorkflowError(
-        resolved.kind === 'unavailable' ? 'capture-unavailable' : 'capture-sources-unavailable',
-        resolved.message,
-        resolved.kind === 'display-gone',
-      );
-    const wasVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
-    const wasFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
-    try {
-      if (wasVisible) mainWindow?.hide();
-      let captured: CapturedDisplayImage[];
-      const service = captureService();
-      try {
-        const stableCapture = await captureAllDisplaysWithStableGeometry(
-          resolved.displays,
-          (displays) => service.captureDisplays(displays),
-          () => screen.getAllDisplays(),
-        );
-        if (!stableCapture)
-          throw new NativeWorkflowError(
-            'capture-sources-unavailable',
-            'The display layout changed while the last area was being prepared. Capture a new area, or reconnect the displays.',
-            true,
-          );
-        captured = stableCapture;
-      } catch (error) {
-        if (error instanceof NativeWorkflowError) throw error;
-        if (error instanceof CaptureServiceError) {
-          if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
-          throw new NativeWorkflowError(
-            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            true,
-          );
-        }
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The screen capture source could not be read. Use Import or Paste instead.',
-          true,
-        );
-      }
-      assertLiveCaptureAdmission(event, admission);
-      let png: Buffer;
-      try {
-        png = service.compose(captured, resolved.selection);
-      } catch (error) {
-        if (error instanceof CaptureServiceError)
-          throw new NativeWorkflowError(
-            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            error.kind !== 'empty-region',
-          );
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The selected screen area could not be prepared. Use Import or Paste instead.',
-          true,
-        );
-      }
-      lastCaptureRegionMemory.remember(
-        captured.map(({ display }) => display),
-        resolved.selection,
-        'region',
-      );
-      assertLiveCaptureAdmission(event, admission);
-      return insertCapturedPng(safeProjectPath, input.collectionId, png, () =>
-        assertLiveCaptureAdmission(event, admission),
-      );
-    } finally {
-      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        if (wasFocused) mainWindow.focus();
-      }
-    }
-  });
-  handleWorkflow(
-    'workflow:capture:commit-buffered',
-    async (event, ...args) => {
-      const [input] = z
-        .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
-        .parse(args);
-      const png = pendingCapturePng;
-      if (!png)
-        throw new NativeWorkflowError(
-          'capture-failed',
-          'The captured screenshot is no longer available. Capture the region again.',
-        );
-      const safeProjectPath = await assertProjectPath(input.projectPath);
-      const inserted = await insertCapturedPng(safeProjectPath, input.collectionId, png, () => {
-        if (
-          event.sender.isDestroyed() ||
-          !mainWindow ||
-          mainWindow.isDestroyed() ||
-          mainWindow.webContents !== event.sender
-        )
-          throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
-      });
-      pendingCapturePng = null;
-      return inserted;
-    },
-    true,
-  );
-  handleWorkflow(
-    'workflow:capture:discard-buffered',
-    (_event, ...args) => {
-      z.tuple([]).parse(args);
-      pendingCapturePng = null;
-    },
-    true,
-  );
-  handleWorkflow('workflow:appearance:desktop', (event, ...args) => {
-    const [input] = z.tuple([z.object({ enabled: z.boolean() }).strict()]).parse(args);
-    const target = BrowserWindow.fromWebContents(event.sender);
-    if (!target) return { active: false };
-    const material = desktopMaterial(process.platform, os.release());
-    const appearance = preferenceSettingsResult.settings.appearance;
-    const active = Boolean(
-      input.enabled &&
-      material &&
-      appearance.desktopGlass &&
-      !appearance.backgroundImage &&
-      appearance.glassLevel !== 'off' &&
-      !nativeTheme.shouldUseHighContrastColors &&
-      !nativeTheme.prefersReducedTransparency &&
-      !nativePerformanceProfile().reducedEffectsRecommended,
-    );
-    try {
-      if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
-      if (material === 'acrylic') target.setBackgroundMaterial(active ? 'acrylic' : 'none');
-      target.setBackgroundColor(active ? '#00000000' : resolvedWindowBackground(appearance.mode));
-      if (material === 'vibrancy') target.invalidateShadow();
-      return { active };
-    } catch {
-      target.setBackgroundColor(resolvedWindowBackground(appearance.mode));
-      return { active: false };
-    }
-  });
-  handleWorkflow(
-    'workflow:prompt-export:start',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              projectPath: pathInput,
-              collectionId: filenameSchema,
-              bundles: workflowManifest,
-            })
-            .strict(),
-        ])
-        .parse(args);
-      return promptBundleWorkflow!.start(input.projectPath, input.collectionId, input.bundles);
-    },
-    true,
-  );
-  handleWorkflow(
-    'workflow:prompt-export:write',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              sessionId: workflowSessionId,
-              bundleNumber: workflowBundleNumber,
-              pngDataUrl: z
-                .string()
-                .max(134_000_000)
-                .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
-                .optional(),
-              markdown: z.string().min(1).max(2_000_000),
-              sourceAssets: z
-                .array(
-                  z
-                    .object({
-                      filename: filenameSchema.refine((value) => value.endsWith('.json'), {
-                        message: 'Drawing source filename must end in .json.',
-                      }),
-                      source: z.string().max(20_000_000),
-                    })
-                    .strict(),
-                )
-                .max(10_000)
-                .optional(),
-            })
-            .strict(),
-        ])
-        .parse(args);
-      // The export worker owns this method's optional fifth argument; keep this worktree
-      // compatible with the pre-integration class type while forwarding the validated assets.
-      const writeWithSources = promptBundleWorkflow!.write.bind(promptBundleWorkflow!) as (
-        sessionId: string,
-        bundleNumber: number,
-        pngDataUrl: string | undefined,
-        markdown: string,
-        sourceAssets?: readonly { filename: string; source: string }[],
-      ) => Promise<unknown>;
-      return writeWithSources(
-        input.sessionId,
-        input.bundleNumber,
-        input.pngDataUrl,
-        input.markdown,
-        input.sourceAssets,
-      );
-    },
-    true,
-  );
-  handleWorkflow(
-    'workflow:prompt-export:finish',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              sessionId: workflowSessionId,
-              masterMarkdown: z.string().max(2_000_000).optional(),
-            })
-            .strict(),
-        ])
-        .parse(args);
-      return promptBundleWorkflow!.finish(input.sessionId, input.masterMarkdown);
-    },
-    true,
-  );
-  handleWorkflow('workflow:prompt-export:cancel', async (_event, ...args) => {
-    const [input] = z.tuple([z.object({ sessionId: workflowSessionId }).strict()]).parse(args);
-    return promptBundleWorkflow!.cancel(input.sessionId);
-  });
-  handleWorkflow('workflow:prompt-export:read', async (_event, ...args) => {
-    const [input] = z
-      .tuple([z.object({ sessionId: workflowSessionId, bundleNumber: workflowBundleNumber }).strict()])
-      .parse(args);
-    return promptBundleWorkflow!.read(input.sessionId, input.bundleNumber);
-  });
-  handleWorkflow('workflow:prompt-export:copy', async (_event, ...args) => {
-    const [input] = z
-      .tuple([
-        z
-          .object({
-            sessionId: workflowSessionId,
-            bundleNumber: workflowBundleNumber,
-            target: z.enum(['rich', 'files', 'files-rich', 'markdown', 'image', 'paths']),
-          })
-          .strict(),
-      ])
-      .parse(args);
-    return promptBundleWorkflow!.copy(input.sessionId, input.bundleNumber, input.target);
-  });
-  handleWorkflow('workflow:prompt-export:open', async (_event, ...args) => {
-    const [input] = z
-      .tuple([
-        z
-          .object({
-            sessionId: workflowSessionId,
-            bundleNumber: workflowBundleNumber,
-            target: z.enum(['folder', 'png', 'markdown', 'master']),
-          })
-          .strict(),
-      ])
-      .parse(args);
-    await promptBundleWorkflow!.open(input.sessionId, input.bundleNumber, input.target);
-  });
-  handleWorkflow('workflow:hosted-share:pair', async (_event, ...args) => {
-    z.tuple([]).parse(args);
-    await hostedShareClient!.openPairing();
-  });
-  handleWorkflow(
-    'workflow:hosted-share:create',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              requestId: z.string().uuid(),
-              pairingToken: z.string().max(512),
-              senderName: z.string().max(256).optional(),
-              sessionId: workflowSessionId,
-              bundleNumbers: z.array(workflowBundleNumber).min(1).max(20),
-              includeArchive: z.boolean(),
-              expiresInDays: z.number().int().min(1).max(30),
-            })
-            .strict(),
-        ])
-        .parse(args);
-      const artifacts = await collectHostedShareArtifacts(
-        promptBundleWorkflow!,
-        input.sessionId,
-        input.bundleNumbers,
-        (dataBase64) => {
-          const image = nativeImage.createFromBuffer(Buffer.from(dataBase64, 'base64'));
-          if (image.isEmpty()) return undefined;
-          const size = image.getSize();
-          if (!hostedPngDimensionsAreSafe(size.width, size.height))
-            return { width: size.width, height: size.height, dataBase64: '' };
-          return {
-            width: size.width,
-            height: size.height,
-            dataBase64: image.toPNG().toString('base64'),
-          };
-        },
-      );
-      return hostedShareClient!.create(input, artifacts);
-    },
-    true,
-  );
-  handleWorkflow('workflow:hosted-share:cancel', async (_event, ...args) => {
-    const [input] = z.tuple([z.object({ requestId: z.string().uuid() }).strict()]).parse(args);
-    await hostedShareClient!.cancel(input.requestId);
-  });
-  handleWorkflow('workflow:hosted-share:list', async (_event, ...args) => {
-    z.tuple([]).parse(args);
-    return hostedShareClient!.list();
-  });
-  handleWorkflow('workflow:hosted-share:recovery-warning:dismiss', async (_event, ...args) => {
-    const [input] = z
-      .tuple([z.object({ id: z.string().regex(/^recovery:[a-f0-9]{64}$/) }).strict()])
-      .parse(args);
-    await hostedShareClient!.dismissRecoveryWarning(input.id);
-  });
-  handleWorkflow(
-    'workflow:hosted-share:revoke',
-    async (_event, ...args) => {
-      const [input] = z.tuple([z.object({ id: z.string().min(1).max(200) }).strict()]).parse(args);
-      return hostedShareClient!.revoke(input.id);
-    },
-    true,
-  );
-  handleWorkflow(
-    'workflow:project-watch:start',
-    async (_event, ...args) => {
-      const [input] = z.tuple([z.object({ projectPath: pathInput }).strict()]).parse(args);
-      return projectWatchManager!.start(await assertProjectPath(input.projectPath));
-    },
-    true,
-  );
-  handleWorkflow('workflow:project-watch:stop', (_event, ...args) => {
-    const [input] = z.tuple([z.object({ watchId: workflowSessionId }).strict()]).parse(args);
-    projectWatchManager!.stop(input.watchId);
-  });
-  handleWorkflow('workflow:project-watch:reload', async (_event, ...args) => {
-    const [input] = z.tuple([z.object({ watchId: workflowSessionId }).strict()]).parse(args);
-    return projectWatchManager!.reload(input.watchId);
-  });
-  handleWorkflow(
-    'workflow:project-watch:cas',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              watchId: workflowSessionId,
-              expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
-              project: projectSchema,
-            })
-            .strict(),
-        ])
-        .parse(args);
-      return projectWatchManager!.compareAndSwap(
-        input.watchId,
-        input.expectedRevision,
-        validateProject(input.project),
-      );
-    },
-    true,
-  );
-  handle('projects:list', async () => {
-    contentSearch.invalidate();
-    if (!settings.workspacePath) return [];
-    await backupService!.recoverInterruptedRestores();
-    return listWorkspaceProjects(settings.workspacePath, (target, error) =>
-      diagnostics.record({
-        category: 'integrity',
-        action: 'project-list-unavailable',
-        phase: 'observed',
-        target,
-        error,
-      }),
-    );
-  });
-  handle('projects:search-content', async (_event, input: ContentSearchRequest) => {
-    const workspacePath = workspaceOrThrow();
-    if (path.relative(workspacePath, input.workspacePath) !== '')
-      throw new Error('The workspace changed. Retry your search in the selected workspace.');
-    const response = await contentSearch.search({ ...input, workspacePath });
-    if (path.relative(workspaceOrThrow(), workspacePath) !== '')
-      throw new Error('The workspace changed while searching. Retry your search.');
-    return response;
-  });
-  handleConcurrent('projects:search', async (_event, input) => projectSearchService!.search(input));
-  handle('projects:create', async (_event, raw) =>
-    withinProjectCreationQueue(async () => {
-      const input = projectInput.parse(raw);
-      const workspace = workspaceOrThrow();
-      await fs.mkdir(workspace, { recursive: true });
-      if (input.templateId) {
-        const folder = await createTemplateProject(workspace, { ...input, templateId: input.templateId });
-        return makeSnapshot(folder);
-      }
-      const folder = await uniqueProjectFolder(workspace, input.name);
-      await fs.mkdir(path.join(folder, 'exports'), { recursive: true });
-      await ensureCollection(folder, '001-collection');
-      await atomicWrite(
-        path.join(folder, 'project.json'),
-        JSON.stringify(
-          {
-            ...emptyProject(input.name, input.description, path.basename(workspace)),
-            ...(input.icon ? { icon: input.icon } : {}),
-            schemaVersion: 4,
-            contentItems: [],
-          },
-          null,
-          2,
-        ),
-      );
-      return makeSnapshot(folder);
-    }),
-  );
-  handle('projects:open-dialog', async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Open Imnota project',
-      defaultPath: settings.workspacePath || app.getPath('documents'),
-      properties: ['openDirectory'],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    await backupService!.recoverInterruptedRestores();
-    const projectPath = await assertProjectPath(result.filePaths[0]);
-    return openWithRecovery(projectPath);
-  });
-  handle('projects:load', async (_event, projectPath: string) => {
-    await backupService!.recoverInterruptedRestores();
-    return openWithRecovery(await assertProjectPath(projectPath));
-  });
-  handle('projects:save', async (_event, projectPath: string, project: ProjectData) => {
-    const safePath = await assertProjectPath(projectPath);
-    const current = await readProject(safePath);
-    const next = preserveMixedProjectMetadata(current, {
-      ...project,
-      id: current.id,
-      updatedAt: nowIso(),
-    });
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
-  });
-  const mutateProjectMetadata = async (
-    projectPath: string,
-    expectedRevision: string,
-    mutate: (project: ProjectData) => ProjectData,
-  ): Promise<ProjectSnapshot> => {
-    const safePath = await assertProjectPath(projectPath);
-    const baseline = await readProjectMutationBaseline(safePath);
-    if (baseline.projectRevision !== expectedRevision)
-      throw new Error('The project changed before this update. Reload it and try again.');
-    const next = validateProject({
-      ...mutate(baseline.project),
-      id: baseline.project.id,
-      updatedAt: nextProjectMutationTimestamp(baseline.project.updatedAt),
-    });
-    await assertProjectRevision(safePath, expectedRevision);
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(next, null, 2));
-    return makeSnapshot(safePath);
-  };
-  handle('projects:update-metadata', async (_event, input) =>
-    mutateProjectMetadata(input.projectPath, input.expectedRevision, (project) => ({
-      ...project,
-      ...(input.patch as { name?: string; description?: string; icon?: ProjectIconKey }),
-    })),
-  );
-  handle('projects:set-archived', async (_event, input) =>
-    mutateProjectMetadata(input.projectPath, input.expectedRevision, (project) => ({
-      ...project,
-      status: input.archived ? 'archived' : 'active',
-    })),
-  );
-  handle('projects:save-screenshot', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const baseline = await readProjectMutationBaseline(safePath);
-    const project = baseline.project;
-    const trustedShot = project.screenshots.find((s) => s.id === input.screenshot.id);
-    if (!trustedShot) throw new Error('Screenshot does not belong to this project.');
-    const currentContent = await readScreenshotFiles(safePath, trustedShot);
-    if (currentContent.revision !== input.contentRevision) {
-      const ext = path.extname(trustedShot.storedFilename);
-      const storedFilename = await uniqueStoredName(
-        safePath,
-        `${path.basename(trustedShot.storedFilename, ext)}-copy-conflict${ext}`,
-      );
-      const timestamp = nextProjectMutationTimestamp(project.updatedAt);
-      const conflict: ScreenshotRecord = {
-        ...input.screenshot,
-        id: `shot_${crypto.randomUUID()}`,
-        collectionId: trustedShot.collectionId,
-        originalFilename: `${trustedShot.originalFilename} Copy conflict`,
-        storedFilename,
-        title: `${input.screenshot.title || trustedShot.title} — Copy conflict`,
-        position: nextScreenshotPosition(project, trustedShot.collectionId),
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        annotationFile: `collections/${trustedShot.collectionId}/annotations/${storedFilename}.json`,
-        descriptionFile: `collections/${trustedShot.collectionId}/descriptions/${storedFilename}.md`,
-        includeInExport: false,
-        conflict: true,
-      };
-      const trustedImagePath = screenshotPath(safePath, trustedShot);
-      await assertNoLinks(trustedImagePath);
-      const conflictImage = await fs.readFile(trustedImagePath);
-      const conflictAnnotations = JSON.stringify(input.annotations, null, 2);
-      project.screenshots.push(conflict);
-      project.updatedAt = timestamp;
-      const savedProject = validateProject(project);
-      const projectSource = JSON.stringify(savedProject, null, 2);
-      const recoverySource = await readOptionalFile(path.join(safePath, '.imnota-recovery.json'));
-      const warnings = await commitFileTransaction(
-        safePath,
-        'conflict',
-        prepareConflictTransactionWrites({
-          imagePath: `collections/${conflict.collectionId}/screenshots/${conflict.storedFilename}`,
-          imageAfter: conflictImage,
-          annotationPath: conflict.annotationFile,
-          annotationAfter: Buffer.from(conflictAnnotations),
-          descriptionPath: conflict.descriptionFile,
-          descriptionAfter: Buffer.from(conflict.description),
-          projectAfter: Buffer.from(projectSource),
-          projectSource: baseline.projectSource,
-          recoverySource,
-        }),
-        () => assertProjectRevision(safePath, baseline.projectRevision),
-      );
-      return {
-        project: savedProject,
-        savedScreenshotId: conflict.id,
-        conflictCreated: true,
-        contentRevision: contentRevision(conflict.description, conflictAnnotations),
-        projectRevision: projectRevisionForSource(projectSource),
-        warnings: warnings.length ? warnings : undefined,
-      };
-    }
-    const timestamp = nextProjectMutationTimestamp(project.updatedAt);
-    const screenshot: ScreenshotRecord = {
-      ...input.screenshot,
-      id: trustedShot.id,
-      collectionId: trustedShot.collectionId,
-      storedFilename: trustedShot.storedFilename,
-      annotationFile: trustedShot.annotationFile,
-      descriptionFile: trustedShot.descriptionFile,
-      createdAt: trustedShot.createdAt,
-      updatedAt: timestamp,
-    };
-    project.screenshots = project.screenshots.map((shot) => (shot.id === screenshot.id ? screenshot : shot));
-    project.updatedAt = timestamp;
-    const annotationsJson = JSON.stringify(input.annotations, null, 2);
-    const savedProject = validateProject(project);
-    const projectSource = JSON.stringify(savedProject, null, 2);
-    const recoverySource = await readOptionalFile(path.join(safePath, '.imnota-recovery.json'));
-    const warnings = await commitFileTransaction(
-      safePath,
-      'save',
-      [
-        {
-          relativePath: screenshot.annotationFile,
-          after: Buffer.from(annotationsJson),
-          expectedBefore: screenshotTransactionBaseline(currentContent.annotationSource),
-        },
-        {
-          relativePath: screenshot.descriptionFile,
-          after: Buffer.from(screenshot.description),
-          expectedBefore: screenshotTransactionBaseline(currentContent.descriptionSource),
-        },
-        {
-          relativePath: '.imnota-recovery.json',
-          after: null,
-          expectedBefore: screenshotTransactionBaseline(recoverySource),
-        },
-        {
-          relativePath: 'project.json',
-          after: Buffer.from(projectSource),
-          expectedBefore: screenshotTransactionBaseline(baseline.projectSource),
-        },
-      ],
-      async () => {
-        await assertProjectRevision(safePath, baseline.projectRevision);
-        if ((await readScreenshotFiles(safePath, trustedShot)).revision !== input.contentRevision)
-          throw new Error('Screenshot content changed while the save was prepared. Reload it and try again.');
-      },
-    );
-    return {
-      project: savedProject,
-      savedScreenshotId: screenshot.id,
-      conflictCreated: false,
-      contentRevision: contentRevision(screenshot.description, annotationsJson),
-      projectRevision: projectRevisionForSource(projectSource),
-      warnings: warnings.length ? warnings : undefined,
-    };
-  });
-  handle('screenshots:load-content', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    const screenshot = project.screenshots.find((shot) => shot.id === input.screenshot.id);
-    if (!screenshot) throw new Error('Screenshot does not belong to this project.');
-    input.screenshot = screenshot;
-    const annotationPath = path.join(safePath, input.screenshot.annotationFile);
-    await assertNoLinks(annotationPath);
-    const content = await readScreenshotFiles(safePath, input.screenshot);
-    const [image] = await Promise.all([loadImage(safePath, input.screenshot)]);
-    return {
-      image,
-      annotations: z.array(annotationSchema).parse(JSON.parse(content.annotationsJson)),
-      description: content.description,
-      contentRevision: content.revision,
-    };
-  });
-  handle('screenshots:import-files', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    if (!Array.isArray(input.paths) || input.paths.length > 50)
-      throw new Error('Choose up to 50 screenshots at a time.');
-    for (const source of input.paths)
-      await importOne(safePath, source, path.basename(source), input.collectionId);
-    return makeSnapshot(safePath);
-  });
-  handle('screenshots:paste', async (_event, projectPath: string, collectionId?: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    const image = await nativeClipboard.readImage();
-    if (image.isEmpty())
-      throw new Error('The clipboard does not contain an image. Copy a screenshot and try again.');
-    const filename = `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-    const temp = path.join(app.getPath('temp'), filename);
-    await fs.writeFile(temp, image.toPNG());
-    await importOne(safePath, temp, filename, collectionId);
-    await fs.unlink(temp).catch(() => undefined);
-    return makeSnapshot(safePath);
-  });
-  handle('screenshots:duplicate', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    const source = project.screenshots.find((s) => s.id === input.screenshot.id);
-    if (!source) throw new Error('Screenshot not found.');
-    const collection = project.collections.find((item) => item.id === source.collectionId);
-    if (!collection) throw new Error('Screenshot collection not found.');
-    const ext = path.extname(source.storedFilename);
-    const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
-    await assertNoLinks(screenshotPath(safePath, source));
-    for (const [original, destination, fallback] of [
-      [source.annotationFile, `collections/${source.collectionId}/annotations/${name}.json`, '[]'],
-      [source.descriptionFile, `collections/${source.collectionId}/descriptions/${name}.md`, ''],
-    ]) {
-      await assertNoLinks(path.join(safePath, original));
-      const contents = await fs
-        .readFile(path.join(safePath, original), 'utf8')
-        .catch((error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') return fallback;
-          throw error;
-        });
-      await atomicWrite(path.join(safePath, destination), contents);
-    }
-    await copyFile(
-      screenshotPath(safePath, source),
-      path.join(safePath, 'collections', source.collectionId, 'screenshots', name),
-    );
-    const timestamp = nowIso();
-    project.screenshots.push({
-      ...source,
-      id: `shot_${crypto.randomUUID()}`,
-      originalFilename: `${source.originalFilename} copy`,
-      storedFilename: name,
-      title: `${source.title} copy`,
-      position: nextScreenshotPosition(project, source.collectionId),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      annotationFile: `collections/${source.collectionId}/annotations/${name}.json`,
-      descriptionFile: `collections/${source.collectionId}/descriptions/${name}.md`,
-    });
-    project.updatedAt = timestamp;
-    collection.archived = false;
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
-    return makeSnapshot(safePath);
-  });
-  handle('screenshots:delete', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    const result = await deleteScreenshotToTrash(
-      safePath,
-      project,
-      input.screenshotId,
-      async (target) => {
-        await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
-        projectWatchManager?.recordSelfDelete(target);
-      },
-      screenshotTrashOperations,
-    );
-    const projectFile = path.join(safePath, 'project.json');
-    projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
-    const snapshot = withSnapshotWarnings(
-      await makeSnapshot(safePath),
-      result.warning ? [result.warning] : [],
-    );
-    return { snapshot, undoToken: result.undoToken };
-  });
-  handle('screenshots:undo-delete', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const before = await readProject(safePath);
-    const undo = await undoScreenshotDelete(safePath, before, input.undoToken, screenshotTrashOperations);
-    const restored = undo.project.screenshots.find(
-      (candidate) => !before.screenshots.some((existing) => existing.id === candidate.id),
-    );
-    if (restored)
-      for (const target of [
-        screenshotPath(safePath, restored),
-        path.join(safePath, restored.annotationFile),
-        path.join(safePath, restored.descriptionFile),
-      ])
-        projectWatchManager?.recordSelfWrite(target, await fs.readFile(target));
-    const projectFile = path.join(safePath, 'project.json');
-    projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
-    return withSnapshotWarnings(await makeSnapshot(safePath), undo.warning ? [undo.warning] : []);
-  });
-  handle('content:create', async (_event, input) =>
-    contentPersistence.create({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
-  );
-  handle('content:load', async (_event, input) =>
-    contentPersistence.load({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
-  );
-  handle('content:save', async (_event, input) =>
-    contentPersistence.save({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
-  );
-  handle('content:duplicate', async (_event, input) =>
-    contentPersistence.duplicate({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
-  );
-  handle('content:delete', async (_event, input) => {
-    const projectPath = await assertProjectPath(input.projectPath);
-    // The renderer owns confirmation; persistence still validates the item and trash transaction.
-    return contentPersistence.delete({ ...input, projectPath });
-  });
-  handle('content:undo-delete', async (_event, input) =>
-    contentPersistence.undoDelete({ ...input, projectPath: await assertProjectPath(input.projectPath) }),
-  );
-  handle('collections:edit', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    const source = project.collections.find((collection) => collection.id === input.collectionId);
-    if (input.action !== 'create' && !source) throw new Error('Collection not found.');
-    const timestamp = nowIso();
-    if (input.action === 'rename') {
-      if (!input.name) throw new Error('Enter a collection name.');
-      source!.name = input.name;
-      source!.updatedAt = timestamp;
-    } else if (input.action === 'archive') {
-      source!.archived = true;
-      source!.updatedAt = timestamp;
-    } else if (input.action === 'restore') {
-      source!.archived = false;
-      source!.updatedAt = timestamp;
-    } else {
-      const number = project.collections.length + 1;
-      const workspaceName = path.basename(workspaceOrThrow());
-      const id = `${String(number).padStart(3, '0')}-collection-${crypto.randomUUID().slice(0, 8)}`;
-      await ensureCollection(safePath, id);
-      Object.assign(project, addEmptyCollection(project, workspaceName, id, timestamp));
-    }
-    project.updatedAt = timestamp;
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(validateProject(project), null, 2));
-    return makeSnapshot(safePath);
-  });
-  handle('projects:duplicate', async (_event, projectPath: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    const workspace = workspaceOrThrow();
-    const source = await readProject(safePath);
-    const target = await uniqueProjectFolder(workspace, `${source.name} copy`);
-    await fs.cp(safePath, target, { recursive: true });
-    const copy = await readProject(target);
-    copy.id = `project_${crypto.randomUUID()}`;
-    copy.name = `${source.name} copy`;
-    copy.createdAt = nowIso();
-    copy.updatedAt = nowIso();
-    await atomicWrite(path.join(target, 'project.json'), JSON.stringify(copy, null, 2));
-    return makeSnapshot(target);
-  });
-  handle('projects:archive', async (_event, projectPath: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    const baseline = await readProjectMutationBaseline(safePath);
-    await mutateProjectMetadata(safePath, baseline.projectRevision, (project) => ({
-      ...project,
-      status: 'archived',
-    }));
-  });
-  handle('projects:delete', async (_event, projectPath: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    const smokeApproved = process.env.IMNOTA_SMOKE === '1' && smokeProjectDeletionPath === safePath;
-    smokeProjectDeletionPath = null;
-    const answer = smokeApproved
-      ? { response: 1 }
-      : await dialog.showMessageBox(mainWindow!, {
-          type: 'warning',
-          buttons: ['Cancel', 'Move to trash'],
-          defaultId: 0,
-          cancelId: 0,
-          message: 'Delete this project?',
-          detail: `All project files in ${safePath} will be moved to the system trash.`,
-        });
-    if (answer.response !== 1) throw new Error('Project deletion cancelled.');
-    if (preferenceSettingsResult.settings.backups.enabled)
-      await backupService!.createSnapshot(safePath, 'destructive-operation');
-    projectWatchManager?.stopProject(safePath);
-    await diagnostics.filesystem('trash', safePath, () => shell.trashItem(safePath));
-  });
-  handle('exports:annotated-image', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    if (input.collectionId && !project.collections.some((item) => item.id === input.collectionId))
-      throw new Error('Collection not found.');
-    const folder = input.collectionId
-      ? path.join(safePath, 'collections', input.collectionId, 'exports')
-      : path.join(safePath, 'exports');
-    const filename = sanitizeFilename(input.filename, 'annotated.png').replace(/\.png$/i, '') + '.png';
-    const target = path.join(folder, filename);
-    await atomicWrite(target, Buffer.from(input.dataUrl.split(',')[1], 'base64'));
-    return target;
-  });
-  handle('exports:package', async (_event, input: ExportRequest) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    const project = await readProject(safePath);
-    if (input.collectionId && !project.collections.some((item) => item.id === input.collectionId))
-      throw new Error('Collection not found.');
-    const exportDir = input.collectionId
-      ? path.join(safePath, 'collections', input.collectionId, 'exports')
-      : path.join(safePath, 'exports');
-    await assertNoLinks(exportDir);
-    await fs.mkdir(exportDir, { recursive: true });
-    const included = project.screenshots.filter(
-      (s) => s.includeInExport && (!input.collectionId || s.collectionId === input.collectionId),
-    );
-    const includedContent = project.contentItems?.filter(
-      (item) => item.includeInExport && (!input.collectionId || item.collectionId === input.collectionId),
-    );
-    const briefPath = path.join(exportDir, 'context.md');
-    await atomicWrite(briefPath, input.markdown);
-    const zip = new JSZip();
-    zip.file('context.md', input.markdown);
-    zip.file(
-      'project.json',
-      JSON.stringify(
-        {
-          ...project,
-          screenshots: included,
-          ...(includedContent ? { contentItems: includedContent } : {}),
-          collections: input.collectionId
-            ? project.collections.filter((collection) => collection.id === input.collectionId)
-            : project.collections,
-        },
-        null,
-        2,
-      ),
-    );
-    for (const image of input.annotatedImages) {
-      const buffer = Buffer.from(image.dataUrl.split(',')[1], 'base64');
-      await atomicWrite(path.join(exportDir, image.filename), buffer);
-      zip.file(image.filename, buffer);
-    }
-    if (input.includeOriginal) {
-      for (const shot of included) {
-        await assertNoLinks(screenshotPath(safePath, shot));
-        const buffer = await fs.readFile(screenshotPath(safePath, shot));
-        zip.file(`collections/${shot.collectionId}/screenshots/${shot.storedFilename}`, buffer);
-      }
-    }
-    if (input.includeAnnotations)
-      for (const shot of included) {
-        await assertNoLinks(path.join(safePath, shot.annotationFile));
-        const json = await fs.readFile(path.join(safePath, shot.annotationFile), 'utf8').catch(() => '[]');
-        zip.file(shot.annotationFile, json);
-      }
-    for (const shot of included) zip.file(shot.descriptionFile, shot.description);
-    for (const item of includedContent ?? []) {
-      const content = await contentPersistence.load({ projectPath: safePath, itemId: item.id });
-      const folder = `collections/${item.collectionId}`;
-      if (item.kind === 'text') {
-        zip.file(`${folder}/text/${item.markdownFilename}`, content.markdown ?? '');
-      } else {
-        if (!content.source || !content.image) throw new Error('Drawing export files are missing.');
-        zip.file(`${folder}/drawings/${item.sourceFilename}`, content.source);
-        zip.file(
-          `${folder}/drawings/${item.imageFilename}`,
-          Buffer.from(content.image.dataUrl.split(',')[1], 'base64'),
-        );
-      }
-    }
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    const zipPath = path.join(exportDir, `${sanitizeFilename(project.name, 'imnota-project')}-package.zip`);
-    await atomicWrite(zipPath, zipBuffer);
-    return { folderPath: exportDir, zipPath, count: input.annotatedImages.length };
-  });
-  handle('system:open-path', async (_event, target: string) => {
-    pathInput.parse(target);
-    if (!isWithin(workspaceOrThrow(), target)) throw new Error('Folder is outside the workspace.');
-    await assertNoLinks(target);
-    if (!(await fs.stat(target)).isDirectory()) throw new Error('Only workspace folders can be opened.');
-    const error = await shell.openPath(target);
-    if (error) throw new Error(error);
-  });
-  handle('system:copy-text', async (_event, text: string) => {
-    await copyTextToClipboard(text);
-  });
-  handle('system:copy-image', async (_event, dataUrl: string) => {
-    await copyImageToClipboard(dataUrl);
-  });
-  handle('system:copy-context', (_event, input) => copyBundleToClipboard(input.markdown, input.imageDataUrl));
-  handle('onboarding:prepare-handoff', async (_event, input) => {
-    clipboardImage(input.imageDataUrl);
-    return onboardingHandoffWorkflow!.prepare(input);
-  });
-  handle('onboarding:copy-handoff', (_event, input) =>
-    onboardingHandoffWorkflow!.copy(input.sessionId, input.action),
-  );
-  handle('onboarding:open-handoff', (_event, input) =>
-    onboardingHandoffWorkflow!.open(input.sessionId, input.target),
-  );
-  handle('recovery:save', async (_event, input) => {
-    const safePath = await assertProjectPath(input.projectPath);
-    await atomicWrite(
-      path.join(safePath, '.imnota-recovery.json'),
-      JSON.stringify({ savedAt: nowIso(), project: input.project, annotations: input.annotations }, null, 2),
-    );
-  });
-  handle('recovery:clear', async (_event, projectPath: string) => {
-    const safePath = await assertProjectPath(projectPath);
-    await fs.unlink(path.join(safePath, '.imnota-recovery.json')).catch(() => undefined);
-  });
-  // Long network operations run outside the filesystem IPC queue.
-  handle('update:download', () => updateController.download());
-  handle('update:check', () => updateController.check());
-  handle('update:status', () => updateController.getStatus());
-  handle('update:install', async () => {
-    if (updateInstallPending) throw new Error('An update installation is already starting.');
-    updateInstallPending = true;
-    try {
-      // Close admission before draining all file work accepted before restart.
-      await router.drain();
-      await updateController.install();
-    } catch (error) {
-      updateInstallPending = false;
-      throw error;
-    }
-  });
+  registerSettingsIpc(router, host);
+  registerPreferenceIpc(router, host);
+  registerPromptExportIpc(router, host);
+  registerHostedShareIpc(router, host);
+  registerProjectWatchIpc(router, host);
+  registerProjectIpc(router, host);
+  registerScreenshotIpc(router, host);
+  registerContentIpc(router, host);
+  registerSystemIpc(router, host);
 }
 
 let updateInstallPending = false;
