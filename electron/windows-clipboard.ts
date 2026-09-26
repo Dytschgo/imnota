@@ -36,6 +36,10 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
   'FileNameW',
   'Shell IDList Array',
   'Chromium Web Custom MIME Data Format',
+  // Chromium writes these as serialized bytes in movable HGLOBAL allocations,
+  // not live handles. Preserve them with the content if a write rolls back.
+  'Chromium internal source RFH token',
+  'Chromium internal source URL',
 ]);
 // OLE ownership metadata points back to the previous clipboard owner. EmptyClipboard
 // releases that owner, so a byte clone cannot recreate these broker references.
