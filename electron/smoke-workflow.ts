@@ -2234,7 +2234,7 @@ async function exercisePromptWorkflow(
         const record = () => {
           const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
           if (dialog?.getAttribute('aria-busy') !== 'true') return;
-          const status = dialog.querySelector('[role="status"]');
+          const status = dialog.querySelector('.prompt-sharing-progress[role="status"]');
           if (status) observed.states.push({
             label: status.textContent?.trim() ?? '',
             hasPercentage: /\\d+%/.test(status.textContent ?? ''),
@@ -2261,6 +2261,7 @@ async function exercisePromptWorkflow(
     await waitForPromptCopyClipboard(driver, latestSet, copiedIndex, variant);
     await waitForPromptGrants(driver, cards.length);
     if (action > 0) {
+      await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
       const observed = await driver.evaluate<{
         states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
         completedStatus: string | null;
@@ -2270,7 +2271,7 @@ async function exercisePromptWorkflow(
         delete window.__imnotaRepeatCopyProgress;
         return {
           states: observed.states,
-          completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] [role="status"]')?.textContent?.trim() ?? null,
+          completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] .prompt-sharing-progress[role="status"]')?.textContent?.trim() ?? null,
         };
       })()`);
       if (
@@ -2281,7 +2282,7 @@ async function exercisePromptWorkflow(
         )
       )
         throw new Error(
-          `Repeated prompt copy showed preparation or numeric progress: ${JSON.stringify(observed.states)}.`,
+          `Repeated prompt copy showed preparation or numeric progress: ${JSON.stringify(observed)}.`,
         );
     }
     const settledSets = await promptSets(host, projectPath);
