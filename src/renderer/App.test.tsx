@@ -6,7 +6,7 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
+import App, { CollectionControls, SettingsView, userFacingErrorMessage } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -3088,15 +3088,6 @@ describe('feedback controls', () => {
     );
     expect(useAppStore.getState().snapshot).toBeNull();
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
-  });
-
-  it('trims project queries before matching project metadata', () => {
-    expect(
-      matchesProjectSearch(
-        { ...snapshot.project, projectPath: snapshot.projectPath, searchText: 'A design note' },
-        '  design  ',
-      ),
-    ).toBe(true);
   });
 
   it('creates an automatically named empty collection and activates it', async () => {

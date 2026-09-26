@@ -138,12 +138,6 @@ import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
-import { runSmokeWorkflow } from './smoke-workflow.js';
-import {
-  boundedSmokeDiagnostic,
-  pathIsWithin,
-  validateCreatedSmokeDirectory,
-} from './smoke-native-driver.js';
 import { ProjectSearchService } from './project-search.js';
 import { createTemplateProject } from './template-project.js';
 import { BackupService } from './backup-service.js';
@@ -3483,13 +3477,6 @@ async function createWindow(): Promise<BrowserWindow> {
   return createdWindow;
 }
 
-async function removeSmokeFixture(temporaryRoot: string, fixture: string): Promise<void> {
-  const verifiedFixture = await validateCreatedSmokeDirectory(fixture, 'fixture');
-  if (!pathIsWithin(temporaryRoot, verifiedFixture))
-    throw new Error('Refusing to remove a smoke fixture outside the verified temporary directory.');
-  await fs.rm(verifiedFixture, { recursive: true, force: true });
-}
-
 app.whenReady().then(async () => {
   await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
   const stored =
@@ -3554,139 +3541,50 @@ app.whenReady().then(async () => {
   createAppTray();
   if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {
-    const temporaryRoot = await fs.realpath(app.getPath('temp'));
-    const fixture = await fs.realpath(await fs.mkdtemp(path.join(temporaryRoot, 'imnota-smoke-')));
-    let exitCode = 0;
-    let result: unknown;
-    try {
-      const mode = process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke';
-      if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
-        result = {
-          passed: true,
-          version: app.getVersion(),
-          mode,
-          artifacts: [],
-          captureCapability: await smokeDesktopCaptureCapability(),
-          assertions: ['exact desktopCapturer source and in-memory crop dimensions for every real display'],
-        };
-      } else {
-        result = await runSmokeWorkflow(
-          {
-            diagnosticsHealth: () => diagnostics.health(),
-            setWorkspace(workspacePath) {
-              settings = { ...settings, workspacePath };
-            },
-            async reopenWindow() {
-              const previousWindow = mainWindow;
-              const nextWindow = await createWindow();
-              if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
-                previousWindow.destroy();
-              return nextWindow;
-            },
-            async captureFromTray(mode) {
-              const nextWindow = new Promise<BrowserWindow>((resolve) =>
-                app.once('browser-window-created', (_event, window) => resolve(window)),
-              );
-              mainWindow?.destroy();
-              requestCapture({ source: 'tray', mode });
-              return nextWindow;
-            },
-            trayAvailable() {
-              return appTray !== null && !appTray.isDestroyed();
-            },
-            globalCaptureShortcutRegistered() {
-              return captureGlobalShortcut.registeredAccelerator !== null;
-            },
-            readProject,
-            async restoreRecovery(projectPath) {
-              return openWithRecovery(projectPath, 'restore');
-            },
-            async readSettings() {
-              return structuredClone(settings);
-            },
-            async approveNextBackupRestore(projectPath) {
-              const real = await fs.realpath(projectPath);
-              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
-                throw new Error('Smoke restore approval must name a real disposable fixture project.');
-              smokeBackupRestorePath = real;
-            },
-            async approveNextProjectDeletion(projectPath) {
-              const real = await fs.realpath(projectPath);
-              if (!pathIsWithin(fixture, real) || real !== path.resolve(projectPath))
-                throw new Error('Smoke deletion approval must name a real disposable fixture project.');
-              smokeProjectDeletionPath = real;
-            },
-          },
-          {
-            fixtureRoot: fixture,
-            artifactDirectory: process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-            version: app.getVersion(),
-            expectedVersion: process.env.IMNOTA_EXPECT_VERSION,
-            mode,
-          },
+    // Loaded only for isolated smoke runs; packaged verification drives the shipped harness.
+    const { runSmokeSession } = await import('./smoke-session.js');
+    const exitCode = await runSmokeSession({
+      mainWindow: () => mainWindow,
+      captureCapability: smokeDesktopCaptureCapability,
+      diagnosticsHealth: () => diagnostics.health(),
+      setWorkspace(workspacePath) {
+        settings = { ...settings, workspacePath };
+      },
+      async reopenWindow() {
+        const previousWindow = mainWindow;
+        const nextWindow = await createWindow();
+        if (previousWindow && previousWindow !== nextWindow && !previousWindow.isDestroyed())
+          previousWindow.destroy();
+        return nextWindow;
+      },
+      async captureFromTray(mode) {
+        const nextWindow = new Promise<BrowserWindow>((resolve) =>
+          app.once('browser-window-created', (_event, window) => resolve(window)),
         );
-      }
-    } catch (error) {
-      exitCode = 1;
-      const failureMessage = error instanceof Error ? (error.stack ?? error.message) : String(error);
-      const diagnosticsHealth = diagnostics.health();
-      console.error('Local diagnostics health:', diagnosticsHealth);
-      let failureArtifactDirectory: string | undefined;
-      if (process.env.IMNOTA_SMOKE_ARTIFACT_DIR) {
-        try {
-          failureArtifactDirectory = await validateCreatedSmokeDirectory(
-            process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
-            'artifact',
-          );
-          await fs.writeFile(
-            path.join(failureArtifactDirectory, 'verification-failure.json'),
-            JSON.stringify(
-              { passed: false, version: app.getVersion(), error: failureMessage, diagnosticsHealth },
-              null,
-              2,
-            ),
-            { flag: 'wx' },
-          );
-        } catch (artifactError) {
-          console.error('Failure report unavailable:', artifactError);
-        }
-      }
-      let rendererState: unknown;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        const failedWindow = mainWindow;
-        rendererState = await boundedSmokeDiagnostic(() =>
-          failedWindow.webContents.executeJavaScript(
-            `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
-          ),
-        );
-        if (failureArtifactDirectory) {
-          try {
-            const captured = await boundedSmokeDiagnostic(() => failedWindow.webContents.capturePage());
-            if (captured)
-              await fs.writeFile(path.join(failureArtifactDirectory, 'failure.png'), captured.toPNG(), {
-                flag: 'wx',
-              });
-          } catch (captureError) {
-            console.error('Failure capture unavailable:', captureError);
-          }
-        }
-      }
-      result = {
-        passed: false,
-        version: app.getVersion(),
-        error: failureMessage,
-        rendererState,
-        diagnosticsHealth,
-      };
-      console.error(error);
-      console.error('Renderer state:', rendererState);
-    }
-    try {
-      if (process.env.IMNOTA_SMOKE_RESULT)
-        await fs.writeFile(process.env.IMNOTA_SMOKE_RESULT, JSON.stringify(result, null, 2), { flag: 'wx' });
-    } finally {
-      await removeSmokeFixture(temporaryRoot, fixture);
-    }
+        mainWindow?.destroy();
+        requestCapture({ source: 'tray', mode });
+        return nextWindow;
+      },
+      trayAvailable() {
+        return appTray !== null && !appTray.isDestroyed();
+      },
+      globalCaptureShortcutRegistered() {
+        return captureGlobalShortcut.registeredAccelerator !== null;
+      },
+      readProject,
+      async restoreRecovery(projectPath) {
+        return openWithRecovery(projectPath, 'restore');
+      },
+      async readSettings() {
+        return structuredClone(settings);
+      },
+      approveBackupRestore(realPath) {
+        smokeBackupRestorePath = realPath;
+      },
+      approveProjectDeletion(realPath) {
+        smokeProjectDeletionPath = realPath;
+      },
+    });
     app.exit(exitCode);
     return;
   }
