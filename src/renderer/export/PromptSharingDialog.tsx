@@ -45,6 +45,7 @@ function progressLabel(progress: PromptBundleProgress): string {
   if (progress.message) return progress.message;
   if (progress.bundleNumber && progress.totalBundles) {
     const action = {
+      checking: 'Loading saved',
       planning: 'Preparing',
       rendering: 'Rendering',
       writing: 'Writing',
@@ -80,13 +81,15 @@ export function PromptSharingDialog({
   onRetryCleanup,
   onShareHosted,
 }: PromptSharingDialogProps) {
-  const busy = progress ? ['planning', 'rendering', 'writing', 'copying'].includes(progress.phase) : false;
+  const busy = progress
+    ? ['checking', 'planning', 'rendering', 'writing', 'copying'].includes(progress.phase)
+    : false;
   const current = progress?.bundleNumber ?? 0;
   const total = progress?.totalBundles ?? bundles.length;
   const progressValue =
     progress?.phase === 'complete'
       ? 100
-      : busy && progress?.phase !== 'copying' && total
+      : busy && progress?.phase !== 'checking' && progress?.phase !== 'copying' && total
         ? Math.min(100, Math.round((current / total) * 100))
         : undefined;
   return (

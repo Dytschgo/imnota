@@ -1252,20 +1252,39 @@ export class PromptBundleControllerEngine {
   }
 
   async open(): Promise<PromptBundleControllerActionResult> {
-    this.emit({ isOpen: true, preview: undefined });
+    const artifact = this.latestArtifact;
+    const reusablePlan = this.latestPlan;
+    const hasReusablePlan = Boolean(artifact && reusablePlan?.planId === artifact.planId);
+    this.emit({
+      isOpen: true,
+      preview: undefined,
+      error: undefined,
+      noContentMessage: undefined,
+      progress: hasReusablePlan
+        ? { phase: 'checking', message: 'Loading saved bundles' }
+        : { phase: 'planning' },
+    });
     let run: ActiveRun | undefined;
     try {
       run = this.beginRun();
-      const metadata = await this.prepareMetadata(run);
+      let metadata = await this.prepareMetadata(run, undefined, hasReusablePlan);
       this.assertActive(run);
+      if (
+        hasReusablePlan &&
+        ('kind' in metadata ||
+          artifact?.projectPath !== metadata.context.snapshot.projectPath ||
+          artifact.projectId !== metadata.context.snapshot.project.id ||
+          JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
+      ) {
+        metadata = await this.prepareMetadata(run);
+        this.assertActive(run);
+      }
       if ('kind' in metadata) {
         this.latestPlan = undefined;
         this.emit({ cards: [], noContentMessage: metadata.message, progress: undefined });
         this.activeRun = undefined;
         return { ok: true };
       }
-      const artifact = this.latestArtifact;
-      const reusablePlan = this.latestPlan;
       if (
         artifact &&
         reusablePlan?.planId === artifact.planId &&
