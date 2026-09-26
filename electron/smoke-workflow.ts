@@ -2219,9 +2219,48 @@ async function exercisePromptWorkflow(
   for (let action = 0; action < actionCount; action += 1) {
     if (action === 1) {
       await closePromptDialog(driver);
+      await driver.evaluate(`(() => {
+        const observed = { states: [], observer: null };
+        const record = () => {
+          const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
+          if (dialog?.getAttribute('aria-busy') !== 'true') return;
+          const status = dialog.querySelector('.prompt-sharing-progress[role="status"]');
+          if (status) observed.states.push({
+            label: status.textContent?.trim() ?? '',
+            hasPercentage: /\\d+%/.test(status.textContent ?? ''),
+            hasProgressbar: Boolean(status.querySelector('progress')),
+          });
+        };
+        observed.observer = new MutationObserver(record);
+        observed.observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+        window.__imnotaReopenProgress = observed;
+      })()`);
       await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
       await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
       await waitForPromptGrants(driver, cards.length);
+      await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
+      const observed = await driver.evaluate<{
+        states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
+        completedStatus: string | null;
+      }>(`(() => {
+        const observed = window.__imnotaReopenProgress;
+        observed.observer.disconnect();
+        delete window.__imnotaReopenProgress;
+        return {
+          states: observed.states,
+          completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] .prompt-sharing-progress[role="status"]')?.textContent?.trim() ?? null,
+        };
+      })()`);
+      if (
+        !observed.states.some((state) => state.label === 'Loading saved bundles') ||
+        observed.completedStatus !== null ||
+        observed.states.some(
+          (state) => state.label !== 'Loading saved bundles' || state.hasPercentage || state.hasProgressbar,
+        )
+      )
+        throw new Error(
+          `Reopening finalized prompt cards showed generation progress: ${JSON.stringify(observed)}.`,
+        );
     }
     const variant = windowsVariants[action] ?? 'rich';
     if (process.platform === 'win32') latestWindowsVariant = variant;

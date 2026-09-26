@@ -79,6 +79,22 @@ it('shows repeat copying without a generation percentage', () => {
   expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'true');
 });
 
+it('shows saved-bundle validation without generation progress', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      progress={{ phase: 'checking', message: 'Loading saved bundles' }}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('status')).toHaveTextContent('Loading saved bundles');
+  expect(screen.getByRole('status')).not.toHaveTextContent(/preparing|%/i);
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'true');
+});
+
 it.each([
   ['cancelled', 'Export cancelled'],
   ['error', 'Export failed'],

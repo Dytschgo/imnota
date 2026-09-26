@@ -925,26 +925,124 @@ describe('prompt export controller orchestration', () => {
 
   test('reopening unchanged sharing cards reuses the finalized files after a clipboard failure', async () => {
     const native = fakeBridge({ failContextCopy: true });
-    const controller = engine(
-      async () => savedContext([screenshot(0)]),
-      native.bridge,
-      fakeRendering().rendering,
-    );
+    const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
+    const compose = vi.spyOn(renderer.rendering, 'compose');
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     await controller.open();
     expect(await controller.copyVariant(controller.getState().cards[0], 'files')).toMatchObject({
       ok: false,
     });
     expect(native.starts).toHaveLength(1);
+    const preflightCount = preflight.mock.calls.length;
+    const composeCount = compose.mock.calls.length;
     controller.close();
+    const observed: Array<{ isOpen: boolean; phase: string | undefined }> = [];
+    const unsubscribe = controller.subscribe(() => {
+      const state = controller.getState();
+      observed.push({ isOpen: state.isOpen, phase: state.progress?.phase });
+    });
     await controller.open();
+    unsubscribe();
     const reopened = controller.getState().cards[0];
     expect(reopened.artifactSessionId).toBe('session-1');
+    expect(observed.find((state) => state.isOpen)?.phase).toBe('checking');
+    expect(observed.filter((state) => state.isOpen).map((state) => state.phase)).not.toContain('planning');
+    expect(preflight).toHaveBeenCalledTimes(preflightCount);
+    expect(compose).toHaveBeenCalledTimes(composeCount);
+    expect(controller.getState().progress).toBeUndefined();
     expect(await controller.copyVariant(reopened, 'files')).toMatchObject({
       ok: false,
     });
     expect(native.starts).toHaveLength(1);
     expect(native.writes).toHaveLength(1);
     expect(native.copies).toHaveLength(2);
+  });
+
+  test('a successful copy reopens directly in checking without flashing its previous progress', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const preflightCount = preflight.mock.calls.length;
+    controller.close();
+    const phases: Array<string | undefined> = [];
+    const unsubscribe = controller.subscribe(() => phases.push(controller.getState().progress?.phase));
+
+    expect((await controller.open()).ok).toBe(true);
+    unsubscribe();
+    expect(phases[0]).toBe('checking');
+    expect(phases).not.toContain('complete');
+    expect(phases).not.toContain('planning');
+    expect(preflight).toHaveBeenCalledTimes(preflightCount);
+    expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('reopening after source changes fully replans and clears the old grants', async () => {
+    let revision = 'first';
+    const native = fakeBridge({ revisionForLoad: () => revision });
+    const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const preflightCount = preflight.mock.calls.length;
+    revision = 'changed';
+    controller.close();
+
+    expect((await controller.open()).ok).toBe(true);
+    expect(preflight).toHaveBeenCalledTimes(preflightCount + 1);
+    expect(controller.getState().cards[0].artifactSessionId).toBeUndefined();
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('reopening another project with identical screenshot input does not reuse old grants', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const preflightCount = preflight.mock.calls.length;
+    context = structuredClone(context);
+    context.snapshot.projectPath = 'P:/different-project';
+    context.snapshot.project.id = 'different-project';
+    controller.close();
+
+    expect((await controller.open()).ok).toBe(true);
+    expect(preflight).toHaveBeenCalledTimes(preflightCount + 1);
+    expect(controller.getState().cards[0].artifactSessionId).toBeUndefined();
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('cancelling saved-bundle validation keeps the finalized cards', async () => {
+    let release!: () => void;
+    let pause = false;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const native = fakeBridge();
+    const controller = engine(
+      async () => {
+        if (pause) await gate;
+        return savedContext([screenshot(0)]);
+      },
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const card = controller.getState().cards[0];
+    controller.close();
+    pause = true;
+    const opening = controller.open();
+    expect(controller.getState().progress?.phase).toBe('checking');
+    expect((await controller.cancel()).ok).toBe(true);
+    release();
+
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(controller.getState().cards[0]).toEqual(card);
+    expect(native.starts).toHaveLength(1);
   });
 
   test('a changed source creates a new bundle before another primary copy', async () => {

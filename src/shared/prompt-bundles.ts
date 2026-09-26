@@ -149,7 +149,7 @@ export interface PromptBundleNoContent {
 }
 export type PromptBundlePlanResult = PromptBundlePlan | PromptBundleNoContent;
 export interface PromptBundleProgress {
-  phase: 'planning' | 'rendering' | 'writing' | 'copying' | 'complete' | 'cancelled' | 'error';
+  phase: 'checking' | 'planning' | 'rendering' | 'writing' | 'copying' | 'complete' | 'cancelled' | 'error';
   bundleNumber?: number;
   totalBundles?: number;
   message?: string;
