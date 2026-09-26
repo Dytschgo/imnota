@@ -164,16 +164,29 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
   {
     afterVersion: '0.2.8',
     channel: 'stable',
-    title: 'Select an area across your screens',
-    summary: 'Screenshot capture opens every connected screen directly, with no monitor chooser.',
+    title: 'Capture faster, hand off more',
+    summary:
+      'Capture from anywhere, give agents readable marks, and optionally let them load bundles locally.',
     preview: false,
     features: [
       {
         id: 'capture-all-displays',
-        title: 'Start selecting immediately',
+        title: 'Capture an area, window or screen',
         description:
-          'Drag an area on any screen or across screen boundaries. Repeat last area keeps the complete selection. Capture pixels stay local.',
+          'Use the capture shortcut or tray icon, drag across screens, add a short delay or repeat the last area. Capture pixels stay local.',
         action: { kind: 'settings', category: 'Shortcuts' },
+      },
+      {
+        id: 'readable-marks',
+        title: 'Marks your agent can read',
+        description:
+          'Prompt Markdown lists arrows, boxes and steps as positions with the screenshot size. Optional on-device text recognition adds visible text.',
+      },
+      {
+        id: 'agent-access',
+        title: 'Let your agent read bundles',
+        description:
+          'Turn on local agent access in Settings so MCP-capable coding agents can load prepared bundles. It is off by default and stays on this computer.',
       },
     ],
   },
