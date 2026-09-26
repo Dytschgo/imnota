@@ -1963,14 +1963,10 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
-            onWorkbenchChange={preferences.saveWorkbench}
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
             onPromptExportChange={preferences.savePromptExport}
-            onExportPresetChange={async (update) => {
-              await preferences.save(update);
-            }}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -2083,7 +2079,6 @@ export default function App() {
                 ),
               });
             }}
-            screenshotFirstAdd={preferences.settings.workbench.screenshotFirstAdd}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}

@@ -23,8 +23,6 @@ import {
   resolveShortcutBindings,
 } from '../../shared/shortcuts';
 import { SharingSettings } from './SharingSettings';
-import { ExportPresetSettings } from './ExportPresetSettings';
-import type { PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 import { BackupSettings } from './BackupSettings';
 import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
@@ -63,12 +61,10 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
-  onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   nativeCopyAvailable?: boolean;
   globalCaptureShortcutRegistered?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
-  onExportPresetChange?(value: PreferenceSettingsUpdate): Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -101,12 +97,10 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
-  onWorkbenchChange,
   nativeCopyAvailable = false,
   globalCaptureShortcutRegistered = false,
   onNativeCopyChange,
   onPromptExportChange,
-  onExportPresetChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -123,7 +117,7 @@ export function SettingsView({
   onWorkspaceChanged,
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
-  const [legacyError, setLegacyError] = useState('');
+  const [workspaceSettingError, setWorkspaceSettingError] = useState('');
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
   const shortcutPlatform = detectShortcutPlatform();
@@ -138,12 +132,12 @@ export function SettingsView({
     if (activeCategory === undefined) setUncontrolledCategory(category);
     onCategoryChange?.(category);
   };
-  const saveLegacy = async (patch: Partial<typeof settings>) => {
-    setLegacyError('');
+  const saveWorkspaceSetting = async (patch: Partial<typeof settings>) => {
+    setWorkspaceSettingError('');
     try {
       set({ settings: await saveWorkspaceSettingsPatch(patch) });
     } catch {
-      setLegacyError('This preference could not be saved. Your previous setting is still active.');
+      setWorkspaceSettingError('This preference could not be saved. Your previous setting is still active.');
     }
   };
   return (
@@ -191,8 +185,8 @@ export function SettingsView({
           )}
           {group === 'Sharing' && (
             <p>
-              Manage export presets, your display name, and shared links. Shared links are created only when
-              you choose to share.
+              Manage your display name and shared links. Shared links are created only when you choose to
+              share.
             </p>
           )}
           {group === 'Backups & history' && (
@@ -206,21 +200,16 @@ export function SettingsView({
           {group === 'Shortcuts' && <p>Change keyboard actions while keeping mouse controls available.</p>}
         </div>
       </header>
-      {(preferenceError || legacyError) && (
+      {(preferenceError || workspaceSettingError) && (
         <p className="settings-error" role="alert">
-          {preferenceError || legacyError}
+          {preferenceError || workspaceSettingError}
         </p>
       )}
       <div className="settings-grid">
         <div hidden={group !== 'Appearance'}>
           <AppearanceSettings
             value={preferences.appearance}
-            onChange={
-              onAppearanceChange ??
-              (async (value) => {
-                await saveLegacy({ theme: value.mode });
-              })
-            }
+            onChange={onAppearanceChange ?? (async () => undefined)}
             effectiveAppearance={effectiveAppearance}
             disabled={savingPreferences}
             showHeading={false}
@@ -271,7 +260,9 @@ export function SettingsView({
               <select
                 aria-label="Interface scale"
                 value={settings.interfaceScale}
-                onChange={(event) => void saveLegacy({ interfaceScale: Number(event.target.value) })}
+                onChange={(event) =>
+                  void saveWorkspaceSetting({ interfaceScale: Number(event.target.value) })
+                }
               >
                 <option value="0.9">90%</option>
                 <option value="1">100%</option>
@@ -287,7 +278,7 @@ export function SettingsView({
               <input
                 type="checkbox"
                 checked={settings.openRecentOnLaunch}
-                onChange={(event) => void saveLegacy({ openRecentOnLaunch: event.target.checked })}
+                onChange={(event) => void saveWorkspaceSetting({ openRecentOnLaunch: event.target.checked })}
               />
             </label>
             <label className="settings-switch">
@@ -298,21 +289,9 @@ export function SettingsView({
               <input
                 type="checkbox"
                 checked={settings.confirmBeforeDeletion}
-                onChange={(event) => void saveLegacy({ confirmBeforeDeletion: event.target.checked })}
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
-                <strong>Combined Add item button</strong>
-                <small>
-                  Restore a single Add item menu instead of making Add screenshot the primary rail action.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                checked={!preferences.workbench.screenshotFirstAdd}
-                disabled={savingPreferences || !onWorkbenchChange}
-                onChange={(event) => void onWorkbenchChange?.({ screenshotFirstAdd: !event.target.checked })}
+                onChange={(event) =>
+                  void saveWorkspaceSetting({ confirmBeforeDeletion: event.target.checked })
+                }
               />
             </label>
           </section>
@@ -328,7 +307,7 @@ export function SettingsView({
               <Button
                 variant="soft"
                 onClick={async () => {
-                  setLegacyError('');
+                  setWorkspaceSettingError('');
                   try {
                     const next = await window.imnota.chooseWorkspace();
                     if (next) {
@@ -336,7 +315,7 @@ export function SettingsView({
                       await onWorkspaceChanged?.();
                     }
                   } catch {
-                    setLegacyError(
+                    setWorkspaceSettingError(
                       'The workspace folder could not be changed. Your current workspace remains active.',
                     );
                   }
@@ -351,7 +330,7 @@ export function SettingsView({
                   onClick={() =>
                     void window.imnota
                       .openPath(settings.workspacePath!)
-                      .catch(() => setLegacyError('The workspace folder could not be opened.'))
+                      .catch(() => setWorkspaceSettingError('The workspace folder could not be opened.'))
                   }
                 >
                   Open folder
@@ -369,11 +348,11 @@ export function SettingsView({
             <Button
               variant="soft"
               onClick={async () => {
-                setLegacyError('');
+                setWorkspaceSettingError('');
                 try {
                   await window.imnota.openDiagnosticsFolder();
                 } catch {
-                  setLegacyError(
+                  setWorkspaceSettingError(
                     'Local diagnostics are unavailable. Check free disk space and access to the application data folder.',
                   );
                 }
@@ -492,12 +471,6 @@ export function SettingsView({
                 </label>
               </section>
             )}
-            <ExportPresetSettings
-              nativeCopyAvailable={nativeCopyAvailable}
-              preferences={preferences}
-              disabled={savingPreferences}
-              onSave={onExportPresetChange}
-            />
             <SharingSettings />
           </>
         )}

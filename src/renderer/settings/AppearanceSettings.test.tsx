@@ -77,15 +77,12 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
-  it('shows image controls when the current theme image overrides stored desktop glass', () => {
+  it('shows image controls when a backdrop image overrides stored desktop glass', () => {
     const value = {
       ...DEFAULT_APPEARANCE,
       mode: 'system' as const,
       desktopGlass: true,
-      useSameBackdropForBoth: false,
-      themeBackdropsInitialized: true,
-      lightBackgroundImage: 'preset:mist-light',
-      darkBackgroundImage: '',
+      backgroundImage: 'preset:mist-light',
     };
     const effective = {
       theme: 'light' as const,
@@ -107,7 +104,7 @@ describe('AppearanceSettings backdrop upload ownership', () => {
 
     rerender(
       <AppearanceSettings
-        value={value}
+        value={{ ...value, backgroundImage: '' }}
         effectiveAppearance={{ ...effective, theme: 'dark', desktopGlassStatus: 'active' }}
         onChange={vi.fn()}
       />,
@@ -136,87 +133,6 @@ describe('AppearanceSettings backdrop upload ownership', () => {
     await waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
         expect.objectContaining({ backgroundImage: 'preset:mist-light' }),
-      ),
-    );
-  });
-
-  it('initializes legacy shared values before allowing one theme to use No image', async () => {
-    const onChange = vi.fn();
-    const legacy = {
-      ...DEFAULT_APPEARANCE,
-      glassLevel: 'balanced' as const,
-      backgroundImage: 'preset:indigo',
-      backgroundOpacity: 0.55,
-    };
-    const { rerender } = render(<AppearanceSettings value={legacy} onChange={onChange} />);
-    fireEvent.click(screen.getByRole('checkbox', { name: /same image and opacity/i }));
-    await waitFor(() =>
-      expect(onChange).toHaveBeenCalledWith(
-        expect.objectContaining({
-          useSameBackdropForBoth: false,
-          themeBackdropsInitialized: true,
-          lightBackgroundImage: 'preset:indigo',
-          darkBackgroundImage: 'preset:indigo',
-        }),
-      ),
-    );
-
-    rerender(
-      <AppearanceSettings
-        value={{
-          ...legacy,
-          useSameBackdropForBoth: false,
-          themeBackdropsInitialized: true,
-          lightBackgroundImage: 'preset:indigo',
-          darkBackgroundImage: 'preset:indigo',
-          lightBackgroundOpacity: 0.55,
-          darkBackgroundOpacity: 0.55,
-        }}
-        onChange={onChange}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'No image' }));
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith(
-        expect.objectContaining({ darkBackgroundImage: '', lightBackgroundImage: 'preset:indigo' }),
-      ),
-    );
-  });
-
-  it('keeps separate backdrop choices and opacity scoped to the effective theme', async () => {
-    const onChange = vi.fn();
-    const separate = {
-      ...DEFAULT_APPEARANCE,
-      useSameBackdropForBoth: false,
-      darkBackgroundImage: 'preset:graphite',
-      darkBackgroundOpacity: 0.35,
-    };
-    render(
-      <AppearanceSettings
-        value={separate}
-        effectiveAppearance={{
-          theme: 'dark',
-          accent: 'indigo',
-          requestedGlassLevel: 'balanced',
-          glassLevel: 'balanced',
-          glassFallbackReason: 'none',
-        }}
-        onChange={onChange}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('backdrop-preset-emerald'));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        useSameBackdropForBoth: false,
-        darkBackgroundImage: 'preset:emerald',
-        lightBackgroundImage: '',
-      }),
-    );
-    await waitFor(() => expect(screen.getByRole('slider')).not.toBeDisabled());
-    fireEvent.change(screen.getByRole('slider'), { target: { value: '0.65' } });
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith(
-        expect.objectContaining({ darkBackgroundOpacity: 0.65, lightBackgroundOpacity: 0.42 }),
       ),
     );
   });

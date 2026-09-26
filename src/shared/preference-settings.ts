@@ -174,9 +174,23 @@ function normalizePersistedPreferences(value: unknown): Record<string, unknown> 
         : appearance[key],
     ]),
   );
+  // Per-theme backdrops are retired: fold a split profile into the single backdrop,
+  // preferring the dark variant (the app default), so the shown image survives.
+  const folded =
+    appearance.useSameBackdropForBoth === false
+      ? {
+          useSameBackdropForBoth: true,
+          backgroundImage: sanitized.darkBackgroundImage || sanitized.lightBackgroundImage || '',
+          backgroundOpacity: sanitized.darkBackgroundImage
+            ? appearance.darkBackgroundOpacity
+            : sanitized.lightBackgroundImage
+              ? appearance.lightBackgroundOpacity
+              : appearance.backgroundOpacity,
+        }
+      : {};
   return {
     ...preferences,
-    appearance: { ...appearance, ...sanitized },
+    appearance: { ...appearance, ...sanitized, ...folded },
     nativeCopy: {
       defaultFunction: persistedNativeCopyFunction.success ? persistedNativeCopyFunction.data : 'files',
     },

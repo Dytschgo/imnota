@@ -218,7 +218,6 @@ let backupService: BackupService | undefined;
 let localMcpServer: LocalMcpServer | undefined;
 let settings: WorkspaceSettings = {
   workspacePath: null,
-  theme: 'system',
   interfaceScale: 1,
   openRecentOnLaunch: true,
   confirmBeforeDeletion: true,
@@ -436,7 +435,7 @@ async function persistApplicationSettings(
   const persist = async () => {
     await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
     if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
-    settings = { ...nextSettings, theme: nextPreferences.appearance.mode };
+    settings = { ...nextSettings };
     preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
   };
   if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
@@ -2066,14 +2065,9 @@ function registerIpc(): void {
     return settings;
   });
   handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {
-    const nextPreferences = input.theme
-      ? mergePreferenceSettings(preferenceSettingsResult.settings, {
-          appearance: { mode: input.theme },
-        })
-      : preferenceSettingsResult.settings;
-    const next = { ...settings, ...input, theme: nextPreferences.appearance.mode };
+    const next = { ...settings, ...input };
     const persist = async () => {
-      await persistApplicationSettings(next, nextPreferences);
+      await persistApplicationSettings(next);
     };
     if (next.updateChannel !== settings.updateChannel)
       await updateController.switchChannel(next.updateChannel, persist);
@@ -2158,7 +2152,7 @@ function registerIpc(): void {
         preferenceSettingsResult.settings,
         input as PreferenceSettingsUpdate,
       );
-      await persistApplicationSettings({ ...settings, theme: next.appearance.mode }, next);
+      await persistApplicationSettings(settings, next);
       return preferenceSettingsResult;
     },
     true,
@@ -2575,7 +2569,7 @@ function registerIpc(): void {
       appearance.glassLevel !== 'off' &&
       !nativeTheme.shouldUseHighContrastColors &&
       !nativeTheme.prefersReducedTransparency &&
-      !(appearance.allowPerformanceFallback && nativePerformanceProfile().reducedEffectsRecommended),
+      !nativePerformanceProfile().reducedEffectsRecommended,
     );
     try {
       if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
@@ -3509,11 +3503,7 @@ app.whenReady().then(async () => {
       delete applicationSettings.preferences;
       delete applicationSettings.preferenceProfile;
       delete applicationSettings.theme;
-      settings = {
-        ...settings,
-        ...applicationSettings,
-        theme: preferenceSettingsResult.settings.appearance.mode,
-      } as WorkspaceSettings;
+      settings = { ...settings, ...applicationSettings } as WorkspaceSettings;
       settings.updateChannel = settings.updateChannel === 'nightly' ? 'nightly' : 'stable';
     } catch {
       preferenceSettingsResult = resolvePreferenceSettings({}, settingsFileExists);

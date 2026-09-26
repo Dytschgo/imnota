@@ -26,7 +26,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
 - Collections with archive/restore controls and a single optional overall context
 - One optional Markdown description per screenshot and per drawing, plus Low, Medium or High agent priority per screenshot
-- Screenshot-first Add control, with the previous combined Add item menu available in Settings
+- Screenshot-first Add control with an adjacent menu for pasted images, drawings and text blocks
 - Direct include/exclude controls without deleting screenshots
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection

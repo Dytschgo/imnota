@@ -278,7 +278,7 @@ describe('CollectionRail', () => {
   it('makes Add screenshot the primary action and can restore the combined Add item button', () => {
     const onImport = vi.fn();
     const onCapture = vi.fn();
-    const { rerender } = render(
+    render(
       <CollectionRail
         {...props({
           onImport,
@@ -296,8 +296,6 @@ describe('CollectionRail', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /Import screenshot/ }));
     expect(onImport).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Add item' })).toBeNull();
-    rerender(<CollectionRail {...props({ onImport, onAddContent: vi.fn(), screenshotFirstAdd: false })} />);
-    expect(screen.getByRole('button', { name: 'Add item' })).toBeVisible();
   });
 
   it('keeps import as the primary screenshot action outside Windows', () => {
@@ -342,7 +340,7 @@ describe('CollectionRail', () => {
     expect(screen.queryByTestId('add-item-capture')).not.toBeInTheDocument();
   });
 
-  it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
+  it('offers Take screenshot in the Add menu with the toolbar capture enablement', async () => {
     const onCapture = vi.fn();
     const { rerender } = render(
       <CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />,
@@ -362,11 +360,10 @@ describe('CollectionRail', () => {
           onCapture,
           captureEnabled: false,
           captureDisabledLabel: 'Choose a current collection before capturing',
-          screenshotFirstAdd: false,
         })}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
     const disabledCapture = await screen.findByTestId('add-item-capture');
     expect(disabledCapture).toHaveAttribute('aria-disabled', 'true');
     expect(disabledCapture).toHaveTextContent('Choose a current collection before capturing');

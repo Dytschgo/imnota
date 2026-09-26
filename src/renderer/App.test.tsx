@@ -3143,8 +3143,8 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
-  it('saves an accessible theme option and reports preference failures', async () => {
-    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings, theme: 'dark' as const }));
+  it('keeps appearance out of workspace settings and reports preference failures', async () => {
+    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings }));
     window.imnota = {
       setSettings,
       onUpdateStatus: () => () => {},
@@ -3160,7 +3160,8 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
-    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ theme: 'dark' }));
+    await act(async () => undefined);
+    expect(setSettings).not.toHaveBeenCalled();
 
     setSettings.mockRejectedValueOnce(new Error('unavailable'));
     fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));

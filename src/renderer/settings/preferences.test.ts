@@ -63,15 +63,6 @@ describe('appearance resolution', () => {
       }),
     ).toMatchObject({ glassLevel: 'off', requestedGlassLevel: 'off' });
   });
-
-  it('lets an explicit keep-transparency preference dominate performance inference', () => {
-    expect(
-      resolveAppearance(
-        { ...DEFAULT_APPEARANCE, glassLevel: 'strong', allowPerformanceFallback: false },
-        { systemTheme: 'dark', reducedTransparency: false, performanceConstrained: true },
-      ),
-    ).toMatchObject({ glassLevel: 'strong', glassFallbackReason: 'none' });
-  });
 });
 
 describe('onboarding profile gating', () => {

@@ -183,21 +183,10 @@ export function AppearanceSettings({
   };
 
   const controlsDisabled = disabled || busy;
-  const activeTheme = effectiveAppearance?.theme ?? (value.mode === 'light' ? 'light' : 'dark');
-  const activeBackdrop = appearanceBackdrop(value, activeTheme);
+  const activeBackdrop = appearanceBackdrop(value);
   const desktopBackdrop = Boolean(value.desktopGlass && !activeBackdrop.image);
-  const updateBackdrop = (image: string) => {
-    if (value.useSameBackdropForBoth) return update({ backgroundImage: image });
-    return activeTheme === 'dark'
-      ? update({ darkBackgroundImage: image })
-      : update({ lightBackgroundImage: image });
-  };
-  const updateBackdropOpacity = (opacity: number) => {
-    if (value.useSameBackdropForBoth) return update({ backgroundOpacity: opacity });
-    return activeTheme === 'dark'
-      ? update({ darkBackgroundOpacity: opacity })
-      : update({ lightBackgroundOpacity: opacity });
-  };
+  const updateBackdrop = (image: string) => update({ backgroundImage: image });
+  const updateBackdropOpacity = (opacity: number) => update({ backgroundOpacity: opacity });
   const fallbackMessage =
     effectiveAppearance?.glassFallbackReason === 'reduced-transparency'
       ? 'Solid surfaces are active because the operating system requests reduced transparency.'
@@ -292,22 +281,6 @@ export function AppearanceSettings({
             </label>
           ))}
         </div>
-        {value.glassLevel !== 'off' && (
-          <label className="imnota-check-row">
-            <input
-              type="checkbox"
-              checked={value.allowPerformanceFallback}
-              onChange={(event) => void update({ allowPerformanceFallback: event.target.checked })}
-            />
-            <span>
-              <strong>Allow conservative performance fallback</strong>
-              <small>
-                Use solid surfaces only when the host supplies an explicit constrained-performance signal.
-                Imnota does not guess device capability.
-              </small>
-            </span>
-          </label>
-        )}
         {fallbackMessage && (
           <div className="imnota-inline-status" role="status">
             <Sparkles size={15} aria-hidden="true" />
@@ -397,13 +370,7 @@ export function AppearanceSettings({
             type="button"
             disabled={controlsDisabled}
             aria-pressed={!activeBackdrop.image && !value.desktopGlass}
-            onClick={() =>
-              void (value.useSameBackdropForBoth
-                ? update({ backgroundImage: '', desktopGlass: false })
-                : activeTheme === 'dark'
-                  ? update({ darkBackgroundImage: '', desktopGlass: false })
-                  : update({ lightBackgroundImage: '', desktopGlass: false }))
-            }
+            onClick={() => void update({ backgroundImage: '', desktopGlass: false })}
           >
             No image
           </button>
@@ -412,23 +379,11 @@ export function AppearanceSettings({
             disabled={controlsDisabled}
             aria-pressed={!activeBackdrop.image && Boolean(value.desktopGlass)}
             onClick={() =>
-              void (value.useSameBackdropForBoth
-                ? update({
-                    backgroundImage: '',
-                    desktopGlass: true,
-                    glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                  })
-                : activeTheme === 'dark'
-                  ? update({
-                      darkBackgroundImage: '',
-                      desktopGlass: true,
-                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                    })
-                  : update({
-                      lightBackgroundImage: '',
-                      desktopGlass: true,
-                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                    }))
+              void update({
+                backgroundImage: '',
+                desktopGlass: true,
+                glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+              })
             }
           >
             Desktop glass (Beta)
@@ -466,51 +421,12 @@ export function AppearanceSettings({
             <output>{Math.round(activeBackdrop.opacity * 100)}%</output>
           </span>
         </label>
-        <label className="imnota-check-row imnota-backdrop-theme-link">
-          <input
-            type="checkbox"
-            checked={value.useSameBackdropForBoth}
-            disabled={controlsDisabled}
-            onChange={(event) => {
-              if (event.target.checked) {
-                void update({
-                  useSameBackdropForBoth: true,
-                  backgroundImage: activeBackdrop.image,
-                  backgroundOpacity: activeBackdrop.opacity,
-                });
-              } else {
-                void update({
-                  useSameBackdropForBoth: false,
-                  ...(value.themeBackdropsInitialized
-                    ? {}
-                    : {
-                        themeBackdropsInitialized: true,
-                        lightBackgroundImage: activeBackdrop.image,
-                        darkBackgroundImage: activeBackdrop.image,
-                        lightBackgroundOpacity: activeBackdrop.opacity,
-                        darkBackgroundOpacity: activeBackdrop.opacity,
-                      }),
-                });
-              }
-            }}
-          />
-          <span>
-            <strong>Use the same image and opacity in light and dark themes</strong>
-            <small>
-              Turn this off to choose a separate backdrop for {activeTheme} mode. System mode follows the
-              current operating-system theme.
-            </small>
-          </span>
-        </label>
         {[
           { label: 'Generic', presets: GENERIC_BACKDROP_PRESETS },
           { label: 'Characters', presets: CHARACTER_BACKDROP_PRESETS },
         ].map(({ label, presets }) => (
           <div key={label} className="imnota-backdrop-presets" role="group" aria-label={`${label} backdrops`}>
-            <span>
-              {label}
-              {value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}
-            </span>
+            <span>{label}</span>
             <div>
               {presets.map((preset) => {
                 const selected = activeBackdrop.image === backdropPresetValue(preset);
@@ -533,7 +449,7 @@ export function AppearanceSettings({
           </div>
         ))}
         <div className="imnota-backdrop-presets" role="group" aria-label="Uploaded backdrops">
-          <span>Your images{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
+          <span>Your images</span>
           <div>
             {library.map((entry) => (
               <div key={entry.id} className="imnota-uploaded-backdrop">

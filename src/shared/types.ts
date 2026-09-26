@@ -144,7 +144,6 @@ export type ProjectListItem = Pick<
 
 export interface WorkspaceSettings {
   workspacePath: string | null;
-  theme: 'system' | 'light' | 'dark';
   interfaceScale: number;
   openRecentOnLaunch: boolean;
   confirmBeforeDeletion: boolean;
