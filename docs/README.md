@@ -45,7 +45,7 @@ Historical documents can contain old versions, branches, test counts or proposed
 - [Deployment verification](../share-service/docs/deployment-verification.md) — deployed-service evidence and known manual gaps.
 - [Hostinger deployment runbook](../share-service/docs/hostinger-deployment.md) — backup, restore, cleanup, monitoring and rollback.
 
-The service has its own `package-lock.json` and must be installed separately with `npm ci --prefix share-service` before service tests or the desktop share contract are run.
+The service has its own `package-lock.json` and must be installed separately with `npm ci --prefix share-service` before service tests, `corepack pnpm typecheck:share-service` (JavaScript type checking, no build output) or the desktop share contract are run.
 
 ## Agent navigation rules
 

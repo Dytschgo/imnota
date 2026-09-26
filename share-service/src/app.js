@@ -339,7 +339,7 @@ async function writeArchive(directory, images) {
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(archivePath, { mode: 0o600 });
     const archive = archiver('zip', { zlib: { level: 9 } });
-    output.once('close', resolve);
+    output.once('close', () => resolve(undefined));
     output.once('error', reject);
     archive.once('warning', reject);
     archive.once('error', reject);
@@ -594,11 +594,14 @@ export function createService(overrides = {}) {
             'SELECT COALESCE(SUM(byte_size), 0) AS artifact_bytes, COALESCE(SUM(metadata_byte_size), 0) AS metadata_bytes FROM shares',
           )
           .get();
-        const reserved = db
-          .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads')
-          .get().bytes;
+        const reserved = Number(
+          db.prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads').get().bytes,
+        );
         if (
-          Math.max(filesystemUsage, usage.artifact_bytes) + usage.metadata_bytes + reserved + estimatedSize >
+          Math.max(filesystemUsage, Number(usage.artifact_bytes)) +
+            Number(usage.metadata_bytes) +
+            reserved +
+            estimatedSize >
           config.maxStorageBytes
         ) {
           throw new ApiError(507, 'quota_exceeded', 'The sharing service storage quota is full.');
@@ -668,12 +671,14 @@ export function createService(overrides = {}) {
               'SELECT COALESCE(SUM(byte_size), 0) AS artifact_bytes, COALESCE(SUM(metadata_byte_size), 0) AS metadata_bytes FROM shares',
             )
             .get();
-          const otherReservations = db
-            .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads WHERE id != ?')
-            .get(id).bytes;
+          const otherReservations = Number(
+            db
+              .prepare('SELECT COALESCE(SUM(reserved_bytes), 0) AS bytes FROM staging_uploads WHERE id != ?')
+              .get(id).bytes,
+          );
           if (
-            Math.max(finalFilesystemUsage, committedUsage.artifact_bytes + byteSize) +
-              committedUsage.metadata_bytes +
+            Math.max(finalFilesystemUsage, Number(committedUsage.artifact_bytes) + byteSize) +
+              Number(committedUsage.metadata_bytes) +
               upload.metadataByteSize +
               otherReservations >
             config.maxStorageBytes
