@@ -1,18 +1,11 @@
 import { Archive, ArchiveRestore, FolderOpen, Heart, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import type { ContentSearchResult } from '../../shared/content-search';
-import type { ProjectListItem } from '../../shared/types';
 import { collectionDisplayName } from '../collection/collection-display-name';
 import { ProjectIcon } from '../components/ProjectIcon';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { relativeOpenedTime, resolveRecentCollections } from '../navigation-history';
 import { ContentSearchResults } from '../search/ContentSearchResults';
 import { useAppStore } from '../store';
-
-export function matchesProjectSearch(project: ProjectListItem, search: string) {
-  return (project.searchText ?? `${project.name} ${project.description}`)
-    .toLowerCase()
-    .includes(search.trim().toLowerCase());
-}
 
 export function Library({
   onOpenCollection,

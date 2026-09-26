@@ -2309,5 +2309,3 @@ function isMissingNavigationTargetError(reason: unknown): boolean {
     /selected project folder is unavailable/i.test(reason.message)
   );
 }
-
-export { matchesProjectSearch } from './app/Library';
