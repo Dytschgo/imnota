@@ -54,7 +54,6 @@ afterEach(() => {
   useAppStore.setState({
     settings: {
       workspacePath: null,
-      theme: 'system',
       interfaceScale: 1,
       openRecentOnLaunch: true,
       confirmBeforeDeletion: true,

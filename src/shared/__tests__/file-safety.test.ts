@@ -19,7 +19,7 @@ describe('filesystem and IPC boundaries', () => {
     ])
       expect(filenameSchema.safeParse(name).success).toBe(false);
     expect(settingsPatchSchema.safeParse({ workspacePath: '/tmp' }).success).toBe(false);
-    expect(settingsPatchSchema.safeParse({ theme: 'dark' }).success).toBe(true);
+    expect(settingsPatchSchema.safeParse({ interfaceScale: 1.1 }).success).toBe(true);
     expect(settingsPatchSchema.parse({ sharingSenderName: '  Jose\u0301  ' })).toEqual({
       sharingSenderName: 'José',
     });
