@@ -888,14 +888,22 @@ describe('prompt export controller orchestration', () => {
     const native = fakeBridge();
     const renderer = fakeRendering();
     const compose = vi.spyOn(renderer.rendering, 'compose');
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     await controller.open();
     const first = await controller.copyFresh(controller.getState().cards[0]);
     const renderCount = compose.mock.calls.length;
+    const preflightCount = preflight.mock.calls.length;
     const card = controller.getState().cards[0];
+    const repeatPhases: string[] = [];
+    const unsubscribe = controller.subscribe(() => {
+      const phase = controller.getState().progress?.phase;
+      if (phase) repeatPhases.push(phase);
+    });
     const second = await controller.copyFresh(card);
     const variant = await controller.copyVariant(controller.getState().cards[0], 'files-rich');
     const shortcut = await controller.copyFresh(1);
+    unsubscribe();
 
     expect(first).toMatchObject({ ok: true, sessionId: 'session-1' });
     expect(second).toMatchObject({ ok: true, sessionId: 'session-1' });
@@ -904,8 +912,15 @@ describe('prompt export controller orchestration', () => {
     expect(native.starts).toHaveLength(1);
     expect(native.writes).toHaveLength(1);
     expect(compose).toHaveBeenCalledTimes(renderCount);
+    expect(preflight).toHaveBeenCalledTimes(preflightCount);
+    expect(repeatPhases).toContain('copying');
+    expect(repeatPhases).not.toContain('planning');
+    expect(repeatPhases).not.toContain('rendering');
+    expect(repeatPhases).not.toContain('writing');
+    expect(repeatPhases).not.toContain('complete');
     expect(native.copies.map((copy) => copy.target)).toEqual(['rich', 'rich', 'files-rich', 'rich']);
     expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'combined' });
+    expect(controller.getState().progress).toBeUndefined();
   });
 
   test('reopening unchanged sharing cards reuses the finalized files after a clipboard failure', async () => {
@@ -936,8 +951,10 @@ describe('prompt export controller orchestration', () => {
     let revision = 'first';
     const native = fakeBridge({ revisionForLoad: () => revision });
     const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     expect((await controller.copyFresh(1)).ok).toBe(true);
+    const preflightCount = preflight.mock.calls.length;
     revision = 'second';
 
     expect(await controller.copyFresh(controller.getState().cards[0])).toMatchObject({
@@ -946,6 +963,7 @@ describe('prompt export controller orchestration', () => {
     });
     expect(native.starts).toHaveLength(2);
     expect(native.writes).toHaveLength(2);
+    expect(preflight).toHaveBeenCalledTimes(preflightCount + 1);
     expect(native.copies.map((copy) => copy.sessionId)).toEqual(['session-1', 'session-2']);
   });
 
@@ -1058,13 +1076,24 @@ describe('prompt export controller orchestration', () => {
     let revision = 'first';
     const native = fakeBridge({ revisionForLoad: () => revision });
     const renderer = fakeRendering();
+    const preflight = vi.spyOn(renderer.rendering, 'preflight');
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     await controller.prepareFreshFiles();
     const card = controller.getState().cards[0];
+    const preflightCount = preflight.mock.calls.length;
+    const repeatProgress: string[] = [];
+    const unsubscribe = controller.subscribe(() => {
+      const progress = controller.getState().progress;
+      if (progress) repeatProgress.push(`${progress.phase}:${progress.message ?? ''}`);
+    });
     revision = 'external-edit';
     const result = await controller.copyMarkdown(card);
+    unsubscribe();
     expect(result).toMatchObject({ ok: false, error: { code: 'content-changed' } });
     expect(native.copies).toEqual([]);
+    expect(preflight).toHaveBeenCalledTimes(preflightCount);
+    expect(repeatProgress).toContain('copying:Copying markdown');
+    expect(repeatProgress).not.toContain('planning:');
   });
 
   describe.each([

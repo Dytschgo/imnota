@@ -2228,6 +2228,24 @@ async function exercisePromptWorkflow(
     if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
       await choosePromptCopyFunction(driver, copiedIndex, variant);
     await nativeClipboard.writeText(`Imnota smoke: waiting for prompt copy ${action + 1}`);
+    if (action > 0)
+      await driver.evaluate(`(() => {
+        const observed = { states: [], observer: null };
+        const record = () => {
+          const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
+          if (dialog?.getAttribute('aria-busy') !== 'true') return;
+          const status = dialog.querySelector('.prompt-sharing-progress[role="status"]');
+          if (status) observed.states.push({
+            label: status.textContent?.trim() ?? '',
+            hasPercentage: /\\d+%/.test(status.textContent ?? ''),
+            hasProgressbar: Boolean(status.querySelector('progress')),
+          });
+        };
+        observed.observer = new MutationObserver(record);
+        observed.observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+        window.__imnotaRepeatCopyProgress = observed;
+        record();
+      })()`);
     await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
     if (action === 0) {
       // The first copy prepares every native-resolution bundle. Later copies must reuse this set.
@@ -2242,6 +2260,31 @@ async function exercisePromptWorkflow(
     if (!latestSet) throw new Error('Prompt copy has no finalized export set.');
     await waitForPromptCopyClipboard(driver, latestSet, copiedIndex, variant);
     await waitForPromptGrants(driver, cards.length);
+    if (action > 0) {
+      await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
+      const observed = await driver.evaluate<{
+        states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
+        completedStatus: string | null;
+      }>(`(() => {
+        const observed = window.__imnotaRepeatCopyProgress;
+        observed.observer.disconnect();
+        delete window.__imnotaRepeatCopyProgress;
+        return {
+          states: observed.states,
+          completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] .prompt-sharing-progress[role="status"]')?.textContent?.trim() ?? null,
+        };
+      })()`);
+      if (
+        !observed.states.some((state) => state.label.includes('Copying Bundle')) ||
+        observed.completedStatus !== null ||
+        observed.states.some(
+          (state) => !state.label.includes('Copying Bundle') || state.hasPercentage || state.hasProgressbar,
+        )
+      )
+        throw new Error(
+          `Repeated prompt copy showed preparation or numeric progress: ${JSON.stringify(observed)}.`,
+        );
+    }
     const settledSets = await promptSets(host, projectPath);
     if (settledSets.length !== existingNames.size || settledSets.some((set) => !existingNames.has(set.name)))
       throw new Error('Repeated prompt copy generated another export set.');

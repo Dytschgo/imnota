@@ -86,7 +86,7 @@ export function PromptSharingDialog({
   const progressValue =
     progress?.phase === 'complete'
       ? 100
-      : busy && total
+      : busy && progress?.phase !== 'copying' && total
         ? Math.min(100, Math.round((current / total) * 100))
         : undefined;
   return (
