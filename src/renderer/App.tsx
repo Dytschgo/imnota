@@ -1963,7 +1963,6 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
-            onWorkbenchChange={preferences.saveWorkbench}
             nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
             onNativeCopyChange={preferences.saveNativeCopy}
@@ -2083,7 +2082,6 @@ export default function App() {
                 ),
               });
             }}
-            screenshotFirstAdd={preferences.settings.workbench.screenshotFirstAdd}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}

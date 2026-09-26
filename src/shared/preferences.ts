@@ -72,7 +72,10 @@ export interface OnboardingPreferences {
   completedVersion: number;
 }
 
-/** Screenshot-first add is the default. Combined Add item restores the previous single menu. */
+/**
+ * Retired: the combined Add item menu was removed and the app ignores this value.
+ * It stays in the schema so existing profiles validate and older builds keep their setting.
+ */
 export interface WorkbenchPreferences {
   screenshotFirstAdd: boolean;
 }

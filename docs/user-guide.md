@@ -36,7 +36,7 @@ Search reports when its limits or unavailable files prevent complete results. Co
 
 ## Add items
 
-The collection rail’s primary action is **Add screenshot**. The adjacent menu adds a pasted clipboard image, a drawing, or a Markdown text block. Settings → Shortcuts → Combined Add item button restores the previous single Add item menu.
+The collection rail’s primary action is **Add screenshot**. The adjacent menu adds a pasted clipboard image, a drawing, or a Markdown text block.
 
 Paste, drop or import still appends screenshots in the order supplied by the operating system or file picker, makes the newest imported screenshot active and opens it for annotation.
 

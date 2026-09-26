@@ -63,7 +63,6 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
-  onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
   nativeCopyAvailable?: boolean;
   globalCaptureShortcutRegistered?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
@@ -101,7 +100,6 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
-  onWorkbenchChange,
   nativeCopyAvailable = false,
   globalCaptureShortcutRegistered = false,
   onNativeCopyChange,
@@ -298,20 +296,6 @@ export function SettingsView({
                 onChange={(event) =>
                   void saveWorkspaceSetting({ confirmBeforeDeletion: event.target.checked })
                 }
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
-                <strong>Combined Add item button</strong>
-                <small>
-                  Restore a single Add item menu instead of making Add screenshot the primary rail action.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                checked={!preferences.workbench.screenshotFirstAdd}
-                disabled={savingPreferences || !onWorkbenchChange}
-                onChange={(event) => void onWorkbenchChange?.({ screenshotFirstAdd: !event.target.checked })}
               />
             </label>
           </section>
