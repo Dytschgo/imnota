@@ -841,42 +841,48 @@ describe('BackupService', () => {
     expect(await fs.readdir(occupied)).toEqual([]);
   });
 
-  it('returns committed restore paths when both journal publication and recovery cleanup fail', async () => {
-    const fixture = await writeProject();
-    const historical = await service().createSnapshot(fixture.projectPath, 'manual');
-    const relative = 'collections/001-collection/text/note.md';
-    await fs.writeFile(path.join(fixture.projectPath, relative), '# Newer original');
-    let installed = false;
-    const rename = fs.rename.bind(fs);
-    const unlink = fs.unlink.bind(fs);
-    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
-      if (installed && String(target).includes('.imnota-restore-journal-'))
-        throw new Error('injected journal publication failure');
-      await rename(source, target);
-    });
-    const unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
-      if (installed && String(target).endsWith('.imnota-restore-owner.json'))
-        throw new Error('injected recovery cleanup failure');
-      await unlink(target);
-    });
-    try {
-      const backups = service({
-        rename: async (source, target) => {
-          await fs.rename(source, target);
-          if (source.includes('.imnota-restore-stage-') && target === fixture.projectPath) installed = true;
-        },
+  it(
+    'returns committed restore paths when both journal publication and recovery cleanup fail',
+    async () => {
+      const fixture = await writeProject();
+      const historical = await service().createSnapshot(fixture.projectPath, 'manual');
+      const relative = 'collections/001-collection/text/note.md';
+      await fs.writeFile(path.join(fixture.projectPath, relative), '# Newer original');
+      let installed = false;
+      const rename = fs.rename.bind(fs);
+      const unlink = fs.unlink.bind(fs);
+      const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+        if (installed && String(target).includes('.imnota-restore-journal-'))
+          throw new Error('injected journal publication failure');
+        await rename(source, target);
       });
-      const restored = await backups.restoreInPlace(historical.snapshotId, fixture.projectPath);
-      expect(restored.projectPath).toBe(fixture.projectPath);
-      expect(restored.safetySnapshotId).toBeTruthy();
-      expect(restored.warnings?.join(' ')).toContain('Restore completed');
-      expect(restored.warnings?.join(' ')).toContain('Recovery files were preserved');
-      expect(await fs.readFile(path.join(fixture.projectPath, relative), 'utf8')).toBe('# Text block');
-      expect(await fs.readFile(path.join(restored.rollbackPath, relative), 'utf8')).toBe('# Newer original');
-    } finally {
-      renameSpy.mockRestore();
-      unlinkSpy.mockRestore();
-    }
-    expect((await service().recoverInterruptedRestores()).join(' ')).toContain('completed');
-  });
+      const unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation(async (target) => {
+        if (installed && String(target).endsWith('.imnota-restore-owner.json'))
+          throw new Error('injected recovery cleanup failure');
+        await unlink(target);
+      });
+      try {
+        const backups = service({
+          rename: async (source, target) => {
+            await fs.rename(source, target);
+            if (source.includes('.imnota-restore-stage-') && target === fixture.projectPath) installed = true;
+          },
+        });
+        const restored = await backups.restoreInPlace(historical.snapshotId, fixture.projectPath);
+        expect(restored.projectPath).toBe(fixture.projectPath);
+        expect(restored.safetySnapshotId).toBeTruthy();
+        expect(restored.warnings?.join(' ')).toContain('Restore completed');
+        expect(restored.warnings?.join(' ')).toContain('Recovery files were preserved');
+        expect(await fs.readFile(path.join(fixture.projectPath, relative), 'utf8')).toBe('# Text block');
+        expect(await fs.readFile(path.join(restored.rollbackPath, relative), 'utf8')).toBe(
+          '# Newer original',
+        );
+      } finally {
+        renameSpy.mockRestore();
+        unlinkSpy.mockRestore();
+      }
+      expect((await service().recoverInterruptedRestores()).join(' ')).toContain('completed');
+    },
+    DURABLE_FILESYSTEM_TIMEOUT,
+  );
 });
