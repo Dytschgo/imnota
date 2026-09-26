@@ -23,8 +23,6 @@ import {
   resolveShortcutBindings,
 } from '../../shared/shortcuts';
 import { SharingSettings } from './SharingSettings';
-import { ExportPresetSettings } from './ExportPresetSettings';
-import type { PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 import { BackupSettings } from './BackupSettings';
 import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
@@ -67,7 +65,6 @@ export interface SettingsViewProps {
   globalCaptureShortcutRegistered?: boolean;
   onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
-  onExportPresetChange?(value: PreferenceSettingsUpdate): Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -104,7 +101,6 @@ export function SettingsView({
   globalCaptureShortcutRegistered = false,
   onNativeCopyChange,
   onPromptExportChange,
-  onExportPresetChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -189,8 +185,8 @@ export function SettingsView({
           )}
           {group === 'Sharing' && (
             <p>
-              Manage export presets, your display name, and shared links. Shared links are created only when
-              you choose to share.
+              Manage your display name and shared links. Shared links are created only when you choose to
+              share.
             </p>
           )}
           {group === 'Backups & history' && (
@@ -475,12 +471,6 @@ export function SettingsView({
                 </label>
               </section>
             )}
-            <ExportPresetSettings
-              nativeCopyAvailable={nativeCopyAvailable}
-              preferences={preferences}
-              disabled={savingPreferences}
-              onSave={onExportPresetChange}
-            />
             <SharingSettings />
           </>
         )}

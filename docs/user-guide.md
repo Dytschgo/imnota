@@ -174,8 +174,6 @@ Installed builds also check the selected channel (Stable or Nightly) shortly aft
 
 After you start a newer installed version, **What’s new** appears once for that version with a short summary and screenshots when they are bundled. Nightly notes are labeled as preview. Choose **Try it now** to open a related setting or the onboarding guide, or **Later** / dismiss to keep working. Missing screenshots do not block startup. Imnota stores that you have seen this version in local application settings, not in project files, and will not show it again until a newer version is installed. Replay the same notes from Settings → Updates & about.
 
-### Saved export presets
+### Export options
 
-In Settings > Sharing, set the primary copy action and whether to include recognised text, then enter a name under Export presets and choose **Save current options**. Choose a saved preset and **Apply preset** to restore both options together. On platforms without native file clipboard support, presets use rich copy (text and image). The receiving app still decides which formats to accept.
-
-Up to 20 uniquely named presets are stored on this device in application preferences. Removing a preset leaves the current export options unchanged. Presets do not change project content, annotation styling, bundle size, or sharing permissions. If saving fails, the previous preferences remain active and the name stays available for retry.
+On Windows, Settings > Sharing sets the primary copy action; the copy menu in the prompt dialog changes the same setting. Settings > Features controls whether recognised text is added to Markdown. Both are stored on this device, not in project files. Saved export presets were removed in favour of these two direct settings.

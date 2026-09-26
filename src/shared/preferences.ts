@@ -146,6 +146,10 @@ export interface NativeCopyPreferences {
   defaultFunction: NativeCopyFunction;
 }
 
+/**
+ * Retired: saved export presets were removed from Settings and the app ignores them.
+ * They stay in the schema so existing profiles validate and older builds keep them.
+ */
 export interface ExportPreset {
   id: string;
   name: string;
