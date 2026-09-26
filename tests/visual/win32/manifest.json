@@ -177,13 +177,13 @@
       "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
     },
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
+      "reviewedAt": "2026-09-26",
+      "sourceRevision": "be5a98ee684540d896c87a000bff29a3ba7cf813",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
-      "review": "Hosted packaged capture and highlighted difference inspected. Settings now shows its own left category rail, active Appearance heading and grouped content across the available width; the former global sidebar and topbar are replaced in this view. Controls and text remain visible at 1440x900. Native smoke passed all 27 groups; strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36265290465",
+      "review": "Inspected the packaged Windows capture and highlighted diff from stacked PR144, which includes PR143. The retired shared-theme backdrop control is removed and the preset grid moves up. The performance fallback control is also removed in source; this Solid-mode capture did not display it. All 13 other approved captures match exactly. Packaged smoke passed all 27 groups. Only this baseline is replaced; strict comparison tolerance is unchanged."
     },
     "1440x900-workspace-dark.png": {
       "reviewedAt": "2026-09-24",
