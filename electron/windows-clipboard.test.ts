@@ -74,7 +74,15 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
     setClipboardData,
     registerClipboardFormat: (name) => (name === 'HTML Format' ? 0xc001 : 0xc002),
     getClipboardFormatName: (format, output) => {
-      const name = format === 0xc003 ? 'DataObject' : format === 0xc004 ? 'Ole Private Data' : '';
+      const name =
+        new Map([
+          [0xc001, 'HTML Format'],
+          [0xc002, 'PNG'],
+          [0xc003, 'DataObject'],
+          [0xc004, 'Ole Private Data'],
+          [0xc006, 'Chromium internal source RFH token'],
+          [0xc007, 'Chromium internal source URL'],
+        ]).get(format) ?? '';
       output.write(name, 'utf16le');
       return name.length;
     },
@@ -349,6 +357,74 @@ describe('Windows clipboard payloads', () => {
     expect(native.emptyClipboard).toHaveBeenCalledTimes(2);
     expect(native.openClipboard).toHaveBeenCalledOnce();
     expect(native.closeClipboard).toHaveBeenCalledOnce();
+  });
+
+  it.each(['files', 'combined'] as const)(
+    'copies %s over Chromium content and provenance',
+    async (variant) => {
+      const native = nativeMock([
+        [13, windowsUnicodeTextBuffer('prior browser selection')],
+        [0xc001, windowsHtmlBuffer('<p>prior browser selection</p>')],
+        [0xc006, Buffer.from('14000000010000000123456789abcdef1032547698badcfe', 'hex')],
+        [0xc007, Buffer.from('https://example.test/source\0')],
+      ]);
+      await expect(
+        writeWindowsClipboard(
+          hwnd(),
+          variant === 'files'
+            ? { filePaths: pair }
+            : {
+                filePaths: pair,
+                markdown: '# Prompt',
+                html: '<p>Prompt</p>',
+                png: Buffer.from('png'),
+                dibV5: Buffer.from('dib'),
+              },
+          native.api,
+        ),
+      ).resolves.toBeUndefined();
+      expect([...native.clipboard.keys()]).toEqual(variant === 'files' ? [15] : [15, 13, 0xc001, 0xc002, 17]);
+      expect(native.memory.get(native.clipboard.get(15)!)).toEqual(windowsDropFilesBuffer(pair));
+    },
+  );
+
+  it('restores Chromium content and provenance byte-for-byte after a late write failure', async () => {
+    const prior: Array<[number, Buffer]> = [
+      [13, windowsUnicodeTextBuffer('prior browser selection')],
+      [0xc001, windowsHtmlBuffer('<p>prior browser selection</p>')],
+      [0xc006, Buffer.from('14000000010000000123456789abcdef1032547698badcfe', 'hex')],
+      [0xc007, Buffer.from('https://example.test/source\0')],
+    ];
+    const native = nativeMock(prior);
+    native.failSetFormat = 17;
+    await expect(
+      writeWindowsClipboard(
+        hwnd(),
+        {
+          filePaths: pair,
+          markdown: '# Prompt',
+          html: '<p>Prompt</p>',
+          png: Buffer.from('png'),
+          dibV5: Buffer.from('dib'),
+        },
+        native.api,
+      ),
+    ).rejects.toThrow(/rejected clipboard format 17/i);
+    expect([...native.clipboard.keys()]).toEqual(prior.map(([format]) => format));
+    for (const [format, bytes] of prior)
+      expect(native.memory.get(native.clipboard.get(format)!)).toEqual(bytes);
+    expect(native.emptyClipboard).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects oversized Chromium metadata before clearing the clipboard', async () => {
+    const prior = Buffer.from('browser metadata');
+    const native = nativeMock([[0xc006, prior]]);
+    native.api.globalSize = () => WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES + 1;
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
+      /too large to restore safely/i,
+    );
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.memory.get(native.clipboard.get(0xc006)!)).toEqual(prior);
   });
 
   it('copies over OLE broker metadata and restores its materialized content after a partial write failure', async () => {

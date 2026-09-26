@@ -57,6 +57,14 @@ File-pair reception, Cursor/VS Code, browser assistants, text-only/mixed/split r
 
 T3 Code's [composer paste handler](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/ChatComposer.tsx#L5617-L5635) reads both clipboard files and plain text. When an image file is present, it prevents the default paste, adds the image attachment and returns without inserting the text. Its [classification function](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/composerAttachmentFiles.ts#L159-L177) and [test](https://github.com/pingdotgg/t3code/blob/b2b43bef73447c483ceae486890cb79f01c369cb/apps/web/src/components/chat/composerAttachmentFiles.test.ts#L341-L350) explicitly choose the image path even when plain text is present. This is a source-based explanation for a reported image-only T3 paste if macOS exposes Imnota's PNG as a clipboard file. It is not a version-pinned macOS receiver observation. Use **Copy Markdown only** to paste text into T3 Code, then **Copy image only** if the image is also needed.
 
+## Chromium source compatibility — 2026-09-26
+
+Windows Copy files and Copy files + text/image can replace a browser selection containing `Chromium internal source RFH token` and `Chromium internal source URL`. Both formats use the bounded byte snapshot path; a partial write restores their original bytes along with the original content. Unknown registered formats still stop the transaction before the clipboard is cleared.
+
+Chromium [serializes its frame token](https://chromium.googlesource.com/chromium/src/+/HEAD/content/public/browser/clipboard_types.cc) and [writes the token and source URL into global memory](https://chromium.googlesource.com/chromium/src/+/master/ui/base/clipboard/clipboard_win.cc). These buffers differ from the transient OLE broker handles that cannot be replayed.
+
+The Windows packaged smoke now creates a real Chromium renderer selection, verifies its content and both provenance formats, injects a partial write failure, checks byte-for-byte restoration, then copies the generated file pair. A local Windows development walkthrough also exercised **Copy Bundle → Copy files** over that clipboard state and confirmed the generated Markdown/PNG pair. This establishes source compatibility and recovery, not acceptance by a receiving editor. Publication and packaged-candidate evidence belong in the fix's PR and release record.
+
 ## Cases that do not count as proof
 
 - `clipboard.readText()` / `clipboard.readImage()` inside Imnota or the smoke driver
