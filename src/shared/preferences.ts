@@ -36,16 +36,16 @@ export interface AppearancePreferences {
   mode: AppearanceMode;
   accent: AccentPreset;
   glassLevel: GlassLevel;
+  /** Retired: constrained-performance fallback is always allowed. Kept for older builds. */
   allowPerformanceFallback: boolean;
   backgroundImage: string;
   backgroundOpacity: number;
   /**
-   * A legacy shared backdrop remains the source of truth while this is true.
-   * Theme-specific values let a dark image and a light image coexist without
-   * changing existing saved preferences.
+   * Retired per-theme backdrop fields. One backdrop serves both themes; loading
+   * folds a split profile into backgroundImage/backgroundOpacity and sets this true.
+   * The fields remain so existing profiles validate and older builds keep working.
    */
   useSameBackdropForBoth: boolean;
-  /** Marks that empty theme fields are intentional, rather than absent legacy data. */
   themeBackdropsInitialized: boolean;
   lightBackgroundImage: string;
   darkBackgroundImage: string;
@@ -204,18 +204,10 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   darkBackgroundOpacity: 0.42,
 };
 
-export type ResolvedBackdropTheme = Exclude<AppearanceMode, 'system'>;
-
 /** Resolve a backdrop without mutating the shared legacy preference. */
-export function appearanceBackdrop(
-  appearance: AppearancePreferences,
-  theme: ResolvedBackdropTheme,
-): { image: string; opacity: number } {
-  if (appearance.useSameBackdropForBoth)
-    return { image: appearance.backgroundImage, opacity: appearance.backgroundOpacity };
-  return theme === 'dark'
-    ? { image: appearance.darkBackgroundImage, opacity: appearance.darkBackgroundOpacity }
-    : { image: appearance.lightBackgroundImage, opacity: appearance.lightBackgroundOpacity };
+/** One backdrop serves both themes. Per-theme fields are retired and folded in on load. */
+export function appearanceBackdrop(appearance: AppearancePreferences): { image: string; opacity: number } {
+  return { image: appearance.backgroundImage, opacity: appearance.backgroundOpacity };
 }
 
 export const DEFAULT_ONBOARDING: OnboardingPreferences = {

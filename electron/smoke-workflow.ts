@@ -1466,7 +1466,6 @@ async function exercisePreferencesAndChannel(
     performanceClass: string;
     platform: string;
     appearanceMode: string;
-    allowPerformanceFallback: boolean;
   }>(`(async () => {
     ${bridgePrelude()}
     const nativeProfile = unwrap(await workflow.getNativePerformanceProfile());
@@ -1474,8 +1473,7 @@ async function exercisePreferencesAndChannel(
     return {
       performanceClass: nativeProfile.performanceClass,
       platform: nativeProfile.platform,
-      appearanceMode: preferences.settings.appearance.mode,
-      allowPerformanceFallback: preferences.settings.appearance.allowPerformanceFallback
+      appearanceMode: preferences.settings.appearance.mode
     };
   })()`);
   if (!['constrained', 'standard'].includes(profile.performanceClass) || !profile.appearanceMode)
@@ -1518,7 +1516,7 @@ async function exercisePreferencesAndChannel(
       );
       const expectedFallback = reducedTransparency
         ? 'reduced-transparency'
-        : profile.allowPerformanceFallback && profile.performanceClass === 'constrained'
+        : profile.performanceClass === 'constrained'
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';

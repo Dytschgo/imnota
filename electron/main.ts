@@ -2569,7 +2569,7 @@ function registerIpc(): void {
       appearance.glassLevel !== 'off' &&
       !nativeTheme.shouldUseHighContrastColors &&
       !nativeTheme.prefersReducedTransparency &&
-      !(appearance.allowPerformanceFallback && nativePerformanceProfile().reducedEffectsRecommended),
+      !nativePerformanceProfile().reducedEffectsRecommended,
     );
     try {
       if (material === 'vibrancy') target.setVibrancy(active ? 'under-window' : null);
