@@ -6,7 +6,7 @@ Reviewed the code and documentation at `107fc5920a6e829ec1b8dec10a21ad8a711e0fe8
 
 [PR #23](https://github.com/Dytschgo/imnota/pull/23) delivered hosted sharing and the remaining workflow fixes. [PR #24](https://github.com/Dytschgo/imnota/pull/24) corrected native screenshot capture timing after a nightly correctly rejected a partially painted onboarding screen. Capture now requires three matching actual pixel frames; approved baselines and comparison tolerances were not changed.
 
-The final [nightly run](https://github.com/Dytschgo/imnota/actions/runs/34169995806) passed all platform jobs and published 13 assets. Public download checks verified platform binaries, all three nightly manifests and the exact source tag. Stable v0.2.5 stayed Latest. The live sharing service passed synthetic create/read/download/restart/revoke checks; see its [deployment record](../share-service/docs/deployment-verification.md).
+The final [nightly run](https://github.com/Dytschgo/imnota/actions/runs/34169995806) passed all platform jobs and published 13 assets. Public download checks verified platform binaries, all three nightly manifests and the exact source tag. Stable v0.2.5 stayed Latest. The live sharing service passed synthetic create/read/download/restart/revoke checks; see its [deployment record](../../share-service/docs/deployment-verification.md).
 
 ## Plan and documentation disposition
 

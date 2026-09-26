@@ -1,6 +1,6 @@
 # Follow-up plan — observations from the 2026-09-18 feedback round
 
-Status: dated observations, reconciled on 2026-09-22. The user authorized the selected shortcut, export-performance, recovery, preset and verification follow-ups; unrelated proposals still need their own decision. This document records what was noticed while implementing PRs #72–#76. Current behavior is documented in the [implementation status](implementation-plan.md).
+Status: dated observations, reconciled on 2026-09-22. The user authorized the selected shortcut, export-performance, recovery, preset and verification follow-ups; unrelated proposals still need their own decision. This document records what was noticed while implementing PRs #72–#76. Current behavior is documented in the [implementation status](../implementation-plan.md).
 
 Items are sorted into **do**, **do only if the matrix shows it**, and **do not do**. Each "do" item is small enough for one PR.
 
@@ -31,7 +31,7 @@ Follow-up: [PR #114](https://github.com/Dytschgo/imnota/pull/114) changes the Ma
 
 ### 1.4 Record the manual matrices as living documents
 
-Follow-up: [capture display matrix](capture-display-matrix.md) now records the available real-display probe and distinguishes it from overlay alignment verification. The [clipboard matrix](clipboard-receiver-matrix.md) separates receiver evidence from clipboard-write assertions.
+Follow-up: [capture display matrix](../capture-display-matrix.md) now records the available real-display probe and distinguishes it from overlay alignment verification. The [clipboard matrix](../clipboard-receiver-matrix.md) separates receiver evidence from clipboard-write assertions.
 
 - Observation: `docs/clipboard-receiver-matrix.md` exists for clipboard, but there is no equivalent record for multi-display capture.
 - Proposal: add `docs/capture-display-matrix.md`, filled in per nightly build, with the exact build and OS; display count, arrangement and scaling; entry point; pointer and overlay displays; saved image dimensions; and whether the crop matches the selection. Link it from `docs/nightly-verification-audit.md`.

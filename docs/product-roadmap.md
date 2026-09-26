@@ -1,6 +1,6 @@
 # Imnota product roadmap
 
-Release baseline: v0.2.8 stable and nightly `v0.2.9-nightly.20260921.35645731983` from `bf8d24e`. Reconciled against main `a3f576e` on 2026-09-22; linked follow-up PRs are not claims of a published release. The [implementation status](implementation-plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
+Release baseline: v0.3.0 stable, published 2026-09-26. The item-level status below was last reconciled against main `a3f576e` on 2026-09-22; linked follow-up PRs are not claims of a published release. The [implementation status](implementation-plan.md) is the source of current delivery status; future items below need their own scope and acceptance decision.
 
 This roadmap builds on the existing local-first workflow:
 
