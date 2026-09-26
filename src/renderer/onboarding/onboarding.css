@@ -20,12 +20,12 @@
   min-width: 900px;
   min-height: 600px;
   overflow: hidden;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border: 1px solid var(--line-strong);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface, #12151c) var(--imnota-glass-opacity, 100%), transparent);
+  background: color-mix(in srgb, var(--surface) var(--imnota-glass-opacity, 100%), transparent);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-  color: var(--ink, #f4f5f7);
-  backdrop-filter: blur(var(--imnota-glass-blur, 0px)) saturate(var(--imnota-glass-saturation, 100%));
+  color: var(--ink);
+  backdrop-filter: blur(var(--imnota-glass-blur)) saturate(var(--imnota-glass-saturation));
 }
 
 /* Header: title with an inline stepper, one quiet exit. */
@@ -35,13 +35,13 @@
   justify-content: space-between;
   gap: 24px;
   padding: 22px 28px 18px;
-  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border-bottom: 1px solid var(--line);
 }
 
 .imnota-onboarding-header h1,
 .imnota-onboarding-instruction h2 {
   margin: 0;
-  color: var(--ink, #f4f5f7);
+  color: var(--ink);
   letter-spacing: -0.025em;
 }
 
@@ -63,17 +63,17 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
   font-size: 12px;
   font-weight: 550;
 }
 
 .imnota-onboarding-progress > div[data-current] {
-  color: var(--ink, #f4f5f7);
+  color: var(--ink);
 }
 
 .imnota-onboarding-progress > div[data-complete] {
-  color: var(--ink-2, #b3bac8);
+  color: var(--ink-2);
 }
 
 .imnota-onboarding-progress > div > span {
@@ -81,22 +81,22 @@
   width: 20px;
   height: 20px;
   place-items: center;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
 
 .imnota-onboarding-progress > div[data-current] > span {
-  border-color: var(--imnota-accent, var(--indigo, #6857f5));
-  background: var(--imnota-accent, var(--indigo, #6857f5));
-  color: var(--imnota-on-accent, #ffffff);
+  border-color: var(--imnota-accent);
+  background: var(--imnota-accent);
+  color: var(--imnota-on-accent);
 }
 
 .imnota-onboarding-progress > div[data-complete] > span {
-  border-color: var(--imnota-accent, var(--indigo, #6857f5));
-  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
-  color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  border-color: var(--imnota-accent);
+  background: var(--imnota-accent-soft);
+  color: var(--imnota-accent-hover);
 }
 
 /* Buttons */
@@ -125,44 +125,44 @@
   padding: 0 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
 }
 
 .imnota-onboarding-dismiss:hover:not(:disabled),
 .imnota-onboarding-back:hover:not(:disabled) {
-  background: var(--surface-2, #191d27);
-  color: var(--ink, #f4f5f7);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .imnota-onboarding-secondary,
 .imnota-demo-tools button {
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
-  background: var(--surface-2, #191d27);
-  color: var(--ink-2, #b3bac8);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 
 .imnota-onboarding-secondary:hover:not(:disabled),
 .imnota-demo-tools button:hover:not(:disabled) {
-  border-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
-  color: var(--ink, #f4f5f7);
+  border-color: var(--imnota-accent-hover);
+  color: var(--ink);
 }
 
 .imnota-onboarding-primary {
   padding: 0 14px;
-  border: 1px solid var(--imnota-accent, var(--indigo, #6857f5));
-  background: var(--imnota-accent, var(--indigo, #6857f5));
-  color: var(--imnota-on-accent, #ffffff);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--imnota-accent, #6857f5) 22%, transparent);
+  border: 1px solid var(--imnota-accent);
+  background: var(--imnota-accent);
+  color: var(--imnota-on-accent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--imnota-accent) 22%, transparent);
 }
 
 .imnota-onboarding-primary:hover:not(:disabled) {
-  border-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
-  background: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  border-color: var(--imnota-accent-hover);
+  background: var(--imnota-accent-hover);
 }
 
 .imnota-onboarding-primary:active:not(:disabled) {
   transform: translateY(1px);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--imnota-accent, #6857f5) 20%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--imnota-accent) 20%, transparent);
 }
 
 .imnota-onboarding button:disabled {
@@ -171,7 +171,7 @@
 }
 
 .imnota-onboarding :is(button, select, textarea):focus-visible {
-  outline: 2px solid var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  outline: 2px solid var(--imnota-accent-hover);
   outline-offset: 2px;
 }
 
@@ -197,7 +197,7 @@
 .imnota-onboarding-instruction p {
   max-width: 44ch;
   margin: 10px 0 20px;
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -225,13 +225,13 @@
   border-radius: 12px;
   object-fit: contain;
   box-shadow:
-    0 0 0 1px var(--line-strong, rgba(255, 255, 255, 0.14)),
+    0 0 0 1px var(--line-strong),
     0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
 .imnota-sample-window > small {
   padding: 60px 0;
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
   font-size: 12px;
   text-align: center;
 }
@@ -241,7 +241,7 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -255,7 +255,7 @@
 .imnota-annotation-step > aside {
   padding: 28px 24px;
   overflow-y: auto;
-  border-right: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border-right: 1px solid var(--line);
 }
 
 .imnota-annotation-step .imnota-onboarding-instruction h2 {
@@ -281,9 +281,9 @@
 }
 
 .imnota-demo-tools button[aria-pressed='true'] {
-  border-color: var(--imnota-accent, var(--indigo, #6857f5));
-  background: var(--imnota-accent-soft, rgba(104, 87, 245, 0.18));
-  color: var(--ink, #f4f5f7);
+  border-color: var(--imnota-accent);
+  background: var(--imnota-accent-soft);
+  color: var(--ink);
 }
 
 .imnota-onboarding-secondary {
@@ -293,7 +293,7 @@
 .imnota-onboarding-tip {
   display: block;
   margin-top: 10px;
-  color: var(--ink-4, #545d6e);
+  color: var(--ink-4);
   font-size: 11.5px;
   line-height: 1.5;
 }
@@ -302,7 +302,7 @@
   display: grid;
   gap: 6px;
   margin-top: 18px;
-  color: var(--ink-2, #b3bac8);
+  color: var(--ink-2);
   font-size: 12px;
   font-weight: 600;
 }
@@ -310,11 +310,11 @@
 .imnota-onboarding-explanation textarea {
   width: 100%;
   resize: vertical;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   padding: 9px 10px;
-  background: var(--input, #0f1218);
-  color: var(--ink, #f4f5f7);
+  background: var(--input);
+  color: var(--ink);
   font: inherit;
   font-size: 12.5px;
   font-weight: 400;
@@ -324,7 +324,7 @@
 .imnota-demo-canvas {
   min-width: 0;
   min-height: 0;
-  background: var(--canvas, var(--bg));
+  background: var(--canvas);
 }
 
 .imnota-demo-canvas .canvas-wrap {
@@ -370,21 +370,21 @@
   object-fit: contain;
   background: #ffffff;
   box-shadow:
-    0 0 0 1px var(--line-strong, rgba(255, 255, 255, 0.14)),
+    0 0 0 1px var(--line-strong),
     0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
 .imnota-bundle-preview strong {
-  color: var(--ink-2, #b3bac8);
+  color: var(--ink-2);
   font-weight: 600;
 }
 
 .imnota-markdown-preview {
   margin: 0 0 18px;
   overflow: hidden;
-  border: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--input, #0f1218);
+  background: var(--input);
 }
 
 .imnota-markdown-preview > div {
@@ -392,8 +392,8 @@
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
-  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.085));
-  color: var(--ink-3, #7d8595);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -403,7 +403,7 @@
   margin: 0;
   padding: 12px;
   overflow: auto;
-  color: var(--ink-2, #b3bac8);
+  color: var(--ink-2);
   font:
     11px/1.6 ui-monospace,
     SFMono-Regular,
@@ -434,10 +434,10 @@
   min-height: 36px;
   margin-left: -12px;
   padding: 0;
-  border: 1px solid var(--imnota-accent, var(--indigo, #6857f5));
-  border-left-color: color-mix(in srgb, var(--imnota-on-accent, #ffffff) 28%, transparent);
+  border: 1px solid var(--imnota-accent);
+  border-left-color: color-mix(in srgb, var(--imnota-on-accent) 28%, transparent);
   border-radius: 0 8px 8px 0;
-  background-color: var(--imnota-accent, var(--indigo, #6857f5));
+  background-color: var(--imnota-accent);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: center;
@@ -448,16 +448,16 @@
 }
 
 .imnota-copy-split-select:hover:not(:disabled) {
-  background-color: var(--imnota-accent-hover, var(--indigo-light, #8b7cf6));
+  background-color: var(--imnota-accent-hover);
 }
 
 .imnota-copy-split-select option {
-  background: var(--surface-2, #191d27);
-  color: var(--ink, #f4f5f7);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .imnota-copy-split > small {
-  color: var(--ink-3, #7d8595);
+  color: var(--ink-3);
   font-size: 12px;
 }
 
@@ -466,7 +466,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 14px;
-  color: var(--text-success, #4ade80);
+  color: var(--text-success);
   font-size: 12.5px;
   font-weight: 600;
 }
@@ -478,8 +478,8 @@
   margin: 12px 0 0;
   padding: 10px 12px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
-  color: var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
   font-size: 12px;
   font-weight: 550;
   line-height: 1.5;
@@ -495,11 +495,11 @@
   gap: 6px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border-top: 1px solid var(--line);
 }
 
 .imnota-onboarding-fallbacks > span {
-  color: var(--ink-4, #545d6e);
+  color: var(--ink-4);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -520,19 +520,19 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--ink-2, #b3bac8);
+  color: var(--ink-2);
   font: inherit;
   font-size: 12px;
   font-weight: 550;
 }
 
 .imnota-onboarding-fallbacks button:hover:not(:disabled) {
-  background: var(--surface-2, #191d27);
-  color: var(--ink, #f4f5f7);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .imnota-onboarding-fallbacks.is-needed > span {
-  color: var(--warning, #f59e0b);
+  color: var(--warning);
 }
 
 /* Footer */
@@ -543,7 +543,7 @@
   gap: 16px;
   min-height: 64px;
   padding: 12px 28px;
-  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.085));
+  border-top: 1px solid var(--line);
 }
 
 .imnota-onboarding-error {
@@ -551,20 +551,20 @@
   padding: 9px 28px;
   border-top: 1px solid rgba(239, 68, 68, 0.22);
   background: rgba(239, 68, 68, 0.07);
-  color: var(--danger, #ef4444);
+  color: var(--danger);
   font-size: 12px;
   line-height: 1.4;
 }
 
 @supports not (backdrop-filter: blur(1px)) {
   .imnota-onboarding {
-    background: var(--surface, #12151c);
+    background: var(--surface);
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .imnota-onboarding {
-    background: var(--surface, #12151c);
+    background: var(--surface);
     backdrop-filter: none;
   }
 }

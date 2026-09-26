@@ -35,8 +35,6 @@ export interface CollectionRailProps {
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
-  /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
-  screenshotFirstAdd?: boolean;
   /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
@@ -418,7 +416,6 @@ export function CollectionRail({
   onSnapshot,
   onAddContent,
   onDeleteItem,
-  screenshotFirstAdd = true,
   onCapture,
   capturePrimary = false,
   captureEnabled = false,
@@ -712,52 +709,26 @@ export function CollectionRail({
           </div>
           <div className="rail-actions">
             <div className="add-item-menu" ref={addMenuRef}>
-              {screenshotFirstAdd ? (
-                <div className="add-item-primary">
-                  <Button
-                    variant="primary"
-                    disabled={captureIsPrimary && captureInProgress}
-                    busy={captureIsPrimary && captureInProgress}
-                    data-testid="add-screenshot"
-                    onClick={captureIsPrimary ? () => onCapture?.() : onImport}
-                  >
-                    {captureIsPrimary ? (
-                      <Camera size={15} aria-hidden="true" />
-                    ) : (
-                      <Upload size={15} aria-hidden="true" />
-                    )}
-                    Add screenshot
-                  </Button>
-                  <Button
-                    ref={addMenuTriggerRef}
-                    data-testid="add-item-trigger"
-                    variant="soft"
-                    aria-label="More ways to add"
-                    aria-expanded={addMenuOpen}
-                    aria-haspopup="menu"
-                    aria-controls={addMenuId}
-                    onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowDown' || event.key === 'Home') {
-                        event.preventDefault();
-                        openAddMenu(0);
-                      } else if (event.key === 'ArrowUp' || event.key === 'End') {
-                        event.preventDefault();
-                        openAddMenu(addItemOptions.length - 1);
-                      } else if (event.key === 'Escape' && addMenuOpen) {
-                        event.preventDefault();
-                        closeAddMenu(true);
-                      }
-                    }}
-                  >
-                    <ChevronDown size={14} aria-hidden="true" />
-                  </Button>
-                </div>
-              ) : (
+              <div className="add-item-primary">
+                <Button
+                  variant="primary"
+                  disabled={captureIsPrimary && captureInProgress}
+                  busy={captureIsPrimary && captureInProgress}
+                  data-testid="add-screenshot"
+                  onClick={captureIsPrimary ? () => onCapture?.() : onImport}
+                >
+                  {captureIsPrimary ? (
+                    <Camera size={15} aria-hidden="true" />
+                  ) : (
+                    <Upload size={15} aria-hidden="true" />
+                  )}
+                  Add screenshot
+                </Button>
                 <Button
                   ref={addMenuTriggerRef}
                   data-testid="add-item-trigger"
-                  variant="primary"
+                  variant="soft"
+                  aria-label="More ways to add"
                   aria-expanded={addMenuOpen}
                   aria-haspopup="menu"
                   aria-controls={addMenuId}
@@ -775,11 +746,9 @@ export function CollectionRail({
                     }
                   }}
                 >
-                  <Plus size={15} aria-hidden="true" />
-                  Add item
                   <ChevronDown size={14} aria-hidden="true" />
                 </Button>
-              )}
+              </div>
               {addMenuOpen && (
                 <div
                   className="add-item-popover"

@@ -7,7 +7,12 @@ import {
   resolvePreferenceSettings,
 } from '../preference-settings';
 import { shouldShowOnboarding } from '../preferences';
-import { BACKDROP_PRESETS, backdropPresetValue, appearanceBackdrop } from '../preferences';
+import {
+  BACKDROP_PRESETS,
+  backdropPresetValue,
+  appearanceBackdrop,
+  type PreferenceSettings,
+} from '../preferences';
 
 describe('profile-aware preference settings', () => {
   it('migrates profiles without presets and preserves presets across unrelated updates and restarts', () => {
@@ -80,8 +85,8 @@ describe('profile-aware preference settings', () => {
           preferenceSettingsEnvelope({}, settings, initial.profile),
           true,
         );
-        expect(appearanceBackdrop(restarted.settings.appearance, 'light').image).toBe(image);
-        expect(appearanceBackdrop(restarted.settings.appearance, 'dark').image).toBe(image);
+        expect(appearanceBackdrop(restarted.settings.appearance).image).toBe(image);
+        expect(restarted.settings.appearance.useSameBackdropForBoth).toBe(true);
       }
     },
   );
@@ -279,31 +284,39 @@ describe('profile-aware preference settings', () => {
     expect(result.settings.appearance.darkBackgroundImage).toBe('');
   });
 
-  it('keeps an explicit per-theme No image after returning through shared mode', () => {
-    const base = resolvePreferenceSettings(undefined, false).settings;
-    const separate = mergePreferenceSettings(base, {
-      appearance: {
-        backgroundImage: 'preset:indigo',
-        backgroundOpacity: 0.55,
-        useSameBackdropForBoth: false,
-        themeBackdropsInitialized: true,
-        lightBackgroundImage: 'preset:indigo',
-        darkBackgroundImage: 'preset:indigo',
-        lightBackgroundOpacity: 0.55,
-        darkBackgroundOpacity: 0.55,
-      },
-    });
-    const lightOff = mergePreferenceSettings(separate, { appearance: { lightBackgroundImage: '' } });
-    expect(appearanceBackdrop(lightOff.appearance, 'light').image).toBe('');
-    expect(appearanceBackdrop(lightOff.appearance, 'dark').image).toBe('preset:indigo');
+  it('folds a retired per-theme backdrop into the single backdrop on load', () => {
+    const base = resolvePreferenceSettings(undefined, false);
+    const load = (appearance: Partial<PreferenceSettings['appearance']>) =>
+      resolvePreferenceSettings(
+        preferenceSettingsEnvelope({}, mergePreferenceSettings(base.settings, { appearance }), base.profile),
+        true,
+      ).settings.appearance;
 
-    const shared = mergePreferenceSettings(lightOff, {
-      appearance: { useSameBackdropForBoth: true, backgroundImage: '' },
+    const split = load({
+      backgroundImage: 'preset:indigo',
+      backgroundOpacity: 0.3,
+      useSameBackdropForBoth: false,
+      lightBackgroundImage: 'preset:indigo',
+      darkBackgroundImage: 'preset:emerald',
+      lightBackgroundOpacity: 0.3,
+      darkBackgroundOpacity: 0.6,
     });
-    const restoredSeparate = mergePreferenceSettings(shared, {
-      appearance: { useSameBackdropForBoth: false },
+    expect(split.useSameBackdropForBoth).toBe(true);
+    expect(appearanceBackdrop(split)).toEqual({ image: 'preset:emerald', opacity: 0.6 });
+
+    const lightOnly = load({
+      useSameBackdropForBoth: false,
+      lightBackgroundImage: 'preset:indigo',
+      darkBackgroundImage: '',
+      lightBackgroundOpacity: 0.25,
     });
-    expect(appearanceBackdrop(restoredSeparate.appearance, 'light').image).toBe('');
-    expect(appearanceBackdrop(restoredSeparate.appearance, 'dark').image).toBe('preset:indigo');
+    expect(appearanceBackdrop(lightOnly)).toEqual({ image: 'preset:indigo', opacity: 0.25 });
+
+    const neither = load({
+      useSameBackdropForBoth: false,
+      lightBackgroundImage: '',
+      darkBackgroundImage: '',
+    });
+    expect(appearanceBackdrop(neither).image).toBe('');
   });
 });

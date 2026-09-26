@@ -141,7 +141,7 @@ export function resolveAppearance(
   environment: AppearanceEnvironment,
 ): EffectiveAppearance {
   const theme = preferences.mode === 'system' ? environment.systemTheme : preferences.mode;
-  const image = appearanceBackdrop(preferences, theme).image;
+  const image = appearanceBackdrop(preferences).image;
   const automaticLightGlass = theme === 'light' && Boolean(image) && isAllowedBackgroundImage(image);
   const glassLevel =
     automaticLightGlass && preferences.glassLevel === 'off' ? 'strong' : preferences.glassLevel;
@@ -163,7 +163,7 @@ export function resolveAppearance(
       glassFallbackReason: 'reduced-transparency',
     };
   }
-  if (preferences.allowPerformanceFallback && environment.performanceConstrained) {
+  if (environment.performanceConstrained) {
     return {
       theme,
       accent: preferences.accent,
@@ -235,9 +235,7 @@ export function useAppearance(
     let current = true;
     setDesktopActive(false);
     const enabled = Boolean(
-      preferences.desktopGlass &&
-      !appearanceBackdrop(preferences, effective.theme).image &&
-      effective.glassLevel !== 'off',
+      preferences.desktopGlass && !appearanceBackdrop(preferences).image && effective.glassLevel !== 'off',
     );
     if (typeof window.imnota?.setDesktopGlass === 'function') {
       void window.imnota
@@ -273,7 +271,7 @@ export function useAppearance(
     root.style.setProperty('--imnota-glass-opacity', `${Number(glass.alpha) * 100}%`);
     root.style.setProperty('--imnota-glass-blur', glass.blur);
     root.style.setProperty('--imnota-glass-saturation', glass.saturation);
-    const backdrop = appearanceBackdrop(preferences, effective.theme);
+    const backdrop = appearanceBackdrop(preferences);
     const backdropActive = effective.glassLevel !== 'off' && Boolean(backdrop.image);
     root.dataset.background = backdropActive ? 'active' : 'none';
     root.dataset.backgroundSource = backdropActive
@@ -301,7 +299,7 @@ export function useAppearance(
     ...effective,
     desktopGlassStatus: desktopActive
       ? 'active'
-      : preferences.desktopGlass && !appearanceBackdrop(preferences, effective.theme).image
+      : preferences.desktopGlass && !appearanceBackdrop(preferences).image
         ? 'fallback'
         : 'off',
   };

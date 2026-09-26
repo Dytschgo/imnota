@@ -10,7 +10,7 @@ import {
 } from '../src/shared/content-search.js';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { assertNoLinks, isWithin } from './files.js';
+import { assertNoLinks, FileReadLimitError, isWithin, readStableRegularFile } from './files.js';
 
 // Restore copies and template stages contain project.json but are not library projects.
 // Match only reserved names; other hidden user project folders remain searchable.
@@ -40,32 +40,15 @@ export async function readSearchText(projectPath: string, relativePath: string, 
   const target = path.resolve(projectPath, relativePath);
   if (target === path.resolve(projectPath) || !isWithin(projectPath, target))
     throw new Error('Search content path leaves the project.');
-  await assertNoLinks(target);
-  const file = await fs.open(target, 'r');
   try {
-    const stat = await file.stat();
-    if (!stat.isFile() || stat.size > maximum) throw new Error('Search file exceeds the read limit.');
-    const bytes = Buffer.alloc(stat.size);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
-      if (!bytesRead) throw new Error('Search file changed while it was read.');
-      offset += bytesRead;
-    }
-    const after = await file.stat();
-    const current = await fs.lstat(target);
-    if (
-      after.size !== stat.size ||
-      after.mtimeMs !== stat.mtimeMs ||
-      current.isSymbolicLink() ||
-      current.ino !== stat.ino ||
-      current.mtimeMs !== stat.mtimeMs ||
-      current.size !== stat.size
-    )
+    const result = await readStableRegularFile(target, maximum);
+    if (!result) throw Object.assign(new Error('Search file is missing.'), { code: 'ENOENT' as const });
+    return result.text;
+  } catch (error) {
+    if (error instanceof FileReadLimitError) throw new Error('Search file exceeds the read limit.');
+    if (error instanceof Error && /changed while it was/.test(error.message))
       throw new Error('Search file changed while it was read.');
-    return bytes.toString('utf8');
-  } finally {
-    await file.close();
+    throw error;
   }
 }
 

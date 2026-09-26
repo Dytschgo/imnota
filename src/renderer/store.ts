@@ -52,7 +52,6 @@ function remember(key: string, value: string): void {
 export const useAppStore = create<AppState>((set, get) => ({
   settings: {
     workspacePath: null,
-    theme: 'system',
     interfaceScale: 1,
     openRecentOnLaunch: true,
     confirmBeforeDeletion: true,

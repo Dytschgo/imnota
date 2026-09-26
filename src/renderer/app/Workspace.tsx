@@ -33,7 +33,6 @@ export interface WorkspaceProps {
   onDuplicateContent?(): void | Promise<void>;
   onDrawingTitle?(title: string): void;
   onDrawingDescription?(description: string): void;
-  screenshotFirstAdd?: boolean;
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
@@ -214,7 +213,6 @@ export function Workspace(props: WorkspaceProps) {
         onMessage={props.onMessage}
         onSnapshot={props.onSnapshot}
         onAddContent={props.onAddContent}
-        screenshotFirstAdd={props.screenshotFirstAdd}
         onCapture={props.onCapture}
         capturePrimary={props.capturePrimary}
         captureEnabled={props.captureEnabled}

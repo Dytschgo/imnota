@@ -105,46 +105,6 @@ describe('useAppearance', () => {
     window.imnota = previous;
   });
 
-  it('selects the saved theme-specific backdrop as System changes', () => {
-    let light = false;
-    const listeners = new Set<() => void>();
-    window.matchMedia = vi.fn((query: string) => ({
-      get matches() {
-        return query.includes('color-scheme') ? light : false;
-      },
-      media: query,
-      onchange: null,
-      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
-      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })) as unknown as typeof window.matchMedia;
-    const root = document.createElement('div');
-    renderHook(() =>
-      useAppearance(
-        {
-          ...DEFAULT_APPEARANCE,
-          glassLevel: 'balanced',
-          useSameBackdropForBoth: false,
-          darkBackgroundImage: 'preset:graphite',
-          darkBackgroundOpacity: 0.35,
-          lightBackgroundImage: 'preset:amber',
-          lightBackgroundOpacity: 0.7,
-        },
-        { root },
-      ),
-    );
-    expect(root.style.getPropertyValue('--imnota-background-image')).toContain('graphite.png');
-    expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0.35');
-    expect(root.dataset.backgroundSource).toBe('preset');
-
-    light = true;
-    act(() => listeners.forEach((listener) => listener()));
-    expect(root.style.getPropertyValue('--imnota-background-image')).toContain('amber.png');
-    expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0.7');
-  });
-
   it('injects darker light-mode accent hover, stronger soft, and onAccent', () => {
     const root = document.createElement('div');
     const { rerender } = renderHook(

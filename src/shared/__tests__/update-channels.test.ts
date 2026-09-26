@@ -45,8 +45,8 @@ it('accepts all API-listed Linux installer entries from the pinned manifest', as
   };
   await expect(prepareNativeUpdate(updater, candidate, 'stable')).resolves.toBeUndefined();
 });
-it('validates channel settings and keeps old settings compatible', () => {
-  expect(settingsPatchSchema.parse({ theme: 'dark' })).toEqual({ theme: 'dark' });
+it('validates channel settings and rejects the retired theme mirror', () => {
+  expect(settingsPatchSchema.safeParse({ theme: 'dark' }).success).toBe(false);
   expect(settingsPatchSchema.parse({ updateChannel: 'nightly' }).updateChannel).toBe('nightly');
   expect(() => settingsPatchSchema.parse({ updateChannel: 'latest' })).toThrow();
 });

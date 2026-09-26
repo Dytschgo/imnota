@@ -6,7 +6,7 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
+import App, { CollectionControls, SettingsView, userFacingErrorMessage } from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -3090,15 +3090,6 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
-  it('trims project queries before matching project metadata', () => {
-    expect(
-      matchesProjectSearch(
-        { ...snapshot.project, projectPath: snapshot.projectPath, searchText: 'A design note' },
-        '  design  ',
-      ),
-    ).toBe(true);
-  });
-
   it('creates an automatically named empty collection and activates it', async () => {
     let finishCreate!: (result: ProjectSnapshot) => void;
     const editCollection = vi.fn(
@@ -3143,8 +3134,8 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
-  it('saves an accessible theme option and reports preference failures', async () => {
-    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings, theme: 'dark' as const }));
+  it('keeps appearance out of workspace settings and reports preference failures', async () => {
+    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings }));
     window.imnota = {
       setSettings,
       onUpdateStatus: () => () => {},
@@ -3160,7 +3151,8 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
-    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ theme: 'dark' }));
+    await act(async () => undefined);
+    expect(setSettings).not.toHaveBeenCalled();
 
     setSettings.mockRejectedValueOnce(new Error('unavailable'));
     fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));

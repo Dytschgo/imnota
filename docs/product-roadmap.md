@@ -88,7 +88,9 @@ The September 22 recovery follow-up is [PR #115](https://github.com/Dytschgo/imn
 
 Saved-text search across projects, collections, screenshots, annotations, Markdown and drawings is implemented, including navigation to the matching item. The user guide documents limits and partial-result reporting. Measure large-workspace latency and completeness before proposing an on-disk index; screenshot-pixel OCR indexing is separate from export-scoped OCR.
 
-### 7. Export presets
+### 7. Export presets (retired)
+
+Saved presets covered only the copy format and the recognised-text option, which are already one click away, so the Settings UI was removed. Stored presets are ignored but kept in preferences for older builds. Revisit presets only if they gain options that are not directly adjustable.
 
 The first scoped implementation is [PR #117](https://github.com/Dytschgo/imnota/pull/117): named device-local presets for the existing copy format and recognised-text option. Applying one saves both options together. Presets do not yet change image quality, original-image inclusion, annotation metadata or Markdown structure. Portable preset files and their version/fallback contract remain future work requiring separate scope.
 

@@ -135,7 +135,6 @@ export type ProjectListItem = Pick<
   'id' | 'name' | 'description' | 'createdAt' | 'updatedAt' | 'status' | 'favourite' | 'icon'
 > & {
   projectPath: string;
-  searchText?: string;
   /** Revision of the raw metadata used by compare-and-swap project edits. */
   projectRevision?: string;
   collections: Array<Pick<Collection, 'id' | 'name' | 'archived' | 'createdAt' | 'updatedAt'>>;
@@ -144,7 +143,6 @@ export type ProjectListItem = Pick<
 
 export interface WorkspaceSettings {
   workspacePath: string | null;
-  theme: 'system' | 'light' | 'dark';
   interfaceScale: number;
   openRecentOnLaunch: boolean;
   confirmBeforeDeletion: boolean;
