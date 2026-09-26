@@ -1258,6 +1258,8 @@ export class PromptBundleControllerEngine {
     this.emit({
       isOpen: true,
       preview: undefined,
+      error: undefined,
+      noContentMessage: undefined,
       progress: hasReusablePlan
         ? { phase: 'checking', message: 'Loading saved bundles' }
         : { phase: 'planning' },

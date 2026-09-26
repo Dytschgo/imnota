@@ -933,6 +933,7 @@ describe('prompt export controller orchestration', () => {
     expect(await controller.copyVariant(controller.getState().cards[0], 'files')).toMatchObject({
       ok: false,
     });
+    expect(controller.getState().error).toBeDefined();
     expect(native.starts).toHaveLength(1);
     const preflightCount = preflight.mock.calls.length;
     const composeCount = compose.mock.calls.length;
@@ -946,6 +947,7 @@ describe('prompt export controller orchestration', () => {
     unsubscribe();
     const reopened = controller.getState().cards[0];
     expect(reopened.artifactSessionId).toBe('session-1');
+    expect(controller.getState().error).toBeUndefined();
     expect(observed.find((state) => state.isOpen)?.phase).toBe('checking');
     expect(observed.filter((state) => state.isOpen).map((state) => state.phase)).not.toContain('planning');
     expect(preflight).toHaveBeenCalledTimes(preflightCount);
