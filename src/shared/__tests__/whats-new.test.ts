@@ -17,6 +17,17 @@ describe('what’s new releases', () => {
     expect(findWhatsNewRelease('0.2.9')?.features[0]?.id).toBe('capture-all-displays');
   });
 
+  it('introduces the 0.3.0 stable capture, Markdown and agent features', () => {
+    const release = findWhatsNewRelease('0.3.0');
+    expect(release?.channel).toBe('stable');
+    expect(release?.preview).toBe(false);
+    expect(release?.features.map((feature) => feature.id)).toEqual([
+      'capture-all-displays',
+      'readable-marks',
+      'agent-access',
+    ]);
+  });
+
   it('orders Imnota stable and nightly versions without using lexical comparison', () => {
     expect(compareWhatsNewVersions('0.2.10', '0.2.9')).toBeGreaterThan(0);
     expect(compareWhatsNewVersions('0.2.7', '0.2.7-nightly.20260919.1')).toBeGreaterThan(0);

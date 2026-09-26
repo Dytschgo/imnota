@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Screen capture is on by default for new Windows and macOS profiles. Capture an area, a window or a whole display from a global shortcut, the tray or menu-bar icon, or the toolbar, with an optional 3- or 5-second delay. Drag directly across screens, repeat the last captured area, then save, annotate, copy or discard from the capture overlay.
+- Prompt Markdown now lists arrows, boxes and steps as positions and records each screenshot's source size. Optional on-device text recognition adds a visible-text section; it is off by default and skips blurred or pixelated screenshots.
+- Added optional local agent access. When turned on, MCP-capable coding agents on the same computer can read prepared prompt bundles. It is off by default and listens only on `127.0.0.1`.
+- Reworked Settings with feature controls and links, an agent-agnostic setup prompt, and saved local copies and OCR presets for exports.
+- Simplified navigation, collection and project management, and decluttered What's New, onboarding and the copy dialog. Update checks and What's New are always reachable.
+- Repeat copies reuse finalized bundles while the collection is unchanged, including after reopening the dialog.
+- Improved persistence safeguards, recovery after Undo, local diagnostics, archived-collection restoration and Windows clipboard reporting.
+- macOS downloads remain ad-hoc signed, not Apple-notarised, and require macOS 13 or later. Back up workspaces before upgrading.
+
 ## 0.2.8
 
 - Added local workflow templates, broader project search, local history, clipboard fallbacks and screenshot-first add flows.
