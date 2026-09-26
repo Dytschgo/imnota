@@ -1,5 +1,13 @@
 # Verification timing and duplicate updater coverage
 
+## September 26 packaged smoke budget
+
+Windows [Validate run 36265303628](https://github.com/Dytschgo/imnota/actions/runs/36265303628) at `07a2d9fb056e3a6f55fe095dda7dd1c72612e43d` retained a passing application report with all 27 assertion groups and a final workflow checkpoint at 224.909 seconds. The packaged process hit the launcher's four-minute limit; cleanup then reported a locked Chromium `DIPS` profile file. This run remains failed. The neighbouring stack run took 200 seconds overall, including a 177-second workflow, showing that portable extraction, startup and shutdown also consume the process budget.
+
+The outer smoke process deadline is now six minutes, allowing the observed full walkthrough plus that overhead. Individual operation deadlines, failure assertions, cleanup ownership checks and the 15-minute stress deadline are unchanged. There are no retries. The new revision must pass fresh packaged verification; the retained application report alone does not satisfy the failed gate.
+
+## Earlier updater timing audit
+
 Profiling the existing [three-platform CI logs](https://github.com/Dytschgo/imnota/actions/runs/34284213202/attempts/2) identified duplicate packaged-updater execution on macOS. PR/main CI builds before `test:platform`, whose script suite already includes `scripts/update-macos.test.mjs`. The later Mac verification step invoked that entire file again.
 
 In that run, the real ZIP installation/rollback-copy case took 19.47s in the platform suite and 20.30s in the repeated invocation. It exercised the same archive and test code twice. Other measured steps were:
