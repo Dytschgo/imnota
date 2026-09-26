@@ -379,7 +379,13 @@ export class NativeUiDriver {
           x: Math.round(from.x + ((to.x - from.x) * index) / steps),
           y: Math.round(from.y + ((to.y - from.y) * index) / steps),
         };
-        contents.sendInputEvent({ type: 'mouseMove', ...point, movementX: 1, movementY: 1 });
+        contents.sendInputEvent({
+          type: 'mouseMove',
+          ...point,
+          movementX: 1,
+          movementY: 1,
+          modifiers: ['leftbuttondown'],
+        });
         await wait(16);
       }
       // Native moves may be coalesced or delivered after the process yields. Do not

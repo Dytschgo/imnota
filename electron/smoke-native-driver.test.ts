@@ -290,6 +290,9 @@ describe('native smoke driver', () => {
       }
       await result;
       expect(sendInputEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseUp', x: 9, y: 10 }));
+      expect(sendInputEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'mouseMove', x: 9, y: 10, modifiers: ['leftbuttondown'] }),
+      );
       expect(listeners.size).toBe(0);
       expect(renderer).not.toHaveProperty('__imnotaSmokeDrag');
     },
