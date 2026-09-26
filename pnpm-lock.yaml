@@ -61,9 +61,6 @@ importers:
       '@testing-library/react':
         specifier: ^16.1.0
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@types/jszip':
-        specifier: ^3.4.1
-        version: 3.4.1
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
@@ -2113,13 +2110,6 @@ packages:
       {
         integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==,
       }
-
-  '@types/jszip@3.4.1':
-    resolution:
-      {
-        integrity: sha512-TezXjmf3lj+zQ651r6hPqvSScqBLvyPI9FxdXBqpEwBijNGQ2NXpaFW/7joGzveYkKQUil7iiDHLo6LV71Pc0A==,
-      }
-    deprecated: This is a stub types definition. jszip provides its own type definitions, so you do not need this installed.
 
   '@types/keyv@3.1.4':
     resolution:
@@ -7554,10 +7544,6 @@ snapshots:
   '@types/http-cache-semantics@4.2.0': {}
 
   '@types/json-schema@7.0.15': {}
-
-  '@types/jszip@3.4.1':
-    dependencies:
-      jszip: 3.10.1
 
   '@types/keyv@3.1.4':
     dependencies:
