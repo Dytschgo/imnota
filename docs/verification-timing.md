@@ -1,5 +1,9 @@
 # Verification timing and duplicate updater coverage
 
+## September 26 restore-test deadline
+
+Windows [Validate run 36267088449](https://github.com/Dytschgo/imnota/actions/runs/36267088449) failed before packaging because `returns committed restore paths when both journal publication and recovery cleanup fail` exceeded Vitest's default five-second limit. It creates a historical snapshot, publishes a safety snapshot and restored project, injects journal/cleanup failures, verifies both project versions, and recovers the retained journal. The test now uses the existing 15-second `DURABLE_FILESYSTEM_TIMEOUT` allowance for multiple durable publications on Windows. Real filesystem operations, fault injection, assertions and recovery remain unchanged. No retries were added; fresh CI must pass.
+
 ## September 26 packaged smoke budget
 
 Windows [Validate run 36265303628](https://github.com/Dytschgo/imnota/actions/runs/36265303628) at `07a2d9fb056e3a6f55fe095dda7dd1c72612e43d` retained a passing application report with all 27 assertion groups and a final workflow checkpoint at 224.909 seconds. The packaged process hit the launcher's four-minute limit; cleanup then reported a locked Chromium `DIPS` profile file. This run remains failed. The neighbouring stack run took 200 seconds overall, including a 177-second workflow, showing that portable extraction, startup and shutdown also consume the process budget.
