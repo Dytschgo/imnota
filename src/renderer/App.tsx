@@ -1948,9 +1948,7 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
-            nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
-            onNativeCopyChange={preferences.saveNativeCopy}
             onPromptExportChange={preferences.savePromptExport}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}

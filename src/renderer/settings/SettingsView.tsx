@@ -61,9 +61,7 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
-  nativeCopyAvailable?: boolean;
   globalCaptureShortcutRegistered?: boolean;
-  onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
@@ -97,9 +95,7 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
-  nativeCopyAvailable = false,
   globalCaptureShortcutRegistered = false,
-  onNativeCopyChange,
   onPromptExportChange,
   projects = [],
   onBackupChange = async () => undefined,
@@ -404,7 +400,7 @@ export function SettingsView({
                   . Change these under Shortcuts.
                 </>
               ) : (
-                <>Shortcut: not set. The toolbar camera button and the Add menu still work.</>
+                <>Shortcut: not set. Take screenshot in the Add menu still works.</>
               )}
               {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
             </small>
@@ -441,39 +437,7 @@ export function SettingsView({
             onChange={onAgentAccessChange}
           />
         </div>
-        {group === 'Sharing' && (
-          <>
-            {nativeCopyAvailable && (
-              <section className="settings-section" aria-labelledby="native-copy-title">
-                <h2 id="native-copy-title">Native copy functions</h2>
-                <label className="field">
-                  <span className="field-label">Primary copy action</span>
-                  <select
-                    aria-label="Native copy functions"
-                    value={preferences.nativeCopy.defaultFunction}
-                    disabled={savingPreferences || !onNativeCopyChange}
-                    onChange={(event) => {
-                      const defaultFunction = event.target
-                        .value as PreferenceSettings['nativeCopy']['defaultFunction'];
-                      void Promise.resolve()
-                        .then(() => onNativeCopyChange?.({ defaultFunction }))
-                        .catch(() => undefined);
-                    }}
-                  >
-                    <option value="files">Copy files — Markdown and PNG files</option>
-                    <option value="files-rich">Files + rich copy — files, text, and image</option>
-                    <option value="rich">Rich copy — text and image</option>
-                  </select>
-                  <small>
-                    Sets the main copy button throughout Imnota. The receiving app still chooses which
-                    clipboard formats it accepts.
-                  </small>
-                </label>
-              </section>
-            )}
-            <SharingSettings />
-          </>
-        )}
+        {group === 'Sharing' && <SharingSettings />}
       </div>
     </section>
   );

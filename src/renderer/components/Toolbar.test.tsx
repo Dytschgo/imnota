@@ -24,25 +24,9 @@ afterEach(() => {
 });
 
 describe('annotation toolbar', () => {
-  test('only renders capture when a capture action is available', () => {
-    const view = render(<Toolbar {...props()} />);
-    expect(screen.queryByRole('button', { name: /screen capture/i })).not.toBeInTheDocument();
-
-    view.rerender(<Toolbar {...props({ onCapture: vi.fn(), captureEnabled: true })} />);
-    expect(screen.getByRole('button', { name: 'Capture area' })).toBeEnabled();
-  });
-
-  test('starts immediate capture from the camera and delayed capture from the delay menu', () => {
-    const onCapture = vi.fn();
-    render(<Toolbar {...props({ onCapture, captureEnabled: true })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Capture area' }));
-    expect(onCapture).toHaveBeenCalledWith();
-    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
-    expect(onCapture).toHaveBeenCalledWith(3);
-    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 5 seconds' }));
-    expect(onCapture).toHaveBeenCalledWith(5);
+  test('leaves capture to the Add menu and shortcut', () => {
+    render(<Toolbar {...props()} />);
+    expect(screen.queryByRole('button', { name: /capture/i })).not.toBeInTheDocument();
   });
 
   test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {

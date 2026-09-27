@@ -12,6 +12,7 @@ import {
   Trash2,
   Pencil,
   Plus,
+  Timer,
   Upload,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
@@ -35,13 +36,14 @@ export interface CollectionRailProps {
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
-  /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
+  /** The only in-window capture entry point besides the shortcut; shares its enablement and platform limits. */
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
   capturePrimary?: boolean;
   captureEnabled?: boolean;
   captureInProgress?: boolean;
   captureDisabledLabel?: string;
+  captureShortcut?: string;
 }
 
 export function CollectionControls({
@@ -421,6 +423,7 @@ export function CollectionRail({
   captureEnabled = false,
   captureInProgress = false,
   captureDisabledLabel,
+  captureShortcut,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -449,19 +452,26 @@ export function CollectionRail({
       run: onImport,
     },
     ...(onCapture
-      ? [
-          {
-            id: 'capture',
-            label: 'Take screenshot',
-            description: captureEnabled
-              ? 'Capture an area on a chosen display'
-              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
-            icon: Camera,
-            run: () => onCapture(),
-            disabled: !captureEnabled || captureInProgress,
-          },
-        ]
+      ? ([undefined, 3, 5] as const).map((delaySeconds) => ({
+          id: delaySeconds ? `capture-${delaySeconds}` : 'capture',
+          label: delaySeconds ? `Take screenshot in ${delaySeconds} seconds` : 'Take screenshot',
+          description: !captureEnabled
+            ? (captureDisabledLabel ?? 'Screen capture is unavailable')
+            : delaySeconds
+              ? 'Time to open a menu or tooltip first'
+              : `Capture a screen area${captureShortcut ? ` (${captureShortcut})` : ''}`,
+          icon: delaySeconds ? Timer : Camera,
+          run: () => (delaySeconds ? onCapture(delaySeconds) : onCapture()),
+          disabled: !captureEnabled || captureInProgress,
+        }))
       : []),
+    {
+      id: 'paste',
+      label: 'Paste from clipboard',
+      description: 'Add a copied image',
+      icon: Clipboard,
+      run: () => void onPaste(),
+    },
     ...(onAddContent
       ? [
           {
@@ -708,7 +718,13 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
-            <div className="add-item-menu" ref={addMenuRef}>
+            <div
+              className="add-item-menu"
+              ref={addMenuRef}
+              data-capture-state={
+                !onCapture ? undefined : captureInProgress ? 'busy' : captureEnabled ? 'ready' : 'unavailable'
+              }
+            >
               <div className="add-item-primary">
                 <Button
                   variant="primary"
@@ -809,10 +825,6 @@ export function CollectionRail({
                 </div>
               )}
             </div>
-            <Button variant="ghost" onClick={() => void onPaste()}>
-              <Clipboard size={15} aria-hidden="true" />
-              Paste from clipboard
-            </Button>
           </div>
         </>
       )}
