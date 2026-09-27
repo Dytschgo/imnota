@@ -75,7 +75,7 @@ The mixed collection order is authoritative for Markdown and visual export. Text
 
 ## Annotate
 
-Select / Move is the default tool. Drag empty screenshot space to pan; drag an annotation to move only that annotation. The primary toolbar contains Select / Move, Text, Arrow, Rectangle, Highlight and Note / Step. Less common tools are under More tools, and tooltips show their purpose and shortcut.
+Select / Move is the default tool. Drag empty screenshot space to pan; drag an annotation to move only that annotation. The primary toolbar contains Select / Move, Text, Arrow, Rectangle, Highlight and Note / Step. More tools holds Redact (an opaque mask for secrets), Crop, Freehand and Ellipse; tooltips show each tool's purpose and shortcut. To delete an annotation, select it and press Delete or use **Delete annotation** in the inspector. Line, Rounded rectangle, Callout and Pixelation marks in older projects still display and stay editable, but new ones cannot be created.
 
 Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual marks such as arrows, boxes and steps also appear under `Picture N / Marks` with kind, id and position as percentages of the source image. Crop stays an image operation, and redaction marks are omitted so Markdown does not outline secrets.
 

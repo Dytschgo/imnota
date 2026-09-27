@@ -779,7 +779,7 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
 const ANNOTATION_TOOL_TEST_IDS: Record<string, string> = {
   Arrow: 'arrow',
   Crop: 'crop',
-  'Redaction mask': 'blur',
+  Redact: 'blur',
 };
 
 async function selectTool(driver: NativeUiDriver, label: string): Promise<void> {
@@ -975,7 +975,7 @@ async function exerciseNativeCanvas(
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
   await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
-  await selectTool(driver, 'Redaction mask');
+  await selectTool(driver, 'Redact');
   await driver.drag(
     {
       x: Math.round(geometry.image.x + geometry.image.width * 0.3),

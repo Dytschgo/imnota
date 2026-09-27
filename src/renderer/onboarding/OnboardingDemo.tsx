@@ -102,7 +102,7 @@ export function OnboardingDemo({
   const [image, setImage] = useState<ImagePayload | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
+  const [tool, setTool] = useState<'select' | AnnotationKind>('select');
   const [bundle, setBundle] = useState<OnboardingBundle | null>(null);
   const [handoff, setHandoff] = useState<OnboardingHandoffGrant | null>(null);
   const [copyOutcome, setCopyOutcome] = useState<PromptDeliveryOutcome>();

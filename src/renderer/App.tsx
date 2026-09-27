@@ -1716,7 +1716,7 @@ export default function App() {
   );
   function selectTool(next: ToolChoice): void {
     setTool(next);
-    if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
+    if (next !== 'select') lastAnnotateTool.current = next;
   }
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
@@ -1819,7 +1819,7 @@ export default function App() {
     );
   const visibleError = error || contentPersistence.error || persistence.error || preferences.error;
   const creationColorTool: ToolChoice = tool === 'select' ? 'text' : tool;
-  const creationKind: Annotation['kind'] = creationColorTool === 'eraser' ? 'arrow' : creationColorTool;
+  const creationKind: Annotation['kind'] = creationColorTool;
   const annotationColor =
     toolColors[creationColorTool] ?? semanticAnnotationColor(creationKind, appearance.theme);
   const selectedAnnotation = persistence.annotations.find((item) => item.id === selectedAnnotationId);

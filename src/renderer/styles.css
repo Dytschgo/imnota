@@ -1740,6 +1740,10 @@ button.icon-button.new-collection-button svg {
 .annotation-properties .field {
   margin-bottom: 10px;
 }
+.annotation-properties .annotation-delete {
+  margin-top: 4px;
+  color: var(--danger);
+}
 .property-line {
   display: flex;
   align-items: center;
