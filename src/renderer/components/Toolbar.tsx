@@ -13,13 +13,9 @@ import {
   Circle,
   Camera,
   Crop,
-  Eraser,
-  Grid2X2,
   Highlighter,
   ListOrdered,
   Maximize2,
-  MessageSquareText,
-  Minus,
   MousePointer2,
   MoveRight,
   Pencil,
@@ -38,7 +34,7 @@ import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { IconButton } from './ui';
 import './annotation-tools.css';
 
-export type ToolChoice = 'select' | AnnotationKind | 'eraser';
+export type ToolChoice = 'select' | AnnotationKind;
 
 interface ToolDefinition {
   id: ToolChoice;
@@ -87,18 +83,15 @@ const PRIMARY_TOOLS: ToolDefinition[] = [
   },
 ];
 
+// Line, Rounded rectangle, Callout, Pixelation and the eraser were retired from creation.
+// Existing annotations of those kinds still render and stay editable; select one and
+// press Delete or use the inspector to remove it.
 const MORE_TOOLS: ToolDefinition[] = [
   {
     id: 'blur',
-    label: 'Redaction mask',
+    label: 'Redact',
     description: 'Cover sensitive content with an opaque mask.',
     icon: Shield,
-  },
-  {
-    id: 'pixelate',
-    label: 'Pixelation',
-    description: 'Obscure an area visually; use Redaction mask for secrets.',
-    icon: Grid2X2,
   },
   {
     id: 'crop',
@@ -107,33 +100,13 @@ const MORE_TOOLS: ToolDefinition[] = [
     icon: Crop,
   },
   { id: 'pen', label: 'Freehand', description: 'Draw a freehand mark.', icon: Pencil },
-  { id: 'line', label: 'Line', description: 'Draw a straight line.', icon: Minus },
   { id: 'ellipse', label: 'Ellipse', description: 'Circle an area.', icon: Circle },
-  {
-    id: 'callout',
-    label: 'Callout',
-    description: 'Add text inside a filled visual callout.',
-    icon: MessageSquareText,
-  },
-  {
-    id: 'rounded-rectangle',
-    label: 'Rounded rectangle',
-    description: 'Frame an area with softened corners.',
-    icon: Square,
-  },
-  {
-    id: 'eraser',
-    label: 'Delete annotation',
-    description: 'Click an annotation to remove it.',
-    icon: Eraser,
-  },
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
 
-const TRANSFORM_TOOLS = MORE_TOOLS.filter((tool) => ['blur', 'pixelate', 'crop'].includes(tool.id));
-const DRAWING_TOOLS = MORE_TOOLS.filter((tool) => !['blur', 'pixelate', 'crop', 'eraser'].includes(tool.id));
-const DANGER_TOOLS = MORE_TOOLS.filter((tool) => tool.id === 'eraser');
+const TRANSFORM_TOOLS = MORE_TOOLS.filter((tool) => ['blur', 'crop'].includes(tool.id));
+const DRAWING_TOOLS = MORE_TOOLS.filter((tool) => !['blur', 'crop'].includes(tool.id));
 
 function ToolTooltip({
   children,
@@ -290,7 +263,7 @@ function MoreToolSection({
 }) {
   if (!tools.length) return null;
   return (
-    <div className={label === 'Remove' ? 'annotation-menu-section is-danger' : 'annotation-menu-section'}>
+    <div className="annotation-menu-section">
       <span className="annotation-menu-label">{label}</span>
       {tools.map((definition) => {
         const Icon = definition.icon;
@@ -584,7 +557,6 @@ export function Toolbar({
                   { label: 'Annotate', tools: PRIMARY_TOOLS },
                   { label: 'Transform', tools: TRANSFORM_TOOLS },
                   { label: 'Draw', tools: DRAWING_TOOLS },
-                  { label: 'Remove', tools: DANGER_TOOLS },
                 ].map((section) => (
                   <MoreToolSection
                     key={section.label}

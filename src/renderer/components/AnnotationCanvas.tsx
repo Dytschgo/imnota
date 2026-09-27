@@ -701,11 +701,6 @@ export function AnnotationCanvas({
     if (tool === 'select') return;
     const point = imagePoint(event.evt);
     if (!point || !pointerIsOnImage(point)) return;
-    if (tool === 'eraser') {
-      const id = event.target.id();
-      if (id) onChange(annotations.filter((annotation) => annotation.id !== id));
-      return;
-    }
     if (tool === 'text') {
       createTextAt(point);
       return;
