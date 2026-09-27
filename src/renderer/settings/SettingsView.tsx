@@ -70,7 +70,6 @@ export interface SettingsViewProps {
   onBeforeBackupAction?(): boolean | Promise<boolean>;
   onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
   onBackupRestoreFailed?(): void;
-  onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
   onAgentAccessChange?(value: PreferenceSettings['agentAccess']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
@@ -106,7 +105,6 @@ export function SettingsView({
   onBeforeBackupAction = () => true,
   onBackupRestored,
   onBackupRestoreFailed,
-  onCaptureChange = async () => undefined,
   onAgentAccessChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
@@ -272,17 +270,6 @@ export function SettingsView({
             </label>
             <label className="settings-switch">
               <span>
-                <strong>Open recent project</strong>
-                <small>Resume the latest project when Imnota opens.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.openRecentOnLaunch}
-                onChange={(event) => void saveWorkspaceSetting({ openRecentOnLaunch: event.target.checked })}
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
                 <strong>Confirm before deletion</strong>
                 <small>Ask before moving a project to the system trash.</small>
               </span>
@@ -363,30 +350,12 @@ export function SettingsView({
           </section>
         </div>
         <div hidden={group !== 'Features'}>
-          <section className="settings-section" aria-labelledby="features-title">
-            <h2 id="features-title">Features</h2>
-            <p>Enable or disable features for this device. Beta features start off.</p>
-            <label className="settings-switch">
-              <span>
-                <strong>
-                  Screen capture <span className="feature-status stable">Stable</span>
-                </strong>
-                <small>
-                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
-                  Linux stays Import or Paste. Captures stay local. Area selection opens across all connected
-                  displays on Windows and macOS.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                aria-label="Enable screen capture"
-                checked={preferences.capture.experimentalRegionCapture}
-                disabled={savingPreferences}
-                onChange={(event) =>
-                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
-                }
-              />
-            </label>
+          <section className="settings-section" aria-labelledby="capture-title">
+            <h2 id="capture-title">Screen capture</h2>
+            <p>
+              Captures stay on this device. Area selection spans all connected displays on Windows and macOS;
+              on Linux, use Import or Paste.
+            </p>
             <small data-testid="capture-shortcut-summary" className="feature-detail">
               {captureShortcut ? (
                 <>

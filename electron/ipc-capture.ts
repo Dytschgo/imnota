@@ -52,11 +52,6 @@ export function registerCaptureIpc(
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
     host.pendingCapturePng = null;
-    if (!host.preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
     if (process.platform === 'linux')
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -253,11 +248,6 @@ export function registerCaptureIpc(
       .tuple([z.object({ projectPath: pathInput, collectionId: filenameSchema }).strict()])
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
-    if (!host.preferenceSettingsResult.settings.capture.experimentalRegionCapture)
-      throw new NativeWorkflowError(
-        'capture-unavailable',
-        'Experimental screen capture is off. Enable it in Settings, or use Import or Paste instead.',
-      );
     if (process.platform === 'linux')
       throw new NativeWorkflowError(
         'capture-unavailable',

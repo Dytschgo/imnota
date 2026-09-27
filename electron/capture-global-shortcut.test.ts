@@ -24,42 +24,36 @@ describe('capture global shortcut', () => {
       resolveCaptureGlobalShortcut({
         bindings: {},
         processPlatform: 'win32',
-        experimentalEnabled: true,
       }),
     ).toBe('Ctrl+Shift+5');
     expect(
       resolveCaptureGlobalShortcut({
-        bindings: {},
+        bindings: { 'capture.region': null },
         processPlatform: 'win32',
-        experimentalEnabled: false,
       }),
     ).toBeNull();
     expect(
       resolveCaptureGlobalShortcut({
         bindings: {},
         processPlatform: 'linux',
-        experimentalEnabled: true,
       }),
     ).toBeNull();
     expect(
       resolveCaptureGlobalShortcut({
         bindings: {},
         processPlatform: 'darwin',
-        experimentalEnabled: true,
       }),
     ).toBe('Ctrl+Shift+5');
     expect(
       resolveCaptureGlobalShortcut({
         bindings: { 'capture.region': 'Meta+Shift+5' },
         processPlatform: 'darwin',
-        experimentalEnabled: true,
       }),
     ).toBeNull();
     expect(
       resolveCaptureGlobalShortcut({
         bindings: { 'capture.region': 'Ctrl+Shift+S' },
         processPlatform: 'darwin',
-        experimentalEnabled: true,
       }),
     ).toBe('Ctrl+Shift+S');
   });

@@ -148,31 +148,8 @@ async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
   return target.projectPath;
 }
 
-async function enableExperimentalCapture(
-  driver: NativeUiDriver,
-  host: CaptureSmokeHost,
-): Promise<NativeUiDriver> {
-  await driver.click({ selector: '[data-testid="settings-button"]' });
-  await driver.waitFor({ selector: '[data-testid="settings-view"]' });
-  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
-  const captureEnabled = await driver.evaluate<boolean>(`(() => {
-    const checkbox = document.querySelector('[aria-label="Enable screen capture"]');
-    if (!(checkbox instanceof HTMLInputElement)) throw new Error('Capture preference checkbox is missing.');
-    return checkbox.checked;
-  })()`);
-  if (!captureEnabled) await driver.click({ selector: '[aria-label="Enable screen capture"]' });
-  await driver.evaluate(`new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = async () => {
-      try {
-        const result = await window.imnota.getPreferenceSettings();
-        if (result.ok && result.value.settings.capture.experimentalRegionCapture) return resolve(true);
-        if (Date.now() - started > 10000) throw new Error('Experimental capture preference was not saved.');
-        setTimeout(check, 50);
-      } catch (error) { reject(error); }
-    };
-    check();
-  })`);
+/** Capture is always available on Windows and macOS; Windows uses a smoke-only shortcut. */
+async function prepareCapture(driver: NativeUiDriver, host: CaptureSmokeHost): Promise<NativeUiDriver> {
   if (process.platform === 'win32')
     await driver.evaluate(`(async () => {
       const result = await window.imnota.setPreferenceSettings({
@@ -586,7 +563,7 @@ export async function exerciseRegionCapture(
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
   const artifacts: SmokeCapture[] = [];
-  const driver = await enableExperimentalCapture(initialDriver, host);
+  const driver = await prepareCapture(initialDriver, host);
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);

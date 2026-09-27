@@ -203,7 +203,6 @@ function syncCaptureGlobalShortcut(): void {
     resolveCaptureGlobalShortcut({
       bindings: preferenceSettingsResult.settings.shortcuts.bindings,
       processPlatform: process.platform,
-      experimentalEnabled: preferenceSettingsResult.settings.capture.experimentalRegionCapture,
     }),
     () => {
       if (captureAdmissionGate.isOccupied()) return;

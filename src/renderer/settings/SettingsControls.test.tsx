@@ -44,7 +44,7 @@ describe('preference controls', () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole('radio', { name: /Balanced/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Glass surfaces/ }));
     await waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith({
         ...DEFAULT_APPEARANCE,
@@ -52,6 +52,25 @@ describe('preference controls', () => {
         glassLevel: 'balanced',
       }),
     );
+  });
+
+  it('shows an older saved glass level as on and switches it off', async () => {
+    const onChange = vi.fn(async () => {});
+    render(
+      <AppearanceSettings value={{ ...DEFAULT_APPEARANCE, glassLevel: 'subtle' }} onChange={onChange} />,
+    );
+    const glass = screen.getByRole('checkbox', { name: /Glass surfaces/ });
+    expect(glass).toBeChecked();
+    fireEvent.click(glass);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_APPEARANCE, glassLevel: 'off' }));
+  });
+
+  it('keeps retired toggles out of Settings', () => {
+    const { rerender } = render(<SettingsView activeCategory="Features" />);
+    expect(screen.queryByRole('checkbox', { name: 'Enable screen capture' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Screen capture' })).toBeInTheDocument();
+    rerender(<SettingsView activeCategory="Shortcuts" />);
+    expect(screen.queryByText('Open recent project')).not.toBeInTheDocument();
   });
 
   it('records normalized shortcuts, explains reserved keys, and resets defaults', async () => {

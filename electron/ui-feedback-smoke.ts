@@ -1,6 +1,7 @@
 import { clipboard, nativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
+import { setGlassSurfaces } from './smoke-appearance.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 import { agentAccessSetupPrompt } from '../src/shared/preferences.js';
 import type { ImnotaBridge, ProjectSnapshot } from '../src/shared/types.js';
@@ -637,8 +638,8 @@ export async function exerciseUiFeedback(
   await driver.click({ text: 'Appearance', exact: true });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="strong"]:not(:disabled))' });
-  await driver.waitFor({ selector: ':root[data-glass-requested="strong"]' });
+  await setGlassSurfaces(driver, true);
+  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-emerald"][aria-pressed="true"]:not(:disabled)',

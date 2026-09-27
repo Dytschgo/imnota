@@ -317,7 +317,7 @@ export default function App() {
           ['projects', 'recent', 'favourites', 'settings'].includes(validCheckpoint.view)
         ) {
           useAppStore.getState().set({ view: validCheckpoint.view, search: validCheckpoint.search });
-        } else if (settings.openRecentOnLaunch && projects[0]) {
+        } else if (projects[0]) {
           const recent = resolveRecentCollections(projects, useAppStore.getState().recentCollections)[0];
           const snapshot = await window.imnota.loadProject(recent?.projectPath ?? projects[0].projectPath);
           if (!active) return;
@@ -990,10 +990,6 @@ export default function App() {
     try {
       if (detectShortcutPlatform() === 'linux') {
         setError('Screen capture is unavailable on Linux — use Import or Paste');
-        return;
-      }
-      if (!preferences.settings.capture.experimentalRegionCapture) {
-        setError('Screen capture is off — enable it in Settings → Features');
         return;
       }
       const current = useAppStore.getState();
@@ -1700,16 +1696,11 @@ export default function App() {
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
-  const captureEnabled =
-    preferences.settings.capture.experimentalRegionCapture &&
-    platform !== 'linux' &&
-    Boolean(activeCaptureCollection);
+  const captureEnabled = platform !== 'linux' && Boolean(activeCaptureCollection);
   const captureDisabledLabel =
     platform === 'linux'
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
-      : !activeCaptureCollection
-        ? 'Choose a collection before capturing'
-        : 'Screen capture is off — enable it in Settings → Features';
+      : 'Choose a collection before capturing';
   const orderedShots = useMemo(
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
@@ -2006,7 +1997,6 @@ export default function App() {
                   : 'Project restored with a safety snapshot',
               );
             }}
-            onCaptureChange={preferences.saveCapture}
             onAgentAccessChange={preferences.saveAgentAccess}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}

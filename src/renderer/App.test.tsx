@@ -67,12 +67,30 @@ const snapshot: ProjectSnapshot = {
 
 describe('feedback controls', () => {
   let changeViewport: (narrow: boolean) => void;
-  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}, narrowViewport = false) {
+  function renderApp(
+    overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
+    narrowViewport = false,
+    { resumeRecent = false }: { resumeRecent?: boolean } = {},
+  ) {
+    // Launch resumes the most recent project unless a saved session names another page.
+    // Most tests start from the Library, so they save that page first.
+    if (!resumeRecent && !localStorage.getItem('imnota:last-session'))
+      localStorage.setItem(
+        'imnota:last-session',
+        JSON.stringify({
+          workspacePath: '/workspace',
+          view: 'projects',
+          projectPath: null,
+          collectionId: '001-collection',
+          itemId: null,
+          search: '',
+          savedAt: new Date().toISOString(),
+        }),
+      );
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
         workspacePath: '/workspace',
-        openRecentOnLaunch: false,
       }),
       listProjects: vi.fn(async () => []),
       onUpdateStatus: () => () => {},
@@ -209,18 +227,24 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
-  it('keeps the library open when launch restoration is disabled', async () => {
+  it('resumes the most recent project when no session page is saved', async () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
-    renderApp({
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' }],
-      loadProject,
-    });
-    await screen.findByTestId('library-full-search');
-    expect(loadProject).not.toHaveBeenCalled();
+    renderApp(
+      {
+        listProjects: async () => [
+          { ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' },
+        ],
+        loadProject,
+      },
+      false,
+      { resumeRecent: true },
+    );
+    await waitFor(() => expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath));
+    expect(screen.queryByTestId('library-full-search')).not.toBeInTheDocument();
   });
 
-  it('restores a settings checkpoint even when recent launch is disabled', async () => {
+  it('restores a settings checkpoint instead of the most recent project', async () => {
     localStorage.setItem(
       'imnota:last-session',
       JSON.stringify({
@@ -1356,26 +1380,20 @@ describe('feedback controls', () => {
     expect(userFacingErrorMessage('Errorless settings name')).toBe('Errorless settings name');
   });
 
-  it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
+  it('offers capture on Windows even when an older profile saved it as off', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn();
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled', message: 'Cancelled.' },
+    }));
+    // DEFAULT_PREFERENCE_SETTINGS stores experimentalRegionCapture: false, like an older profile.
     await renderEditingProject({ startRegionCapture: startRegionCapture as never });
-    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const importClick = vi.fn();
-    fileInput.addEventListener('click', importClick);
 
-    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
-    expect(addScreenshot).toBeEnabled();
-    expect(screen.queryByRole('button', { name: /Capture area/ })).not.toBeInTheDocument();
-    fireEvent.click(addScreenshot);
-    expect(importClick).toHaveBeenCalledOnce();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add screenshot' }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
-    expect(startRegionCapture).not.toHaveBeenCalled();
-    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
-    expect(startRegionCapture).not.toHaveBeenCalled();
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Screen capture is off — enable it in Settings → Features',
-    );
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Screen capture is off/)).not.toBeInTheDocument();
   });
 
   it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {
@@ -1688,7 +1706,6 @@ describe('feedback controls', () => {
       resolveSettings({
         ...useAppStore.getState().settings,
         workspacePath: null,
-        openRecentOnLaunch: false,
       }),
     );
     await waitFor(() => expect(captureRendererReady).toHaveBeenCalledOnce());

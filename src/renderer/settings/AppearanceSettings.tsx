@@ -43,12 +43,8 @@ const ACCENTS: Array<{ value: AccentPreset; label: string; color: string }> = [
   { value: 'amber', label: 'Amber', color: '#c77c11' },
 ];
 
-const GLASS_LEVELS: Array<{ value: GlassLevel; label: string; description: string }> = [
-  { value: 'off', label: 'Solid', description: 'No transparency' },
-  { value: 'subtle', label: 'Subtle', description: '92% surface' },
-  { value: 'balanced', label: 'Balanced', description: '82% surface' },
-  { value: 'strong', label: 'Strong', description: '70% surface' },
-];
+/** Level used when glass is switched on. Older profiles may keep Subtle or Strong until switched off. */
+const GLASS_ON_LEVEL: GlassLevel = 'balanced';
 
 const BACKDROP_LABELS: Record<BackdropPreset, string> = {
   graphite: 'Graphite',
@@ -257,37 +253,27 @@ export function AppearanceSettings({
         </div>
       </fieldset>
 
-      <fieldset className="imnota-preference-fieldset" disabled={controlsDisabled}>
-        <legend>Glass surfaces</legend>
-        <p>Glass is cosmetic and independent from the accent preset. Solid remains the safest default.</p>
-        <div className="imnota-glass-options">
-          {GLASS_LEVELS.map((option) => (
-            <label key={option.value} data-selected={value.glassLevel === option.value || undefined}>
-              <input
-                type="radio"
-                name="glass-level"
-                value={option.value}
-                checked={value.glassLevel === option.value}
-                onChange={() => void update({ glassLevel: option.value })}
-              />
-              <span
-                className={`imnota-glass-sample imnota-glass-sample-${option.value}`}
-                aria-hidden="true"
-              />
-              <span>
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
-              </span>
-            </label>
-          ))}
-        </div>
+      <div className="imnota-preference-fieldset">
+        <label className="settings-switch">
+          <span>
+            <strong>Glass surfaces</strong>
+            <small>Let the backdrop show through panels. Off keeps solid surfaces.</small>
+          </span>
+          <input
+            type="checkbox"
+            name="glass-surfaces"
+            checked={value.glassLevel !== 'off'}
+            disabled={controlsDisabled}
+            onChange={(event) => void update({ glassLevel: event.target.checked ? GLASS_ON_LEVEL : 'off' })}
+          />
+        </label>
         {fallbackMessage && (
           <div className="imnota-inline-status" role="status">
             <Sparkles size={15} aria-hidden="true" />
             <span>{fallbackMessage}</span>
           </div>
         )}
-      </fieldset>
+      </div>
 
       <section className="imnota-background-settings" aria-labelledby="background-settings-title">
         <div className="imnota-background-heading">
@@ -382,7 +368,7 @@ export function AppearanceSettings({
               void update({
                 backgroundImage: '',
                 desktopGlass: true,
-                glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
+                glassLevel: value.glassLevel === 'off' ? GLASS_ON_LEVEL : value.glassLevel,
               })
             }
           >
@@ -394,9 +380,9 @@ export function AppearanceSettings({
             {effectiveAppearance?.desktopGlassStatus === 'active'
               ? 'Desktop glass (Beta) is active. '
               : 'Solid fallback is active on this configuration. '}
-            Beta: scrolling or transparency may show rendering glitches. Choose No image or Solid surfaces if
-            this happens. Uses native desktop material on macOS and supported Windows 11 systems. Other
-            systems, reduced transparency, and constrained-performance mode use solid surfaces.
+            Beta: scrolling or transparency may show rendering glitches. Choose No image or turn off Glass
+            surfaces if this happens. Uses native desktop material on macOS and supported Windows 11 systems.
+            Other systems, reduced transparency, and constrained-performance mode use solid surfaces.
           </p>
         )}
         <label className="imnota-range-row">
