@@ -218,6 +218,7 @@ export function Workspace(props: WorkspaceProps) {
         captureEnabled={props.captureEnabled}
         captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
+        captureShortcut={props.captureShortcut}
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
@@ -236,11 +237,6 @@ export function Workspace(props: WorkspaceProps) {
                 onZoom={props.onZoom}
                 onFit={props.onFit}
                 onActualSize={props.onActualSize}
-                onCapture={props.onCapture}
-                captureEnabled={props.captureEnabled}
-                captureInProgress={props.captureInProgress}
-                captureShortcut={props.captureShortcut}
-                captureDisabledLabel={props.captureDisabledLabel}
                 onColorSelect={props.onColor}
                 selectedColor={props.paletteColor}
                 shortcutLabels={props.shortcutLabels}

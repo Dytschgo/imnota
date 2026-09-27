@@ -420,7 +420,8 @@ export async function exerciseUiFeedback(
   if (!templateProjectExists)
     throw new Error('Template picker verification did not retain its template project.');
   clipboard.clear();
-  await driver.click({ text: 'Paste from clipboard', exact: true });
+  await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+  await driver.click({ selector: '[data-testid="add-item-paste"]' });
   await driver.waitFor({ selector: '[data-testid="error-toast"]' });
   await driver.evaluate(`(async () => {
     const error = document.querySelector('[data-testid="error-toast"]');
