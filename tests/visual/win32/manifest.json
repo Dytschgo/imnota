@@ -24,13 +24,13 @@
   "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. The Settings and two backdrop captures now record the Settings rail and the Forward history entry created when leaving Settings. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
     "backdrop-collapsed.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
-      "review": "Hosted packaged capture and highlighted difference inspected. The new Forward history control appears after returning from Settings and shifts the breadcrumb right. Backdrop, image, annotations, inspector, collapsed navigation and other controls match the prior baseline. Native smoke passed all 27 groups; strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-workspace-dark": {
       "reviewedAt": "2026-09-22",
@@ -132,121 +132,121 @@
       "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
     },
     "1280x800-onboarding-annotate.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-onboarding-copy.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-onboarding-intro.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. Onboarding modal content and geometry are unchanged; the reviewed navigation changes are visible behind its backdrop."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-26",
-      "sourceRevision": "be5a98ee684540d896c87a000bff29a3ba7cf813",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36265290465",
-      "review": "Inspected the packaged Windows capture and highlighted diff from stacked PR144, which includes PR143. The retired shared-theme backdrop control is removed and the preset grid moves up. The performance fallback control is also removed in source; this Solid-mode capture did not display it. All 13 other approved captures match exactly. Packaged smoke passed all 27 groups. Only this baseline is replaced; strict comparison tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "3440x1440-workspace-dark.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "3440x1440-workspace-light.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c79e761047f094118afaa3b6648259f5e4958250",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36005400811",
-      "review": "Packaged candidate and highlighted differences inspected. Primary Recent/Favourites buttons are removed; Archived and retained quick sections move up, selected collection uses a neutral fill, and View all remains available for the empty favourite section. Text fits and surrounding content is unchanged. Packaged native walkthrough passed all 27 groups. Strict tolerance is unchanged. The wide toolbar also incorporates the already-shipped View-caption removal from PR124 (34e2b72), confirmed in green capture PR133 run36005266232; its older wide baseline had not yet recorded that inherited change."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "backdrop-workspace.png": {
-      "reviewedAt": "2026-09-24",
-      "sourceRevision": "c658b0113f24fed8c865356357684a6ece712208",
+      "reviewedAt": "2026-09-27",
+      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36059421451",
-      "review": "Hosted packaged capture and highlighted difference inspected. The new Forward history control appears after returning from Settings and shifts the breadcrumb right. Backdrop, selected image, annotation, inspector, sidebar and remaining controls match the prior baseline. Native smoke passed all 27 groups; strict tolerance is unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     }
   }
 }
