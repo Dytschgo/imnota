@@ -165,11 +165,7 @@ export function AppearanceSettings({
     setBusy(true);
     setError('');
     try {
-      await onChange({
-        ...valueRef.current,
-        ...patch,
-        ...('backgroundImage' in patch && !('desktopGlass' in patch) ? { desktopGlass: false } : {}),
-      });
+      await onChange({ ...valueRef.current, ...patch });
     } catch {
       setError('Appearance could not be saved. Your previous preference is still active.');
     } finally {
@@ -180,9 +176,8 @@ export function AppearanceSettings({
 
   const controlsDisabled = disabled || busy;
   const activeBackdrop = appearanceBackdrop(value);
-  const desktopBackdrop = Boolean(value.desktopGlass && !activeBackdrop.image);
   const updateBackdrop = (image: string) => update({ backgroundImage: image });
-  const updateBackdropOpacity = (opacity: number) => update({ backgroundOpacity: opacity });
+  const showOpacity = value.glassLevel !== 'off' && Boolean(activeBackdrop.image);
   const fallbackMessage =
     effectiveAppearance?.glassFallbackReason === 'reduced-transparency'
       ? 'Solid surfaces are active because the operating system requests reduced transparency.'
@@ -351,62 +346,13 @@ export function AppearanceSettings({
             />
           </div>
         </div>
-        <div className="imnota-background-modes" role="group" aria-label="Backdrop source">
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            aria-pressed={!activeBackdrop.image && !value.desktopGlass}
-            onClick={() => void update({ backgroundImage: '', desktopGlass: false })}
-          >
-            No image
-          </button>
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            aria-pressed={!activeBackdrop.image && Boolean(value.desktopGlass)}
-            onClick={() =>
-              void update({
-                backgroundImage: '',
-                desktopGlass: true,
-                glassLevel: value.glassLevel === 'off' ? GLASS_ON_LEVEL : value.glassLevel,
-              })
-            }
-          >
-            Desktop glass (Beta)
-          </button>
-        </div>
-        {desktopBackdrop && (
-          <p className="imnota-background-hint" role="status">
-            {effectiveAppearance?.desktopGlassStatus === 'active'
-              ? 'Desktop glass (Beta) is active. '
-              : 'Solid fallback is active on this configuration. '}
-            Beta: scrolling or transparency may show rendering glitches. Choose No image or turn off Glass
-            surfaces if this happens. Uses native desktop material on macOS and supported Windows 11 systems.
-            Other systems, reduced transparency, and constrained-performance mode use solid surfaces.
-          </p>
+        {showOpacity && (
+          <BackdropOpacity
+            value={activeBackdrop.opacity}
+            disabled={disabled}
+            onCommit={(opacity) => update({ backgroundOpacity: opacity }, { invalidateUpload: false })}
+          />
         )}
-        <label className="imnota-range-row">
-          <span>
-            <strong>{desktopBackdrop ? 'Glass tint' : 'Background opacity'}</strong>
-            <small>
-              {desktopBackdrop
-                ? 'Lower the tint to reveal more of the desktop material.'
-                : 'Lower the image when it competes with screenshot details.'}
-            </small>
-          </span>
-          <span className="imnota-range-control">
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={activeBackdrop.opacity}
-              disabled={controlsDisabled || (!activeBackdrop.image && !value.desktopGlass)}
-              onChange={(event) => void updateBackdropOpacity(Number(event.target.value))}
-            />
-            <output>{Math.round(activeBackdrop.opacity * 100)}%</output>
-          </span>
-        </label>
         {[
           { label: 'Generic', presets: GENERIC_BACKDROP_PRESETS },
           { label: 'Characters', presets: CHARACTER_BACKDROP_PRESETS },
@@ -498,5 +444,66 @@ export function AppearanceSettings({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * The slider moves freely and previews on the live backdrop; the preference is
+ * saved once the drag pauses or ends, so saving never interrupts dragging.
+ */
+function BackdropOpacity({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: number;
+  disabled: boolean;
+  onCommit(opacity: number): Promise<void>;
+}) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const pending = useRef<number | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const shown = draft ?? value;
+
+  const commit = () => {
+    window.clearTimeout(timer.current);
+    const next = pending.current;
+    if (next === null) return;
+    pending.current = null;
+    void onCommit(next).finally(() => {
+      if (pending.current === null) setDraft(null);
+    });
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  return (
+    <label className="imnota-range-row">
+      <span>
+        <strong>Background opacity</strong>
+        <small>Lower the image when it competes with screenshot details.</small>
+      </span>
+      <span className="imnota-range-control">
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={shown}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            setDraft(next);
+            pending.current = next;
+            document.documentElement.style.setProperty('--imnota-background-opacity', String(next));
+            window.clearTimeout(timer.current);
+            timer.current = window.setTimeout(commit, 250);
+          }}
+          onPointerUp={commit}
+          onKeyUp={commit}
+          onBlur={commit}
+        />
+        <output>{Math.round(shown * 100)}%</output>
+      </span>
+    </label>
   );
 }

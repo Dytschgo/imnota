@@ -4,12 +4,6 @@
   border-top: 1px solid var(--line);
   color: var(--ink);
 }
-.imnota-background-modes {
-  display: flex;
-  gap: 8px;
-  margin: 16px 0;
-}
-.imnota-background-modes button,
 .imnota-uploaded-backdrop > button {
   padding: 8px 12px;
   border: 1px solid var(--line);
@@ -17,7 +11,6 @@
   background: var(--input);
   color: var(--ink-2);
 }
-.imnota-background-modes button[aria-pressed='true'],
 .imnota-backdrop-preset[aria-pressed='true'] {
   border-color: var(--imnota-accent);
   background: var(--imnota-accent-soft);
@@ -37,11 +30,6 @@
 .imnota-uploaded-backdrop > button {
   margin-top: 6px;
   font-size: 11px;
-}
-.imnota-background-hint {
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .imnota-preference-heading {
