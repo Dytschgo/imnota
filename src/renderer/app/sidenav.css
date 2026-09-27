@@ -75,8 +75,7 @@
   height: 40px;
 }
 
-.side-nav-list,
-.side-nav-project-collections {
+.side-nav-list {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -114,8 +113,7 @@
   font-weight: 650;
 }
 
-.side-nav-collection-name,
-.side-nav-project-button span {
+.side-nav-collection-name {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -167,51 +165,6 @@
   line-height: 1.45;
 }
 
-.side-nav-project {
-  min-width: 0;
-}
-
-.side-nav-project-row {
-  display: flex;
-  min-height: 40px;
-  align-items: center;
-  gap: 1px;
-}
-
-.side-nav-project-button {
-  min-width: 0;
-  min-height: 40px;
-  flex: 1;
-  padding: 0 8px 0 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.side-nav-project-button:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--ink);
-}
-
-.side-nav-project.active-project .side-nav-project-button {
-  color: var(--ink);
-}
-
-.side-nav-project-row .nav-disclosure {
-  width: 40px;
-  height: 40px;
-}
-
-.side-nav-project-collections {
-  margin: 1px 0 5px 14px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
-}
-
 /* Icon-only workspace row: Settings and About lead, the update control sits at the end.
    Matches the specificity of the generic `.sidebar nav` column rule. */
 .side-nav .side-nav-footer {
@@ -231,11 +184,6 @@
   color: var(--ink);
   background: var(--surface-2);
   box-shadow: none;
-}
-
-.side-nav-empty-collections {
-  padding-top: 2px;
-  padding-bottom: 8px;
 }
 
 @media (max-height: 720px) {

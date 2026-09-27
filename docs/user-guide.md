@@ -6,9 +6,9 @@ Imnota turns screenshots, Markdown text blocks and drawings in one collection in
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.
 
-Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent, Favourites and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
+Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
 
-The sidebar keeps Projects and Archived in its main navigation. Use **View all recent** and **View all favourites** beneath the quick lists to open those pages, or use their keyboard shortcuts. Archiving or restoring a collection updates both quick lists immediately; archived collections stay out of the lists until restored.
+The sidebar holds Projects and the Recent quick list. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.

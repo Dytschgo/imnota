@@ -1858,7 +1858,6 @@ export default function App() {
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
-        onSelectProject={openProject}
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
@@ -2031,6 +2030,7 @@ export default function App() {
             onDelete={requestProjectDeletion}
             onSearch={openProjectSearch}
             onBrowseProjects={() => navigate('projects')}
+            onFilter={(filter) => navigate(filter)}
             onSelectContentResult={openContentSearchResult}
           />
         ) : (

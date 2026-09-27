@@ -209,6 +209,34 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
+  it('switches between all, favourite and archived projects from the Library filter', async () => {
+    renderApp({
+      listProjects: async () => [
+        { ...snapshot.project, projectPath: snapshot.projectPath, name: 'Loved', favourite: true },
+        {
+          ...snapshot.project,
+          id: 'old',
+          projectPath: '/workspace/old',
+          name: 'Old',
+          status: 'archived' as const,
+        },
+      ],
+    });
+    const filter = within(await screen.findByRole('group', { name: 'Show projects' }));
+    expect(filter.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(filter.getByRole('button', { name: 'Archived' }));
+    expect(await screen.findByRole('heading', { name: 'Archived projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Old/ })).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Show projects' })).getByRole('button', {
+        name: 'Favourites',
+      }),
+    );
+    expect(await screen.findByRole('heading', { name: 'Favourite projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
+  });
+
   it('keeps the library open when launch restoration is disabled', async () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
@@ -305,8 +333,6 @@ describe('feedback controls', () => {
       expect(screen.getByTestId('collection-picker')).toHaveTextContent(label);
       const recent = within(document.getElementById('quick-access-collections')!);
       expect(recent.getByRole('button', { name: /Imnota Feedback/ })).toHaveAttribute('title', label);
-      const favourites = within(document.getElementById('favourite-projects')!);
-      expect(favourites.getByRole('button', { name: label })).toHaveAttribute('title', label);
       fireEvent.click(screen.getByTestId('collection-picker'));
       expect(
         within(screen.getByRole('menu', { name: 'Collections' })).getByRole('menuitemradio', {
@@ -351,22 +377,19 @@ describe('feedback controls', () => {
     await screen.findByTestId('library-full-search');
     act(() => useAppStore.getState().setProject(current));
     const recent = within(document.getElementById('quick-access-collections')!);
-    const favourites = within(document.getElementById('favourite-projects')!);
-    expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible();
+    expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible();
     fireEvent.click(screen.getByTestId('collection-picker'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive Collection 01' }));
     await waitFor(() => expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(true));
     await waitFor(() =>
-      expect(favourites.queryByRole('button', { name: 'Collection 01' })).not.toBeInTheDocument(),
+      expect(recent.queryByRole('button', { name: /Collection 01/ })).not.toBeInTheDocument(),
     );
-    expect(recent.queryByRole('button', { name: /Collection 01/ })).not.toBeInTheDocument();
     expect(useAppStore.getState().recentCollections).toHaveLength(1);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore Collection 01' }));
     await waitFor(() =>
       expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(false),
     );
-    await waitFor(() => expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible());
-    expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible();
+    await waitFor(() => expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible());
     expect(listProjects).toHaveBeenCalledTimes(1);
   });
 
@@ -2892,7 +2915,8 @@ describe('feedback controls', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Second project' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Projects/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Second project/ }));
     await waitFor(() =>
       expect(useAppStore.getState().snapshot?.projectPath).toBe(secondSnapshot.projectPath),
     );
