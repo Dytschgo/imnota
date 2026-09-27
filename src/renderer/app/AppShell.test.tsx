@@ -238,14 +238,14 @@ describe('AppShell navigation', () => {
     disclosure.focus();
     fireEvent.keyDown(disclosure, { key: 'ArrowDown' });
 
-    expect(screen.getByRole('button', { name: 'Collapse favourite projects' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Settings' })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     expect(screen.getByRole('button', { name: 'About' })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: 'Home' });
     expect(screen.getByRole('button', { name: 'Hide navigation' })).toHaveFocus();
   });
 
-  it('does not reopen an active favourite group when project metadata refreshes', () => {
+  it('does not reopen a collapsed Recent group when project metadata refreshes', () => {
     const props = {
       activeCollectionId: 'atlas-recent',
       activeProjectPath: '/workspace/atlas',
@@ -267,8 +267,8 @@ describe('AppShell navigation', () => {
     };
     const { rerender } = render(<SideNav {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse favourite projects' }));
-    expect(document.getElementById('favourite-projects')).toHaveAttribute('hidden');
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse quick access' }));
+    expect(document.getElementById('quick-access-collections')).toHaveAttribute('hidden');
 
     rerender(
       <SideNav
@@ -277,7 +277,9 @@ describe('AppShell navigation', () => {
       />,
     );
 
-    expect(document.getElementById('favourite-projects')).toHaveAttribute('hidden');
+    expect(document.getElementById('quick-access-collections')).toHaveAttribute('hidden');
+    expect(screen.queryByText(/Favourite projects/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Archived/ })).not.toBeInTheDocument();
   });
 
   it('renders the workspace footer as icon-only Settings, About, and update controls', () => {

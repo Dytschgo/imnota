@@ -119,17 +119,6 @@
   color: var(--imnota-accent-hover);
 }
 
-.side-nav-project-button {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-}
-
-.side-nav-project-button > svg {
-  color: var(--imnota-accent-hover);
-}
-
 @media (max-width: 720px) {
   .library .project-row:not(button) {
     grid-template-columns: minmax(0, 1fr);
