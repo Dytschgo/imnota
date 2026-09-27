@@ -40,6 +40,11 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
   // not live handles. Preserve them with the content if a write rolls back.
   'Chromium internal source RFH token',
   'Chromium internal source URL',
+  // Windows clipboard-history and cloud-sync policy flags. Apps set these as small
+  // DWORD values in movable HGLOBAL allocations; they carry no live handles.
+  'CanIncludeInClipboardHistory',
+  'CanUploadToCloudClipboard',
+  'ExcludeClipboardContentFromMonitorProcessing',
 ]);
 // OLE ownership metadata points back to the previous clipboard owner. EmptyClipboard
 // releases that owner, so a byte clone cannot recreate these broker references.
