@@ -25,7 +25,7 @@ Enabling access first checks that the listener can bind. If the port is occupied
 | `get_item`              | One item's Markdown plus image path for screenshots and drawings |
 | `search_saved_text`     | Existing saved-text search results                               |
 
-`get_latest_bundle` only reads files already written by **Copy Bundle**. If none exist it returns `bundle not prepared` and does not generate an export.
+`get_latest_bundle` only reads files already written by copying or preparing a card in **Export bundles**. If none exist it returns `bundle not prepared` and does not generate an export.
 
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed.
 

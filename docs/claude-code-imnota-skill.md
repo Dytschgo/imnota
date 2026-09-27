@@ -14,6 +14,6 @@ Call the Imnota MCP tools instead of guessing from chat images or asking the use
 3. Use `list_projects` and `list_collection_items` when the project or collection is unclear.
 4. Use `search_saved_text` for saved titles, descriptions, and Markdown. It does not read pixels.
 
-If `get_latest_bundle` returns `bundle not prepared`, tell the user to use **Copy Bundle** in Imnota first. Do not invent export contents.
+If `get_latest_bundle` returns `bundle not prepared`, tell the user to use **Export bundles** and copy a card or choose **Prepare fresh files** in Imnota first. Do not invent export contents.
 
 Stay inside the selected workspace. Do not ask for hosted-share tokens, pairing codes, recovery journals, or backup archives.

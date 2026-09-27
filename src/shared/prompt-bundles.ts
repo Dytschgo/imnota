@@ -390,13 +390,9 @@ export function planPromptBundles(
   if (!included.length)
     return {
       kind: 'no-content',
-      message: collection.items
-        ? ordered.length
-          ? 'No content is included. Turn on at least one item to create a prompt bundle.'
-          : 'This collection has no content yet. Add a screenshot, drawing, or text block to create a prompt bundle.'
-        : ordered.length
-          ? 'No screenshots are included. Turn on at least one screenshot to create a prompt bundle.'
-          : 'This collection has no screenshots yet. Add a screenshot to create a prompt bundle.',
+      message: ordered.length
+        ? 'No content is included. Turn on at least one picture, text block, or drawing to create a prompt bundle.'
+        : 'This collection has no content yet. Add a picture, text block, or drawing to create a prompt bundle.',
     };
   const limits = { ...DEFAULT_PROMPT_BUNDLE_LIMITS, ...options.limits };
   positiveInteger(limits.maxEdge, 'Maximum edge');

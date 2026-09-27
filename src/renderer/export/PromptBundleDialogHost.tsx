@@ -10,6 +10,7 @@ import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 
 interface PromptActionError {
   message: string;
+  technicalDetails?: string;
 }
 
 type PromptActionResult = { ok: true } | { ok: false; error: PromptActionError };
@@ -58,9 +59,9 @@ export function PromptBundleDialogHost({
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
   const [preferenceError, setPreferenceError] = useState<string>();
+  const [pendingCopyVariant, setPendingCopyVariant] = useState<WindowsCopyVariantId>();
   const run = async (action: Promise<PromptActionResult>) => {
-    const result = await action;
-    if (!result.ok) onError(result.error.message);
+    await action;
   };
   if (!controller.isOpen) return null;
   return (
@@ -69,7 +70,8 @@ export function PromptBundleDialogHost({
         hidden={Boolean(controller.preview || hostedArtifacts)}
         bundles={controller.cards}
         fileClipboardAvailable={fileClipboardAvailable}
-        defaultCopyVariant={defaultCopyVariant}
+        defaultCopyVariant={pendingCopyVariant ?? defaultCopyVariant}
+        copyFormatSaving={pendingCopyVariant !== undefined}
         progress={controller.progress}
         error={controller.error}
         preferenceError={preferenceError}
@@ -83,12 +85,15 @@ export function PromptBundleDialogHost({
         onCopyVariant={(selection, variant) => run(controller.copyVariant(selection, variant))}
         onSelectCopyVariant={async (_selection, variant) => {
           setPreferenceError(undefined);
+          setPendingCopyVariant(variant);
           try {
             await onDefaultCopyVariantChange?.(variant);
           } catch {
             setPreferenceError(
               'The primary copy action could not be saved. Your previous choice is still active.',
             );
+          } finally {
+            setPendingCopyVariant(undefined);
           }
         }}
         onPrepareFreshFiles={(selection) => run(controller.prepareFreshFiles(selection))}
@@ -102,7 +107,6 @@ export function PromptBundleDialogHost({
         onShareHosted={async () => {
           const result = await controller.prepareHostedShare();
           if (result.ok) setHostedArtifacts(result.value);
-          else onError(result.error.message);
         }}
         onLoadPreview={(selection) => run(controller.loadPreview(selection))}
       />

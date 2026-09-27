@@ -27,7 +27,7 @@ it('disables preview while another prompt operation is running', () => {
       onLoadPreview={onLoadPreview}
     />,
   );
-  const preview = screen.getByRole('button', { name: /full-resolution preview/i });
+  const preview = screen.getByRole('button', { name: /full bundle preview/i });
   expect(preview).toBeDisabled();
   fireEvent.click(preview);
   expect(onLoadPreview).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ function model(overrides: Partial<PromptBundleCardModel> = {}): PromptBundleCard
 it('sends plan and artifact freshness identity with the primary action', () => {
   const onCopyFresh = vi.fn();
   render(<PromptBundleCard bundle={model()} onCopyFresh={onCopyFresh} onPrepareFreshFiles={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Copy bundle' }));
   expect(onCopyFresh).toHaveBeenCalledWith({
     planId: 'plan-current',
     artifactSessionId: 'session-current',
@@ -64,9 +64,8 @@ it('sends plan and artifact freshness identity with the primary action', () => {
   expect(screen.getByText('2.0 MB estimated')).toBeInTheDocument();
 });
 
-it('uses the saved Windows function for the primary action and keeps every variant in its dropdown', () => {
+it('uses the saved Windows format for the primary action and keeps only immediate actions in its menu', () => {
   const onCopyVariant = vi.fn();
-  const onSelectCopyVariant = vi.fn();
   render(
     <PromptBundleCard
       bundle={model()}
@@ -74,20 +73,21 @@ it('uses the saved Windows function for the primary action and keeps every varia
       defaultCopyVariant="files"
       onCopyFresh={vi.fn()}
       onCopyVariant={onCopyVariant}
-      onSelectCopyVariant={onSelectCopyVariant}
       onPrepareFreshFiles={vi.fn()}
+      onCopyMarkdown={vi.fn()}
+      onCopyImage={vi.fn()}
+      onOpenFiles={vi.fn()}
+      onCopyPaths={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Copy bundle' }));
   expect(onCopyVariant).toHaveBeenCalledWith(
     { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
     'files',
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
-  expect(screen.getByText('Default copy format')).toBeVisible();
-  expect(screen.getByText('Changes the main button')).toBeVisible();
-  expect(screen.getByRole('separator')).toBeVisible();
+  expect(screen.queryByText('Default copy format')).not.toBeInTheDocument();
   const enabledItems = screen.getAllByRole('menuitem').filter((item) => !item.hasAttribute('disabled'));
   expect(enabledItems[0]).toHaveFocus();
   fireEvent.keyDown(enabledItems[0]!, { key: 'ArrowDown' });
@@ -98,20 +98,14 @@ it('uses the saved Windows function for the primary action and keeps every varia
   expect(enabledItems[0]).toHaveFocus();
   fireEvent.keyDown(enabledItems[0]!, { key: 'ArrowUp' });
   expect(enabledItems.at(-1)).toHaveFocus();
-  expect(screen.getByRole('menu')).toHaveTextContent(
-    'Copy filesMD + PNG filesFiles + rich copyFiles, text + imageRich copyText + image',
-  );
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Files + rich copy' }));
-  expect(onSelectCopyVariant).toHaveBeenCalledWith(
-    { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
-    'files-rich',
-  );
+  expect(screen.queryByRole('menuitem', { name: 'Files + text + image' })).not.toBeInTheDocument();
+  expect(screen.getByRole('menuitem', { name: 'Copy Markdown' })).toBeEnabled();
   expect(onCopyVariant).toHaveBeenCalledTimes(1);
 });
 
 it('keeps rich copy available without showing unsupported file clipboard variants', () => {
   render(<PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />);
-  expect(screen.getByRole('button', { name: 'Rich copy' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Copy bundle' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
   expect(screen.queryByRole('menuitem', { name: 'Copy files' })).not.toBeInTheDocument();
   expect(screen.queryByRole('menuitem', { name: 'Files + rich copy' })).not.toBeInTheDocument();
@@ -126,11 +120,10 @@ it('uses rich copy for a text-only bundle without changing the saved Windows def
       defaultCopyVariant="files"
       onCopyFresh={onCopyFresh}
       onCopyVariant={vi.fn()}
-      onSelectCopyVariant={vi.fn()}
       onPrepareFreshFiles={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Copy text' }));
   expect(onCopyFresh).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
   expect(screen.queryByText('Default copy format')).not.toBeInTheDocument();
@@ -253,7 +246,7 @@ it('shows a gray copied state while leaving Copy Bundle available again', () => 
     />,
   );
 
-  const button = screen.getByRole('button', { name: 'Rich copy' });
+  const button = screen.getByRole('button', { name: 'Copy bundle' });
   expect(button).toHaveClass('is-copied');
   fireEvent.click(button);
   expect(onCopyFresh).toHaveBeenCalledOnce();
@@ -340,13 +333,50 @@ it('identifies prepared formats and exposes generated filenames and path copying
       onCopyPaths={copyPaths}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Markdown + image prepared');
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Text + image');
   expect(screen.getByText('Prompt-2.png')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Copy file paths' }));
   expect(copyPaths).toHaveBeenCalledWith(
     expect.objectContaining({ artifactSessionId: 'session-current', bundleNumber: 2 }),
   );
+});
+
+it('distinguishes saved files and opened files from clipboard success', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({ opened: 'files', filenames: ['Prompt-2.md'] })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Saved locally')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Files opened');
+  expect(screen.queryByText(/Last copied/)).not.toBeInTheDocument();
+});
+
+it('keeps the last copy visible when opening its export folder', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({ state: 'copied', outcome: 'markdown', opened: 'folder' })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Last copied: Markdown')).toBeInTheDocument();
+  expect(screen.getByText('Export folder opened')).toBeInTheDocument();
+});
+
+it('keeps standalone card errors accessible without a false copied state', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({ state: 'error', error: 'Could not copy this bundle.', outcome: 'markdown' })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not copy this bundle.');
+  expect(screen.queryByText(/Last copied/)).not.toBeInTheDocument();
 });
 
 it('does not claim Markdown + image prepared when only one format is confirmed', () => {
@@ -365,7 +395,7 @@ it('does not claim Markdown + image prepared when only one format is confirmed',
       onCopyPaths={vi.fn()}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Markdown copied');
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Markdown');
   expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
   expect(screen.getByText(/Image was not confirmed/)).toBeInTheDocument();
   expect(screen.getByText(/Copy image only or Open files/)).toBeInTheDocument();

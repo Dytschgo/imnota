@@ -1,6 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
+import { loadWindowsClipboardApi } from './windows-clipboard.js';
 import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
@@ -18,6 +19,7 @@ import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import { BundleWalkthrough } from './bundle-walkthrough.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
@@ -33,7 +35,7 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard';
 
 export interface SmokeWorkflowHost {
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
@@ -148,12 +150,12 @@ export const SMOKE_UI_CONTRACT = {
   ],
   shareBundles: [
     { selector: '[data-testid="share-prompt-bundles"]' },
-    { text: 'Share bundles', exact: true },
+    { text: 'Export bundles', exact: true },
     { text: 'Copy AI context', exact: true },
   ],
   promptDialog: [
     { selector: '[data-testid="prompt-sharing-dialog"]' },
-    { selector: '[role="dialog"]', text: 'Share bundles' },
+    { selector: '[role="dialog"]', text: 'Export bundles' },
   ],
   settings: [{ selector: '[data-testid="settings-button"]' }, { text: 'Settings', exact: true }],
 } as const satisfies Record<string, readonly SmokeLocator[]>;
@@ -406,11 +408,7 @@ async function exerciseOnboarding(
     await chooseNativeCopyFunction('files', 'Copy files');
     await driver.click({ text: 'Copy files', exact: true });
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    await driver.waitFor({
-      selector: '[data-testid="onboarding-copy-warning"]',
-      text: 'Files were confirmed on the clipboard. The receiving app still decides whether paste accepts file attachments.',
-      exact: true,
-    });
+    await driver.waitFor({ selector: '[data-testid="onboarding-copy-warning"]' }, { absent: true });
     const copiedFiles = await readWindowsClipboardFilesForSmoke(
       window.getNativeWindowHandle(),
       'Onboarding Copy files',
@@ -424,11 +422,7 @@ async function exerciseOnboarding(
     await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
     await driver.click({ text: 'Files + rich copy', exact: true });
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    await driver.waitFor({
-      selector: '[data-testid="onboarding-copy-warning"]',
-      text: 'Files, Markdown, HTML and image were confirmed on the clipboard. The receiving app chooses which of these formats it pastes.',
-      exact: true,
-    });
+    await driver.waitFor({ selector: '[data-testid="onboarding-copy-warning"]' }, { absent: true });
     const combinedFiles = await readWindowsClipboardFilesForSmoke(
       window.getNativeWindowHandle(),
       'Onboarding Files + rich copy',
@@ -1742,15 +1736,12 @@ const promptCopyLabels: Record<WindowsCopyVariantId, string> = {
 
 async function selectedPromptCopyFunction(
   driver: NativeUiDriver,
-  cardIndex: number,
 ): Promise<{ label: string; preference: string }> {
   return driver.evaluate(`(async () => {
-    const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
-    const button = card?.querySelector('button[data-testid^="copy-bundle-"]');
     const result = await window.imnota.getPreferenceSettings();
     if (!result.ok) throw new Error(result.error.message);
     return {
-      label: button?.getAttribute('aria-label') ?? '',
+      label: document.querySelector('select[aria-label="Copy format"]')?.value ?? '',
       preference: result.value.settings.nativeCopy.defaultFunction,
     };
   })()`);
@@ -1758,52 +1749,33 @@ async function selectedPromptCopyFunction(
 
 async function choosePromptCopyFunction(
   driver: NativeUiDriver,
-  cardIndex: number,
   variant: WindowsCopyVariantId,
 ): Promise<void> {
-  const label = promptCopyLabels[variant];
-  const current = await selectedPromptCopyFunction(driver, cardIndex);
-  if (current.label !== label || current.preference !== variant) {
-    const optionsPoint = await driver.evaluate<SmokePoint>(`(() => {
-      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
-      const button = card?.querySelector('button[aria-label="Copy options"]');
-      if (!button || button.disabled) throw new Error('Prompt copy options are unavailable.');
-      button.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const bounds = button.getBoundingClientRect();
-      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
-    })()`);
-    await driver.clickPoint(optionsPoint);
-    const optionPoint = await driver.evaluate<SmokePoint>(`new Promise((resolve, reject) => {
+  const formats: WindowsCopyVariantId[] = ['files', 'rich', 'files-rich'];
+  const current = await selectedPromptCopyFunction(driver);
+  const start = formats.indexOf(current.label as WindowsCopyVariantId);
+  const target = formats.indexOf(variant);
+  if (start < 0) throw new Error('Copy format selector is unavailable.');
+  await driver.evaluate(`document.querySelector('select[aria-label="Copy format"]').focus()`);
+  const direction = target > start ? 1 : -1;
+  for (let index = start; index !== target;) {
+    index += direction;
+    await driver.press(direction === 1 ? 'Down' : 'Up');
+    const expected = formats[index];
+    await driver.evaluate(`new Promise((resolve, reject) => {
       const started = Date.now();
-      const check = () => {
-        const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
-        const menuId = card?.querySelector('button[aria-label="Copy options"]')?.getAttribute('aria-controls');
-        const menu = menuId ? document.getElementById(menuId) : null;
-        const item = [...(menu?.querySelectorAll('[role="menuitem"]') ?? [])]
-          .find(candidate => candidate.getAttribute('aria-label') === ${JSON.stringify(label)});
-        const bounds = item?.getBoundingClientRect();
-        if (item && !item.disabled && bounds && bounds.width > 0 && bounds.height > 0)
-          return resolve({ x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) });
-        if (Date.now() - started > 5000) return reject(new Error('Prompt copy function option was not ready.'));
-        setTimeout(check, 25);
+      const check = async () => {
+        const selector = document.querySelector('select[aria-label="Copy format"]');
+        const selected = selector?.value;
+        const result = await window.imnota.getPreferenceSettings();
+        const preference = result.ok ? result.value.settings.nativeCopy.defaultFunction : 'error';
+        if (!selector?.disabled && selected === ${JSON.stringify(expected)} && preference === ${JSON.stringify(expected)}) return resolve(true);
+        if (Date.now() - started > 10000) return reject(new Error('Copy format expected ' + ${JSON.stringify(expected)} + ', selected=' + selected + ', saved=' + preference));
+        setTimeout(check, 50);
       };
       check();
     })`);
-    await driver.clickPoint(optionPoint);
   }
-  await driver.evaluate(`new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = async () => {
-      const card = [...document.querySelectorAll('[data-testid="prompt-bundle-card"]')][${cardIndex}];
-      const label = card?.querySelector('button[data-testid^="copy-bundle-"]')?.getAttribute('aria-label');
-      const result = await window.imnota.getPreferenceSettings();
-      if (label === ${JSON.stringify(label)} && result.ok && result.value.settings.nativeCopy.defaultFunction === ${JSON.stringify(variant)})
-        return resolve(true);
-      if (Date.now() - started > 10000) return reject(new Error('Prompt copy function was not persisted.'));
-      setTimeout(check, 50);
-    };
-    check();
-  })`);
 }
 
 async function waitForPromptGrants(driver: NativeUiDriver, bundleCount: number): Promise<void> {
@@ -2008,6 +1980,7 @@ async function preserveFirstDensePromptPair(set: PromptSet, artifactDirectory: s
 }
 
 interface PromptWorkflowOptions {
+  walkthrough?: BundleWalkthrough;
   artifactDirectory?: string;
   artifacts: SmokeCapture[];
   expectedExcludedPicture?: number;
@@ -2075,6 +2048,114 @@ async function assertPromptRichClipboard(
   return { text, png: image.toPNG() };
 }
 
+async function assertPromptPasteReceiver(
+  driver: NativeUiDriver,
+  expectedText: string,
+  expectedPng: Buffer,
+  walkthrough?: BundleWalkthrough,
+): Promise<void> {
+  const expectedImage = nativeImage.createFromBuffer(expectedPng);
+  const expectedSize = expectedImage.getSize();
+  const expectedHtmlFragment = clipboardContextHtml(expectedText);
+  await driver.evaluate(`(() => {
+    document.getElementById('imnota-smoke-paste-receiver')?.remove();
+    const receiver = document.createElement('div');
+    receiver.id = 'imnota-smoke-paste-receiver';
+    receiver.contentEditable = 'true';
+    receiver.setAttribute('role', 'textbox');
+    receiver.setAttribute('aria-label', 'Clipboard verification receiver');
+    receiver.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;width:240px;height:60px;overflow:hidden;padding:8px;background:#fff;color:#111;border:2px solid #4b78ff;';
+    document.body.append(receiver);
+    window.__imnotaPasteResult = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Paste receiver did not receive the native Paste command within 5000ms.')), 5000);
+      receiver.addEventListener('paste', async event => {
+        try {
+          const data = event.clipboardData;
+          const types = [...(data?.types ?? [])].map(type => type.toLowerCase());
+          const text = data?.getData('text/plain') ?? '';
+          const html = data?.getData('text/html') ?? '';
+          const items = [...(data?.items ?? [])].map(item => ({ kind: item.kind, type: item.type.toLowerCase() }));
+          const imageItem = [...(data?.items ?? [])].find(item => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'));
+          let imageSize;
+          const file = imageItem?.getAsFile();
+          if (file) {
+            const bitmap = await createImageBitmap(file);
+            imageSize = { width: bitmap.width, height: bitmap.height };
+            bitmap.close();
+          }
+          resolve({
+            trusted: event.isTrusted,
+            types,
+            items,
+            text,
+            html,
+            imageSize,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          clearTimeout(timeout);
+        }
+      }, { once: true });
+    });
+    receiver.focus();
+    if (document.activeElement !== receiver) throw new Error('Paste receiver could not receive focus.');
+  })()`);
+  try {
+    driver.browserWindow.webContents.paste();
+    const received = await driver.evaluate<{
+      trusted: boolean;
+      types: string[];
+      items: Array<{ kind: string; type: string }>;
+      text: string;
+      html: string;
+      imageSize?: { width: number; height: number };
+    }>('window.__imnotaPasteResult');
+    if (!received.trusted) throw new Error('The paste receiver event was not a trusted native paste.');
+    for (const type of ['text/plain', 'text/html'])
+      if (!received.types.includes(type))
+        throw new Error(
+          `Paste receiver did not receive ${type}; it received ${received.types.join(', ') || 'no advertised formats'}.`,
+        );
+    if (received.text !== expectedText) throw new Error('Paste receiver changed the exact prompt Markdown.');
+    if (!received.html.includes(expectedHtmlFragment))
+      throw new Error(`Paste receiver changed the prompt HTML fragment: ${received.html.slice(0, 160)}.`);
+    const insertedText = await driver.evaluate<string>(
+      `document.getElementById('imnota-smoke-paste-receiver')?.textContent ?? ''`,
+    );
+    if (insertedText !== expectedText)
+      throw new Error('The native Paste command did not insert the prompt into the editable receiver.');
+    if (
+      received.imageSize?.width !== expectedSize.width ||
+      received.imageSize?.height !== expectedSize.height
+    )
+      throw new Error(
+        `Paste receiver did not receive the expected prompt image; items: ${JSON.stringify(received.items)}, dimensions: ${JSON.stringify(received.imageSize)}.`,
+      );
+    if (walkthrough) {
+      await driver.evaluate(`(() => {
+        const receiver = document.getElementById('imnota-smoke-paste-receiver');
+        receiver.style.cssText = 'position:fixed;left:24px;top:24px;z-index:2147483647;width:620px;height:640px;overflow:auto;padding:20px;background:#fff;color:#111;border:3px solid #4b78ff;font:13px monospace;';
+        const title = document.createElement('div');
+        title.textContent = 'TEST RECEIVER — native Paste result';
+        title.style.cssText = 'position:fixed;left:24px;top:0;z-index:2147483647;background:#4b78ff;color:white;padding:4px 12px;';
+        title.id = 'imnota-smoke-paste-title';
+        document.body.append(title);
+      })()`);
+      await walkthrough.capture(
+        'Native paste result',
+        'Test-only receiving control. A trusted native Paste inserted the exact Markdown. HTML and decoded PNG dimensions were also checked; this is not an external editor.',
+      );
+    }
+  } finally {
+    await driver.evaluate(`(() => {
+      document.getElementById('imnota-smoke-paste-receiver')?.remove();
+      document.getElementById('imnota-smoke-paste-title')?.remove();
+      delete window.__imnotaPasteResult;
+    })()`);
+  }
+}
+
 async function waitForPromptCopyClipboard(
   driver: NativeUiDriver,
   set: PromptSet,
@@ -2111,9 +2192,7 @@ async function exercisePromptWorkflow(
 ): Promise<{ bundleCount: number; renderMs: number; latestSet: PromptSet }> {
   const renderStarted = performance.now();
   const existingNames = new Set((await promptSets(host, projectPath)).map((set) => set.name));
-  if (!(await existsAny(driver, SMOKE_UI_CONTRACT.shareBundles)))
-    await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
-  await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
+  await driver.click({ selector: '.topbar-actions [data-testid="share-prompt-bundles"]' });
   await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
   await driver.waitFor(
     {
@@ -2126,12 +2205,17 @@ async function exercisePromptWorkflow(
   if (options.requireSplit && cards.length < 2)
     throw new Error('Mixed native-resolution fixture did not split into prompt bundles.');
   if (options.artifactDirectory) {
+    await driver.resize(SMOKE_VIEWPORTS[0]);
+    options.artifacts.push(await driver.capture(options.artifactDirectory, '1280x800-sharing.png'));
     await driver.resize(SMOKE_VIEWPORTS[2]);
     options.artifacts.push(await driver.capture(options.artifactDirectory, '1920x1080-sharing.png'));
     await driver.resize(SMOKE_VIEWPORTS[3]);
     options.artifacts.push(await driver.capture(options.artifactDirectory, '3440x1440-sharing.png'));
   }
   await verifyPromptCopyOptions(driver, cards.length);
+  if (options.walkthrough) {
+    await options.walkthrough.inspectOpening();
+  }
   const copiedIndex = cards.findIndex((card) => card.copyLabel);
   if (copiedIndex < 0)
     throw new Error('Every prompt bundle was file-only; native clipboard was not exercised.');
@@ -2142,18 +2226,19 @@ async function exercisePromptWorkflow(
         ? Array.from({ length: options.copyActions }, () => 'rich' as const)
         : [];
   if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
-    const defaultFunction = await selectedPromptCopyFunction(driver, copiedIndex);
-    if (defaultFunction.label !== 'Copy files' || defaultFunction.preference !== 'files')
+    const defaultFunction = await selectedPromptCopyFunction(driver);
+    if (defaultFunction.label !== 'files' || defaultFunction.preference !== 'files')
       throw new Error('Production prompt copy did not start with the persisted Copy files default.');
   }
   const actionCount = Math.max(options.copyActions, windowsVariants.length);
   let latestSet: PromptSet | undefined;
   let latestRichClipboard: { text: string; png: Buffer } | undefined;
   let latestWindowsVariant: WindowsCopyVariantId | undefined;
-  for (let action = 0; action < actionCount; action += 1) {
-    if (action === 1) {
-      await closePromptDialog(driver);
-      await driver.evaluate(`(() => {
+  try {
+    for (let action = 0; action < actionCount; action += 1) {
+      if (action === 1) {
+        await closePromptDialog(driver);
+        await driver.evaluate(`(() => {
         const observed = { states: [], observer: null };
         const record = () => {
           const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
@@ -2169,14 +2254,14 @@ async function exercisePromptWorkflow(
         observed.observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
         window.__imnotaReopenProgress = observed;
       })()`);
-      await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
-      await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
-      await waitForPromptGrants(driver, cards.length);
-      await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
-      const observed = await driver.evaluate<{
-        states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
-        completedStatus: string | null;
-      }>(`(() => {
+        await driver.click({ selector: '.topbar-actions [data-testid="share-prompt-bundles"]' });
+        await driver.waitFor(SMOKE_UI_CONTRACT.promptDialog[1]);
+        await waitForPromptGrants(driver, cards.length);
+        await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
+        const observed = await driver.evaluate<{
+          states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
+          completedStatus: string | null;
+        }>(`(() => {
         const observed = window.__imnotaReopenProgress;
         observed.observer.disconnect();
         delete window.__imnotaReopenProgress;
@@ -2185,24 +2270,24 @@ async function exercisePromptWorkflow(
           completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] .prompt-sharing-progress[role="status"]')?.textContent?.trim() ?? null,
         };
       })()`);
-      if (
-        !observed.states.some((state) => state.label === 'Loading saved bundles') ||
-        observed.completedStatus !== null ||
-        observed.states.some(
-          (state) => state.label !== 'Loading saved bundles' || state.hasPercentage || state.hasProgressbar,
+        if (
+          !observed.states.some((state) => state.label === 'Loading saved bundles') ||
+          observed.completedStatus !== null ||
+          observed.states.some(
+            (state) => state.label !== 'Loading saved bundles' || state.hasPercentage || state.hasProgressbar,
+          )
         )
-      )
-        throw new Error(
-          `Reopening finalized prompt cards showed generation progress: ${JSON.stringify(observed)}.`,
-        );
-    }
-    const variant = windowsVariants[action] ?? 'rich';
-    if (process.platform === 'win32') latestWindowsVariant = variant;
-    if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
-      await choosePromptCopyFunction(driver, copiedIndex, variant);
-    await nativeClipboard.writeText(`Imnota smoke: waiting for prompt copy ${action + 1}`);
-    if (action > 0)
-      await driver.evaluate(`(() => {
+          throw new Error(
+            `Reopening finalized prompt cards showed generation progress: ${JSON.stringify(observed)}.`,
+          );
+      }
+      const variant = windowsVariants[action] ?? 'rich';
+      if (process.platform === 'win32') latestWindowsVariant = variant;
+      if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
+        await choosePromptCopyFunction(driver, variant);
+      await nativeClipboard.writeText(`Imnota smoke: waiting for prompt copy ${action + 1}`);
+      if (action > 0)
+        await driver.evaluate(`(() => {
         const observed = { states: [], observer: null };
         const record = () => {
           const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
@@ -2219,26 +2304,38 @@ async function exercisePromptWorkflow(
         window.__imnotaRepeatCopyProgress = observed;
         record();
       })()`);
-    await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
-    if (action === 0) {
-      // The first copy prepares every native-resolution bundle. Later copies must reuse this set.
-      latestSet = await waitForNewPromptSet(
-        host,
-        projectPath,
-        existingNames,
-        Math.max(30_000, cards.length * 3_000),
+      if (action === 0) options.walkthrough?.startProgressCapture();
+      await driver.clickPoint(await promptActionPoint(driver, copiedIndex));
+      if (action === 0) {
+        // The first copy prepares every native-resolution bundle. Later copies must reuse this set.
+        latestSet = await waitForNewPromptSet(
+          host,
+          projectPath,
+          existingNames,
+          Math.max(30_000, cards.length * 3_000),
+        );
+        existingNames.add(latestSet.name);
+      }
+      if (!latestSet) throw new Error('Prompt copy has no finalized export set.');
+      await waitForPromptCopyClipboard(driver, latestSet, copiedIndex, variant);
+      await waitForPromptGrants(driver, cards.length);
+      const confirmedClipboardSequence =
+        process.platform === 'win32' ? loadWindowsClipboardApi().getClipboardSequenceNumber() : undefined;
+      if (options.walkthrough && action === 0) {
+        await options.walkthrough.stopProgressCapture();
+      }
+      await options.walkthrough?.capture(
+        `After ${promptCopyLabels[variant]}`,
+        action === 0
+          ? 'The first primary click creates all bundles locally and copies the selected bundle. Generated-file disclosures and success feedback are now available.'
+          : 'The selected copy format was executed against the saved bundle. Repeated copying does not create another export set.',
       );
-      existingNames.add(latestSet.name);
-    }
-    if (!latestSet) throw new Error('Prompt copy has no finalized export set.');
-    await waitForPromptCopyClipboard(driver, latestSet, copiedIndex, variant);
-    await waitForPromptGrants(driver, cards.length);
-    if (action > 0) {
-      await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
-      const observed = await driver.evaluate<{
-        states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
-        completedStatus: string | null;
-      }>(`(() => {
+      if (action > 0) {
+        await driver.waitFor({ selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"]' });
+        const observed = await driver.evaluate<{
+          states: Array<{ label: string; hasPercentage: boolean; hasProgressbar: boolean }>;
+          completedStatus: string | null;
+        }>(`(() => {
         const observed = window.__imnotaRepeatCopyProgress;
         observed.observer.disconnect();
         delete window.__imnotaRepeatCopyProgress;
@@ -2247,35 +2344,63 @@ async function exercisePromptWorkflow(
           completedStatus: document.querySelector('[data-testid="prompt-sharing-dialog"] .prompt-sharing-progress[role="status"]')?.textContent?.trim() ?? null,
         };
       })()`);
-      if (
-        !observed.states.some((state) => state.label.includes('Copying Bundle')) ||
-        observed.completedStatus !== null ||
-        observed.states.some(
-          (state) => !state.label.includes('Copying Bundle') || state.hasPercentage || state.hasProgressbar,
+        if (
+          !observed.states.some((state) => state.label.includes('Copying Bundle')) ||
+          observed.completedStatus !== null ||
+          observed.states.some(
+            (state) => !state.label.includes('Copying Bundle') || state.hasPercentage || state.hasProgressbar,
+          )
         )
+          throw new Error(
+            `Repeated prompt copy showed preparation or numeric progress: ${JSON.stringify(observed)}.`,
+          );
+      }
+      const settledSets = await promptSets(host, projectPath);
+      if (
+        settledSets.length !== existingNames.size ||
+        settledSets.some((set) => !existingNames.has(set.name))
       )
-        throw new Error(
-          `Repeated prompt copy showed preparation or numeric progress: ${JSON.stringify(observed)}.`,
+        throw new Error('Repeated prompt copy generated another export set.');
+      await verifyPromptSet(projectPath, latestSet, cards.length);
+      if (confirmedClipboardSequence !== undefined) {
+        const sequence = loadWindowsClipboardApi().getClipboardSequenceNumber();
+        if (sequence !== confirmedClipboardSequence)
+          throw new Error(
+            `Clipboard changed after confirmed ${variant} copy, before the final readback (sequence ${confirmedClipboardSequence} to ${sequence}). No further copy was requested.`,
+          );
+      }
+      if (process.platform === 'win32' && (variant === 'files' || variant === 'files-rich'))
+        await assertPromptFileClipboard(
+          driver,
+          latestSet,
+          copiedIndex,
+          `Prompt ${promptCopyLabels[variant]}`,
         );
+      if (process.platform !== 'win32' || variant === 'rich' || variant === 'files-rich') {
+        latestRichClipboard = await assertPromptRichClipboard(
+          latestSet,
+          copiedIndex,
+          `Prompt ${promptCopyLabels[variant]}`,
+        );
+        // File-attachment formats may take precedence in Chromium. Exercise the
+        // editable rich-text receiver immediately after the rich-only UI action.
+        if (variant === 'rich')
+          await assertPromptPasteReceiver(
+            driver,
+            latestRichClipboard.text,
+            latestRichClipboard.png,
+            options.walkthrough,
+          );
+      }
     }
-    const settledSets = await promptSets(host, projectPath);
-    if (settledSets.length !== existingNames.size || settledSets.some((set) => !existingNames.has(set.name)))
-      throw new Error('Repeated prompt copy generated another export set.');
-    await verifyPromptSet(projectPath, latestSet, cards.length);
-    if (process.platform === 'win32' && (variant === 'files' || variant === 'files-rich'))
-      await assertPromptFileClipboard(driver, latestSet, copiedIndex, `Prompt ${promptCopyLabels[variant]}`);
-    if (process.platform !== 'win32' || variant === 'rich' || variant === 'files-rich')
-      latestRichClipboard = await assertPromptRichClipboard(
-        latestSet,
-        copiedIndex,
-        `Prompt ${promptCopyLabels[variant]}`,
-      );
+  } finally {
+    await options.walkthrough?.stopProgressCapture();
   }
   if (!latestSet) throw new Error('Prompt workflow did not publish its first export set.');
   if (!latestRichClipboard)
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
   if (process.platform === 'win32') {
-    await choosePromptCopyFunction(driver, copiedIndex, 'files');
+    await choosePromptCopyFunction(driver, 'files');
     if (latestWindowsVariant === 'files-rich') {
       await assertPromptFileClipboard(driver, latestSet, copiedIndex, 'Changing the prompt copy default');
     } else if (
@@ -2358,7 +2483,7 @@ async function closePromptDialog(driver: NativeUiDriver): Promise<void> {
     { selector: '[data-testid="prompt-sharing-close"]' },
     { selector: '[role="dialog"] [aria-label="Close"]' },
   ]);
-  await driver.waitFor({ selector: '[role="dialog"]', text: 'Share bundles' }, { absent: true });
+  await driver.waitFor({ selector: '[role="dialog"]', text: 'Export bundles' }, { absent: true });
 }
 
 async function assertWorkflowFailure(
@@ -2641,6 +2766,295 @@ export async function runSmokeWorkflow(
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
 
+  if (mode === 'clipboard') {
+    const walkthrough =
+      process.env.IMNOTA_BUNDLE_WALKTHROUGH === '1' && artifactDirectory
+        ? new BundleWalkthrough(driver, artifactDirectory, artifacts)
+        : undefined;
+    // This mode starts at the workspace toolbar, never at the onboarding demo.
+    // Preferences and project files belong to this run's disposable profile.
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({
+        onboarding: { completed: true },
+        updates: { whatsNewAcknowledgedVersion: ${JSON.stringify(options.version)} },
+      });
+      if (!result.ok) throw new Error(result.error.message);
+    })()`);
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.library' });
+    await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' }, { absent: true });
+    const projectPath = await createProjectThroughUi(driver, 'Bundle Export Verification', false);
+    await importImages(driver, projectPath, sources, 3);
+    activeWindow = await host.reopenWindow();
+    driver.setWindow(activeWindow);
+    await driver.waitFor({ selector: '.konvajs-content' });
+    await driver.click({ selector: '.shot-select', text: path.basename(sources[0].path) });
+    await driver.waitFor({ selector: 'textarea[aria-label="Description"]' });
+    await driver.resize(SMOKE_VIEWPORTS[0]);
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, '1280x800-bundle-workspace.png'));
+    await driver.evaluate(`(() => {
+      const observed = { states: [], observer: null };
+      const record = () => {
+        const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
+        const status = dialog?.querySelector('.prompt-sharing-progress');
+        if (!status) return;
+        const phase = [...status.classList].find(name => name.startsWith('prompt-sharing-progress-'));
+        const state = {
+          phase: phase?.replace('prompt-sharing-progress-', ''),
+          busy: dialog.getAttribute('aria-busy') === 'true',
+          message: status.textContent?.trim() ?? '',
+          value: status.querySelector('progress')?.getAttribute('value') ?? null,
+        };
+        if (JSON.stringify(observed.states.at(-1)) !== JSON.stringify(state)) observed.states.push(state);
+      };
+      observed.observer = new MutationObserver(record);
+      observed.observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+      window.__imnotaWorkspaceExportProgress = observed;
+    })()`);
+    const firstDescription =
+      'EXPORT CURRENT EDIT: the top-right action must include this unsaved description.';
+    await driver.fill({ selector: 'textarea[aria-label="Description"]' }, firstDescription);
+    await walkthrough?.capture(
+      'Before clicking the toolbar',
+      'The real workspace contains three source pictures and a current description edit. The top-right Export bundles button is the entry point.',
+    );
+    const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
+      walkthrough,
+      artifactDirectory,
+      artifacts,
+      copyActions: 2,
+      requireSplit: true,
+      verifyWindowsCopyVariants: true,
+    });
+    const progressStates = await driver.evaluate<
+      Array<{
+        phase: string;
+        busy: boolean;
+        message: string;
+        value: string | null;
+      }>
+    >(`(() => {
+      const observed = window.__imnotaWorkspaceExportProgress;
+      observed.observer.disconnect();
+      delete window.__imnotaWorkspaceExportProgress;
+      return observed.states;
+    })()`);
+    if (
+      ['rendering', 'writing', 'copying'].some(
+        (phase) => !progressStates.some((state) => state.phase === phase),
+      ) ||
+      progressStates.some((state) => state.busy && (state.value !== null || /\d+%/.test(state.message)))
+    )
+      throw new Error(
+        `Workspace export did not show truthful rendering, writing and copying progress: ${JSON.stringify(progressStates)}`,
+      );
+    if (artifactDirectory)
+      await fs.writeFile(
+        path.join(artifactDirectory, 'bundle-export-progress.json'),
+        JSON.stringify(progressStates, null, 2),
+        { flag: 'wx' },
+      );
+    assertions.push(
+      'actual rendering, writing and copying phases stay busy without a premature completion percentage',
+    );
+    const [firstMarkdownPath] = await promptBundlePaths(promptTiming.latestSet, 0);
+    const firstMarkdown = await fs.readFile(firstMarkdownPath, 'utf8');
+    if (!firstMarkdown.includes(firstDescription))
+      throw new Error('Top-right Export bundles omitted the latest inspector edit.');
+    assertions.push(
+      'top-right Export bundles saves the current inspector edit into the actual exported Markdown',
+    );
+    assertions.push(
+      'multi-bundle export publishes complete file pairs; reopening and repeat copy reuse the saved set',
+    );
+    if (process.platform === 'win32')
+      assertions.push(
+        'production Copy files, Rich copy and Files + rich copy retain the exact generated content',
+      );
+    for (let index = 0; index < promptTiming.bundleCount; index += 1) {
+      if (process.platform === 'win32') await choosePromptCopyFunction(driver, 'rich');
+      await nativeClipboard.writeText(`Waiting for workspace Bundle ${index + 1}`);
+      await driver.clickPoint(await promptActionPoint(driver, index));
+      await waitForPromptCopyClipboard(driver, promptTiming.latestSet, index, 'rich');
+      await waitForPromptGrants(driver, promptTiming.bundleCount);
+      const copied = await assertPromptRichClipboard(
+        promptTiming.latestSet,
+        index,
+        `Workspace Bundle ${index + 1}`,
+      );
+      await assertPromptPasteReceiver(driver, copied.text, copied.png);
+    }
+    if ((await promptSets(host, projectPath)).length !== 1)
+      throw new Error('Copying each workspace bundle regenerated the export set.');
+    assertions.push(
+      'every bundle card copies and pastes its own Markdown, HTML fragment and image without regeneration',
+    );
+    if (artifactDirectory) {
+      await driver.resize(SMOKE_VIEWPORTS[0]);
+      artifacts.push(await driver.capture(artifactDirectory, '1280x800-bundle-export-complete.png'));
+    }
+    await walkthrough?.capture(
+      'Both bundles copied',
+      'Both cards have been copied and pasted individually. Only one timestamped export set exists.',
+    );
+    timings.push({
+      scenario: 'workspace-multiple-bundle-export-and-paste',
+      screenshotCount: 3,
+      importMs: 0,
+      reopenMs: 0,
+      ...promptTiming,
+      ...(await memoryMegabytes(driver.browserWindow)),
+    });
+    await closePromptDialog(driver);
+    const revisedDescription =
+      'EXPORT REVISED EDIT: this new description must replace the previous exported content.';
+    await driver.fill({ selector: 'textarea[aria-label="Description"]' }, revisedDescription);
+    const revised = await exercisePromptWorkflow(driver, host, projectPath, {
+      artifacts,
+      copyActions: 1,
+      requireSplit: true,
+    });
+    const [revisedMarkdownPath] = await promptBundlePaths(revised.latestSet, 0);
+    const revisedMarkdown = await fs.readFile(revisedMarkdownPath, 'utf8');
+    if (
+      revised.latestSet.directory === promptTiming.latestSet.directory ||
+      !revisedMarkdown.includes(revisedDescription) ||
+      revisedMarkdown.includes(firstDescription) ||
+      (await fs.readFile(firstMarkdownPath, 'utf8')) !== firstMarkdown ||
+      (await promptSets(host, projectPath)).length !== 2
+    )
+      throw new Error(
+        'Export after editing failed to publish new content while preserving the previous files.',
+      );
+    assertions.push(
+      'editing and exporting again creates a fresh set with revised content and preserves the previous files',
+    );
+    if (walkthrough) {
+      await walkthrough.capture(
+        'Export after editing',
+        'A second timestamped export contains the revised description. The first export remains byte-for-byte unchanged.',
+      );
+      const [markdownPath, pngPath] = await promptBundlePaths(revised.latestSet, 0);
+      await walkthrough.inspectSaved(markdownPath, pngPath);
+      const beforeFresh = new Set((await promptSets(host, projectPath)).map((set) => set.name));
+      await walkthrough.option('Prepare fresh files');
+      await waitForNewPromptSet(host, projectPath, beforeFresh);
+      await waitForPromptGrants(driver, revised.bundleCount);
+      await walkthrough.idle();
+      await walkthrough.capture(
+        'Prepare fresh files',
+        'This explicit action creates another complete local set, even when collection content is unchanged.',
+      );
+      const beforeShare = (await promptSets(host, projectPath)).map((set) => set.name).sort();
+      await walkthrough.inspectHosted();
+      if (
+        JSON.stringify((await promptSets(host, projectPath)).map((set) => set.name).sort()) !==
+        JSON.stringify(beforeShare)
+      )
+        throw new Error('Opening share review regenerated an unchanged complete export.');
+      await driver.evaluate(`(() => {
+        window.__imnotaCancelWalkthrough = new Promise((resolve, reject) => {
+          const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Cancel did not become available during fresh preparation.')); }, 10000);
+          const observer = new MutationObserver(() => {
+            const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"][aria-busy="true"]');
+            const cancel = [...(dialog?.querySelectorAll('.prompt-sharing-footer button') ?? [])].find(button => button.textContent.trim() === 'Cancel' && !button.disabled);
+            if (!cancel) return;
+            observer.disconnect();
+            clearTimeout(timer);
+            cancel.click();
+            resolve(true);
+          });
+          observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+        });
+      })()`);
+      await walkthrough.option('Prepare fresh files');
+      await driver.evaluate('window.__imnotaCancelWalkthrough');
+      await driver.evaluate('delete window.__imnotaCancelWalkthrough');
+      await walkthrough.idle();
+      await driver.waitFor({ selector: '.prompt-sharing-progress-cancelled' });
+      await walkthrough.capture(
+        'Cancel preparation',
+        'Automation activated the real Cancel button as soon as fresh preparation became busy. The export stopped; completed pairs are retained. No artificial export delay was introduced.',
+      );
+      for (const set of await promptSets(host, projectPath)) {
+        const names = await fs.readdir(set.directory);
+        const pngStems = names.filter((name) => name.endsWith('.png')).map((name) => name.slice(0, -4));
+        const markdownStems = names
+          .filter((name) => name.endsWith('.md') && !name.endsWith(' - overview.md'))
+          .map((name) => name.slice(0, -3));
+        if (JSON.stringify(pngStems.sort()) !== JSON.stringify(markdownStems.sort()))
+          throw new Error('Cancellation left an incomplete PNG/Markdown pair.');
+      }
+      assertions.push(
+        'walkthrough: preview modes, keyboard menu, single-format copies, open dispatches, missing-file recovery, fresh files, local share review and cancellation',
+      );
+      await closePromptDialog(driver);
+      await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+      await createProjectThroughUi(driver, 'Empty bundle verification', false);
+      await driver.click({ selector: '.topbar-actions [data-testid="share-prompt-bundles"]' });
+      await driver.waitFor({ selector: '.prompt-sharing-empty h3', text: 'Nothing to export yet' });
+      await walkthrough.capture(
+        'Empty collection',
+        'There are no bundle cards. The dialog explains that content must be included before a bundle can be shared.',
+      );
+      await closePromptDialog(driver);
+      await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+      await driver.click({ selector: '[data-testid="add-item-text"]' });
+      await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
+      await driver.fill(
+        { selector: '[data-testid="markdown-input"]' },
+        '# Text-only bundle\n\nCopy this text without a placeholder image.',
+      );
+      await driver.click({ selector: '.topbar-actions [data-testid="share-prompt-bundles"]' });
+      await driver.waitFor({
+        selector: '[data-testid="copy-bundle-1"][aria-label="Copy text"]:not(:disabled)',
+      });
+      await walkthrough.menu();
+      const pngDisabled = await driver.evaluate<boolean>(
+        `[...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent.trim() === 'Copy PNG' && item.disabled)`,
+      );
+      if (!pngDisabled) throw new Error('Text-only bundle offered an enabled Copy PNG action.');
+      await walkthrough.capture(
+        'Text-only options',
+        'A text-only bundle uses Copy text, disables Copy PNG and preview, and omits the Windows file/image format choices.',
+      );
+      await driver.press('Escape');
+      await driver.click({ selector: '[data-testid="copy-bundle-1"]' });
+      await driver.waitFor({ selector: '[data-testid="copy-bundle-1"].is-copied' });
+      if (
+        !(await nativeClipboard.readText()).includes('# Text-only bundle') ||
+        !(await nativeClipboard.readImage()).isEmpty()
+      )
+        throw new Error('Text-only export did not produce text without an image.');
+      await walkthrough.capture(
+        'Text-only export complete',
+        'The real primary action copied Markdown without an image and generated a Markdown file.',
+      );
+      await driver.resize({ width: 1080, height: 680 });
+      await walkthrough.menu();
+      await walkthrough.capture(
+        'Minimum window: copy menu',
+        'The menu and dialog are checked at the supported 1080×680 minimum window.',
+      );
+      await driver.press('Escape');
+      assertions.push(
+        'walkthrough: empty and text-only collections, disabled image actions and minimum-window menu',
+      );
+    }
+    await closePromptDialog(driver);
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts,
+      timings,
+      assertions,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
   await exerciseOnboarding(driver, activeWindow, artifactDirectory, artifacts);
   assertions.push('onboarding copy variants and independent clipboard fallbacks');
   const projectPath = await createProjectThroughUi(driver, 'Native Verification', true);

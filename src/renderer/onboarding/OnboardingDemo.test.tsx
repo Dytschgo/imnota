@@ -110,7 +110,7 @@ describe('OnboardingDemo', () => {
     const { props } = await reachCopyStep({ onCopyHandoff });
     fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Files ready');
-    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(/files were confirmed/i);
+    expect(screen.queryByTestId('onboarding-copy-warning')).not.toBeInTheDocument();
     expect(props.onCreateFirstProject).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create your first project' }));
 
@@ -156,7 +156,7 @@ describe('OnboardingDemo', () => {
     await reachCopyStep({ onCopyHandoff, onOpenHandoff });
     fireEvent.click(await screen.findByRole('button', { name: 'Copy files' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Files ready');
-    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(/receiving app still decides/i);
+    expect(screen.queryByTestId('onboarding-copy-warning')).not.toBeInTheDocument();
     for (const name of [
       'Copy Markdown only',
       'Copy image only',

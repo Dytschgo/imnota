@@ -131,7 +131,7 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     'Tools the server exposes (all read-only):',
     '- list_projects: active projects in the selected workspace (path, name, updated time).',
     '- list_collection_items: ordered items of a collection (id, kind, title, includeInExport, priority).',
-    '- get_latest_bundle: the latest prepared export as Markdown text plus PNG paths. Returns "bundle not prepared" when Copy Bundle has not been run; it never generates an export.',
+    '- get_latest_bundle: the latest prepared export as Markdown text plus PNG paths. Returns "bundle not prepared" until a card has been copied or prepared in Export bundles; it never generates an export.',
     '- get_item: one item as Markdown plus its image path for screenshots and drawings.',
     '- search_saved_text: search saved descriptions, annotation text, Markdown blocks and drawing text.',
     '',

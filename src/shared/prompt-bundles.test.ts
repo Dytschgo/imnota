@@ -139,11 +139,13 @@ describe('prompt bundle planning', () => {
   it('returns friendly no-content results for empty and all-excluded collections', () => {
     expect(planPromptBundles(collection([]), [])).toEqual({
       kind: 'no-content',
-      message: 'This collection has no screenshots yet. Add a screenshot to create a prompt bundle.',
+      message:
+        'This collection has no content yet. Add a picture, text block, or drawing to create a prompt bundle.',
     });
     expect(planPromptBundles(collection([screenshot('hidden', 0, { includeInExport: false })]), [])).toEqual({
       kind: 'no-content',
-      message: 'No screenshots are included. Turn on at least one screenshot to create a prompt bundle.',
+      message:
+        'No content is included. Turn on at least one picture, text block, or drawing to create a prompt bundle.',
     });
   });
 

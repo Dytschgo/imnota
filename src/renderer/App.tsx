@@ -244,7 +244,7 @@ export default function App() {
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
-      if (!result.ok) setError(result.error.message);
+      if (!result.ok && !promptBundles.isOpen) setError(result.error.message);
     },
     [promptBundles],
   );
@@ -1854,7 +1854,9 @@ export default function App() {
         onNewProject={() => setDialog('new-project')}
         onOpenProject={openProjectDialog}
         onSearch={openProjectSearch}
-        onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
+        onOpenPromptBundles={async () => {
+          await promptBundles.open();
+        }}
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}

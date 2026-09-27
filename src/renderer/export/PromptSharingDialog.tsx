@@ -1,4 +1,5 @@
 import { AlertTriangle, CloudUpload, FolderOpen, Square } from 'lucide-react';
+import { useLayoutEffect, useRef } from 'react';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import { Button, Modal } from '../components/ui';
@@ -13,9 +14,10 @@ export interface PromptSharingDialogProps {
   hidden?: boolean;
   fileClipboardAvailable?: boolean;
   defaultCopyVariant?: WindowsCopyVariantId;
+  copyFormatSaving?: boolean;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
-  error?: { message: string };
+  error?: { message: string; technicalDetails?: string };
   preferenceError?: string;
   cleanupPending?: boolean;
   noContentMessage?: string;
@@ -61,6 +63,7 @@ export function PromptSharingDialog({
   hidden = false,
   fileClipboardAvailable = false,
   defaultCopyVariant = 'files',
+  copyFormatSaving = false,
   progress,
   error,
   preferenceError,
@@ -81,33 +84,39 @@ export function PromptSharingDialog({
   onRetryCleanup,
   onShareHosted,
 }: PromptSharingDialogProps) {
+  const formatSelect = useRef<HTMLSelectElement>(null);
+  const restoreFormatFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (copyFormatSaving || !restoreFormatFocus.current) return;
+    restoreFormatFocus.current = false;
+    if (document.activeElement === document.body) formatSelect.current?.focus();
+  }, [copyFormatSaving]);
   const busy = progress
     ? ['checking', 'planning', 'rendering', 'writing', 'copying'].includes(progress.phase)
     : false;
-  const current = progress?.bundleNumber ?? 0;
-  const total = progress?.totalBundles ?? bundles.length;
-  const progressValue =
-    progress?.phase === 'complete'
-      ? 100
-      : busy && progress?.phase !== 'checking' && progress?.phase !== 'copying' && total
-        ? Math.min(100, Math.round((current / total) * 100))
-        : undefined;
+  // bundleNumber is the item being processed, not completed work. Rendering
+  // can also split the plan again before writing starts, so it is not a percent.
+  const progressValue = progress?.phase === 'complete' ? 100 : undefined;
+  const showProgressBar =
+    progress && ['planning', 'rendering', 'writing', 'complete'].includes(progress.phase);
+  const firstImageBundle = bundles.find((bundle) => bundle.pictureNumbers.length > 0);
+  const rebuildBundle = bundles.find((bundle) => bundle.state === 'error') ?? bundles[0];
   return (
     <Modal
       hidden={hidden}
-      title="Share bundles"
-      description="Copy a bundle to your clipboard, or pick a single format from its menu."
+      title="Export bundles"
+      description="Prepare bundles locally, then copy and paste each bundle before copying the next."
       onClose={onClose}
       closeTestId="prompt-sharing-close"
     >
       <section className="prompt-sharing-dialog" aria-busy={busy} data-testid="prompt-sharing-dialog">
-        {progress && (
+        {progress && !(error && progress.phase === 'error') && (
           <div className={`prompt-sharing-progress prompt-sharing-progress-${progress.phase}`} role="status">
             <div>
               <span>{progressLabel(progress)}</span>
               {progressValue !== undefined && <strong>{progressValue}%</strong>}
             </div>
-            {progressValue !== undefined && (
+            {showProgressBar && (
               <progress value={progressValue} max={100} aria-label="Prompt export progress" />
             )}
           </div>
@@ -115,12 +124,35 @@ export function PromptSharingDialog({
         {error && (
           <div className="prompt-sharing-error" role="alert">
             <AlertTriangle size={16} aria-hidden="true" />
-            <span>{error.message}</span>
-            {cleanupPending && onRetryCleanup && (
-              <Button variant="soft" onClick={() => void onRetryCleanup()}>
-                Retry cleanup
-              </Button>
-            )}
+            <div className="prompt-sharing-error-content">
+              <span>{error.message}</span>
+              {error.technicalDetails && (
+                <details>
+                  <summary>Technical details</summary>
+                  <p>{error.technicalDetails}</p>
+                </details>
+              )}
+            </div>
+            {cleanupPending
+              ? onRetryCleanup && (
+                  <Button variant="soft" onClick={() => void onRetryCleanup()}>
+                    Retry cleanup
+                  </Button>
+                )
+              : rebuildBundle && (
+                  <Button
+                    variant="soft"
+                    onClick={() =>
+                      void onPrepareFreshFiles({
+                        planId: rebuildBundle.planId,
+                        artifactSessionId: rebuildBundle.artifactSessionId,
+                        bundleNumber: rebuildBundle.bundleNumber,
+                      })
+                    }
+                  >
+                    Rebuild bundles
+                  </Button>
+                )}
           </div>
         )}
         {preferenceError && (
@@ -131,46 +163,75 @@ export function PromptSharingDialog({
         )}
         {!bundles.length && busy ? (
           <p className="prompt-sharing-empty">Reading the saved collection and preparing prompt cards…</p>
-        ) : !bundles.length ? (
+        ) : !bundles.length && error ? null : !bundles.length ? (
           <div className="prompt-sharing-empty">
             <AlertTriangle size={20} aria-hidden="true" />
             <div>
-              <h3>No bundle to share</h3>
+              <h3>Nothing to export yet</h3>
               <p>
                 {noContentMessage ??
-                  'Include at least one screenshot in this collection before preparing a prompt bundle.'}
+                  'Include a picture, text note or drawing in this collection before preparing bundles.'}
               </p>
             </div>
           </div>
         ) : (
-          <div className="prompt-bundle-list">
-            {bundles.map((bundle) => (
-              <PromptBundleCard
-                key={`${bundle.planId}:${bundle.bundleNumber}`}
-                bundle={bundle}
-                disabled={busy}
-                fileClipboardAvailable={fileClipboardAvailable}
-                defaultCopyVariant={defaultCopyVariant}
-                onCopyFresh={onCopyFresh}
-                onCopyVariant={onCopyVariant}
-                onSelectCopyVariant={onSelectCopyVariant}
-                onPrepareFreshFiles={onPrepareFreshFiles}
-                onCopyMarkdown={onCopyMarkdown}
-                onCopyImage={onCopyImage}
-                onOpenFiles={onOpenFiles}
-                onCopyPaths={onCopyPaths}
-                onLoadPreview={onLoadPreview}
-              />
-            ))}
-          </div>
+          <>
+            {fileClipboardAvailable && firstImageBundle && (
+              <div className="prompt-sharing-copy-format">
+                <label htmlFor="prompt-copy-format">Copy format</label>
+                <select
+                  ref={formatSelect}
+                  id="prompt-copy-format"
+                  aria-label="Copy format"
+                  value={defaultCopyVariant}
+                  disabled={busy || copyFormatSaving || !onSelectCopyVariant}
+                  onChange={(event) => {
+                    restoreFormatFocus.current = document.activeElement === event.currentTarget;
+                    void onSelectCopyVariant?.(
+                      {
+                        planId: firstImageBundle.planId,
+                        artifactSessionId: firstImageBundle.artifactSessionId,
+                        bundleNumber: firstImageBundle.bundleNumber,
+                      },
+                      event.currentTarget.value as WindowsCopyVariantId,
+                    );
+                  }}
+                >
+                  <option value="files">Files (.md + .png)</option>
+                  <option value="rich">Text + image</option>
+                  <option value="files-rich">Files + text + image</option>
+                </select>
+              </div>
+            )}
+            <div className="prompt-bundle-list">
+              {bundles.map((bundle) => (
+                <PromptBundleCard
+                  key={`${bundle.planId}:${bundle.bundleNumber}`}
+                  bundle={bundle}
+                  disabled={busy || copyFormatSaving}
+                  fileClipboardAvailable={fileClipboardAvailable}
+                  defaultCopyVariant={defaultCopyVariant}
+                  errorReported={Boolean(error)}
+                  onCopyFresh={onCopyFresh}
+                  onCopyVariant={onCopyVariant}
+                  onPrepareFreshFiles={onPrepareFreshFiles}
+                  onCopyMarkdown={onCopyMarkdown}
+                  onCopyImage={onCopyImage}
+                  onOpenFiles={onOpenFiles}
+                  onCopyPaths={onCopyPaths}
+                  onLoadPreview={onLoadPreview}
+                />
+              ))}
+            </div>
+          </>
         )}
         <footer className="prompt-sharing-footer">
           <details className="prompt-sharing-info">
             <summary>Copying help</summary>
             <p>
               {fileClipboardAvailable
-                ? 'The native copy menu changes the primary copy action. The receiving app decides which clipboard formats it accepts. '
-                : 'Rich copy places text and image formats on the clipboard. '}
+                ? 'Copy format changes the main action for picture bundles. The receiving app decides which clipboard formats it accepts. '
+                : 'Copy bundle places text and image formats on the clipboard. '}
               File paths remain a separate plain-text fallback, and files open only when you choose an Open
               action.
             </p>

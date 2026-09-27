@@ -1,25 +1,12 @@
-import { orderedCollectionItems, type CollectionContentItem } from '../../shared/markdown';
-import { recognisedScreenshotText } from '../../shared/screenshot-ocr';
+import type { CollectionContentItem } from '../../shared/markdown';
 import {
   applyPromptBundleMarkdownIdentity,
-  planPromptBundles,
   type MeasuredPromptScreenshot,
   type PromptBundle,
   type PromptBundleNoContent,
   type PromptBundleProgress,
-  type PromptCollectionInput,
-  type PromptCollectionItemInput,
-  type PromptDrawingInput,
-  type PromptScreenshotInput,
-  type PromptTextInput,
 } from '../../shared/prompt-bundles';
-import type {
-  Annotation,
-  ImagePayload,
-  ProjectData,
-  ProjectSnapshot,
-  ScreenshotRecord,
-} from '../../shared/types';
+import type { Annotation, ImagePayload, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type {
   PromptExportBundleContent,
   PromptExportBundleGrant,
@@ -32,6 +19,8 @@ import type {
   WindowsCopyVariantId,
 } from '../../shared/workflow-bridge';
 import { describeCopyDelivery } from './clipboard-delivery';
+import { capturePromptExportSnapshot } from './prompt-export-snapshot';
+import { PromptExportPipeline } from './prompt-export-pipeline';
 import { type AnnotatedImageRender } from '../export-image';
 import {
   type ComposedPromptBundle,
@@ -39,15 +28,7 @@ import {
   type ResolvedPromptPicturePng,
 } from '../prompt-bundle-render';
 
-// Encoded PNGs only, scoped to one export. Never retain decoded canvases or grow
-// with collection size: eight million UTF-16 characters cost at most 16 MiB.
-export const MAX_RETAINED_EXPORT_CHARACTERS = 8 * 1024 * 1024;
-
-async function imageFingerprint(image: ImagePayload): Promise<string> {
-  const bytes = new TextEncoder().encode(`${image.width}:${image.height}:${image.dataUrl}`);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
+export { MAX_RETAINED_EXPORT_CHARACTERS } from './prompt-export-controller-helpers';
 import type {
   PromptBundleActionRequest,
   PromptBundleCardModel,
@@ -60,7 +41,6 @@ import {
   PromptExportArtifact,
   ActiveRun,
   ControllerFailure,
-  OCR_EXPORT_BUDGET_MS,
   cloneAndFreeze,
   failure,
   cancelledFailure,
@@ -70,9 +50,7 @@ import {
   cleanupPendingFailure,
   unwrap,
   defaultRendering,
-  planId,
   selectionNumber,
-  assertBundleRenderLimit,
   masterMarkdown,
   cardsForPlan,
   publicError,
@@ -82,6 +60,16 @@ export interface SavedPromptExportContext {
   snapshot: ProjectSnapshot;
   collectionId: string;
 }
+
+const SAVED_CONTEXT_GUIDANCE = new Set([
+  'Save the current drawing or text before preparing the prompt.',
+  'Reload and review the pending workspace change before preparing prompt bundles.',
+  'Current screenshot edits could not be saved.',
+  'Project details could not be saved. Prompt preparation was cancelled.',
+  'The workspace changed while prompt bundles were being prepared. Reload and review it, then try again.',
+  'Open a project before preparing prompt bundles.',
+  'The selected collection is no longer available.',
+]);
 
 export interface PromptExportBundleManifestInput {
   bundleNumber: number;
@@ -187,6 +175,7 @@ export interface PromptBundleControllerError {
   retryable: boolean;
   fallbackAvailable: boolean;
   nativeCode?: WorkflowError['code'];
+  technicalDetails?: string;
 }
 
 export type PromptBundleControllerActionResult =
@@ -219,6 +208,13 @@ export interface PromptBundleControllerState {
 export type PromptBundleSelection =
   number | Pick<PromptBundleActionRequest, 'bundleNumber' | 'planId' | 'artifactSessionId'>;
 
+interface SelectedBundleIdentity {
+  projectPath: string;
+  projectId: string;
+  collectionId: string;
+  entries: readonly Pick<PromptBundle['entries'][number], 'kind' | 'itemId'>[];
+}
+
 export interface PromptBundleControllerEngineOptions {
   getSavedContext(): Promise<SavedPromptExportContext>;
   bridge: PromptBundleControllerBridge;
@@ -232,6 +228,7 @@ export class PromptBundleControllerEngine {
   private readonly listeners = new Set<() => void>();
   private readonly bridge: PromptBundleControllerBridge;
   private readonly rendering: PromptBundleControllerRendering;
+  private readonly pipeline: PromptExportPipeline;
   private readonly getSavedContext: () => Promise<SavedPromptExportContext>;
   private readonly includeMasterOverview: boolean;
   private readonly getIncludeRecognisedText: () => boolean;
@@ -250,6 +247,12 @@ export class PromptBundleControllerEngine {
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
     this.getIncludeRecognisedText = options.getIncludeRecognisedText ?? (() => true);
+    this.pipeline = new PromptExportPipeline({
+      bridge: this.bridge,
+      rendering: this.rendering,
+      loadContentItem: (input) => this.loadContentItem(input),
+      onProgress: (progress) => this.emit({ progress }),
+    });
   }
 
   getState = (): PromptBundleControllerState => this.state;
@@ -265,10 +268,22 @@ export class PromptBundleControllerEngine {
     for (const listener of this.listeners) listener();
   }
 
-  private setCardState(bundleNumber: number, state: PromptBundleCardModel['state'], error?: string): void {
+  private setCardState(
+    bundleNumber: number,
+    state: PromptBundleCardModel['state'],
+    error?: string,
+    preserveOutcomeOnError = false,
+  ): void {
     this.emit({
       cards: this.state.cards.map((card) =>
-        card.bundleNumber === bundleNumber ? { ...card, state, error } : card,
+        card.bundleNumber === bundleNumber
+          ? {
+              ...card,
+              state,
+              error,
+              outcome: state === 'error' && !preserveOutcomeOnError ? undefined : card.outcome,
+            }
+          : card,
       ),
     });
   }
@@ -279,13 +294,34 @@ export class PromptBundleControllerEngine {
     primaryCopy = false,
     warning?: string,
     showExportProgress = true,
+    opened?: 'files' | 'folder',
   ): void {
     this.emit({
       error: undefined,
       cards: this.state.cards.map((card) =>
         card.bundleNumber === bundleNumber
-          ? { ...card, state: primaryCopy ? 'copied' : 'idle', outcome, error: undefined, warning }
-          : card,
+          ? outcome === 'opened'
+            ? {
+                ...card,
+                state: card.outcome && card.outcome !== 'opened' ? 'copied' : 'idle',
+                opened: opened ?? 'files',
+                error: undefined,
+              }
+            : {
+                ...card,
+                state: primaryCopy && outcome ? 'copied' : 'idle',
+                outcome,
+                opened: undefined,
+                error: undefined,
+                warning,
+              }
+          : primaryCopy
+            ? {
+                ...card,
+                state: card.state === 'copied' ? 'idle' : card.state,
+                outcome: undefined,
+              }
+            : card,
       ),
       progress: showExportProgress
         ? { phase: 'complete', bundleNumber, totalBundles: this.state.cards.length }
@@ -338,10 +374,16 @@ export class PromptBundleControllerEngine {
     try {
       saved = await this.getSavedContext();
     } catch (error) {
+      const details = actionableMessage(error, 'Saving the latest changes failed.');
       throw failure(
         'save-failed',
-        `Latest changes could not be saved, so no export was created. ${actionableMessage(error, 'Try saving again.')}`,
+        SAVED_CONTEXT_GUIDANCE.has(details)
+          ? details
+          : 'Latest changes could not be saved. Check the project folder and try again.',
         true,
+        false,
+        undefined,
+        details,
       );
     }
     throwIfAborted(signal);
@@ -360,7 +402,7 @@ export class PromptBundleControllerEngine {
         'content-changed',
         'These files belong to another project. Prepare fresh files for the current project.',
       );
-    if (artifact.input.collectionId !== context.collectionId)
+    if (artifact.collectionId !== context.collectionId)
       throw failure(
         'content-changed',
         'These files belong to another collection. Prepare fresh files for the current collection.',
@@ -387,422 +429,55 @@ export class PromptBundleControllerEngine {
     const context = await this.readSavedContext(run.controller.signal);
     this.assertActive(run);
     if (artifact) this.assertArtifactContext(artifact, context);
-    const collection = context.snapshot.project.collections.find((item) => item.id === context.collectionId);
-    if (!collection)
-      throw failure(
-        'save-failed',
-        'The current collection no longer exists. Reload the project and try again.',
-        true,
-      );
-    const measured: MeasuredPromptScreenshot[] = [];
-    const promptItems: PromptCollectionItemInput[] = [];
-    const hasMixedContentItems = Boolean(
-      (context.snapshot.project as ProjectData & { contentItems?: unknown[] }).contentItems?.length,
-    );
-    const sourceByItemId = new Map<string, { filename: string; source: string; contentRevision: string }>();
-    const ocrController = new AbortController();
-    const cancelOcr = () => ocrController.abort();
-    run.controller.signal.addEventListener('abort', cancelOcr, { once: true });
-    const ocrTimeout = window.setTimeout(cancelOcr, OCR_EXPORT_BUDGET_MS);
-    try {
-      for (const entry of orderedCollectionItems(context.snapshot.project, context.collectionId)) {
-        this.assertActive(run);
-        if (entry.kind === 'text') {
-          const item = entry.item;
-          if (!item.includeInExport) {
-            promptItems.push({
-              id: item.id,
-              kind: 'text',
-              position: item.position,
-              includeInExport: false,
-              markdown: '',
-              contentRevision: 'excluded',
-            });
-            continue;
-          }
-          const loaded = await this.loadContentItem({
-            projectPath: context.snapshot.projectPath,
-            itemId: item.id,
-          });
-          this.assertActive(run);
-          promptItems.push({
-            id: item.id,
-            kind: 'text',
-            position: item.position,
-            includeInExport: true,
-            markdown: loaded.markdown ?? '',
-            contentRevision: loaded.contentRevision,
-          } satisfies PromptTextInput);
-          continue;
-        }
-        if (entry.kind === 'drawing') {
-          const item = entry.item;
-          if (!item.includeInExport) {
-            promptItems.push({
-              id: item.id,
-              kind: 'drawing',
-              position: item.position,
-              title: item.title ?? 'Untitled drawing',
-              originalFilename: item.imageFilename,
-              description: item.description ?? '',
-              includeInExport: false,
-              nativeWidth: item.originalWidth ?? 1,
-              nativeHeight: item.originalHeight ?? 1,
-              contentRevision: 'excluded',
-              sourceFilename: item.sourceFilename ?? `${item.id}.json`,
-            });
-            continue;
-          }
-          const loaded = await this.loadContentItem({
-            projectPath: context.snapshot.projectPath,
-            itemId: item.id,
-          });
-          this.assertActive(run);
-          if (!loaded.image)
-            throw failure(
-              'content-changed',
-              'A drawing image is unavailable. Save the drawing and export again.',
-              true,
-            );
-          // Drawing PNGs already contain their final white crop/padding. Screenshot
-          // preflight adds annotation margins that resolvePicture does not render again.
-          if (!reuseCheck)
-            measured.push({
-              screenshotId: item.id,
-              width: loaded.image.width,
-              height: loaded.image.height,
-              estimatedPngCharacters: loaded.image.dataUrl.length,
-            });
-          const sourceFilename = item.sourceFilename ?? `${item.id}.json`;
-          if (loaded.source)
-            sourceByItemId.set(item.id, {
-              filename: sourceFilename,
-              source: loaded.source,
-              contentRevision: loaded.contentRevision,
-            });
-          promptItems.push({
-            id: item.id,
-            kind: 'drawing',
-            position: item.position,
-            title: item.title ?? 'Untitled drawing',
-            originalFilename: item.imageFilename,
-            description: item.description ?? '',
-            includeInExport: true,
-            nativeWidth: loaded.image.width,
-            nativeHeight: loaded.image.height,
-            contentRevision: loaded.contentRevision,
-            sourceFilename,
-          } satisfies PromptDrawingInput);
-          continue;
-        }
-        const screenshot = entry.item as ScreenshotRecord;
-        if (!screenshot.includeInExport) {
-          promptItems.push({
-            id: screenshot.id,
-            kind: 'screenshot',
-            position: screenshot.position,
-            title: screenshot.title,
-            originalFilename: screenshot.originalFilename,
-            description: screenshot.description,
-            priority: screenshot.priority,
-            includeInExport: false,
-            nativeWidth: screenshot.originalWidth,
-            nativeHeight: screenshot.originalHeight,
-            contentRevision: 'excluded',
-            annotations: [],
-          });
-          continue;
-        }
-        const loaded = await this.bridge.loadScreenshotContent({
-          projectPath: context.snapshot.projectPath,
-          screenshot: cloneAndFreeze(screenshot) as ScreenshotRecord,
-        });
-        this.assertActive(run);
-        const annotations = cloneAndFreeze(loaded.annotations) as readonly Annotation[];
-        if (!reuseCheck) {
-          const dimensions = await this.rendering.preflight(loaded.image, annotations, run.controller.signal);
-          this.assertActive(run);
-          measured.push({
-            screenshotId: screenshot.id,
-            width: dimensions.width,
-            height: dimensions.height,
-            estimatedPngCharacters: dimensions.estimatedPngCharacters,
-          });
-        }
-        this.assertActive(run);
-        const visibleText = await recognisedScreenshotText({
-          includeRecognisedText: this.getIncludeRecognisedText(),
-          annotations,
-          pngDataUrl: loaded.image.dataUrl,
-          screenshotId: screenshot.id,
-          nativeWidth: loaded.image.width,
-          nativeHeight: loaded.image.height,
-          recognizer: this.bridge.recognizeScreenshotText
-            ? { recognize: (input) => this.bridge.recognizeScreenshotText!(input) }
-            : undefined,
-          signal: ocrController.signal,
-        });
-        this.assertActive(run);
-        promptItems.push({
-          id: screenshot.id,
-          kind: 'screenshot',
-          position: screenshot.position,
-          title: screenshot.title,
-          originalFilename: screenshot.originalFilename,
-          description: loaded.description,
-          priority: screenshot.priority,
-          includeInExport: true,
-          nativeWidth: loaded.image.width,
-          nativeHeight: loaded.image.height,
-          contentRevision: loaded.contentRevision,
-          annotations,
-          ...(visibleText ? { visibleText } : {}),
-        });
-      }
-    } finally {
-      window.clearTimeout(ocrTimeout);
-      run.controller.signal.removeEventListener('abort', cancelOcr);
-    }
-    const input = cloneAndFreeze({
-      collectionId: collection.id,
-      collectionName: collection.name,
-      overallContext: collection.overallContext,
-      screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
-      items: hasMixedContentItems ? promptItems : undefined,
-    }) as Readonly<PromptCollectionInput>;
-    // A reused copy only compares the saved input with its artifact. Changed input
-    // takes the fresh path, which performs full measurement and no-content checks.
-    if (!reuseCheck) {
-      const initial = planPromptBundles(input, measured);
-      if (initial.kind === 'no-content') return initial;
-    }
-    return {
+    return await capturePromptExportSnapshot({
       context,
-      input,
-      measured: cloneAndFreeze(measured) as readonly MeasuredPromptScreenshot[],
-      thumbnails: context.snapshot.thumbnails,
-      sourceByItemId,
-    };
+      signal: run.controller.signal,
+      reuseCheck,
+      includeRecognisedText: this.getIncludeRecognisedText(),
+      assertActive: () => this.assertActive(run),
+      loadContentItem: (input) => this.loadContentItem(input),
+      loadScreenshotContent: (input) => this.bridge.loadScreenshotContent(input),
+      preflight: (image, annotations, signal) => this.rendering.preflight(image, annotations, signal),
+      recognizeScreenshotText: this.bridge.recognizeScreenshotText
+        ? (input) => this.bridge.recognizeScreenshotText!(input)
+        : undefined,
+    });
   }
 
   private planMetadata(
     metadata: PreparedPromptMetadata,
     breakBeforeScreenshotIds: ReadonlySet<string> = new Set(),
   ): PreparedPromptPlan {
-    const result = planPromptBundles(metadata.input, metadata.measured, { breakBeforeScreenshotIds });
-    if (result.kind === 'no-content') throw failure('no-content', result.message, true);
-    return { ...metadata, plan: result, planId: planId() };
+    return this.pipeline.plan(metadata, breakBeforeScreenshotIds);
   }
 
-  private async resolvePicture(
-    prepared: PreparedPromptPlan,
-    picture: PromptBundle['pictures'][number],
-    signal: AbortSignal,
-    fingerprints?: Map<string, string>,
-  ): Promise<PromptPictureResolveResult> {
-    throwIfAborted(signal);
-    if (picture.kind === 'drawing') {
-      const loaded = await this.loadContentItem({
-        projectPath: prepared.context.snapshot.projectPath,
-        itemId: picture.screenshotId,
-      });
-      throwIfAborted(signal);
-      if (!loaded.image || loaded.contentRevision !== picture.contentRevision)
-        throw failure(
-          'content-changed',
-          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
-          true,
-        );
-      return {
-        dataUrl: loaded.image.dataUrl,
-        width: loaded.image.width,
-        height: loaded.image.height,
-        contentRevision: loaded.contentRevision,
-        release: () => undefined,
-      };
-    }
-    const screenshot = prepared.context.snapshot.project.screenshots.find(
-      (item) => item.collectionId === prepared.context.collectionId && item.id === picture.screenshotId,
-    );
-    if (!screenshot)
-      throw failure(
-        'content-changed',
-        `Picture ${picture.pictureNumber} is no longer in this collection. Save and export again.`,
-        true,
-      );
-    const loaded = await this.bridge.loadScreenshotContent({
-      projectPath: prepared.context.snapshot.projectPath,
-      screenshot: cloneAndFreeze(screenshot) as ScreenshotRecord,
-    });
-    throwIfAborted(signal);
-    if (loaded.contentRevision !== picture.contentRevision)
-      throw failure(
-        'content-changed',
-        `Picture ${picture.pictureNumber} changed after export planning. Save the latest version and export again.`,
-        true,
-      );
-    const renderOptions = { signal };
-    if (fingerprints) fingerprints.set(picture.screenshotId, await imageFingerprint(loaded.image));
-    throwIfAborted(signal);
-    const rendered = await this.rendering.render(loaded.image, loaded.annotations, renderOptions);
-    throwIfAborted(signal);
-    return {
-      dataUrl: rendered.dataUrl,
-      width: rendered.width,
-      height: rendered.height,
-      contentRevision: loaded.contentRevision,
-      release: () => undefined,
-    };
-  }
-
-  private async compose(
+  private compose(
     prepared: PreparedPromptPlan,
     bundle: PromptBundle,
     signal: AbortSignal,
     fingerprints?: Map<string, string>,
-  ) {
-    if (!bundle.pictures.length)
-      return {
-        kind: 'composed' as const,
-        dataUrl: undefined,
-        width: 0,
-        height: 0,
-        encodedCharacters: 0,
-        delivery: 'clipboard' as const,
-      };
-    assertBundleRenderLimit(bundle);
-    const composeOptions = {
-      signal,
-      resolvePicturePng: (picture: PromptBundle['pictures'][number]) =>
-        this.resolvePicture(prepared, picture, signal, fingerprints),
-    };
-    return this.rendering.compose(bundle, composeOptions);
+  ): Promise<PromptBundleComposition> {
+    return this.pipeline.compose(prepared, bundle, signal, fingerprints);
   }
 
-  private async verifyBundleContent(
+  private verifyBundleContent(
     prepared: PreparedPromptPlan,
     bundle: PromptBundle,
     signal: AbortSignal,
     fingerprints?: ReadonlyMap<string, string>,
   ): Promise<readonly { filename: string; source: string }[]> {
-    const assets: { filename: string; source: string }[] = [];
-    for (const text of bundle.textItems) {
-      throwIfAborted(signal);
-      const loaded = await this.loadContentItem({
-        projectPath: prepared.context.snapshot.projectPath,
-        itemId: text.itemId,
-      });
-      if (loaded.contentRevision !== text.contentRevision || (loaded.markdown ?? '') !== text.markdown)
-        throw failure(
-          'content-changed',
-          'Text content changed after export planning. Save and export again.',
-          true,
-        );
-    }
-    for (const picture of bundle.pictures) {
-      if (picture.kind !== 'drawing') {
-        if (fingerprints) {
-          throwIfAborted(signal);
-          const screenshot = prepared.context.snapshot.project.screenshots.find(
-            (item) => item.id === picture.screenshotId && item.collectionId === prepared.context.collectionId,
-          );
-          if (!screenshot) throw failure('content-changed', 'The screenshot is no longer available.', true);
-          const loaded = await this.bridge.loadScreenshotContent({
-            projectPath: prepared.context.snapshot.projectPath,
-            screenshot,
-          });
-          if (
-            loaded.contentRevision !== picture.contentRevision ||
-            (await imageFingerprint(loaded.image)) !== fingerprints.get(picture.screenshotId)
-          )
-            throw failure(
-              'content-changed',
-              'Picture content changed after export planning. Save and export again.',
-              true,
-            );
-        }
-        continue;
-      }
-      throwIfAborted(signal);
-      const loaded = await this.loadContentItem({
-        projectPath: prepared.context.snapshot.projectPath,
-        itemId: picture.screenshotId,
-      });
-      if (loaded.contentRevision !== picture.contentRevision || !loaded.source)
-        throw failure(
-          'content-changed',
-          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
-          true,
-        );
-      const expected = prepared.sourceByItemId.get(picture.screenshotId);
-      if (
-        !expected ||
-        expected.contentRevision !== loaded.contentRevision ||
-        expected.source !== loaded.source
-      )
-        throw failure(
-          'content-changed',
-          `Drawing ${picture.pictureNumber} changed after export planning. Save and export again.`,
-          true,
-        );
-      assets.push({ filename: expected.filename, source: expected.source });
-    }
-    throwIfAborted(signal);
-    return assets;
+    return this.pipeline.verifyBundleContent(prepared, bundle, signal, fingerprints);
   }
 
-  private async settleSplits(
+  private settleSplits(
     run: ActiveRun,
     metadata: PreparedPromptMetadata,
     compositions: Map<number, ComposedPromptBundle>,
     fingerprints: Map<string, string>,
   ): Promise<SettledPromptPlan> {
-    const breaks = new Set<string>();
-    const includedCount = (metadata.input.items ?? metadata.input.screenshots).filter(
-      (item) => item.includeInExport && item.kind !== 'text',
-    ).length;
-    for (let attempt = 0; attempt <= includedCount; attempt += 1) {
-      compositions.clear();
-      fingerprints.clear();
-      let retainedCharacters = 0;
-      this.assertActive(run);
-      const prepared = this.planMetadata(metadata, breaks);
-      const encoded = new Map<number, number>();
-      let changed = false;
-      for (const bundle of prepared.plan.bundles) {
-        this.emit({
-          progress: {
-            phase: 'rendering',
-            bundleNumber: bundle.number,
-            totalBundles: prepared.plan.bundles.length,
-            message: `Checking Bundle ${bundle.number} of ${prepared.plan.bundles.length}`,
-          },
-        });
-        const composition = await this.compose(prepared, bundle, run.controller.signal, fingerprints);
-        this.assertActive(run);
-        if (composition.kind === 'encoded-overflow') {
-          if (breaks.has(composition.breakBeforeScreenshotId))
-            throw failure(
-              'render-limit',
-              'Prompt splitting could not reach a stable encoded size. Reduce oversized content and try again.',
-              true,
-            );
-          breaks.add(composition.breakBeforeScreenshotId);
-          changed = true;
-          break;
-        }
-        encoded.set(bundle.number, composition.encodedCharacters);
-        const characters = composition.dataUrl?.length ?? 0;
-        if (retainedCharacters + characters <= MAX_RETAINED_EXPORT_CHARACTERS) {
-          compositions.set(bundle.number, composition);
-          retainedCharacters += characters;
-        }
-        bundle.delivery = composition.delivery;
-        bundle.warning = composition.warning;
-      }
-      if (!changed) return { ...prepared, encodedCharacters: encoded };
-    }
-    throw failure('render-limit', 'Prompt splitting exceeded the safe number of attempts.', true);
+    return this.pipeline.settleSplits(metadata, compositions, fingerprints, run.controller.signal, () =>
+      this.assertActive(run),
+    );
   }
 
   private terminate(
@@ -881,7 +556,8 @@ export class PromptBundleControllerEngine {
       planId: prepared.planId,
       projectPath: prepared.context.snapshot.projectPath,
       projectId: prepared.context.snapshot.project.id,
-      input: prepared.input,
+      collectionId: prepared.context.collectionId,
+      snapshotFingerprint: prepared.snapshotFingerprint,
       grants: new Map(finalized.bundles.map((grant) => [grant.bundleNumber, grant])),
     };
     this.latestArtifact = artifact;
@@ -1005,7 +681,7 @@ export class PromptBundleControllerEngine {
         ('kind' in metadata ||
           artifact?.projectPath !== metadata.context.snapshot.projectPath ||
           artifact.projectId !== metadata.context.snapshot.project.id ||
-          JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
+          metadata.snapshotFingerprint !== artifact.snapshotFingerprint)
       ) {
         metadata = await this.prepareMetadata(run);
         this.assertActive(run);
@@ -1021,7 +697,7 @@ export class PromptBundleControllerEngine {
         reusablePlan?.planId === artifact.planId &&
         artifact.projectPath === metadata.context.snapshot.projectPath &&
         artifact.projectId === metadata.context.snapshot.project.id &&
-        JSON.stringify(metadata.input) === JSON.stringify(artifact.input)
+        metadata.snapshotFingerprint === artifact.snapshotFingerprint
       ) {
         const cards =
           this.state.cards.length === reusablePlan.plan.bundles.length &&
@@ -1038,6 +714,7 @@ export class PromptBundleControllerEngine {
       this.activeRun = undefined;
       return { ok: true };
     } catch (error) {
+      if (run && this.activeRun === run && publicError(error).code !== 'cancelled') this.emit({ cards: [] });
       return this.resultError(error, run);
     }
   }
@@ -1064,6 +741,47 @@ export class PromptBundleControllerEngine {
     variant: WindowsCopyVariantId,
   ): Promise<PromptBundleControllerActionResult> {
     return this.copyWithReusableArtifact(selection, variant);
+  }
+
+  private selectedBundleIdentity(selection: PromptBundleSelection): SelectedBundleIdentity | undefined {
+    const bundleNumber = selectionNumber(selection);
+    const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
+    const plan = this.latestPlan;
+    if (!plan || !card || card.planId !== plan.planId) return undefined;
+    const bundle = plan.plan.bundles.find((item) => item.number === bundleNumber);
+    if (!bundle) return undefined;
+    return {
+      projectPath: plan.context.snapshot.projectPath,
+      projectId: plan.context.snapshot.project.id,
+      collectionId: plan.context.collectionId,
+      entries: bundle.entries.map(({ kind, itemId }) => ({ kind, itemId })),
+    };
+  }
+
+  private matchesSelectedBundle(
+    selected: SelectedBundleIdentity,
+    prepared: PreparedPromptPlan,
+    bundle: PromptBundle,
+  ): boolean {
+    return (
+      selected.projectPath === prepared.context.snapshot.projectPath &&
+      selected.projectId === prepared.context.snapshot.project.id &&
+      selected.collectionId === prepared.context.collectionId &&
+      selected.entries.length === bundle.entries.length &&
+      selected.entries.every(
+        (entry, index) =>
+          entry.kind === bundle.entries[index].kind && entry.itemId === bundle.entries[index].itemId,
+      )
+    );
+  }
+
+  private changedSelectedBundleFailure(): ControllerFailure {
+    return failure(
+      'content-changed',
+      'The selected bundle changed during preparation. Review the refreshed cards, then copy the bundle you want.',
+      true,
+      true,
+    );
   }
 
   private async copyWithReusableArtifact(
@@ -1097,6 +815,11 @@ export class PromptBundleControllerEngine {
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
       );
+    const selectedIdentity = this.selectedBundleIdentity(selection);
+    if (typeof selection !== 'number' && !selectedIdentity)
+      return this.resultError(
+        failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+      );
     if (
       this.pendingCleanup ||
       !artifact ||
@@ -1105,7 +828,7 @@ export class PromptBundleControllerEngine {
       (typeof selection !== 'number' && !selection.artifactSessionId) ||
       (typeof selection === 'number' && card?.artifactSessionId !== artifact.sessionId)
     )
-      return this.fresh(bundleNumber, true, target);
+      return this.fresh(bundleNumber, true, target, selectedIdentity);
 
     let run: ActiveRun | undefined;
     try {
@@ -1119,9 +842,9 @@ export class PromptBundleControllerEngine {
       const metadata = await this.prepareMetadata(run, artifact, true);
       this.assertActive(run);
       if ('kind' in metadata) throw failure('no-content', metadata.message, true);
-      if (JSON.stringify(metadata.input) !== JSON.stringify(artifact.input)) {
+      if (metadata.snapshotFingerprint !== artifact.snapshotFingerprint) {
         this.activeRun = undefined;
-        return this.fresh(bundleNumber, true, target);
+        return this.fresh(bundleNumber, true, target, selectedIdentity);
       }
       if (card?.delivery === 'file-only')
         throw failure(
@@ -1158,32 +881,106 @@ export class PromptBundleControllerEngine {
     return this.fresh(selectionNumber(selection), false);
   }
 
-  /** Creates a new local finalized export, then reads only Markdown and rendered PNG bytes for opt-in sharing. */
+  /** Reuses a complete current export or prepares fresh local files for opt-in sharing. */
   async prepareHostedShare(): Promise<
     { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
   > {
-    const prepared = await this.fresh(undefined, false);
-    if (!prepared.ok || !prepared.sessionId)
-      return prepared as { ok: false; error: PromptBundleControllerError };
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt export to finish.', true).detail,
+      };
+    if (this.pendingCleanup) {
+      const cleanup = await this.retryCleanup();
+      if (!cleanup.ok) return cleanup as { ok: false; error: PromptBundleControllerError };
+    }
+    let reusable = false;
+    let checkRun: ActiveRun | undefined;
     try {
       const artifact = this.latestArtifact;
       const plan = this.latestPlan;
-      if (!artifact || !plan)
-        throw failure('native-failure', 'The finalized local export is unavailable. Prepare it again.', true);
+      if (artifact && plan?.planId === artifact.planId) {
+        checkRun = this.beginRun();
+        this.emit({ error: undefined, progress: { phase: 'checking', message: 'Checking saved bundles' } });
+        const metadata = await this.prepareMetadata(checkRun, undefined, true);
+        this.assertActive(checkRun);
+        reusable =
+          !('kind' in metadata) &&
+          artifact.projectPath === metadata.context.snapshot.projectPath &&
+          artifact.projectId === metadata.context.snapshot.project.id &&
+          artifact.collectionId === metadata.context.collectionId &&
+          artifact.snapshotFingerprint === metadata.snapshotFingerprint &&
+          artifact.grants.size === plan.plan.bundles.length &&
+          plan.plan.bundles.every((bundle) => artifact.grants.has(bundle.number));
+        if (reusable) {
+          for (const bundle of plan.plan.bundles) {
+            this.assertActive(checkRun);
+            let read: WorkflowResult<PromptExportBundleContent> | undefined;
+            try {
+              read = await this.bridge.readPromptExportBundle({
+                sessionId: artifact.sessionId,
+                bundleNumber: bundle.number,
+              });
+            } catch {
+              reusable = false;
+              break;
+            }
+            this.assertActive(checkRun);
+            const grant = artifact.grants.get(bundle.number)!;
+            if (
+              !read.ok ||
+              read.value.bundleNumber !== bundle.number ||
+              read.value.markdownFilename !== grant.markdownFilename ||
+              !read.value.markdown ||
+              (Boolean(grant.pngFilename) &&
+                (read.value.pngFilename !== grant.pngFilename || !read.value.imageDataUrl))
+            ) {
+              reusable = false;
+              break;
+            }
+          }
+        }
+        if (reusable) {
+          const latest = await this.prepareMetadata(checkRun, undefined, true);
+          this.assertActive(checkRun);
+          reusable =
+            !('kind' in latest) &&
+            artifact.projectPath === latest.context.snapshot.projectPath &&
+            artifact.projectId === latest.context.snapshot.project.id &&
+            artifact.collectionId === latest.context.collectionId &&
+            artifact.snapshotFingerprint === latest.snapshotFingerprint;
+        }
+        this.assertActive(checkRun);
+        this.activeRun = undefined;
+        this.emit({ progress: undefined });
+      }
+      if (!reusable) {
+        const prepared = await this.fresh(undefined, false);
+        if (!prepared.ok || !prepared.sessionId)
+          return prepared as { ok: false; error: PromptBundleControllerError };
+      }
+      const currentArtifact = this.latestArtifact;
+      const currentPlan = this.latestPlan;
+      if (!currentArtifact || !currentPlan || currentArtifact.planId !== currentPlan.planId)
+        throw failure(
+          'native-failure',
+          'The finalized local export is unavailable. Rebuild the bundles.',
+          true,
+        );
       return {
         ok: true,
         value: {
-          title: plan.plan.collectionName || 'Imnota prompt',
-          sessionId: artifact.sessionId,
-          bundleNumbers: [...artifact.grants.keys()].sort((left, right) => left - right),
-          imageBundleNumbers: [...artifact.grants.entries()]
+          title: currentPlan.plan.collectionName || 'Imnota prompt',
+          sessionId: currentArtifact.sessionId,
+          bundleNumbers: [...currentArtifact.grants.keys()].sort((left, right) => left - right),
+          imageBundleNumbers: [...currentArtifact.grants.entries()]
             .filter(([, grant]) => Boolean(grant.pngFilename))
             .map(([bundleNumber]) => bundleNumber)
             .sort((left, right) => left - right),
         },
       };
     } catch (error) {
-      return this.resultError(error) as { ok: false; error: PromptBundleControllerError };
+      return this.resultError(error, checkRun) as { ok: false; error: PromptBundleControllerError };
     }
   }
 
@@ -1191,6 +988,7 @@ export class PromptBundleControllerEngine {
     requestedBundleNumber: number | undefined,
     copyAfterExport: boolean,
     copyTarget: WindowsCopyVariantId = 'rich',
+    selectedIdentity?: SelectedBundleIdentity,
   ): Promise<PromptBundleControllerActionResult> {
     if (this.pendingCleanup) {
       const cleanup = await this.retryCleanup();
@@ -1210,6 +1008,8 @@ export class PromptBundleControllerEngine {
           true,
           true,
         );
+      if (selectedIdentity && !this.matchesSelectedBundle(selectedIdentity, prepared, bundle))
+        throw this.changedSelectedBundleFailure();
       if (copyAfterExport) {
         if (bundle.delivery === 'file-only')
           throw failure(
@@ -1293,6 +1093,7 @@ export class PromptBundleControllerEngine {
       validate: () => Promise<void>,
     ) => Promise<WorkflowResult<unknown>>,
     outcome: PromptDeliveryOutcome = 'files',
+    opened?: 'files' | 'folder',
   ): Promise<PromptBundleControllerActionResult> {
     if (this.activeRun) {
       const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
@@ -1313,7 +1114,10 @@ export class PromptBundleControllerEngine {
           )
         )
           throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
-        const prepared = await this.prepareFreshFiles(selection);
+        const selectedIdentity = this.selectedBundleIdentity(selection);
+        if (this.state.cards.length && !selectedIdentity)
+          throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
+        const prepared = await this.fresh(selection.bundleNumber, false, 'rich', selectedIdentity);
         if (!prepared.ok) return prepared;
         selection = selection.bundleNumber;
       } else if (typeof selection === 'number' && !this.latestArtifact) {
@@ -1328,13 +1132,13 @@ export class PromptBundleControllerEngine {
         progress: {
           phase: 'copying',
           bundleNumber,
-          message: outcome === 'files' ? 'Opening generated files' : `Copying ${outcome}`,
+          message: outcome === 'opened' ? 'Opening generated files' : `Copying ${outcome}`,
         },
       });
       this.setCardState(bundleNumber, 'copying');
       const metadata = await this.prepareMetadata(run, artifact, true);
       this.assertActive(run);
-      if ('kind' in metadata || JSON.stringify(metadata.input) !== JSON.stringify(artifact.input))
+      if ('kind' in metadata || metadata.snapshotFingerprint !== artifact.snapshotFingerprint)
         throw failure(
           'content-changed',
           'The collection changed since these files were generated. Prepare fresh files before using this fallback.',
@@ -1350,12 +1154,13 @@ export class PromptBundleControllerEngine {
       const result = await action(artifact.sessionId, bundleNumber, validate);
       if (!result.ok) throw nativeFailure(result.error, true);
       this.assertActive(run);
-      this.deliveryCompleted(bundleNumber, outcome, false, undefined, false);
+      this.deliveryCompleted(bundleNumber, outcome, outcome !== 'opened', undefined, false, opened);
       this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
       const number = selectionNumber(selection);
-      if (number !== undefined) this.setCardState(number, 'error', publicError(error).message);
+      if (number !== undefined)
+        this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
       return this.resultError(error, run);
     }
   }
@@ -1375,13 +1180,27 @@ export class PromptBundleControllerEngine {
           )
         )
           throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
+        const selectedIdentity = this.selectedBundleIdentity(selection);
+        if (typeof selection !== 'number' && !selectedIdentity)
+          throw failure('invalid-bundle', 'Review the current prompt cards before copying.', true);
         run = this.beginRun();
         const metadata = await this.prepareMetadata(run);
         if ('kind' in metadata) throw failure('no-content', metadata.message, true);
         const prepared = this.planMetadata(metadata);
         const bundle = prepared.plan.bundles.find((item) => item.number === selectionNumber(selection));
-        if (!bundle)
+        if (!bundle) {
+          if (selectedIdentity) {
+            this.latestPlan = prepared;
+            this.emit({ cards: cardsForPlan(prepared) });
+            throw this.changedSelectedBundleFailure();
+          }
           throw failure('invalid-bundle', 'That prompt is no longer in the saved collection.', true);
+        }
+        if (selectedIdentity && !this.matchesSelectedBundle(selectedIdentity, prepared, bundle)) {
+          this.latestPlan = prepared;
+          this.emit({ cards: cardsForPlan(prepared) });
+          throw this.changedSelectedBundleFailure();
+        }
         await this.verifyBundleContent(prepared, bundle, run.controller.signal);
         for (const picture of bundle.pictures) {
           if (picture.kind === 'drawing') continue;
@@ -1440,14 +1259,19 @@ export class PromptBundleControllerEngine {
   }
 
   openFiles(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    return this.nativeArtifactAction(selection, async (sessionId, bundleNumber, validate) => {
-      if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
-        const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
-        if (!png.ok) return png;
-        await validate();
-      }
-      return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
-    });
+    return this.nativeArtifactAction(
+      selection,
+      async (sessionId, bundleNumber, validate) => {
+        if (this.latestArtifact?.grants.get(bundleNumber)?.pngFilename) {
+          const png = await this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'png' });
+          if (!png.ok) return png;
+          await validate();
+        }
+        return this.bridge.openPromptExportBundle({ sessionId, bundleNumber, target: 'markdown' });
+      },
+      'opened',
+      'files',
+    );
   }
 
   async openFolder(): Promise<PromptBundleControllerActionResult> {
@@ -1471,6 +1295,8 @@ export class PromptBundleControllerEngine {
           bundleNumber: selectedBundleNumber,
           target: 'folder',
         }),
+      'opened',
+      'folder',
     );
   }
 

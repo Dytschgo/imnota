@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleDialogHost, type PromptBundleUiController } from './PromptBundleDialogHost';
 import { PromptSharingDialog } from './PromptSharingDialog';
@@ -22,7 +22,7 @@ it('shows a useful empty state without offering a misleading copy action', () =>
   );
   expect(screen.getByRole('dialog')).toBeInTheDocument();
   expect(screen.getByText('No screenshots are included. Turn one on first.')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Copy Bundle' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copy bundle' })).not.toBeInTheDocument();
 });
 
 it('reports typed progress, offers cancellation, and avoids receiver-detection claims', () => {
@@ -38,11 +38,41 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
   expect(screen.getByRole('status')).toHaveTextContent('Rendering Bundle 2 of 4');
   expect(screen.queryByText('No prompt bundle to share')).not.toBeInTheDocument();
   expect(screen.getByText(/Reading the saved collection/)).toBeInTheDocument();
-  expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
+  expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  expect(screen.getByRole('status')).not.toHaveTextContent('%');
   fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();
-  expect(screen.getByRole('dialog')).toHaveTextContent(/native copy menu changes the primary copy action/i);
+  expect(screen.getByRole('dialog')).toHaveTextContent(/copy format changes the main action/i);
   expect(screen.getByRole('dialog')).not.toHaveTextContent(/receiver detected|attachment received/i);
+});
+
+it.each(['rendering', 'writing'] as const)(
+  'does not call the last %s bundle 100 percent complete',
+  (phase) => {
+    render(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={[]}
+        progress={{ phase, bundleNumber: 3, totalBundles: 3 }}
+      />,
+    );
+    expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Bundle 3 of 3');
+    expect(screen.getByRole('status')).not.toHaveTextContent('100%');
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  },
+);
+
+it('shows a failed collection read without claiming the collection is empty', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      error={{ message: 'Save the current edits and try again.' }}
+    />,
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Save the current edits and try again.');
+  expect(screen.queryByText('No bundle to share')).not.toBeInTheDocument();
 });
 
 it('reports completed exports at 100% regardless of the last bundle number', () => {
@@ -130,9 +160,9 @@ it('offers explicit retry when native export cleanup is still pending', () => {
   expect(onRetryCleanup).toHaveBeenCalledOnce();
 });
 
-it('reports a rejected default change inside the open sharing dialog and keeps the prior action', async () => {
+function hostController(): PromptBundleUiController {
   const success = async () => ({ ok: true as const });
-  const controller: PromptBundleUiController = {
+  return {
     cards: [
       {
         planId: 'plan-current',
@@ -172,6 +202,41 @@ it('reports a rejected default change inside the open sharing dialog and keeps t
       },
     })),
   };
+}
+
+it('shows the selected format immediately and waits for its save before another change', async () => {
+  let finish!: () => void;
+  const save = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const props = {
+    controller: hostController(),
+    onError: vi.fn(),
+    fileClipboardAvailable: true,
+    onDefaultCopyVariantChange: save,
+  };
+  const view = render(<PromptBundleDialogHost {...props} defaultCopyVariant="files" />);
+  const selector = screen.getByRole('combobox', { name: 'Copy format' });
+  selector.focus();
+  fireEvent.change(selector, { target: { value: 'rich' } });
+  expect(selector).toHaveValue('rich');
+  expect(selector).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Copy bundle' })).toBeDisabled();
+  selector.blur();
+  view.rerender(<PromptBundleDialogHost {...props} defaultCopyVariant="rich" />);
+  await act(async () => finish());
+  expect(selector).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Copy bundle' })).toBeEnabled();
+  expect(selector).toHaveFocus();
+  expect(selector).toHaveValue('rich');
+  expect(save).toHaveBeenCalledExactlyOnceWith('rich');
+});
+
+it('reports a rejected default change inside the open sharing dialog and keeps the prior action', async () => {
+  const controller = hostController();
   const onError = vi.fn();
   render(
     <PromptBundleDialogHost
@@ -183,9 +248,114 @@ it('reports a rejected default change inside the open sharing dialog and keeps t
     />,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Rich copy' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Copy format' }), { target: { value: 'rich' } });
   expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
-  expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Copy bundle' })).toBeEnabled();
+  expect(screen.getByRole('combobox', { name: 'Copy format' })).toHaveValue('files');
   expect(onError).not.toHaveBeenCalled();
+});
+
+it('shows a failed controller copy inline without invoking a duplicate toast', async () => {
+  const controller = hostController();
+  const onError = vi.fn();
+  controller.copyVariant = vi.fn(async () => ({
+    ok: false as const,
+    error: { message: 'Could not copy this bundle.' },
+  }));
+  const view = render(
+    <PromptBundleDialogHost
+      controller={controller}
+      onError={onError}
+      fileClipboardAvailable
+      defaultCopyVariant="files"
+    />,
+  );
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy bundle' })));
+  expect(controller.copyVariant).toHaveBeenCalledOnce();
+  expect(onError).not.toHaveBeenCalled();
+
+  controller.error = { message: 'Could not copy this bundle.' };
+  view.rerender(
+    <PromptBundleDialogHost
+      controller={controller}
+      onError={onError}
+      fileClipboardAvailable
+      defaultCopyVariant="files"
+    />,
+  );
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not copy this bundle.');
+  expect(onError).not.toHaveBeenCalled();
+});
+
+it('selects one persisted format for image bundles without putting preferences in action menus', () => {
+  const onSelectCopyVariant = vi.fn();
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[
+        {
+          planId: 'current',
+          artifactSessionId: 'saved',
+          bundleNumber: 1,
+          pictureNumbers: [1],
+          screenshotCount: 1,
+          excludedCount: 0,
+          width: 1280,
+          height: 800,
+          delivery: 'clipboard',
+          state: 'idle',
+        },
+      ]}
+      defaultCopyVariant="files"
+      onSelectCopyVariant={onSelectCopyVariant}
+    />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Copy format' }), {
+    target: { value: 'files-rich' },
+  });
+  expect(onSelectCopyVariant).toHaveBeenCalledWith(
+    { planId: 'current', artifactSessionId: 'saved', bundleNumber: 1 },
+    'files-rich',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  expect(screen.queryByText('Default copy format')).not.toBeInTheDocument();
+  expect(screen.getByRole('menuitem', { name: 'Copy Markdown' })).toBeInTheDocument();
+});
+
+it('reports one error with details and rebuilds the affected bundle', () => {
+  const onPrepareFreshFiles = vi.fn();
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      onPrepareFreshFiles={onPrepareFreshFiles}
+      bundles={[
+        {
+          planId: 'current',
+          artifactSessionId: 'saved',
+          bundleNumber: 2,
+          pictureNumbers: [1],
+          screenshotCount: 1,
+          excludedCount: 0,
+          width: 1280,
+          height: 800,
+          delivery: 'clipboard',
+          state: 'error',
+          error: 'Could not copy this bundle.',
+        },
+      ]}
+      progress={{ phase: 'error', message: 'Could not copy this bundle.' }}
+      error={{ message: 'Could not copy this bundle.', technicalDetails: 'Native clipboard unavailable' }}
+    />,
+  );
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getAllByText('Could not copy this bundle.')).toHaveLength(1);
+  fireEvent.click(screen.getByText('Technical details'));
+  expect(screen.getByText('Native clipboard unavailable')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Rebuild bundles' }));
+  expect(onPrepareFreshFiles).toHaveBeenCalledWith({
+    planId: 'current',
+    artifactSessionId: 'saved',
+    bundleNumber: 2,
+  });
 });

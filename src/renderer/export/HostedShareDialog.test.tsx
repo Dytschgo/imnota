@@ -116,7 +116,12 @@ describe('HostedShareDialog', () => {
     const create = screen.getByRole('button', { name: 'Create link' });
     expect(screen.queryByRole('link', { name: /Site owner/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /ZIP/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/ZIP included/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Share collection bundles' })).toBeInTheDocument();
+    expect(screen.getByText(/2 bundles.*Markdown.*1 PNG.*ZIP included/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/everyone with the link can open all bundles in this export/),
+    ).toBeInTheDocument();
+    expect(native.createHostedShare).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Pairing code')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pairing code' }).closest('footer')).toBe(
       create.closest('footer'),
@@ -127,7 +132,12 @@ describe('HostedShareDialog', () => {
     fireEvent.click(create);
     await screen.findByRole('heading', { name: 'Your link is ready' });
     expect(native.createHostedShare).toHaveBeenCalledWith(
-      expect.objectContaining({ includeArchive: true, expiresInDays: 7 }),
+      expect.objectContaining({
+        includeArchive: true,
+        expiresInDays: 7,
+        sessionId: artifacts.sessionId,
+        bundleNumbers: [1, 2],
+      }),
     );
     expect(screen.queryByRole('link', { name: /Site owner/ })).not.toBeInTheDocument();
   });
@@ -283,7 +293,7 @@ describe('HostedShareDialog', () => {
 
     const requestId = createHostedShare.mock.calls[0]![0].requestId;
     await waitFor(() => expect(native.cancelHostedShare).toHaveBeenCalledWith({ requestId }));
-    expect(screen.getByRole('dialog', { name: 'Share your bundle' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Share collection bundles' })).toBeInTheDocument();
     finish({
       ok: false,
       error: { code: 'session-cancelled', message: 'Hosted share upload cancelled.', retryable: true },

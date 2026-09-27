@@ -31,6 +31,7 @@ import type {
 export interface PreparedPromptMetadata {
   context: Readonly<SavedPromptExportContext>;
   input: Readonly<PromptCollectionInput>;
+  snapshotFingerprint: string;
   measured: readonly MeasuredPromptScreenshot[];
   thumbnails: Readonly<Record<string, string>>;
   sourceByItemId: ReadonlyMap<string, { filename: string; source: string; contentRevision: string }>;
@@ -50,8 +51,9 @@ export interface PromptExportArtifact {
   planId: string;
   projectPath: string;
   projectId: string;
+  collectionId: string;
   grants: ReadonlyMap<number, PromptExportBundleGrant>;
-  input: Readonly<PromptCollectionInput>;
+  snapshotFingerprint: string;
 }
 
 export interface ActiveRun {
@@ -73,6 +75,8 @@ export class ControllerFailure extends Error {
 
 export const HARD_BUNDLE_MAX_EDGE = 16_384;
 export const HARD_BUNDLE_MAX_PIXELS = 64_000_000;
+// Encoded PNGs only, scoped to one export. Never retain decoded canvases or grow with collection size.
+export const MAX_RETAINED_EXPORT_CHARACTERS = 8 * 1024 * 1024;
 /** OCR is optional metadata: all screenshots in one Copy Bundle share this wait budget. */
 export const OCR_EXPORT_BUDGET_MS = 10_000;
 export let nextPlanId = 0;
@@ -97,8 +101,9 @@ export function failure(
   retryable = true,
   fallbackAvailable = false,
   nativeCode?: WorkflowError['code'],
+  technicalDetails?: string,
 ): ControllerFailure {
-  return new ControllerFailure({ code, message, retryable, fallbackAvailable, nativeCode });
+  return new ControllerFailure({ code, message, retryable, fallbackAvailable, nativeCode, technicalDetails });
 }
 
 export function cancelledFailure(): ControllerFailure {
@@ -114,7 +119,24 @@ export function actionableMessage(error: unknown, fallback: string): string {
 }
 
 export function nativeFailure(error: WorkflowError, fallbackAvailable = false): ControllerFailure {
-  return failure('native-failure', error.message, error.retryable, fallbackAvailable, error.code);
+  const messages: Partial<Record<WorkflowError['code'], string>> = {
+    'io-failure': /\bENOENT\b/.test(error.message)
+      ? 'An export file is missing. Rebuild the bundles to create a new copy.'
+      : 'The export files could not be read or written. Check available space and folder access, then try again.',
+    'session-not-found': 'The saved export is no longer available. Rebuild the bundles and try again.',
+    'bundle-not-found': 'A saved bundle is no longer available. Rebuild the bundles and try again.',
+    'project-not-found': 'The project is no longer available. Open it again and rebuild the bundles.',
+    'collection-not-found': 'The collection is no longer available. Open it again and rebuild the bundles.',
+    'permission-denied': 'The export folder cannot be accessed. Check its permissions and try again.',
+  };
+  return failure(
+    'native-failure',
+    messages[error.code] ?? error.message,
+    error.retryable,
+    fallbackAvailable,
+    error.code,
+    messages[error.code] ? error.message : undefined,
+  );
 }
 
 export function cleanupPendingFailure(error: unknown): ControllerFailure {
@@ -125,6 +147,7 @@ export function cleanupPendingFailure(error: unknown): ControllerFailure {
     true,
     false,
     detail.nativeCode,
+    detail.technicalDetails,
   );
 }
 
@@ -176,8 +199,9 @@ export function selectionNumber(selection?: PromptBundleSelection): number | und
   return typeof selection === 'number' ? selection : selection?.bundleNumber;
 }
 
-export function estimatedBytes(encodedCharacters: number | undefined): number | undefined {
-  return encodedCharacters === undefined ? undefined : Math.max(0, Math.floor((encodedCharacters * 3) / 4));
+export function estimatedBytes(encodedCharacters: number | undefined, markdown = ''): number | undefined {
+  if (encodedCharacters === undefined) return undefined;
+  return new TextEncoder().encode(markdown).length + Math.max(0, Math.floor((encodedCharacters * 3) / 4));
 }
 
 export function renderLimitMessage(bundle: PromptBundle): string {
@@ -283,29 +307,40 @@ export function cardsForPlan(
   encoded: ReadonlyMap<number, number> = new Map(),
   artifact?: PromptExportArtifact,
 ): PromptBundleCardModel[] {
-  return prepared.plan.bundles.map((bundle) => ({
-    planId: prepared.planId,
-    artifactSessionId: artifact?.grants.has(bundle.number) ? artifact.sessionId : undefined,
-    filenames: artifact?.grants.has(bundle.number)
-      ? [
-          artifact.grants.get(bundle.number)!.markdownFilename,
-          artifact.grants.get(bundle.number)!.pngFilename,
-        ].filter(Boolean)
-      : undefined,
-    outcome: artifact?.grants.has(bundle.number) ? 'files' : undefined,
-    bundleNumber: bundle.number,
-    pictureNumbers: bundle.pictureNumbers,
-    screenshotCount: bundle.pictures.length,
-    textCount: bundle.textItems.length,
-    excludedCount: bundle.excludedCount,
-    width: bundle.layout.width,
-    height: bundle.layout.height,
-    estimatedBytes: estimatedBytes(encoded.get(bundle.number)),
-    previewDataUrl: prepared.thumbnails[bundle.pictures[0]?.screenshotId],
-    delivery: bundle.delivery,
-    warning: bundle.warning,
-    state: 'idle',
-  }));
+  return prepared.plan.bundles.map((bundle) => {
+    const actualPngCharacters = encoded.get(bundle.number);
+    const pictureEstimates = bundle.pictures.map((picture) => picture.estimatedPngCharacters);
+    const estimatedPngCharacters =
+      bundle.pictures.length === 0
+        ? 0
+        : actualPngCharacters !== undefined && actualPngCharacters > 0
+          ? actualPngCharacters
+          : pictureEstimates.every((characters) => characters !== undefined && characters > 0)
+            ? pictureEstimates.reduce<number>((total, characters) => total + characters!, 0)
+            : undefined;
+    return {
+      planId: prepared.planId,
+      artifactSessionId: artifact?.grants.has(bundle.number) ? artifact.sessionId : undefined,
+      filenames: artifact?.grants.has(bundle.number)
+        ? [
+            artifact.grants.get(bundle.number)!.markdownFilename,
+            artifact.grants.get(bundle.number)!.pngFilename,
+          ].filter(Boolean)
+        : undefined,
+      bundleNumber: bundle.number,
+      pictureNumbers: bundle.pictureNumbers,
+      screenshotCount: bundle.pictures.length,
+      textCount: bundle.textItems.length,
+      excludedCount: bundle.excludedCount,
+      width: bundle.layout.width,
+      height: bundle.layout.height,
+      estimatedBytes: estimatedBytes(estimatedPngCharacters, bundle.markdown),
+      previewDataUrl: prepared.thumbnails[bundle.pictures[0]?.screenshotId],
+      delivery: bundle.delivery,
+      warning: bundle.warning,
+      state: 'idle',
+    };
+  });
 }
 
 export function publicError(error: unknown): PromptBundleControllerError {
@@ -313,5 +348,11 @@ export function publicError(error: unknown): PromptBundleControllerError {
   const message = actionableMessage(error, 'Prompt export failed unexpectedly. Try again.');
   if (/safe render|safe renderer|render limit|canvas safety|above the safe/i.test(message))
     return { code: 'render-limit', message, retryable: true, fallbackAvailable: false };
-  return { code: 'unexpected', message, retryable: true, fallbackAvailable: false };
+  return {
+    code: 'unexpected',
+    message: 'Prompt export failed unexpectedly. Try rebuilding the bundles.',
+    retryable: true,
+    fallbackAvailable: false,
+    technicalDetails: error instanceof Error ? message : undefined,
+  };
 }

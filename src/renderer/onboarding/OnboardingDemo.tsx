@@ -79,6 +79,7 @@ const COPY_OUTCOME_LABELS: Record<PromptDeliveryOutcome, string> = {
   image: 'Image copied',
   paths: 'File paths copied',
   files: 'Files ready',
+  opened: 'Files opened',
 };
 
 const OPEN_STATUS_LABELS: Record<OnboardingHandoffOpenTarget, string> = {

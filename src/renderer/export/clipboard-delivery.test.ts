@@ -14,10 +14,7 @@ describe('clipboard variant reporting', () => {
   it('reports exact file-list readback separately from plain paths', () => {
     expect(
       describeCopyDelivery('files', { text: false, html: false, image: false, files: true }, true),
-    ).toMatchObject({
-      outcome: 'files',
-      warning: expect.stringMatching(/receiving app.*decides/i),
-    });
+    ).toEqual({ outcome: 'files' });
     expect(
       describeCopyDelivery('files', { text: false, html: false, image: false, files: false }, true),
     ).toEqual({ warning: expect.stringContaining('Copy file paths') });
@@ -25,9 +22,9 @@ describe('clipboard variant reporting', () => {
 
   it('lists every confirmed files-rich representation without promising a combined paste', () => {
     const placed = { text: true, html: true, image: true, files: true };
-    expect(describeCopyDelivery('files-rich', placed, true)).toMatchObject({
+    expect(describeCopyDelivery('files-rich', placed, true)).toEqual({
       outcome: 'files',
-      warning: expect.stringMatching(/files, Markdown, HTML and image.*chooses/i),
+      warning: undefined,
     });
     expect(describeCopyMessage('files-rich', placed)).toMatch(/may choose only one representation/i);
   });

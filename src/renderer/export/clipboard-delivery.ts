@@ -47,10 +47,7 @@ export function describeCopyDelivery(
   const confirmed = sentenceList(verifiedFormats(placed));
   if (variant === 'files')
     return placed.files
-      ? {
-          outcome: 'files',
-          warning: `${confirmed} The receiving app still decides whether paste accepts file attachments.`,
-        }
+      ? { outcome: 'files' }
       : {
           warning: `${confirmed} Use Copy file paths or Open files instead.`,
         };
@@ -58,9 +55,7 @@ export function describeCopyDelivery(
     const complete = placed.files && placed.text && placed.html && placed.image;
     return {
       outcome: placed.files ? 'files' : placed.text && placed.image ? 'combined' : undefined,
-      warning: complete
-        ? `${confirmed} The receiving app chooses which of these formats it pastes.`
-        : `${confirmed} Try another comparison option or a separate copy action.`,
+      warning: complete ? undefined : `${confirmed} Try another comparison option or a separate copy action.`,
     };
   }
   if (placed.text && placed.image) return { outcome: 'combined' };

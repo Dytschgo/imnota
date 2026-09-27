@@ -23,19 +23,19 @@ Use this sheet to verify the Windows copy format that feels best in your apps. C
 
 Keep chat messages as drafts. You do not need to send anything to compare the pasted text, image preview, or attachments.
 
-After choosing a favorite, repeat that option with a disposable project called **Copy comparison**, one harmless screenshot, an annotation, and the same explanation. This checks the normal **Copy Bundle** flow as well as the guide.
+After choosing a favorite, repeat that option with a disposable project called **Copy comparison**, one harmless screenshot, an annotation, and the same explanation. This checks the normal **Export bundles** flow as well as the guide.
 
 ## Try each copy variant
 
-Open **Copy Bundle**, then use the copy choices on the image bundle. The interactive guide offers the same choices on its copy step if you prefer a disposable sample.
+Open **Export bundles**, choose a **Copy format**, then click **Copy bundle**. The interactive guide offers the same choices on its copy step if you prefer a disposable sample.
 
-| Option                                   | What it puts on the clipboard                                       | What to compare                                                 |
-| ---------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Rich copy                                | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
-| Copy files                               | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
-| Files + rich copy                        | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
-| Copy Markdown only, then Copy image only | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
-| Copy file paths                          | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
+| Option                                                | What it puts on the clipboard                                       | What to compare                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Text + image (Rich copy in the guide)                 | Markdown text, formatted HTML, and image pixels                     | Does the receiver paste the explanation, image, or both?        |
+| Files (.md + .png) (Copy files in the guide)          | The generated `.md` and `.png` as two files                         | Does the receiver attach or import both files without Explorer? |
+| Files + text + image (Files + rich copy in the guide) | Both files plus the text, HTML, and image formats                   | Which formats does the app choose? Are there duplicates?        |
+| Copy Markdown only, then Copy image only              | Two separate clipboard operations, each pasted before the next copy | Is this predictable enough to justify the extra step?           |
+| Copy file paths                                       | The two file paths as text                                          | Useful fallback only: paths are not file attachments.           |
 
 The guide and export cards label the separate actions **Copy Markdown only** and **Copy image only**. The primary button uses your saved copy format, initially **Copy files** on Windows. Choose another format from its dropdown or **Settings → Sharing → Native copy functions**. Changing the selection saves your preference without copying anything. For each option, use this same procedure:
 
@@ -81,7 +81,7 @@ Duplicate these rows for each copy option. **1** means frustrating or unusable; 
 - [ ] Selecting a different format changes the primary button without replacing the clipboard.
 - [ ] Settings and the guide/share-bundle selector show the same choice.
 - [ ] Restarting Imnota keeps the selected format.
-- [ ] Share bundles fits the window and the copy dropdown is usable without clipping.
+- [ ] Export bundles fits the window and the action menu is usable without clipping.
 
 ## Check the fallbacks once
 

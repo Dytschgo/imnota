@@ -63,6 +63,6 @@ test('remains usable after the React Strict Mode effect cleanup probe', async ()
 
   expect(outcome).toEqual({ ok: true });
   expect(result.current.isOpen).toBe(true);
-  expect(result.current.noContentMessage).toContain('no screenshots');
+  expect(result.current.noContentMessage).toContain('no content yet');
   expect(getSavedContext).toHaveBeenCalledOnce();
 });

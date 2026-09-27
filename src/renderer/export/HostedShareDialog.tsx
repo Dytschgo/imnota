@@ -189,7 +189,7 @@ export function HostedShareDialog({
   const recordUnavailable = Boolean(record?.revokedAt) || recordExpired;
   return (
     <Modal
-      title="Share your bundle"
+      title="Share collection bundles"
       onClose={busy ? () => undefined : onClose}
       closeTestId="hosted-share-close"
     >
@@ -199,7 +199,8 @@ export function HostedShareDialog({
             <div className="hosted-share-manifest">
               <strong>{artifacts.title}</strong>
               <span>
-                Markdown · {imageCount} PNG
+                {artifacts.bundleNumbers.length} {artifacts.bundleNumbers.length === 1 ? 'bundle' : 'bundles'}{' '}
+                · Markdown · {imageCount} PNG
                 {imageCount === 1 ? '' : 's'} · ZIP included
               </span>
               <details className="hosted-share-file-details">
@@ -253,7 +254,7 @@ export function HostedShareDialog({
             </fieldset>
             <div className="hosted-share-consent">
               <p id="hosted-share-consent-description">
-                I understand that everyone with the link can open the bundle.
+                I understand that everyone with the link can open all bundles in this export.
               </p>
               <button
                 type="button"
@@ -275,8 +276,9 @@ export function HostedShareDialog({
                 <Info size={14} aria-hidden="true" /> About sharing
               </summary>
               <p>
-                Only this bundle is uploaded. Copies already saved by someone else stay with them. The site
-                records views and downloads; the hosting provider may keep access logs.
+                Creating a link uploads the Markdown and rendered images from all bundles in this export.
+                Copies already saved by someone else stay with them. The site records views and downloads; the
+                hosting provider may keep access logs.
               </p>
             </details>
             {showPairing && (

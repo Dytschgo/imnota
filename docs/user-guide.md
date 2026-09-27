@@ -83,9 +83,9 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
+Choose **Export bundles** in the active collection's toolbar, then **Copy bundle** on a card. Paste it into the receiving app before copying the next card. **Copy text** is used for text-only bundles. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
 
-Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
+The first copy saves pending edits and creates a timestamped export of the current collection. Copying more bundles or copying again reuses those files until the collection changes. After an edit, the next copy creates a fresh export. Each image bundle contains a matching `.png` and `.md` file:
 
 ```text
 Collection 02 - 260907-184205 - 01.png
@@ -93,6 +93,8 @@ Collection 02 - 260907-184205 - 01.md
 ```
 
 Prompt PNGs use a white background, full-width labelled screenshots, expanded bounds for annotations outside the source image and a safety margin. Imnota chooses split points automatically when dimensions, pixel count, memory, clipboard safety or text readability require more than one bundle. Original Picture numbers are preserved across split bundles.
+
+During export, the dialog shows which bundle is being rendered or written; 100% appears only after the export completes. If the final split changes which items belong to your selected bundle, Imnota refreshes the cards and asks you to choose again before changing the clipboard. If the current collection cannot be saved or read, the dialog shows that error without offering cards from an earlier collection.
 
 An excluded screenshot is omitted from every prompt PNG but noted in Markdown, for example:
 
@@ -114,15 +116,19 @@ When a screenshot has visual annotations, Markdown lists them under `### Picture
 - step `s2` number 1 at 70.0%,40.0%
 ```
 
-On Windows the green primary button is **Copy files** by default (the generated `.md` and `.png` as two files). Change it to **Rich copy** or **Files + rich copy** from the copy menu or Settings → Sharing. On macOS the primary action is **Rich copy**. **Rich copy** writes Markdown, HTML and a prompt PNG to the clipboard in one operation, then reads the clipboard back and names the formats the operating system actually kept. The card says **Markdown + image prepared** only when both text and image are confirmed. If a format is missing, the card names it and points to **Copy Markdown only**, **Copy image only** or **Open files**. Windows in particular may keep only one format. Imnota cannot promise that both formats will arrive in the receiving app; some apps paste only text or only the image even when both are present on the clipboard. Use **Copy Markdown only**, **Copy image only**, **Open files**, **Copy file paths** or **Open export folder** when a target accepts only one format. Text-only bundles copy Markdown without an image. The button turns gray after copying and remains available to copy again.
+On Windows, **Copy format** above the cards defaults to **Files (.md + .png)**. Choose **Text + image** or **Files + text + image** there, or change the default in Settings → Sharing. Changing the format does not copy anything. On macOS, **Copy bundle** writes text and image formats. The card's options menu runs its chosen action immediately.
 
-Markdown copy works without generating an image first. Reopening Share bundles after a copy shows **Loading saved bundles** while checking the saved content, then restores the existing cards without generation progress when the collection is unchanged. Repeating **Rich copy** or a Windows copy variant shows **Copying** and reuses the generated files, including after retrying a failed clipboard copy. A changed collection creates fresh files before the primary copy. **Prepare fresh files** always generates a new export. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using a single-format fallback. Imnota reports what the clipboard held after the write, not whether another app accepted it.
+**Saved locally** means generated files exist. **Last copied** identifies the most recent confirmed copy in this dialog; copying another bundle clears the earlier copy marker. Opening files does not count as copying. A partial or unconfirmed copy names the missing formats and offers separate Markdown, image and file actions. The receiving app decides which formats to accept. Text-only bundles copy Markdown without an image, and their estimated size includes the text.
+
+If a saved export becomes unavailable, one error explains the problem. Expand **Technical details** for the underlying error, or choose **Rebuild bundles** to create fresh files. Failed copying preserves the existing clipboard; rebuilding preserves earlier completed exports.
+
+Markdown copy works without generating an image first. Reopening **Export bundles** after a copy shows **Loading saved bundles** while checking the saved content, then restores the existing cards without generation progress when the collection is unchanged. Repeating **Copy bundle** shows **Copying** and reuses the generated files, including after retrying a failed clipboard copy. A changed collection creates fresh files before the primary copy. **Prepare fresh files** always generates a new export. Copying file paths does not place file attachments on the clipboard. If the source changes after preparation, prepare fresh files before using a single-format fallback. Imnota reports what the clipboard held after the write, not whether another app accepted it.
 
 ## Local agent access
 
 Off by default. The beta **Settings → Features → MCP access** toggle lets any MCP-capable coding agent read prepared prompt bundles from the selected workspace without a clipboard paste. Imnota starts no listener until the toggle is on, and the listener binds only to `127.0.0.1` (or a spawned `--mcp` stdio process). There is no public HTTP server, account, or hosted model call.
 
-Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
+Agents can list projects, read collection items, search saved text, and load the latest export. They cannot prepare an export for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
 
 Choose **Copy prompt** in Settings and paste it into your agent; the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
 

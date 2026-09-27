@@ -209,6 +209,34 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
+  it.each([false, true])(
+    'reports export errors once when opened from the toolbar or shortcut (%s)',
+    async (shortcut) => {
+      let rejectExport = false;
+      await renderEditingProject({
+        loadScreenshotContent: vi.fn(async () => {
+          if (rejectExport) throw new Error('Synthetic export read failed');
+          return {
+            image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+            annotations: [],
+            description: 'Original note',
+            contentRevision: 'a'.repeat(64),
+          };
+        }),
+      });
+      rejectExport = true;
+      if (shortcut) {
+        fireEvent.keyDown(window, { key: 'c', code: 'KeyC', ctrlKey: true, shiftKey: true });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Export bundles' }));
+      }
+      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+      const alert = screen.getByRole('alert');
+      expect(Boolean(alert.closest('[data-testid="prompt-sharing-dialog"]'))).toBe(!shortcut);
+      expect(screen.queryByTestId('prompt-sharing-dialog') !== null).toBe(!shortcut);
+    },
+  );
+
   it('keeps the library open when launch restoration is disabled', async () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);

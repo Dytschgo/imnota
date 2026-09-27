@@ -206,7 +206,7 @@ export function AppShell({
                   data-testid="share-prompt-bundles"
                 >
                   <Sparkles size={15} aria-hidden="true" />
-                  Copy Bundle
+                  Export bundles
                 </Button>
                 <IconButton
                   label={store.snapshot.project.favourite ? 'Remove from favourites' : 'Add to favourites'}
