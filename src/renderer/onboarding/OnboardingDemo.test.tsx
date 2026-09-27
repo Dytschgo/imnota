@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
 import { OnboardingDemo, type OnboardingDemoProps } from './OnboardingDemo';
@@ -53,6 +53,11 @@ async function reachCopyStep(overrides: Partial<OnboardingDemoProps> = {}) {
   fireEvent.click(screen.getByRole('button', { name: 'Continue to copy' }));
   await screen.findByRole('heading', { name: 'Copy the bundle' });
   return { props, ...view };
+}
+
+function chooseCopyFormat(name: RegExp): void {
+  fireEvent.click(screen.getByRole('button', { name: 'Native copy function' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name }));
 }
 
 describe('OnboardingDemo', () => {
@@ -208,6 +213,21 @@ describe('OnboardingDemo', () => {
     expect(screen.queryByRole('button', { name: 'Files + rich copy' })).not.toBeInTheDocument();
   });
 
+  it('offers the copy format in an app menu with the current choice checked', async () => {
+    await reachCopyStep({ defaultCopyVariant: 'files', onDefaultCopyVariantChange: vi.fn(async () => {}) });
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Native copy function' }));
+    const menu = screen.getByRole('menu', { name: 'Native copy function' });
+    expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(3);
+    expect(within(menu).getByRole('menuitemradio', { name: /^Copy files/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Native copy function' })).toHaveFocus();
+  });
+
   it('saves a dropdown choice without copying until the primary action is clicked', async () => {
     const onDefaultCopyVariantChange = vi.fn(async () => {});
     const onCopyHandoff = vi.fn(async () => ({ text: true, html: true, image: true, files: true }));
@@ -217,9 +237,7 @@ describe('OnboardingDemo', () => {
       onDefaultCopyVariantChange,
     });
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
-      target: { value: 'rich' },
-    });
+    chooseCopyFormat(/^Rich copy/);
     await waitFor(() => expect(onDefaultCopyVariantChange).toHaveBeenCalledWith('rich'));
     expect(onCopyHandoff).not.toHaveBeenCalled();
 
@@ -234,9 +252,7 @@ describe('OnboardingDemo', () => {
       defaultCopyVariant: 'files',
       onDefaultCopyVariantChange: vi.fn(async () => Promise.reject(new Error('disk full'))),
     });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Native copy function' }), {
-      target: { value: 'rich' },
-    });
+    chooseCopyFormat(/^Rich copy/);
     expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
     expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
   });

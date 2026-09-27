@@ -323,13 +323,11 @@ async function exerciseOnboarding(
     { text: 'Continue to copy', exact: true },
   ]);
   const chooseNativeCopyFunction = async (value: 'files' | 'files-rich' | 'rich', label: string) => {
-    await driver.evaluate(`(() => {
-      const select = document.querySelector('select[aria-label="Native copy function"]');
-      if (!(select instanceof HTMLSelectElement)) throw new Error('Native copy function selector is missing.');
-      select.value = ${JSON.stringify(value)};
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`);
+    await driver.click({ selector: '.imnota-copy-format-trigger' });
+    await driver.click({
+      selector: `.imnota-copy-format-menu [role="menuitemradio"][data-variant="${value}"]`,
+    });
+    await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
   if (process.platform === 'win32') {
