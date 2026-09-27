@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Copy, PanelRight, Undo2 } from 'lucide-react';
+import { Copy, PanelRight, Trash2, Undo2 } from 'lucide-react';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { Button, EmptyState, TextArea, TextInput } from '../components/ui';
@@ -13,6 +13,7 @@ export interface ScreenshotInspectorProps {
   onUndoDescription(): void;
   canUndoDescription: boolean;
   onChangeAnnotation(patch: Partial<Annotation>): void;
+  onDeleteAnnotation(): void;
   onDuplicate(): void | Promise<void>;
 }
 
@@ -25,6 +26,7 @@ export function ScreenshotInspector({
   onUndoDescription,
   canUndoDescription,
   onChangeAnnotation,
+  onDeleteAnnotation,
   onDuplicate,
 }: ScreenshotInspectorProps) {
   if (!shot)
@@ -272,6 +274,10 @@ export function ScreenshotInspector({
                 }
               />
             )}
+            <Button variant="ghost" className="annotation-delete" onClick={onDeleteAnnotation}>
+              <Trash2 size={15} aria-hidden="true" />
+              Delete annotation
+            </Button>
           </section>
         )}
         <section className="inspector-section export-section" aria-labelledby="export-heading">

@@ -148,31 +148,8 @@ async function openScreenshotProject(driver: NativeUiDriver): Promise<string> {
   return target.projectPath;
 }
 
-async function enableExperimentalCapture(
-  driver: NativeUiDriver,
-  host: CaptureSmokeHost,
-): Promise<NativeUiDriver> {
-  await driver.click({ selector: '[data-testid="settings-button"]' });
-  await driver.waitFor({ selector: '[data-testid="settings-view"]' });
-  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
-  const captureEnabled = await driver.evaluate<boolean>(`(() => {
-    const checkbox = document.querySelector('[aria-label="Enable screen capture"]');
-    if (!(checkbox instanceof HTMLInputElement)) throw new Error('Capture preference checkbox is missing.');
-    return checkbox.checked;
-  })()`);
-  if (!captureEnabled) await driver.click({ selector: '[aria-label="Enable screen capture"]' });
-  await driver.evaluate(`new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = async () => {
-      try {
-        const result = await window.imnota.getPreferenceSettings();
-        if (result.ok && result.value.settings.capture.experimentalRegionCapture) return resolve(true);
-        if (Date.now() - started > 10000) throw new Error('Experimental capture preference was not saved.');
-        setTimeout(check, 50);
-      } catch (error) { reject(error); }
-    };
-    check();
-  })`);
+/** Capture is always available on Windows and macOS; Windows uses a smoke-only shortcut. */
+async function prepareCapture(driver: NativeUiDriver, host: CaptureSmokeHost): Promise<NativeUiDriver> {
   if (process.platform === 'win32')
     await driver.evaluate(`(async () => {
       const result = await window.imnota.setPreferenceSettings({
@@ -252,9 +229,24 @@ async function createWindowsHotkeyFocusTarget(mainWindow: BrowserWindow): Promis
   }
 }
 
+/** Wait until the renderer releases its capture guard, as reported by the Add menu. */
+async function waitForCaptureReady(driver: NativeUiDriver): Promise<void> {
+  await driver.waitFor({ selector: '.add-item-menu[data-capture-state="ready"]' });
+}
+
+/**
+ * Choose a capture item from the collection rail's Add menu, the in-window capture entry point.
+ * Wait for readiness first: an open menu closes when focus returns from a capture overlay.
+ */
+async function chooseAddMenuItem(driver: NativeUiDriver, id: string): Promise<void> {
+  await waitForCaptureReady(driver);
+  await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+  await driver.click({ selector: `[data-testid="add-item-${id}"]:not([aria-disabled="true"])` });
+}
+
 async function startCapture(
   driver: NativeUiDriver,
-  trigger: 'toolbar' | 'global-shortcut' = 'toolbar',
+  trigger: 'menu' | 'global-shortcut' = 'menu',
 ): Promise<NativeUiDriver> {
   let focusTarget: BrowserWindow | null = null;
   let overlay: BrowserWindow;
@@ -267,7 +259,7 @@ async function startCapture(
       if (!registered) throw new Error('Windows global capture shortcut is not registered.');
       focusTarget = await createWindowsHotkeyFocusTarget(driver.browserWindow);
       sendWindowsSmokeCaptureShortcut();
-    } else await driver.click({ selector: 'button[aria-label^="Capture area"]' });
+    } else await chooseAddMenuItem(driver, 'capture');
     overlay = await waitForCaptureOverlay(driver.browserWindow);
   } finally {
     if (focusTarget && !focusTarget.isDestroyed()) focusTarget.destroy();
@@ -586,7 +578,7 @@ export async function exerciseRegionCapture(
     throw new Error('Synthetic region capture smoke is only applicable on Windows and macOS.');
 
   const artifacts: SmokeCapture[] = [];
-  const driver = await enableExperimentalCapture(initialDriver, host);
+  const driver = await prepareCapture(initialDriver, host);
   const projectPath = await openScreenshotProject(driver);
   const baseline = await host.readProject(projectPath);
   const baselineFiles = await screenshotFiles(projectPath);
@@ -598,13 +590,10 @@ export async function exerciseRegionCapture(
   // Exercise the actual countdown window and IPC in packaged Windows/macOS runs.
   for (const seconds of [3, 5] as const) {
     for (const cancel of [true, false]) {
-      await driver.click({ selector: 'button[aria-label="Capture delay"]' });
+      await waitForCaptureReady(driver);
+      await driver.click({ selector: '[data-testid="add-item-trigger"]' });
       const started = Date.now();
-      await driver.click({
-        selector: '[role="menuitem"]',
-        text: `Capture in ${seconds} seconds`,
-        exact: true,
-      });
+      await driver.click({ selector: `[data-testid="add-item-capture-${seconds}"]` });
       let hud: BrowserWindow | undefined;
       while (Date.now() - started < 5000) {
         hud = BrowserWindow.getAllWindows().find(
@@ -647,7 +636,7 @@ export async function exerciseRegionCapture(
         await selectedDriver.press('Escape');
         await waitForClosed(selectedOverlay, 'Delayed capture selection');
       }
-      await driver.waitFor({ selector: 'button[aria-label="Capture delay"]' }, { enabled: true });
+      await waitForCaptureReady(driver);
       await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Delayed capture cancellation');
       await waitForScreenshotCount(host, projectPath, baseline.screenshots.length);
       if ((await screenshotFiles(projectPath)).join('\n') !== baselineFiles.join('\n'))
@@ -655,7 +644,7 @@ export async function exerciseRegionCapture(
     }
   }
 
-  let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'toolbar');
+  let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'menu');
   const defaultRegion = await overlay.evaluate<boolean>(
     `document.querySelector('[data-mode="region"]')?.getAttribute('aria-checked') === 'true'`,
   );
@@ -797,7 +786,7 @@ export async function exerciseRegionCapture(
   );
   if (!displayScreenshot) throw new Error('Display mode did not save a screenshot.');
   await verifySyntheticDisplayPng(projectPath, displayScreenshot, clickedDisplay, screen.getAllDisplays());
-  await driver.waitFor({ selector: 'button[aria-label^="Capture area"]:not(:disabled)' });
+  await waitForCaptureReady(driver);
 
   // Full-display capture must not replace the remembered region. Repeat uses the
   // same source pixels and crop through the normal renderer/native IPC path.
@@ -855,7 +844,7 @@ export async function exerciseRegionCapture(
     // The project file can be committed before the renderer accepts the new
     // snapshot and releases its capture guard. Wait for that visible state.
     await driver.waitFor({ selector: `.shot-item.active [data-testid="screenshot-${crossScreenshot.id}"]` });
-    await driver.waitFor({ selector: 'button[aria-label^="Capture area"]:not(:disabled)' });
+    await waitForCaptureReady(driver);
     await driver.press('6', [process.platform === 'darwin' ? 'meta' : 'control', 'shift']);
     const afterCrossRepeat = await waitForScreenshotCount(
       host,

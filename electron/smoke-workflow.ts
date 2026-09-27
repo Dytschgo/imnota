@@ -12,6 +12,7 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
@@ -323,13 +324,11 @@ async function exerciseOnboarding(
     { text: 'Continue to copy', exact: true },
   ]);
   const chooseNativeCopyFunction = async (value: 'files' | 'files-rich' | 'rich', label: string) => {
-    await driver.evaluate(`(() => {
-      const select = document.querySelector('select[aria-label="Native copy function"]');
-      if (!(select instanceof HTMLSelectElement)) throw new Error('Native copy function selector is missing.');
-      select.value = ${JSON.stringify(value)};
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`);
+    await driver.click({ selector: '.imnota-copy-format-trigger' });
+    await driver.click({
+      selector: `.imnota-copy-format-menu [role="menuitemradio"][data-variant="${value}"]`,
+    });
+    await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
   if (process.platform === 'win32') {
@@ -779,7 +778,7 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
 const ANNOTATION_TOOL_TEST_IDS: Record<string, string> = {
   Arrow: 'arrow',
   Crop: 'crop',
-  'Redaction mask': 'blur',
+  Redact: 'blur',
 };
 
 async function selectTool(driver: NativeUiDriver, label: string): Promise<void> {
@@ -975,7 +974,7 @@ async function exerciseNativeCanvas(
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
   await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
-  await selectTool(driver, 'Redaction mask');
+  await selectTool(driver, 'Redact');
   await driver.drag(
     {
       x: Math.round(geometry.image.x + geometry.image.width * 0.3),
@@ -1382,16 +1381,15 @@ async function captureWorkspaceMatrix(
   for (const viewport of [{ width: 1080, height: 680 }, SMOKE_VIEWPORTS[1]]) {
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
-    await driver.waitFor({ selector: '#features-title' });
+    await driver.waitFor({ selector: '#capture-title' });
     await driver.evaluate(`(() => {
       const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
-      const row = document.querySelector('[aria-label="Enable screen capture"]')?.closest('label');
-      if (!detail || !row) throw new Error('Capture feature controls are missing.');
+      const heading = document.querySelector('#capture-title');
+      if (!detail || !heading) throw new Error('Capture feature details are missing.');
       const detailBounds = detail.getBoundingClientRect();
-      const rowBounds = row.getBoundingClientRect();
-      if (detailBounds.top < rowBounds.bottom || detailBounds.height <= 0 ||
+      if (detailBounds.top < heading.getBoundingClientRect().bottom || detailBounds.height <= 0 ||
           detail.scrollWidth > detail.clientWidth)
-        throw new Error('Capture shortcut help overlaps or overflows its feature row.');
+        throw new Error('Capture shortcut help overlaps or overflows its section.');
     })()`);
     artifacts.push(
       await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-features.png`),
@@ -1510,8 +1508,10 @@ async function exercisePreferencesAndChannel(
       await driver.waitFor({
         selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
       });
-      const glass = theme === 'light' ? 'off' : 'strong';
-      await driver.click({ selector: `label:has(input[name="glass-level"][value="${glass}"])` });
+      // Light mode reveals the backdrop with automatic strong glass; dark mode uses the switch.
+      const glassOn = theme === 'dark';
+      await setGlassSurfaces(driver, glassOn);
+      const glass = glassOn ? 'balanced' : 'off';
       const reducedTransparency = await driver.evaluate<boolean>(
         `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
       );
@@ -1521,12 +1521,12 @@ async function exercisePreferencesAndChannel(
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
-      const expectedGlass = expectedFallback === 'none' ? 'strong' : 'off';
+      const expectedGlass = expectedFallback !== 'none' ? 'off' : glassOn ? 'balanced' : 'strong';
       await driver.waitFor({
-        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
+        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
-        selector: `input[name="glass-level"][value="${glass}"]:checked:not(:disabled)`,
+        selector: `input[name="glass-surfaces"]${glassOn ? ':checked' : ':not(:checked)'}:not(:disabled)`,
       });
       if (artifactDirectory)
         artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
@@ -1577,9 +1577,9 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-amber"][aria-pressed="true"]:not(:disabled)',
   });
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="balanced"])' });
+  await setGlassSurfaces(driver, true);
   await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
-  await driver.waitFor({ selector: 'input[name="glass-level"][value="balanced"]:checked:not(:disabled)' });
+  await driver.waitFor({ selector: 'input[name="glass-surfaces"]:checked:not(:disabled)' });
   await driver.evaluate(`(async () => {
     if (document.documentElement.dataset.glassLevel === 'off') return;
     const cssImage = getComputedStyle(document.querySelector('.app-shell'), '::after').backgroundImage;
@@ -1623,7 +1623,7 @@ async function exercisePreferencesAndChannel(
     await driver.click({ selector: '[data-testid="settings-button"]' });
     await driver.waitFor({ selector: '.settings-view' });
   }
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
+  await setGlassSurfaces(driver, false);
   await driver.waitFor({ selector: ':root[data-glass-requested="off"]' });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
@@ -1643,17 +1643,9 @@ async function exercisePreferencesAndChannel(
   if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
-  await driver.click({ text: 'Desktop glass (Beta)', exact: true });
-  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
-  const desktopResult = await driver.evaluate<{ ok: boolean; value?: { active: boolean } }>(
-    `window.imnota.setDesktopGlass({ enabled: true })`,
-  );
-  if (!desktopResult.ok) throw new Error('Native desktop material bridge rejected its validated request.');
-  await driver.waitFor({
-    selector: ':root[data-desktop-glass="' + (desktopResult.value?.active ? 'active' : 'fallback') + '"]',
-  });
-  await driver.click({ text: 'No image', exact: true });
-  await driver.waitFor({ selector: ':root[data-desktop-glass="off"][data-background="none"]' });
+  await driver.waitFor({ selector: ':root[data-background="none"]' });
+  if (await driver.exists({ text: 'Desktop glass (Beta)', exact: true }))
+    throw new Error('The retired Desktop glass option is still offered.');
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   await driver.click({ text: 'Updates & about', exact: true });
   const chooseNightly = async () => {

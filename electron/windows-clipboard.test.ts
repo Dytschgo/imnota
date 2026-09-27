@@ -82,6 +82,9 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
           [0xc004, 'Ole Private Data'],
           [0xc006, 'Chromium internal source RFH token'],
           [0xc007, 'Chromium internal source URL'],
+          [0xc008, 'CanIncludeInClipboardHistory'],
+          [0xc009, 'CanUploadToCloudClipboard'],
+          [0xc00a, 'ExcludeClipboardContentFromMonitorProcessing'],
         ]).get(format) ?? '';
       output.write(name, 'utf16le');
       return name.length;
@@ -387,6 +390,26 @@ describe('Windows clipboard payloads', () => {
       expect(native.memory.get(native.clipboard.get(15)!)).toEqual(windowsDropFilesBuffer(pair));
     },
   );
+
+  it('copies over and restores Windows clipboard-history policy flags byte-for-byte', async () => {
+    // Snipping Tool, browsers and clipboard managers mark content with these flags.
+    const prior: Array<[number, Buffer]> = [
+      [13, windowsUnicodeTextBuffer('prior selection')],
+      [0xc008, Buffer.from('00000000', 'hex')],
+      [0xc009, Buffer.from('00000000', 'hex')],
+      [0xc00a, Buffer.from('01000000', 'hex')],
+    ];
+    const copied = nativeMock(prior);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, copied.api)).resolves.toBeUndefined();
+    expect([...copied.clipboard.keys()]).toEqual([15]);
+
+    const failed = nativeMock(prior);
+    failed.failSetFormat = 15;
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, failed.api)).rejects.toThrow();
+    expect([...failed.clipboard].map(([format, handle]) => [format, failed.memory.get(handle)])).toEqual(
+      prior,
+    );
+  });
 
   it('restores Chromium content and provenance byte-for-byte after a late write failure', async () => {
     const prior: Array<[number, Buffer]> = [

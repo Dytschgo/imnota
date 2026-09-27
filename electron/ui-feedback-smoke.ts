@@ -1,6 +1,7 @@
 import { clipboard, nativeImage } from 'electron';
 import fs from 'node:fs/promises';
 import { nativeClipboard } from './native-clipboard.js';
+import { setGlassSurfaces } from './smoke-appearance.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 import { agentAccessSetupPrompt } from '../src/shared/preferences.js';
 import type { ImnotaBridge, ProjectSnapshot } from '../src/shared/types.js';
@@ -189,28 +190,15 @@ export async function exerciseUiFeedback(
   })()`);
   if (persistedName !== collection.name) throw new Error('Displaying a collection changed its stored name.');
   await driver.click({ selector: '.topbar [aria-label="Add to favourites"]' });
-  await driver.waitFor({
-    selector: '#favourite-projects .side-nav-collection',
-    text: 'Collection 01',
-    exact: true,
-  });
+  await driver.waitFor({ selector: '.topbar [aria-label="Remove from favourites"]' });
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.click({ selector: '[role="menuitem"][aria-label="Archive Collection 01"]' });
   await driver.waitFor({ selector: '[role="menuitem"][aria-label="Restore Collection 01"]' });
-  await driver.waitFor(
-    { selector: '#favourite-projects .side-nav-collection', text: 'Collection 01', exact: true },
-    { absent: true },
-  );
   await driver.waitFor(
     { selector: '#quick-access-collections .side-nav-collection.active' },
     { absent: true },
   );
   await driver.click({ selector: '[role="menuitem"][aria-label="Restore Collection 01"]' });
-  await driver.waitFor({
-    selector: '#favourite-projects .side-nav-collection',
-    text: 'Collection 01',
-    exact: true,
-  });
   await driver.waitFor({
     selector: '#quick-access-collections .side-nav-collection.active[title="Collection 01"]',
   });
@@ -219,8 +207,10 @@ export async function exerciseUiFeedback(
   const primaryDestinations = await driver.evaluate<string[]>(
     `[...document.querySelectorAll('.side-nav-primary .nav-item')].map(button => button.textContent.trim())`,
   );
-  if (JSON.stringify(primaryDestinations) !== JSON.stringify(['Projects', 'Archived']))
-    throw new Error('Duplicate Recent or Favourites destinations remain in primary navigation.');
+  if (JSON.stringify(primaryDestinations) !== JSON.stringify(['Projects']))
+    throw new Error('Archived, Recent or Favourites destinations remain in primary navigation.');
+  if (await driver.exists({ selector: '#favourite-projects' }))
+    throw new Error('The retired Favourite projects section is still in the side navigation.');
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'feedback-quick-collections-restored.png'));
   await driver.click({ selector: '.topbar [aria-label="Remove from favourites"]' });
@@ -430,7 +420,8 @@ export async function exerciseUiFeedback(
   if (!templateProjectExists)
     throw new Error('Template picker verification did not retain its template project.');
   clipboard.clear();
-  await driver.click({ text: 'Paste from clipboard', exact: true });
+  await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+  await driver.click({ selector: '[data-testid="add-item-paste"]' });
   await driver.waitFor({ selector: '[data-testid="error-toast"]' });
   await driver.evaluate(`(async () => {
     const error = document.querySelector('[data-testid="error-toast"]');
@@ -543,7 +534,7 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
   await driver.click({ selector: `[data-testid="project-archive-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
-  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Archived', exact: true });
+  await driver.click({ selector: '.library-filter button', text: 'Archived', exact: true });
   await driver.click({ selector: `[data-testid="project-restore-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
@@ -569,9 +560,9 @@ export async function exerciseUiFeedback(
   })()`);
   // Direct bridge mutations do not update the renderer's cached library list.
   // Re-entering the library performs the production refresh before row actions.
-  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Archived', exact: true });
+  await driver.click({ selector: '.library-filter button', text: 'Archived', exact: true });
   await driver.waitFor({
-    selector: '.side-nav-primary .nav-item[aria-current="page"]',
+    selector: '.library-filter button[aria-pressed="true"]',
     text: 'Archived',
     exact: true,
   });
@@ -637,8 +628,8 @@ export async function exerciseUiFeedback(
   await driver.click({ text: 'Appearance', exact: true });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="strong"]:not(:disabled))' });
-  await driver.waitFor({ selector: ':root[data-glass-requested="strong"]' });
+  await setGlassSurfaces(driver, true);
+  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-emerald"][aria-pressed="true"]:not(:disabled)',
@@ -651,7 +642,7 @@ export async function exerciseUiFeedback(
   });
   if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-dark-backdrop.png'));
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
-  await driver.click({ text: 'No image', exact: true });
+  await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: ':root[data-background="none"][data-theme="light"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({

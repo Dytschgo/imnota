@@ -24,25 +24,9 @@ afterEach(() => {
 });
 
 describe('annotation toolbar', () => {
-  test('only renders capture when a capture action is available', () => {
-    const view = render(<Toolbar {...props()} />);
-    expect(screen.queryByRole('button', { name: /screen capture/i })).not.toBeInTheDocument();
-
-    view.rerender(<Toolbar {...props({ onCapture: vi.fn(), captureEnabled: true })} />);
-    expect(screen.getByRole('button', { name: 'Capture area' })).toBeEnabled();
-  });
-
-  test('starts immediate capture from the camera and delayed capture from the delay menu', () => {
-    const onCapture = vi.fn();
-    render(<Toolbar {...props({ onCapture, captureEnabled: true })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Capture area' }));
-    expect(onCapture).toHaveBeenCalledWith();
-    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
-    expect(onCapture).toHaveBeenCalledWith(3);
-    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 5 seconds' }));
-    expect(onCapture).toHaveBeenCalledWith(5);
+  test('leaves capture to the Add menu and shortcut', () => {
+    render(<Toolbar {...props()} />);
+    expect(screen.queryByRole('button', { name: /capture/i })).not.toBeInTheDocument();
   });
 
   test('dismisses tooltips after activation and departure, and reopens only on a new hover', () => {
@@ -127,8 +111,11 @@ describe('annotation toolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More annotation tools' }));
     const menu = screen.getByRole('menu', { name: 'More annotation tools' });
-    fireEvent.click(within(menu).getByRole('menuitemradio', { name: /Pixelation/ }));
-    expect(setTool).toHaveBeenCalledWith('pixelate');
+    expect(
+      within(menu).queryByRole('menuitemradio', { name: /Pixelation|Line|Callout|Rounded|Delete/ }),
+    ).toBeNull();
+    fireEvent.click(within(menu).getByRole('menuitemradio', { name: /^Redact/ }));
+    expect(setTool).toHaveBeenCalledWith('blur');
   });
 
   test('keeps More keyboard navigable and restores focus after dismissal or selection', async () => {
@@ -139,26 +126,24 @@ describe('annotation toolbar', () => {
     const trigger = toolbar.getByRole('button', { name: 'More annotation tools' });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redact/ });
     await waitFor(() => expect(redaction).toHaveFocus());
 
     fireEvent.keyDown(redaction, { key: 'End' });
-    const deleteAnnotation = toolbar.getByRole('menuitemradio', { name: /Delete annotation/ });
-    await waitFor(() => expect(deleteAnnotation).toHaveFocus());
-    fireEvent.keyDown(deleteAnnotation, { key: 'Home' });
+    const lastItem = toolbar.getByRole('menuitemradio', { name: /^Ellipse/ });
+    await waitFor(() => expect(lastItem).toHaveFocus());
+    fireEvent.keyDown(lastItem, { key: 'Home' });
     await waitFor(() => expect(redaction).toHaveFocus());
     fireEvent.keyDown(redaction, { key: 'ArrowUp' });
-    await waitFor(() => expect(deleteAnnotation).toHaveFocus());
-    fireEvent.keyDown(deleteAnnotation, { key: 'Escape' });
+    await waitFor(() => expect(lastItem).toHaveFocus());
+    fireEvent.keyDown(lastItem, { key: 'Escape' });
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.keyDown(trigger, { key: 'ArrowUp' });
-    await waitFor(() =>
-      expect(toolbar.getByRole('menuitemradio', { name: /Delete annotation/ })).toHaveFocus(),
-    );
-    fireEvent.click(toolbar.getByRole('menuitemradio', { name: /Delete annotation/ }));
-    expect(setTool).toHaveBeenCalledWith('eraser');
+    await waitFor(() => expect(toolbar.getByRole('menuitemradio', { name: /^Ellipse/ })).toHaveFocus());
+    fireEvent.click(toolbar.getByRole('menuitemradio', { name: /^Ellipse/ }));
+    expect(setTool).toHaveBeenCalledWith('ellipse');
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
@@ -171,7 +156,7 @@ describe('annotation toolbar', () => {
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    const redaction = await toolbar.findByRole('menuitemradio', { name: /^Redact/ });
     await waitFor(() => expect(redaction).toHaveFocus());
     fireEvent.keyDown(redaction, { key: 'Tab' });
     fireEvent.blur(redaction, { relatedTarget: undo });
@@ -179,7 +164,7 @@ describe('annotation toolbar', () => {
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    const firstItem = await toolbar.findByRole('menuitemradio', { name: /^Redaction mask/ });
+    const firstItem = await toolbar.findByRole('menuitemradio', { name: /^Redact/ });
     await waitFor(() => expect(firstItem).toHaveFocus());
     fireEvent.keyDown(firstItem, { key: 'Tab', shiftKey: true });
     trigger.focus();
@@ -188,7 +173,8 @@ describe('annotation toolbar', () => {
   });
 
   test('fills available container space and keeps overflow navigation and focus correct on resize', async () => {
-    let width = 600;
+    // Six primary tools plus Redact fit; Crop, Freehand and Ellipse overflow into More.
+    let width = 540;
     let resize = () => {};
     vi.stubGlobal(
       'ResizeObserver',
@@ -215,28 +201,28 @@ describe('annotation toolbar', () => {
       return { width: size, height: 29, top: 0, left: 0, right: size, bottom: 29, x: 0, y: 0, toJSON() {} };
     });
     const setTool = vi.fn();
-    const initialProps = props({ setTool, tool: 'crop' });
+    const initialProps = props({ setTool, tool: 'blur' });
     const { rerender } = render(<Toolbar {...initialProps} />);
-    expect(screen.getByRole('button', { name: 'Crop' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('button', { name: 'Freehand' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Redact' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Crop' })).toBeNull();
     const trigger = screen.getByRole('button', { name: 'More annotation tools' });
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    const freehand = screen.getByRole('menuitemradio', { name: /^Freehand/ });
-    await waitFor(() => expect(freehand).toHaveFocus());
-    expect(screen.queryByRole('menuitemradio', { name: /^Crop/ })).toBeNull();
-    fireEvent.keyDown(freehand, { key: 'End' });
-    const remove = screen.getByRole('menuitemradio', { name: /Delete annotation/ });
-    await waitFor(() => expect(remove).toHaveFocus());
-    fireEvent.keyDown(remove, { key: 'ArrowDown' });
-    await waitFor(() => expect(freehand).toHaveFocus());
+    const crop = screen.getByRole('menuitemradio', { name: /^Crop/ });
+    await waitFor(() => expect(crop).toHaveFocus());
+    expect(screen.queryByRole('menuitemradio', { name: /^Redact/ })).toBeNull();
+    fireEvent.keyDown(crop, { key: 'End' });
+    const last = screen.getByRole('menuitemradio', { name: /^Ellipse/ });
+    await waitFor(() => expect(last).toHaveFocus());
+    fireEvent.keyDown(last, { key: 'ArrowDown' });
+    await waitFor(() => expect(crop).toHaveFocus());
     act(() => {
       width = 1000;
       resize();
     });
     expect(screen.queryByRole('button', { name: 'More annotation tools' })).toBeNull();
     expect(screen.queryByRole('menu')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Delete annotation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crop' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Ellipse' })).toBeInTheDocument();
     act(() => {
       width = 400;
       resize();

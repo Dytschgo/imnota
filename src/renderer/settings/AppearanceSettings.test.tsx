@@ -2,7 +2,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_IMAGE_MAX_BYTES, DEFAULT_APPEARANCE } from '../../shared/preferences';
 import { AppearanceSettings } from './AppearanceSettings';
-import { savedBackgrounds } from './background-library';
 vi.mock('./background-library', () => ({
   savedBackgrounds: vi.fn(async () => []),
   saveBackground: vi.fn(async () => {}),
@@ -77,44 +76,49 @@ afterEach(() => {
 });
 
 describe('AppearanceSettings backdrop upload ownership', () => {
-  it('shows image controls when a backdrop image overrides stored desktop glass', () => {
+  it('shows the opacity slider only while glass shows a backdrop, and ignores stored desktop glass', () => {
     const value = {
       ...DEFAULT_APPEARANCE,
-      mode: 'system' as const,
+      glassLevel: 'balanced' as const,
       desktopGlass: true,
       backgroundImage: 'preset:mist-light',
     };
-    const effective = {
-      theme: 'light' as const,
-      accent: 'indigo' as const,
-      requestedGlassLevel: 'strong' as const,
-      glassLevel: 'strong' as const,
-      glassFallbackReason: 'none' as const,
-      desktopGlassStatus: 'off' as const,
-    };
-    const { rerender } = render(
-      <AppearanceSettings value={value} effectiveAppearance={effective} onChange={vi.fn()} />,
-    );
+    const { rerender } = render(<AppearanceSettings value={value} onChange={vi.fn()} />);
     expect(screen.getByRole('slider', { name: /Background opacity/ })).toBeEnabled();
-    expect(screen.queryByText(/Solid fallback is active/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(screen.queryByRole('button', { name: /Desktop glass/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'No image' })).not.toBeInTheDocument();
 
-    rerender(
-      <AppearanceSettings
-        value={{ ...value, backgroundImage: '' }}
-        effectiveAppearance={{ ...effective, theme: 'dark', desktopGlassStatus: 'active' }}
-        onChange={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole('slider', { name: /Glass tint/ })).toBeEnabled();
-    expect(screen.getByText(/Desktop glass \(Beta\) is active/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Desktop glass (Beta)' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    rerender(<AppearanceSettings value={{ ...value, glassLevel: 'off' }} onChange={vi.fn()} />);
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+    rerender(<AppearanceSettings value={{ ...value, backgroundImage: '' }} onChange={vi.fn()} />);
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+  });
+
+  it('keeps the opacity slider responsive and saves only the final value', async () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn(async () => undefined);
+      render(
+        <AppearanceSettings
+          value={{ ...DEFAULT_APPEARANCE, glassLevel: 'balanced', backgroundImage: 'preset:mist-light' }}
+          onChange={onChange}
+        />,
+      );
+      const slider = screen.getByRole('slider', { name: /Background opacity/ });
+      for (const next of ['0.4', '0.3', '0.22']) fireEvent.change(slider, { target: { value: next } });
+      expect(slider).toHaveValue('0.22');
+      expect(slider).toBeEnabled();
+      expect(document.documentElement.style.getPropertyValue('--imnota-background-opacity')).toBe('0.22');
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.pointerUp(slider);
+      await act(async () => undefined);
+      expect(onChange).toHaveBeenCalledOnce();
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ backgroundOpacity: 0.22 }));
+      await act(async () => vi.advanceTimersByTime(500));
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the selected character and offers generic artwork as explicit choices', async () => {
@@ -137,18 +141,6 @@ describe('AppearanceSettings backdrop upload ownership', () => {
     );
   });
 
-  it('offers native desktop glass without forgetting uploaded thumbnails', async () => {
-    vi.mocked(savedBackgrounds).mockResolvedValueOnce([
-      { id: 'one', name: 'My image', dataUrl: 'data:image/png;base64,AA==', addedAt: 1 },
-    ]);
-    const onChange = vi.fn();
-    renderSettings(onChange);
-    await screen.findByRole('button', { name: 'My image' });
-    fireEvent.click(screen.getByRole('button', { name: 'Desktop glass (Beta)' }));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ desktopGlass: true, backgroundImage: '', glassLevel: 'balanced' }),
-    );
-  });
   it('does not let a delayed FileReader completion overwrite a later bundled preset', async () => {
     const onChange = vi.fn();
     renderSettings(onChange);

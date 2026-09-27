@@ -18,6 +18,7 @@ export function Library({
   onDelete,
   onSearch,
   onBrowseProjects,
+  onFilter,
   onSelectContentResult,
 }: {
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
@@ -30,6 +31,8 @@ export function Library({
   onDelete(projectPath: string): void;
   onSearch(): void | Promise<void>;
   onBrowseProjects(): void | Promise<void>;
+  /** Switch between the project filters, which are separate navigation views. */
+  onFilter(view: 'projects' | 'favourites' | 'archived'): void | Promise<void>;
   onSelectContentResult(result: ContentSearchResult): void;
 }) {
   const { projects, search, set, view, settings, recentCollections } = useAppStore();
@@ -69,6 +72,26 @@ export function Library({
           </Button>
         </div>
       </div>
+      {view !== 'recent' && (
+        <div className="library-filter" role="group" aria-label="Show projects">
+          {(
+            [
+              ['projects', 'All'],
+              ['favourites', 'Favourites'],
+              ['archived', 'Archived'],
+            ] as const
+          ).map(([filter, label]) => (
+            <button
+              key={filter}
+              type="button"
+              aria-pressed={view === filter}
+              onClick={() => void onFilter(filter)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {view === 'recent' ? (
         <div className="search-line">
           <Search size={16} aria-hidden="true" />

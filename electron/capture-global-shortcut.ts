@@ -52,13 +52,11 @@ export function isOsHeldGlobalCaptureShortcut(binding: string, platform: Shortcu
   return normalized !== null && OS_HELD_GLOBAL_CAPTURE[platform].has(normalized);
 }
 
-/** Binding to register globally, or null when capture is off, unsupported, cleared, or OS-owned. */
+/** Binding to register globally, or null when capture is unsupported, cleared, or OS-owned. */
 export function resolveCaptureGlobalShortcut(input: {
   bindings: ShortcutBindings;
   processPlatform: NodeJS.Platform;
-  experimentalEnabled: boolean;
 }): string | null {
-  if (!input.experimentalEnabled) return null;
   if (input.processPlatform !== 'win32' && input.processPlatform !== 'darwin') return null;
   const binding = captureRegionBinding(input.bindings, input.processPlatform);
   if (!binding) return null;

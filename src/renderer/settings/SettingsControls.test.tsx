@@ -44,7 +44,7 @@ describe('preference controls', () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole('radio', { name: /Balanced/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Glass surfaces/ }));
     await waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith({
         ...DEFAULT_APPEARANCE,
@@ -52,6 +52,25 @@ describe('preference controls', () => {
         glassLevel: 'balanced',
       }),
     );
+  });
+
+  it('shows an older saved glass level as on and switches it off', async () => {
+    const onChange = vi.fn(async () => {});
+    render(
+      <AppearanceSettings value={{ ...DEFAULT_APPEARANCE, glassLevel: 'subtle' }} onChange={onChange} />,
+    );
+    const glass = screen.getByRole('checkbox', { name: /Glass surfaces/ });
+    expect(glass).toBeChecked();
+    fireEvent.click(glass);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_APPEARANCE, glassLevel: 'off' }));
+  });
+
+  it('keeps retired toggles out of Settings', () => {
+    const { rerender } = render(<SettingsView activeCategory="Features" />);
+    expect(screen.queryByRole('checkbox', { name: 'Enable screen capture' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Screen capture' })).toBeInTheDocument();
+    rerender(<SettingsView activeCategory="Shortcuts" />);
+    expect(screen.queryByText('Open recent project')).not.toBeInTheDocument();
   });
 
   it('records normalized shortcuts, explains reserved keys, and resets defaults', async () => {
@@ -155,41 +174,9 @@ describe('preference controls', () => {
     expect(screen.getByText(/without changing a workspace/i)).toBeInTheDocument();
   });
 
-  it('shows the Windows native copy default and emits a persisted-function change', async () => {
-    const onNativeCopyChange = vi.fn(async () => {});
-    render(
-      <SettingsView
-        activeCategory="Sharing"
-        preferences={DEFAULT_PREFERENCE_SETTINGS}
-        nativeCopyAvailable
-        onNativeCopyChange={onNativeCopyChange}
-      />,
-    );
-    const select = screen.getByRole('combobox', { name: 'Native copy functions' });
-    expect(select).toHaveValue('files');
-    fireEvent.change(select, { target: { value: 'files-rich' } });
-    await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'files-rich' }));
-  });
-
-  it('hides native copy functions when the host capability is unavailable', () => {
+  it('leaves the copy format choice to the Copy Bundle menu', () => {
     render(<SettingsView activeCategory="Sharing" preferences={DEFAULT_PREFERENCE_SETTINGS} />);
     expect(screen.queryByRole('combobox', { name: 'Native copy functions' })).not.toBeInTheDocument();
-  });
-
-  it('keeps the saved native copy choice when a settings update is rejected', async () => {
-    const onNativeCopyChange = vi.fn(async () => Promise.reject(new Error('disk full')));
-    render(
-      <SettingsView
-        activeCategory="Sharing"
-        preferences={DEFAULT_PREFERENCE_SETTINGS}
-        nativeCopyAvailable
-        onNativeCopyChange={onNativeCopyChange}
-      />,
-    );
-    const select = screen.getByRole('combobox', { name: 'Native copy functions' });
-    fireEvent.change(select, { target: { value: 'rich' } });
-    await waitFor(() => expect(onNativeCopyChange).toHaveBeenCalledWith({ defaultFunction: 'rich' }));
-    expect(select).toHaveValue('files');
   });
 
   it('explains when the background capture shortcut could not be registered', () => {

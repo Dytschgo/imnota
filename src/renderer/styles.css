@@ -156,20 +156,6 @@ button:disabled {
   background: transparent;
   backdrop-filter: none;
 }
-:root[data-desktop-glass='active'],
-:root[data-desktop-glass='active'] body,
-:root[data-desktop-glass='active'] .app-shell {
-  background: transparent;
-}
-:root[data-desktop-glass='active']
-  :is(.workspace, .sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  background: color-mix(in srgb, var(--surface) var(--imnota-desktop-tint, 42%), transparent);
-  backdrop-filter: none;
-}
-:root[data-desktop-glass='fallback'] :is(.sidebar, .topbar, .shot-rail, .inspector, .settings-navigation) {
-  background: var(--surface);
-  backdrop-filter: none;
-}
 :root[data-glass-level='off'] .app-shell::after {
   background-image: none;
   opacity: 0;
@@ -993,6 +979,29 @@ button.icon-button.new-collection-button svg {
   display: flex;
   gap: 7px;
 }
+.library-filter {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input);
+}
+.library-filter button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11px;
+}
+.library-filter button[aria-pressed='true'] {
+  background: var(--surface-3);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
 .search-line {
   height: 40px;
   display: flex;
@@ -1739,6 +1748,10 @@ button.icon-button.new-collection-button svg {
 }
 .annotation-properties .field {
   margin-bottom: 10px;
+}
+.annotation-properties .annotation-delete {
+  margin-top: 4px;
+  color: var(--danger);
 }
 .property-line {
   display: flex;

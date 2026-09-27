@@ -75,3 +75,7 @@ The Windows packaged smoke now creates a real Chromium renderer selection, verif
 
 - [Clipboard compatibility plan](clipboard-images-plan.md)
 - [User guide](user-guide.md)
+
+## Windows clipboard-history flags — 2026-09-27
+
+Windows Copy files and Copy files + text/image failed with “Clipboard format “CanUploadToCloudClipboard” cannot be restored safely” when the previous clipboard came from an app that marks content for clipboard history or cloud sync. `CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard` and `ExcludeClipboardContentFromMonitorProcessing` are [documented policy flags](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats#cloud-clipboard-and-clipboard-history-formats) stored as small values in global memory. They now use the bounded byte snapshot path, and a partial write restores them with the original content. Other unknown registered formats still stop the transaction before the clipboard is cleared.

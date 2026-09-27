@@ -61,16 +61,13 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
-  nativeCopyAvailable?: boolean;
   globalCaptureShortcutRegistered?: boolean;
-  onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
   onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
   onBackupRestoreFailed?(): void;
-  onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
   onAgentAccessChange?(value: PreferenceSettings['agentAccess']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
@@ -97,16 +94,13 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
-  nativeCopyAvailable = false,
   globalCaptureShortcutRegistered = false,
-  onNativeCopyChange,
   onPromptExportChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
   onBackupRestored,
   onBackupRestoreFailed,
-  onCaptureChange = async () => undefined,
   onAgentAccessChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
@@ -272,17 +266,6 @@ export function SettingsView({
             </label>
             <label className="settings-switch">
               <span>
-                <strong>Open recent project</strong>
-                <small>Resume the latest project when Imnota opens.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.openRecentOnLaunch}
-                onChange={(event) => void saveWorkspaceSetting({ openRecentOnLaunch: event.target.checked })}
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
                 <strong>Confirm before deletion</strong>
                 <small>Ask before moving a project to the system trash.</small>
               </span>
@@ -363,30 +346,12 @@ export function SettingsView({
           </section>
         </div>
         <div hidden={group !== 'Features'}>
-          <section className="settings-section" aria-labelledby="features-title">
-            <h2 id="features-title">Features</h2>
-            <p>Enable or disable features for this device. Beta features start off.</p>
-            <label className="settings-switch">
-              <span>
-                <strong>
-                  Screen capture <span className="feature-status stable">Stable</span>
-                </strong>
-                <small>
-                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
-                  Linux stays Import or Paste. Captures stay local. Area selection opens across all connected
-                  displays on Windows and macOS.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                aria-label="Enable screen capture"
-                checked={preferences.capture.experimentalRegionCapture}
-                disabled={savingPreferences}
-                onChange={(event) =>
-                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
-                }
-              />
-            </label>
+          <section className="settings-section" aria-labelledby="capture-title">
+            <h2 id="capture-title">Screen capture</h2>
+            <p>
+              Captures stay on this device. Area selection spans all connected displays on Windows and macOS;
+              on Linux, use Import or Paste.
+            </p>
             <small data-testid="capture-shortcut-summary" className="feature-detail">
               {captureShortcut ? (
                 <>
@@ -404,7 +369,7 @@ export function SettingsView({
                   . Change these under Shortcuts.
                 </>
               ) : (
-                <>Shortcut: not set. The toolbar camera button and the Add menu still work.</>
+                <>Shortcut: not set. Take screenshot in the Add menu still works.</>
               )}
               {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
             </small>
@@ -441,39 +406,7 @@ export function SettingsView({
             onChange={onAgentAccessChange}
           />
         </div>
-        {group === 'Sharing' && (
-          <>
-            {nativeCopyAvailable && (
-              <section className="settings-section" aria-labelledby="native-copy-title">
-                <h2 id="native-copy-title">Native copy functions</h2>
-                <label className="field">
-                  <span className="field-label">Primary copy action</span>
-                  <select
-                    aria-label="Native copy functions"
-                    value={preferences.nativeCopy.defaultFunction}
-                    disabled={savingPreferences || !onNativeCopyChange}
-                    onChange={(event) => {
-                      const defaultFunction = event.target
-                        .value as PreferenceSettings['nativeCopy']['defaultFunction'];
-                      void Promise.resolve()
-                        .then(() => onNativeCopyChange?.({ defaultFunction }))
-                        .catch(() => undefined);
-                    }}
-                  >
-                    <option value="files">Copy files — Markdown and PNG files</option>
-                    <option value="files-rich">Files + rich copy — files, text, and image</option>
-                    <option value="rich">Rich copy — text and image</option>
-                  </select>
-                  <small>
-                    Sets the main copy button throughout Imnota. The receiving app still chooses which
-                    clipboard formats it accepts.
-                  </small>
-                </label>
-              </section>
-            )}
-            <SharingSettings />
-          </>
-        )}
+        {group === 'Sharing' && <SharingSettings />}
       </div>
     </section>
   );
