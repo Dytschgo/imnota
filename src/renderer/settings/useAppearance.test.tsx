@@ -70,11 +70,8 @@ describe('useAppearance', () => {
     expect(root.style.getPropertyValue('--imnota-background-image')).toBe('none');
   });
 
-  it('derives light image glass without changing saved dark or native desktop choices', async () => {
+  it('derives light image glass without changing saved dark choices', async () => {
     const root = document.createElement('div');
-    const setDesktopGlass = vi.fn().mockResolvedValue({ ok: true, value: { active: false } });
-    const previous = window.imnota;
-    window.imnota = { ...previous, setDesktopGlass };
     const preferences = {
       ...DEFAULT_APPEARANCE,
       mode: 'light' as const,
@@ -89,8 +86,6 @@ describe('useAppearance', () => {
     await act(async () => undefined);
     expect(result.current.glassLevel).toBe('strong');
     expect(root.dataset.background).toBe('active');
-    expect(root.dataset.desktopGlass).toBe('off');
-    expect(setDesktopGlass).toHaveBeenLastCalledWith({ enabled: false });
     expect(preferences.glassLevel).toBe('off');
     rerender({ mode: 'dark', image: preferences.backgroundImage });
     expect(result.current.glassLevel).toBe('off');
@@ -102,7 +97,6 @@ describe('useAppearance', () => {
     expect(root.dataset.background).toBe('none');
     await act(async () => undefined);
     unmount();
-    window.imnota = previous;
   });
 
   it('injects darker light-mode accent hover, stronger soft, and onAccent', () => {

@@ -1525,7 +1525,7 @@ async function exercisePreferencesAndChannel(
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
       const expectedGlass = expectedFallback !== 'none' ? 'off' : glassOn ? 'balanced' : 'strong';
       await driver.waitFor({
-        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
+        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
         selector: `input[name="glass-surfaces"]${glassOn ? ':checked' : ':not(:checked)'}:not(:disabled)`,
@@ -1645,17 +1645,9 @@ async function exercisePreferencesAndChannel(
   if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
-  await driver.click({ text: 'Desktop glass (Beta)', exact: true });
-  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
-  const desktopResult = await driver.evaluate<{ ok: boolean; value?: { active: boolean } }>(
-    `window.imnota.setDesktopGlass({ enabled: true })`,
-  );
-  if (!desktopResult.ok) throw new Error('Native desktop material bridge rejected its validated request.');
-  await driver.waitFor({
-    selector: ':root[data-desktop-glass="' + (desktopResult.value?.active ? 'active' : 'fallback') + '"]',
-  });
-  await driver.click({ text: 'No image', exact: true });
-  await driver.waitFor({ selector: ':root[data-desktop-glass="off"][data-background="none"]' });
+  await driver.waitFor({ selector: ':root[data-background="none"]' });
+  if (await driver.exists({ text: 'Desktop glass (Beta)', exact: true }))
+    throw new Error('The retired Desktop glass option is still offered.');
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   await driver.click({ text: 'Updates & about', exact: true });
   const chooseNightly = async () => {

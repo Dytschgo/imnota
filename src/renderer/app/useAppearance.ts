@@ -19,7 +19,6 @@ export interface AppearanceEnvironment {
 }
 
 export interface EffectiveAppearance {
-  desktopGlassStatus?: 'active' | 'fallback' | 'off';
   theme: ResolvedTheme;
   accent: AccentPreset;
   requestedGlassLevel: GlassLevel;
@@ -203,7 +202,6 @@ export function useAppearance(
   const [reducedTransparency, setReducedTransparency] = useState(() =>
     mediaMatches('(prefers-reduced-transparency: reduce)'),
   );
-  const [desktopActive, setDesktopActive] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -232,27 +230,6 @@ export function useAppearance(
   );
 
   useEffect(() => {
-    let current = true;
-    setDesktopActive(false);
-    const enabled = Boolean(
-      preferences.desktopGlass && !appearanceBackdrop(preferences).image && effective.glassLevel !== 'off',
-    );
-    if (typeof window.imnota?.setDesktopGlass === 'function') {
-      void window.imnota
-        .setDesktopGlass({ enabled })
-        .then((result) => {
-          if (current) setDesktopActive(result.ok && result.value.active);
-        })
-        .catch(() => {
-          if (current) setDesktopActive(false);
-        });
-    }
-    return () => {
-      current = false;
-    };
-  }, [effective.glassLevel, effective.theme, preferences]);
-
-  useEffect(() => {
     const root = options.root ?? (typeof document === 'undefined' ? null : document.documentElement);
     if (!root) return;
     const accent = accentTokens(effective.accent, effective.theme);
@@ -279,12 +256,6 @@ export function useAppearance(
         ? 'preset'
         : 'upload'
       : 'none';
-    root.dataset.desktopGlass = desktopActive
-      ? 'active'
-      : preferences.desktopGlass && !backdrop.image
-        ? 'fallback'
-        : 'off';
-    root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, backdrop.opacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',
       backdropActive ? cssBackgroundImage(backdrop.image) : 'none',
@@ -293,14 +264,7 @@ export function useAppearance(
     // Compatibility aliases let the current indigo-named shell adopt presets before its global tokens are renamed.
     root.style.setProperty('--indigo', accent.base);
     root.style.setProperty('--indigo-light', accent.hover);
-  }, [effective, options.root, preferences, desktopActive]);
+  }, [effective, options.root, preferences]);
 
-  return {
-    ...effective,
-    desktopGlassStatus: desktopActive
-      ? 'active'
-      : preferences.desktopGlass && !appearanceBackdrop(preferences).image
-        ? 'fallback'
-        : 'off',
-  };
+  return effective;
 }

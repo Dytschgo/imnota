@@ -642,7 +642,7 @@ export async function exerciseUiFeedback(
   });
   if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-dark-backdrop.png'));
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
-  await driver.click({ text: 'No image', exact: true });
+  await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: ':root[data-background="none"][data-theme="light"]' });
   await driver.click({ selector: '[data-testid="backdrop-preset-emerald"]' });
   await driver.waitFor({

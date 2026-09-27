@@ -1930,10 +1930,6 @@ async function createWindow(): Promise<BrowserWindow> {
     minWidth: 1080,
     minHeight: 680,
     backgroundColor: resolvedWindowBackground(preferenceSettingsResult.settings.appearance.mode),
-    // macOS must create an alpha-capable compositor before runtime vibrancy is
-    // enabled. Changing only the background colour of an opaque window can
-    // retain old frames while scrolling. Solid mode still paints opaque CSS.
-    transparent: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {

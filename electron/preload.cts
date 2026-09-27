@@ -5,7 +5,6 @@ const onDeviceOcrAvailable = process.platform === 'win32';
 
 const bridge: ImnotaBridge = {
   onDeviceOcrAvailable,
-  setDesktopGlass: (input) => ipcRenderer.invoke('workflow:appearance:desktop', input),
   getPreferenceSettings: () => ipcRenderer.invoke('workflow:preferences:get'),
   setPreferenceSettings: (input) => ipcRenderer.invoke('workflow:preferences:set', input),
   getNativePerformanceProfile: () => ipcRenderer.invoke('workflow:performance:get'),
