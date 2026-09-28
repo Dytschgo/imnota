@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   isStrictChild,
+  normalizeNativeVerificationMode,
   nativeVerificationEnvironment,
   prepareArtifactDirectory,
   removeRunDirectory,
@@ -17,6 +18,11 @@ afterEach(() => {
 });
 
 describe('native smoke process safety', () => {
+  it('selects the focused clipboard workflow explicitly', () => {
+    assert.equal(normalizeNativeVerificationMode(), 'smoke');
+    assert.equal(normalizeNativeVerificationMode('clipboard'), 'clipboard');
+    assert.throws(() => normalizeNativeVerificationMode('unknown'), /Unknown native verification mode/);
+  });
   it('uses built renderer assets and enables synthetic capture only on supported native platforms', () => {
     const inherited = {
       ELECTRON_RUN_AS_NODE: '1',
