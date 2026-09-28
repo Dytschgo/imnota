@@ -207,23 +207,33 @@ function messageFor(error, fallback) {
   return `Couldn’t copy. ${fallback}`;
 }
 
+const DOWNLOAD_FALLBACK = 'Use the downloads in the arrow menu instead.';
+
 export function boot(documentObject = globalThis.document) {
   const root = documentObject?.querySelector?.('[data-share-copy-root]');
   if (!root) return;
   const status = root.querySelector('[data-copy-status]');
   const controls = root.querySelectorAll('[data-copy-markdown], [data-copy-png], [data-copy-bundle]');
   let copying = false;
-  const setStatus = (message, error = false) => {
+  const setStatus = (message, state) => {
     if (!status) return;
     status.textContent = message;
-    status.classList.toggle('error', error);
+    status.classList.toggle('error', state === 'error');
+    status.classList.toggle('is-visible', Boolean(message));
   };
-  const run = (button, action, success, fallback) => {
+  const markCopied = (scope, button) => {
+    scope.classList.add('is-copied');
+    scope.querySelector('[data-copied-badge]')?.removeAttribute('hidden');
+    if (!button.hasAttribute('data-copy-bundle')) return;
+    const label = button.querySelector('[data-copy-label]');
+    if (label) label.textContent = 'Copied';
+    button.classList.add('is-copied');
+    button.closest('.copy-split')?.classList.add('is-copied');
+  };
+  const run = (scope, button, action, success, fallback) => {
     button.addEventListener('click', async () => {
       if (copying) return;
       copying = true;
-      const picker = root.querySelector('[data-bundle-picker]');
-      if (picker) picker.disabled = true;
       button.closest('details')?.removeAttribute('open');
       for (const control of controls) control.disabled = true;
       setStatus('Copying…');
@@ -231,72 +241,43 @@ export function boot(documentObject = globalThis.document) {
         // action reaches clipboard.write before this handler awaits its result.
         await action();
         setStatus(success);
-        if (button.hasAttribute('data-copy-bundle')) {
-          button.textContent = 'Copied';
-          button.classList.add('is-copied');
-          button.closest('.copy-split')?.classList.add('is-copied');
-        }
+        markCopied(scope, button);
       } catch (error) {
-        root.querySelector('.markdown-preview')?.setAttribute('open', '');
-        setStatus(messageFor(error, fallback), true);
+        setStatus(messageFor(error, fallback), 'error');
       } finally {
         copying = false;
-        if (picker) picker.disabled = false;
         for (const control of controls) control.disabled = false;
       }
     });
   };
 
   for (const scope of root.querySelectorAll('[data-copy-scope]')) {
-    const paths = () => ({
-      markdownPath: scope.getAttribute('data-markdown-url'),
-      pngPath: scope.getAttribute('data-asset-url') || undefined,
-    });
+    const label = scope.getAttribute('data-copy-label') || 'bundle';
+    const name = label.charAt(0).toUpperCase() + label.slice(1);
+    const markdownPath = scope.getAttribute('data-markdown-url');
+    const pngPath = scope.getAttribute('data-asset-url') || undefined;
     const copyMarkdown = scope.querySelector('[data-copy-markdown]');
     if (copyMarkdown)
       run(
+        scope,
         copyMarkdown,
-        () => writeShareClipboard({ markdownPath: paths().markdownPath }),
-        'Markdown copied.',
-        'Use Download Markdown in the expanded prompt below.',
+        () => writeShareClipboard({ markdownPath }),
+        `${name} Markdown copied. Paste it into your coding agent.`,
+        DOWNLOAD_FALLBACK,
       );
     const copyPng = scope.querySelector('[data-copy-png]');
-    if (copyPng) {
-      run(
-        copyPng,
-        () => writeShareClipboard({ pngPath: paths().pngPath }),
-        'PNG copied.',
-        'Use Download PNG beside the image instead.',
-      );
-    }
+    if (copyPng)
+      run(scope, copyPng, () => writeShareClipboard({ pngPath }), `${name} image copied.`, DOWNLOAD_FALLBACK);
     const copyBundle = scope.querySelector('[data-copy-bundle]');
-    if (copyBundle) {
+    if (copyBundle)
       run(
+        scope,
         copyBundle,
-        () => writeShareClipboard(paths()),
-        'Bundle copied.',
-        'Use Download Markdown below, and Download PNG beside any image.',
+        () => writeShareClipboard({ markdownPath, pngPath }),
+        `${name} copied. Paste it into your coding agent.`,
+        DOWNLOAD_FALLBACK,
       );
-    }
   }
-  const picker = root.querySelector('[data-bundle-picker]');
-  const toolbar = root.querySelector('[data-top-copy]');
-  const updateSelection = () => {
-    const selected = Array.from(root.querySelectorAll('[data-bundle-number]')).find(
-      (item) => item.getAttribute('data-bundle-number') === picker?.value,
-    );
-    if (!selected || !toolbar) return;
-    for (const attribute of ['data-markdown-url', 'data-asset-url'])
-      toolbar.setAttribute(attribute, selected.getAttribute(attribute) || '');
-    const png = toolbar.querySelector('[data-copy-png]');
-    if (png) png.hidden = !selected.getAttribute('data-asset-url');
-    const primary = toolbar.querySelector('[data-copy-bundle]');
-    primary.textContent = 'Copy Bundle';
-    primary.classList.remove('is-copied');
-    primary.closest('.copy-split')?.classList.remove('is-copied');
-  };
-  picker?.addEventListener('change', updateSelection);
-  updateSelection();
   root.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     const open = root.querySelector('details.copy-options[open]');

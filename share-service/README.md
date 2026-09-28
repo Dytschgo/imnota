@@ -80,7 +80,7 @@ Expected upload codes are `invalid_token` or `pairing_expired` (401), `pairing_u
 
 ### Read and manage
 
-- `GET /s/:token` renders sanitized Markdown, PNG previews, downloads, and the expiry date.
+- `GET /s/:token` renders one card per bundle with its PNG preview beside its own sanitized Markdown, per-bundle copy and download actions, whole-share downloads, and the expiry. Shares without bundle metadata show the complete Markdown once.
 - `GET /s/:token/markdown` downloads `prompt.md`.
 - `GET /s/:token/assets/:filename` serves a validated file as `image/png`.
 - `GET /s/:token/archive.zip` downloads the optional server-generated archive.
