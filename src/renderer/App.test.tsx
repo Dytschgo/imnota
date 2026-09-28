@@ -71,6 +71,13 @@ function addMenuItem(name: RegExp): HTMLElement {
   return screen.getByRole('menuitem', { name });
 }
 
+/** Choose a delay beside Take screenshot, then take it. */
+function takeDelayedScreenshot(seconds: 3 | 5): void {
+  fireEvent.click(screen.getByTestId('add-item-trigger'));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: `Capture after ${seconds} seconds` }));
+  fireEvent.click(screen.getByTestId('add-item-capture'));
+}
+
 function pasteFromAddMenu(): void {
   fireEvent.click(addMenuItem(/^Paste from clipboard/));
 }
@@ -130,7 +137,7 @@ describe('feedback controls', () => {
       }),
       getNativeCapabilities: async () => ({
         ok: true,
-        value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
+        value: { fileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
       raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
       onRegionCaptureHotkey: () => () => {},
@@ -1563,7 +1570,11 @@ describe('feedback controls', () => {
     const progress = screen.getByTestId('add-screenshot');
     expect(progress).toBeDisabled();
     expect(progress).toHaveAttribute('aria-busy', 'true');
-    expect(addMenuItem(/^Take screenshot in 3 seconds/)).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(screen.getByRole('menuitemradio', { name: 'Capture after 3 seconds' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
 
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
@@ -1603,7 +1614,7 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
     await screen.findByTestId('add-screenshot');
-    fireEvent.click(addMenuItem(/^Take screenshot in 3 seconds/));
+    takeDelayedScreenshot(3);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1634,7 +1645,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(addMenuItem(/^Take screenshot in 5 seconds/));
+    takeDelayedScreenshot(5);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1771,6 +1782,46 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(2));
+  });
+
+  it('repairs the macOS Screen Recording permission and restarts from the error', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    const repairCapturePermission = vi.fn(async () => ({ ok: true as const, value: { reset: true } }));
+    const relaunchForCapturePermission = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: 'capture-permission-denied' as const,
+          message: 'Imnota is not allowed to record the screen.',
+          retryable: false,
+        },
+      })) as never,
+      repairCapturePermission,
+      relaunchForCapturePermission,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    const fix = await screen.findByRole('button', { name: 'Fix permission' });
+    fireEvent.click(fix);
+    await waitFor(() => expect(repairCapturePermission).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('then restart Imnota');
+    fireEvent.click(screen.getByRole('button', { name: 'Restart Imnota' }));
+    await waitFor(() => expect(relaunchForCapturePermission).toHaveBeenCalledOnce());
+  });
+
+  it('offers no permission repair for other capture errors', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: { code: 'capture-failed' as const, message: 'The selection window stopped.', retryable: true },
+      })) as never,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('The selection window stopped.');
+    expect(screen.queryByRole('button', { name: 'Fix permission' })).not.toBeInTheDocument();
   });
 
   it('starts capture from the primary Add screenshot action', async () => {

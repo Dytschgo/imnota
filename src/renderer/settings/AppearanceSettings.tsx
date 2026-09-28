@@ -176,7 +176,12 @@ export function AppearanceSettings({
 
   const controlsDisabled = disabled || busy;
   const activeBackdrop = appearanceBackdrop(value);
-  const updateBackdrop = (image: string) => update({ backgroundImage: image });
+  // Choosing a backdrop while glass is off turns glass on, so the choice is visible.
+  const updateBackdrop = (image: string) =>
+    update({
+      backgroundImage: image,
+      ...(image && value.glassLevel === 'off' ? { glassLevel: GLASS_ON_LEVEL } : {}),
+    });
   const showOpacity = value.glassLevel !== 'off' && Boolean(activeBackdrop.image);
   const fallbackMessage =
     effectiveAppearance?.glassFallbackReason === 'reduced-transparency'
@@ -275,8 +280,8 @@ export function AppearanceSettings({
           <div>
             <h3 id="background-settings-title">Backdrop</h3>
             <p>
-              Choose a bundled image or upload one from this device. Light mode automatically reveals the
-              image through glass surfaces.
+              Choose a bundled image or upload one from this device. It shows through panels while Glass
+              surfaces is on.
             </p>
           </div>
           <div className="imnota-background-actions">

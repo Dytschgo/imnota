@@ -362,11 +362,20 @@ describe('CollectionRail', () => {
     expect(onCapture).toHaveBeenCalledOnce();
     expect(onCapture).toHaveBeenCalledWith();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-item-capture-3')).not.toBeInTheDocument();
     for (const delay of [3, 5]) {
       fireEvent.click(screen.getByTestId('add-item-trigger'));
-      fireEvent.click(await screen.findByTestId(`add-item-capture-${delay}`));
+      fireEvent.click(await screen.findByTestId(`add-item-capture-delay-${delay}`));
+      // Choosing a delay keeps the menu open and relabels Take screenshot.
+      expect(screen.getByTestId(`add-item-capture-delay-${delay}`)).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByTestId('add-item-capture')).toHaveTextContent(`Captures after ${delay} seconds`);
+      fireEvent.click(screen.getByTestId('add-item-capture'));
       expect(onCapture).toHaveBeenLastCalledWith(delay);
     }
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture-delay-0'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    expect(onCapture).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     fireEvent.click(await screen.findByTestId('add-item-paste'));
     expect(onPaste).toHaveBeenCalledOnce();
@@ -388,7 +397,7 @@ describe('CollectionRail', () => {
     expect(disabledCapture).toHaveAttribute('aria-disabled', 'true');
     expect(disabledCapture).toHaveTextContent('Choose a current collection before capturing');
     fireEvent.click(disabledCapture);
-    expect(onCapture).toHaveBeenCalledTimes(3);
+    expect(onCapture).toHaveBeenCalledTimes(4);
     expect(screen.getByRole('menu')).toBeVisible();
 
     rerender(<CollectionRail {...props({ onAddContent: vi.fn() })} />);
