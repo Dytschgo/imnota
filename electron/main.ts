@@ -100,6 +100,7 @@ import { recoverContentTrashTransactions, type ContentTrashOperations } from './
 import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
+import { listMacCaptureWindows, type MacCaptureHelperLocation } from './macos-capture-windows.js';
 import type {
   CaptureDelaySeconds,
   CaptureDisplay,
@@ -262,7 +263,7 @@ function createAppTray(): void {
   appTray.setContextMenu(
     Menu.buildFromTemplate(
       captureTrayTemplate({
-        windowCapture: process.platform === 'win32',
+        windowCapture: process.platform === 'win32' || process.platform === 'darwin',
         onCapture: (mode) => requestCapture({ source: 'tray', mode }),
         onOpen: () => {
           if (!mainWindow || mainWindow.isDestroyed())
@@ -1016,7 +1017,7 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
-  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
+  return { ...capability, windowCandidateCount: (await listIdentifiableCaptureWindows(displays)).length };
 }
 
 function cancelCaptureDelay(): void {
@@ -1136,8 +1137,22 @@ function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverla
   return captureDisplaysHaveStableGeometry(active.displays, screen.getAllDisplays());
 }
 
-function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
+function macCaptureHelperLocation(): MacCaptureHelperLocation {
+  return {
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    sourcePath: path.join(__dirname, '../../native/macos-capture-helper.swift'),
+  };
+}
+
+async function listIdentifiableCaptureWindows(
+  displays: readonly CaptureDisplay[],
+): Promise<CaptureWindowCandidate[]> {
   if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  // macOS lists windows through a bundled read-only WindowServer helper; a failure
+  // leaves Area and Display available and Window mode explains it cannot identify windows.
+  if (process.platform === 'darwin')
+    return listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => []);
   return identifiableCaptureWindows(
     tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
     displays,
