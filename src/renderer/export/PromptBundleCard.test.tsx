@@ -27,7 +27,7 @@ it('disables preview while another prompt operation is running', () => {
       onLoadPreview={onLoadPreview}
     />,
   );
-  const preview = screen.getByRole('button', { name: /full-resolution preview/i });
+  const preview = screen.getByRole('button', { name: /full bundle preview/i });
   expect(preview).toBeDisabled();
   fireEvent.click(preview);
   expect(onLoadPreview).not.toHaveBeenCalled();
@@ -340,7 +340,7 @@ it('identifies prepared formats and exposes generated filenames and path copying
       onCopyPaths={copyPaths}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Markdown + image prepared');
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Text + image');
   expect(screen.getByText('Prompt-2.png')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /options/i }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Copy file paths' }));
@@ -365,8 +365,8 @@ it('does not claim Markdown + image prepared when only one format is confirmed',
       onCopyPaths={vi.fn()}
     />,
   );
-  expect(screen.getByRole('status')).toHaveTextContent('Markdown copied');
-  expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Markdown');
+  expect(screen.queryByText(/Text \+ image/)).not.toBeInTheDocument();
   expect(screen.getByText(/Image was not confirmed/)).toBeInTheDocument();
   expect(screen.getByText(/Copy image only or Open files/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /markdown only/i })).toBeEnabled();
@@ -389,8 +389,8 @@ it('does not show Files ready when clipboard formats were not confirmed', () => 
       onOpenFiles={vi.fn()}
     />,
   );
-  expect(screen.queryByText('Files ready')).not.toBeInTheDocument();
-  expect(screen.queryByText('Markdown + image prepared')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Last copied: Files/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Text \+ image/)).not.toBeInTheDocument();
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
   expect(screen.getByText(/Markdown and image were not confirmed/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /markdown only/i })).toBeEnabled();
@@ -418,4 +418,45 @@ it('keeps a healthy clipboard bundle to one action and its menu, without inline 
   expect(screen.getByText('1952 × 2300')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
   expect(screen.getByRole('menuitem', { name: 'Open files' })).toBeEnabled();
+});
+
+it('separates the saved export, the last Open action and the last copy', () => {
+  const { rerender } = render(
+    <PromptBundleCard
+      bundle={model({ opened: 'folder' })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.getByText('Saved locally')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Export folder opened');
+  rerender(
+    <PromptBundleCard
+      bundle={model({ outcome: 'files', state: 'copied' })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Files');
+  rerender(
+    <PromptBundleCard
+      bundle={model({ artifactSessionId: undefined, pictureNumbers: [], screenshotCount: 0, textCount: 1 })}
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.queryByText('Saved locally')).not.toBeInTheDocument();
+  expect(screen.queryByText(/First picture/)).not.toBeInTheDocument();
+});
+
+it('leaves an error to the dialog when the dialog already reports it', () => {
+  render(
+    <PromptBundleCard
+      bundle={model({ state: 'error', error: 'Export failed' })}
+      errorReported
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

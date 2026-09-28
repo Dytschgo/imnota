@@ -10,6 +10,7 @@ import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 
 interface PromptActionError {
   message: string;
+  technicalDetails?: string;
 }
 
 type PromptActionResult = { ok: true } | { ok: false; error: PromptActionError };
@@ -58,9 +59,9 @@ export function PromptBundleDialogHost({
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
   const [preferenceError, setPreferenceError] = useState<string>();
+  // Bundle failures are shown once, inside the dialog, with a Rebuild action.
   const run = async (action: Promise<PromptActionResult>) => {
-    const result = await action;
-    if (!result.ok) onError(result.error.message);
+    await action;
   };
   if (!controller.isOpen) return null;
   return (

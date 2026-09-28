@@ -10,12 +10,13 @@ export type PromptBundleCardState =
 
 export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files' | 'opened';
 
+/** What the last copy put on the clipboard, shown as "Last copied: …". */
 const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
-  combined: 'Markdown + image prepared',
-  markdown: 'Markdown copied',
-  image: 'Image copied',
-  paths: 'File paths copied',
-  files: 'Files ready',
+  combined: 'Text + image',
+  markdown: 'Markdown',
+  image: 'Image',
+  paths: 'File paths',
+  files: 'Files',
   opened: 'Files opened',
 };
 
@@ -36,6 +37,8 @@ export interface PromptBundleCardModel {
   state: PromptBundleCardState;
   error?: string;
   outcome?: PromptDeliveryOutcome;
+  /** The last Open action: the bundle's files or the export folder. */
+  opened?: 'files' | 'folder';
   filenames?: readonly string[];
 }
 
@@ -48,6 +51,8 @@ export interface PromptBundleActionRequest {
 export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
+  /** The dialog already shows this failure, so the card does not repeat it. */
+  errorReported?: boolean;
   fileClipboardAvailable?: boolean;
   defaultCopyVariant?: WindowsCopyVariantId;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
@@ -87,6 +92,7 @@ function pictureLabel(numbers: readonly number[]): string {
 export function PromptBundleCard({
   bundle,
   disabled = false,
+  errorReported = false,
   fileClipboardAvailable = false,
   defaultCopyVariant = 'files',
   onCopyFresh,
@@ -106,7 +112,8 @@ export function PromptBundleCard({
   const restoreFocusAfterOption = useRef(false);
   const optionsMenuId = useId().replace(/:/g, '');
   const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
-  const copied = bundle.state === 'copied';
+  const copied = bundle.state === 'copied' && !bundle.error;
+  const savedLocally = Boolean(bundle.artifactSessionId || bundle.filenames?.length);
   const request = requestFor(bundle);
   const supportsFileVariants = fileClipboardAvailable && bundle.pictureNumbers.length > 0;
   const primaryVariant = supportsFileVariants ? defaultCopyVariant : 'rich';
@@ -257,14 +264,23 @@ export function PromptBundleCard({
       <button
         type="button"
         className="prompt-bundle-preview"
-        aria-label={`Open full-resolution preview for Bundle ${bundle.bundleNumber}`}
+        aria-label={`Open full bundle preview for Bundle ${bundle.bundleNumber}`}
         disabled={disabled || !onLoadPreview || busy || !bundle.pictureNumbers.length}
         onClick={() => void onLoadPreview?.(request)}
       >
         {bundle.previewDataUrl ? (
-          <img src={bundle.previewDataUrl} alt={`First screenshot in Bundle ${bundle.bundleNumber}`} />
-        ) : (
+          <img src={bundle.previewDataUrl} alt={`First picture in Bundle ${bundle.bundleNumber}`} />
+        ) : bundle.pictureNumbers.length ? (
           <FileImage size={22} aria-hidden="true" />
+        ) : (
+          <FileText size={22} aria-hidden="true" />
+        )}
+        {bundle.pictureNumbers.length > 0 && (
+          <span className="prompt-bundle-preview-caption" aria-hidden="true">
+            First picture
+            <br />
+            Preview bundle
+          </span>
         )}
         <span className="prompt-bundle-index" aria-hidden="true">
           {String(bundle.bundleNumber).padStart(2, '0')}
@@ -283,11 +299,21 @@ export function PromptBundleCard({
               ))}
             </dl>
           </div>
-          {bundle.outcome && (
-            <span className="prompt-bundle-state prompt-bundle-state-success" role="status">
-              <Check size={13} aria-hidden="true" /> {outcomeLabels[bundle.outcome]}
-            </span>
-          )}
+          <div className="prompt-bundle-states">
+            {savedLocally && (
+              <span className="prompt-bundle-state prompt-bundle-state-saved">Saved locally</span>
+            )}
+            {bundle.opened && !bundle.error && (
+              <span className="prompt-bundle-state prompt-bundle-state-saved" role="status">
+                {bundle.opened === 'folder' ? 'Export folder opened' : 'Files opened'}
+              </span>
+            )}
+            {bundle.outcome && bundle.outcome !== 'opened' && !bundle.error && (
+              <span className="prompt-bundle-state prompt-bundle-state-success" role="status">
+                <Check size={13} aria-hidden="true" /> Last copied: {outcomeLabels[bundle.outcome]}
+              </span>
+            )}
+          </div>
         </div>
         {bundle.filenames?.length ? (
           <details className="prompt-bundle-files">
@@ -308,7 +334,7 @@ export function PromptBundleCard({
             </span>
           </p>
         )}
-        {bundle.error && (
+        {bundle.error && !errorReported && (
           <p className="prompt-bundle-error" role="alert">
             {bundle.error}
           </p>

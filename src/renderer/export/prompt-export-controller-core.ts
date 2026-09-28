@@ -964,7 +964,7 @@ export class PromptBundleControllerEngine {
       if (!currentArtifact || !currentPlan || currentArtifact.planId !== currentPlan.planId)
         throw failure(
           'native-failure',
-          'The finalized local export is unavailable. Choose Prepare fresh files.',
+          'The finalized local export is unavailable. Choose Rebuild bundles.',
           true,
         );
       return {
