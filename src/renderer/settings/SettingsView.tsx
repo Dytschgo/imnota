@@ -23,8 +23,6 @@ import {
   resolveShortcutBindings,
 } from '../../shared/shortcuts';
 import { SharingSettings } from './SharingSettings';
-import { ExportPresetSettings } from './ExportPresetSettings';
-import type { PreferenceSettingsUpdate } from '../../shared/workflow-bridge';
 import { saveWorkspaceSettingsPatch } from './sharing-preferences';
 import { BackupSettings } from './BackupSettings';
 import type { BackupPreferences, BackupRestoreResult } from '../../shared/backups';
@@ -63,18 +61,13 @@ export interface SettingsViewProps {
   preferenceError?: string;
   onAppearanceChange?(value: PreferenceSettings['appearance']): void | Promise<void>;
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
-  onWorkbenchChange?(value: PreferenceSettings['workbench']): void | Promise<void>;
-  nativeCopyAvailable?: boolean;
   globalCaptureShortcutRegistered?: boolean;
-  onNativeCopyChange?(value: PreferenceSettings['nativeCopy']): void | Promise<void>;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
-  onExportPresetChange?(value: PreferenceSettingsUpdate): Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
   onBackupRestored?(result: BackupRestoreResult): void | Promise<void>;
   onBackupRestoreFailed?(): void;
-  onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
   onAgentAccessChange?(value: PreferenceSettings['agentAccess']): void | Promise<void>;
   onReplayOnboarding?(): void;
   onDownload?: () => Promise<void>;
@@ -101,18 +94,13 @@ export function SettingsView({
   preferenceError = '',
   onAppearanceChange,
   onShortcutChange = async () => undefined,
-  onWorkbenchChange,
-  nativeCopyAvailable = false,
   globalCaptureShortcutRegistered = false,
-  onNativeCopyChange,
   onPromptExportChange,
-  onExportPresetChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
   onBackupRestored,
   onBackupRestoreFailed,
-  onCaptureChange = async () => undefined,
   onAgentAccessChange = async () => undefined,
   onReplayOnboarding = () => undefined,
   onDownload,
@@ -123,7 +111,7 @@ export function SettingsView({
   onWorkspaceChanged,
 }: SettingsViewProps) {
   const { settings, set } = useAppStore();
-  const [legacyError, setLegacyError] = useState('');
+  const [workspaceSettingError, setWorkspaceSettingError] = useState('');
   const [uncontrolledCategory, setUncontrolledCategory] = useState<SettingsCategory>('Appearance');
   const group = activeCategory ?? uncontrolledCategory;
   const shortcutPlatform = detectShortcutPlatform();
@@ -138,12 +126,12 @@ export function SettingsView({
     if (activeCategory === undefined) setUncontrolledCategory(category);
     onCategoryChange?.(category);
   };
-  const saveLegacy = async (patch: Partial<typeof settings>) => {
-    setLegacyError('');
+  const saveWorkspaceSetting = async (patch: Partial<typeof settings>) => {
+    setWorkspaceSettingError('');
     try {
       set({ settings: await saveWorkspaceSettingsPatch(patch) });
     } catch {
-      setLegacyError('This preference could not be saved. Your previous setting is still active.');
+      setWorkspaceSettingError('This preference could not be saved. Your previous setting is still active.');
     }
   };
   return (
@@ -191,8 +179,8 @@ export function SettingsView({
           )}
           {group === 'Sharing' && (
             <p>
-              Manage export presets, your display name, and shared links. Shared links are created only when
-              you choose to share.
+              Manage your display name and shared links. Shared links are created only when you choose to
+              share.
             </p>
           )}
           {group === 'Backups & history' && (
@@ -206,21 +194,16 @@ export function SettingsView({
           {group === 'Shortcuts' && <p>Change keyboard actions while keeping mouse controls available.</p>}
         </div>
       </header>
-      {(preferenceError || legacyError) && (
+      {(preferenceError || workspaceSettingError) && (
         <p className="settings-error" role="alert">
-          {preferenceError || legacyError}
+          {preferenceError || workspaceSettingError}
         </p>
       )}
       <div className="settings-grid">
         <div hidden={group !== 'Appearance'}>
           <AppearanceSettings
             value={preferences.appearance}
-            onChange={
-              onAppearanceChange ??
-              (async (value) => {
-                await saveLegacy({ theme: value.mode });
-              })
-            }
+            onChange={onAppearanceChange ?? (async () => undefined)}
             effectiveAppearance={effectiveAppearance}
             disabled={savingPreferences}
             showHeading={false}
@@ -271,7 +254,9 @@ export function SettingsView({
               <select
                 aria-label="Interface scale"
                 value={settings.interfaceScale}
-                onChange={(event) => void saveLegacy({ interfaceScale: Number(event.target.value) })}
+                onChange={(event) =>
+                  void saveWorkspaceSetting({ interfaceScale: Number(event.target.value) })
+                }
               >
                 <option value="0.9">90%</option>
                 <option value="1">100%</option>
@@ -281,38 +266,15 @@ export function SettingsView({
             </label>
             <label className="settings-switch">
               <span>
-                <strong>Open recent project</strong>
-                <small>Resume the latest project when Imnota opens.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.openRecentOnLaunch}
-                onChange={(event) => void saveLegacy({ openRecentOnLaunch: event.target.checked })}
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
                 <strong>Confirm before deletion</strong>
                 <small>Ask before moving a project to the system trash.</small>
               </span>
               <input
                 type="checkbox"
                 checked={settings.confirmBeforeDeletion}
-                onChange={(event) => void saveLegacy({ confirmBeforeDeletion: event.target.checked })}
-              />
-            </label>
-            <label className="settings-switch">
-              <span>
-                <strong>Combined Add item button</strong>
-                <small>
-                  Restore a single Add item menu instead of making Add screenshot the primary rail action.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                checked={!preferences.workbench.screenshotFirstAdd}
-                disabled={savingPreferences || !onWorkbenchChange}
-                onChange={(event) => void onWorkbenchChange?.({ screenshotFirstAdd: !event.target.checked })}
+                onChange={(event) =>
+                  void saveWorkspaceSetting({ confirmBeforeDeletion: event.target.checked })
+                }
               />
             </label>
           </section>
@@ -328,7 +290,7 @@ export function SettingsView({
               <Button
                 variant="soft"
                 onClick={async () => {
-                  setLegacyError('');
+                  setWorkspaceSettingError('');
                   try {
                     const next = await window.imnota.chooseWorkspace();
                     if (next) {
@@ -336,7 +298,7 @@ export function SettingsView({
                       await onWorkspaceChanged?.();
                     }
                   } catch {
-                    setLegacyError(
+                    setWorkspaceSettingError(
                       'The workspace folder could not be changed. Your current workspace remains active.',
                     );
                   }
@@ -351,7 +313,7 @@ export function SettingsView({
                   onClick={() =>
                     void window.imnota
                       .openPath(settings.workspacePath!)
-                      .catch(() => setLegacyError('The workspace folder could not be opened.'))
+                      .catch(() => setWorkspaceSettingError('The workspace folder could not be opened.'))
                   }
                 >
                   Open folder
@@ -369,11 +331,11 @@ export function SettingsView({
             <Button
               variant="soft"
               onClick={async () => {
-                setLegacyError('');
+                setWorkspaceSettingError('');
                 try {
                   await window.imnota.openDiagnosticsFolder();
                 } catch {
-                  setLegacyError(
+                  setWorkspaceSettingError(
                     'Local diagnostics are unavailable. Check free disk space and access to the application data folder.',
                   );
                 }
@@ -384,30 +346,12 @@ export function SettingsView({
           </section>
         </div>
         <div hidden={group !== 'Features'}>
-          <section className="settings-section" aria-labelledby="features-title">
-            <h2 id="features-title">Features</h2>
-            <p>Enable or disable features for this device. Beta features start off.</p>
-            <label className="settings-switch">
-              <span>
-                <strong>
-                  Screen capture <span className="feature-status stable">Stable</span>
-                </strong>
-                <small>
-                  On by default for new Windows and macOS profiles. Existing profiles keep their saved value.
-                  Linux stays Import or Paste. Captures stay local. Area selection opens across all connected
-                  displays on Windows and macOS.
-                </small>
-              </span>
-              <input
-                type="checkbox"
-                aria-label="Enable screen capture"
-                checked={preferences.capture.experimentalRegionCapture}
-                disabled={savingPreferences}
-                onChange={(event) =>
-                  void onCaptureChange({ experimentalRegionCapture: event.target.checked })
-                }
-              />
-            </label>
+          <section className="settings-section" aria-labelledby="capture-title">
+            <h2 id="capture-title">Screen capture</h2>
+            <p>
+              Captures stay on this device. Area selection spans all connected displays on Windows and macOS;
+              on Linux, use Import or Paste.
+            </p>
             <small data-testid="capture-shortcut-summary" className="feature-detail">
               {captureShortcut ? (
                 <>
@@ -425,7 +369,7 @@ export function SettingsView({
                   . Change these under Shortcuts.
                 </>
               ) : (
-                <>Shortcut: not set. The toolbar camera button and the Add menu still work.</>
+                <>Shortcut: not set. Take screenshot in the Add menu still works.</>
               )}
               {captureShortcutNote ? ` ${captureShortcutNote}` : ''}
             </small>
@@ -462,45 +406,7 @@ export function SettingsView({
             onChange={onAgentAccessChange}
           />
         </div>
-        {group === 'Sharing' && (
-          <>
-            {nativeCopyAvailable && (
-              <section className="settings-section" aria-labelledby="native-copy-title">
-                <h2 id="native-copy-title">Native copy functions</h2>
-                <label className="field">
-                  <span className="field-label">Primary copy action</span>
-                  <select
-                    aria-label="Native copy functions"
-                    value={preferences.nativeCopy.defaultFunction}
-                    disabled={savingPreferences || !onNativeCopyChange}
-                    onChange={(event) => {
-                      const defaultFunction = event.target
-                        .value as PreferenceSettings['nativeCopy']['defaultFunction'];
-                      void Promise.resolve()
-                        .then(() => onNativeCopyChange?.({ defaultFunction }))
-                        .catch(() => undefined);
-                    }}
-                  >
-                    <option value="files">Copy files — Markdown and PNG files</option>
-                    <option value="files-rich">Files + rich copy — files, text, and image</option>
-                    <option value="rich">Rich copy — text and image</option>
-                  </select>
-                  <small>
-                    Sets the main copy button throughout Imnota. The receiving app still chooses which
-                    clipboard formats it accepts.
-                  </small>
-                </label>
-              </section>
-            )}
-            <ExportPresetSettings
-              nativeCopyAvailable={nativeCopyAvailable}
-              preferences={preferences}
-              disabled={savingPreferences}
-              onSave={onExportPresetChange}
-            />
-            <SharingSettings />
-          </>
-        )}
+        {group === 'Sharing' && <SharingSettings />}
       </div>
     </section>
   );

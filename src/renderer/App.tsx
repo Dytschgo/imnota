@@ -1,19 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
-import {
-  Archive,
-  ArchiveRestore,
-  CircleAlert,
-  Check,
-  FolderOpen,
-  FolderPlus,
-  Heart,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { CircleAlert, Check, X } from 'lucide-react';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -34,7 +21,6 @@ import type { CaptureDelaySeconds } from '../shared/capture';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
-import { collectionDisplayName } from './collection/collection-display-name';
 import { AppDialogs, type AppDialog, type NewProjectDraft, type ProjectEditDraft } from './app/AppDialogs';
 import { AppShell } from './app/AppShell';
 import { useAppearance } from './app/useAppearance';
@@ -44,9 +30,8 @@ import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
 import { Logo } from './components/Logo';
-import { ProjectIcon } from './components/ProjectIcon';
 import type { ToolChoice } from './components/Toolbar';
-import { Button, EmptyState, IconButton, Modal } from './components/ui';
+import { Button, IconButton, Modal } from './components/ui';
 import { OnboardingDemo } from './onboarding';
 import { PromptBundleDialogHost } from './export/PromptBundleDialogHost';
 import { usePromptBundleController } from './export/usePromptBundleController';
@@ -57,14 +42,14 @@ import {
   pushNavigationLocation,
   replaceNavigationLocation,
   resolveRecentCollections,
-  relativeOpenedTime,
   type NavigationLocation,
 } from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
-import { ContentSearchResults } from './search/ContentSearchResults';
+import { Library } from './app/Library';
+import { Welcome } from './app/Welcome';
 import { WorkflowRequestError, workflowValue } from './app/workflow';
 import { CaptureDestinationDialog } from './capture/CaptureDestinationDialog';
 import {
@@ -96,9 +81,16 @@ type PendingDeletion = {
   title: string;
 };
 
+/** Plain confirmations. Long enough to read one short sentence, then gone. */
+export const TOAST_STATUS_MS = 2000;
+/** Undo confirmations. Longer than a plain confirmation, then gone on their own. */
+export const TOAST_ACTION_MS = 4000;
+
 type ToastNotification = {
   message: string;
   action?: { label: string; run(): void };
+  durationMs: number;
+  generation: number;
 };
 
 export function userFacingErrorMessage(message: string): string {
@@ -130,8 +122,16 @@ export default function App() {
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
+  /** macOS Screen Recording help attached to the error it explains. */
+  const [permissionHelp, setPermissionHelp] = useState<{
+    step: 'repair' | 'restart';
+    message: string;
+  } | null>(null);
   const [toast, setToast] = useState<ToastNotification | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const toastGeneration = useRef(0);
+  const toastHold = useRef(0);
+  const toastLifetime = useRef<{ generation: number; durationMs: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -264,24 +264,57 @@ export default function App() {
     [promptBundles],
   );
 
-  useEffect(
-    () => () => {
-      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    },
-    [],
-  );
-  const showToast = useCallback((message: string, action?: ToastNotification['action']) => {
-    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    setToast({ message, action });
-    if (action) {
+  const clearToastTimer = useCallback(() => {
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
       toastTimer.current = null;
-      return;
     }
-    toastTimer.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimer.current = null;
-    }, 3500);
   }, []);
+  const armToastTimer = useCallback(
+    (generation: number, durationMs: number) => {
+      clearToastTimer();
+      toastTimer.current = window.setTimeout(() => {
+        if (toastGeneration.current !== generation) return;
+        toastTimer.current = null;
+        toastLifetime.current = null;
+        toastHold.current = 0;
+        setToast(null);
+      }, durationMs);
+    },
+    [clearToastTimer],
+  );
+  useEffect(() => clearToastTimer, [clearToastTimer]);
+  const showToast = useCallback(
+    (message: string, action?: ToastNotification['action']) => {
+      const generation = ++toastGeneration.current;
+      const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
+      toastHold.current = 0;
+      toastLifetime.current = { generation, durationMs };
+      setToast({ message, action, durationMs, generation });
+      armToastTimer(generation, durationMs);
+    },
+    [armToastTimer],
+  );
+  const holdToast = useCallback(() => {
+    toastHold.current += 1;
+    clearToastTimer();
+  }, [clearToastTimer]);
+  const releaseToast = useCallback(() => {
+    toastHold.current = Math.max(0, toastHold.current - 1);
+    const lifetime = toastLifetime.current;
+    if (toastHold.current > 0 || !lifetime) return;
+    armToastTimer(lifetime.generation, lifetime.durationMs);
+  }, [armToastTimer]);
+  const dismissToast = useCallback(
+    (generation?: number) => {
+      if (generation !== undefined && toastGeneration.current !== generation) return;
+      toastHold.current = 0;
+      toastLifetime.current = null;
+      clearToastTimer();
+      setToast(null);
+    },
+    [clearToastTimer],
+  );
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -332,7 +365,7 @@ export default function App() {
           ['projects', 'recent', 'favourites', 'settings'].includes(validCheckpoint.view)
         ) {
           useAppStore.getState().set({ view: validCheckpoint.view, search: validCheckpoint.search });
-        } else if (settings.openRecentOnLaunch && projects[0]) {
+        } else if (projects[0]) {
           const recent = resolveRecentCollections(projects, useAppStore.getState().recentCollections)[0];
           const snapshot = await window.imnota.loadProject(recent?.projectPath ?? projects[0].projectPath);
           if (!active) return;
@@ -1007,10 +1040,6 @@ export default function App() {
         setError('Screen capture is unavailable on Linux — use Import or Paste');
         return;
       }
-      if (!preferences.settings.capture.experimentalRegionCapture) {
-        setError('Screen capture is off — enable it in Settings → Features');
-        return;
-      }
       const current = useAppStore.getState();
       const destination = currentCaptureDestination(current.snapshot, current.activeCollectionId);
       if (repeatLast) {
@@ -1138,7 +1167,15 @@ export default function App() {
         nativeMutationToken = null;
       }
       if (reason instanceof WorkflowRequestError && reason.workflowError.code === 'capture-cancelled') return;
-      setError(reason instanceof Error ? reason.message : 'The screen capture could not be completed.');
+      const message = reason instanceof Error ? reason.message : 'The screen capture could not be completed.';
+      setPermissionHelp(
+        detectShortcutPlatform() === 'mac' &&
+          reason instanceof WorkflowRequestError &&
+          reason.workflowError.code === 'capture-permission-denied'
+          ? { step: 'repair', message }
+          : null,
+      );
+      setError(message);
     } finally {
       captureBusyRef.current = false;
       setCapturing(false);
@@ -1715,23 +1752,18 @@ export default function App() {
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
-  const captureEnabled =
-    preferences.settings.capture.experimentalRegionCapture &&
-    platform !== 'linux' &&
-    Boolean(activeCaptureCollection);
+  const captureEnabled = platform !== 'linux' && Boolean(activeCaptureCollection);
   const captureDisabledLabel =
     platform === 'linux'
       ? 'Screen capture is unavailable on Linux — use Import or Paste'
-      : !activeCaptureCollection
-        ? 'Choose a collection before capturing'
-        : 'Screen capture is off — enable it in Settings → Features';
+      : 'Choose a collection before capturing';
   const orderedShots = useMemo(
     () => (store.snapshot ? orderedCollectionItems(store.snapshot.project, store.activeCollectionId) : []),
     [store.activeCollectionId, store.snapshot],
   );
   function selectTool(next: ToolChoice): void {
     setTool(next);
-    if (next !== 'select' && next !== 'eraser') lastAnnotateTool.current = next;
+    if (next !== 'select') lastAnnotateTool.current = next;
   }
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
@@ -1834,7 +1866,7 @@ export default function App() {
     );
   const visibleError = error || contentPersistence.error || persistence.error || preferences.error;
   const creationColorTool: ToolChoice = tool === 'select' ? 'text' : tool;
-  const creationKind: Annotation['kind'] = creationColorTool === 'eraser' ? 'arrow' : creationColorTool;
+  const creationKind: Annotation['kind'] = creationColorTool;
   const annotationColor =
     toolColors[creationColorTool] ?? semanticAnnotationColor(creationKind, appearance.theme);
   const selectedAnnotation = persistence.annotations.find((item) => item.id === selectedAnnotationId);
@@ -1873,7 +1905,6 @@ export default function App() {
         onToggleFavourite={toggleFavourite}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
-        onSelectProject={openProject}
         onDropFiles={(files) =>
           importPaths(Array.from(files).map((file) => window.imnota.getDroppedFilePath(file)))
         }
@@ -1963,14 +1994,8 @@ export default function App() {
             preferenceError={preferences.error}
             onAppearanceChange={preferences.saveAppearance}
             onShortcutChange={preferences.saveShortcuts}
-            onWorkbenchChange={preferences.saveWorkbench}
-            nativeCopyAvailable={preferences.capabilities.windowsFileClipboard}
             globalCaptureShortcutRegistered={preferences.capabilities.globalCaptureShortcutRegistered}
-            onNativeCopyChange={preferences.saveNativeCopy}
             onPromptExportChange={preferences.savePromptExport}
-            onExportPresetChange={async (update) => {
-              await preferences.save(update);
-            }}
             projects={store.projects}
             onBackupChange={preferences.saveBackups}
             onBeforeBackupAction={prepareBackupAction}
@@ -2025,7 +2050,6 @@ export default function App() {
                   : 'Project restored with a safety snapshot',
               );
             }}
-            onCaptureChange={preferences.saveCapture}
             onAgentAccessChange={preferences.saveAgentAccess}
             onReplayOnboarding={() => setShowOnboarding(true)}
             onDownload={downloadUpdate}
@@ -2050,6 +2074,7 @@ export default function App() {
             onDelete={requestProjectDeletion}
             onSearch={openProjectSearch}
             onBrowseProjects={() => navigate('projects')}
+            onFilter={(filter) => navigate(filter)}
             onSelectContentResult={openContentSearchResult}
           />
         ) : (
@@ -2083,7 +2108,6 @@ export default function App() {
                 ),
               });
             }}
-            screenshotFirstAdd={preferences.settings.workbench.screenshotFirstAdd}
             image={persistence.image}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
@@ -2184,11 +2208,26 @@ export default function App() {
         />
       </AppShell>
       {toast && !visibleError && (
-        <div className="toast" role="status">
-          <Check size={16} aria-hidden="true" />
+        <div
+          className="toast"
+          role="status"
+          onMouseEnter={holdToast}
+          onMouseLeave={releaseToast}
+          onFocus={holdToast}
+          onBlur={releaseToast}
+        >
+          <Check size={14} aria-hidden="true" />
           <span>{toast.message}</span>
           {toast.action && (
-            <button type="button" onClick={toast.action.run}>
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                const generation = toast.generation;
+                toast.action?.run();
+                dismissToast(generation);
+              }}
+            >
               {toast.action.label}
             </button>
           )}
@@ -2198,9 +2237,34 @@ export default function App() {
         <div className="toast error-toast" role="alert" data-testid="error-toast">
           <CircleAlert size={16} aria-hidden="true" />
           <span>{userFacingErrorMessage(visibleError)}</span>
+          {permissionHelp && visibleError === permissionHelp.message && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                if (permissionHelp.step === 'restart') {
+                  // Save everything first; macOS applies the grant only after a restart.
+                  void flushAll().then((saved) => {
+                    if (saved) void window.imnota.relaunchForCapturePermission();
+                  });
+                  return;
+                }
+                void window.imnota.repairCapturePermission().then((result) => {
+                  const message = result.ok
+                    ? 'In the Settings window, turn on Imnota under Screen & System Audio Recording, then restart Imnota.'
+                    : 'Open System Settings → Privacy & Security → Screen & System Audio Recording, remove Imnota with −, then capture again.';
+                  setPermissionHelp(result.ok ? { step: 'restart', message } : null);
+                  setError(message);
+                });
+              }}
+            >
+              {permissionHelp.step === 'restart' ? 'Restart Imnota' : 'Fix permission'}
+            </button>
+          )}
           <IconButton
             label="Dismiss error"
             onClick={() => {
+              setPermissionHelp(null);
               setError('');
               persistence.clearError();
               preferences.clearError();
@@ -2268,7 +2332,7 @@ export default function App() {
       <PromptBundleDialogHost
         controller={promptBundles}
         onError={setError}
-        fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+        fileClipboardAvailable={preferences.capabilities.fileClipboard}
         defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
         onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
       />
@@ -2281,7 +2345,7 @@ export default function App() {
       />
       {showOnboarding && (
         <OnboardingDemo
-          fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+          fileClipboardAvailable={preferences.capabilities.fileClipboard}
           defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
           onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
           onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>
@@ -2320,34 +2384,6 @@ export default function App() {
   );
 }
 
-function Welcome({ chooseWorkspace }: { chooseWorkspace(): void }) {
-  return (
-    <section className="welcome">
-      <div className="welcome-mark">
-        <Logo compact />
-      </div>
-      <h1>
-        Turn screenshots into
-        <br />
-        <span>understanding.</span>
-      </h1>
-      <p>Annotate what matters. Add the context an AI agent needs. Keep every file local and inspectable.</p>
-      <div className="welcome-actions">
-        <Button variant="primary" onClick={chooseWorkspace}>
-          <FolderPlus size={17} aria-hidden="true" />
-          Choose workspace
-        </Button>
-        <span>Works offline. No account required.</span>
-      </div>
-      <div className="welcome-rule">
-        <span>IM</span>
-        <i />
-        <span>NOTA</span>
-      </div>
-    </section>
-  );
-}
-
 function isMissingNavigationTargetError(reason: unknown): boolean {
   if (!(reason instanceof Error)) return false;
   const code = (reason as Error & { code?: unknown }).code;
@@ -2355,250 +2391,5 @@ function isMissingNavigationTargetError(reason: unknown): boolean {
     code === 'ENOENT' ||
     /\b(enoent|not found|missing|no such file)\b/i.test(reason.message) ||
     /selected project folder is unavailable/i.test(reason.message)
-  );
-}
-
-export function matchesProjectSearch(project: ProjectListItem, search: string) {
-  return (project.searchText ?? `${project.name} ${project.description}`)
-    .toLowerCase()
-    .includes(search.trim().toLowerCase());
-}
-
-function Library({
-  onOpenCollection,
-  onNew,
-  onOpen,
-  onSelect,
-  onEdit,
-  onArchive,
-  onRestore,
-  onDelete,
-  onSearch,
-  onBrowseProjects,
-  onSelectContentResult,
-}: {
-  onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
-  onNew(): void;
-  onOpen(): void;
-  onSelect(projectPath: string): void;
-  onEdit(projectPath: string): void;
-  onArchive(projectPath: string): void;
-  onRestore(projectPath: string): void;
-  onDelete(projectPath: string): void;
-  onSearch(): void | Promise<void>;
-  onBrowseProjects(): void | Promise<void>;
-  onSelectContentResult(result: ContentSearchResult): void;
-}) {
-  const { projects, search, set, view, settings, recentCollections } = useAppStore();
-  const recent = resolveRecentCollections(projects, recentCollections).filter((entry) =>
-    `${entry.name} ${entry.projectName}`.toLowerCase().includes(search.trim().toLowerCase()),
-  );
-  const normalizedQuery = search.trim();
-  const filtered = projects.filter((project) => {
-    if (view === 'archived') return project.status === 'archived';
-    return project.status !== 'archived' && (view !== 'favourites' || project.favourite);
-  });
-  return (
-    <section className="library">
-      <div className="library-heading">
-        <div>
-          <h1>
-            {view === 'favourites'
-              ? 'Favourite projects'
-              : view === 'recent'
-                ? 'Recent collections'
-                : view === 'archived'
-                  ? 'Archived projects'
-                  : 'Projects'}
-          </h1>
-          <p>
-            {projects.length} local project{projects.length === 1 ? '' : 's'} · {settings.workspacePath}
-          </p>
-        </div>
-        <div className="library-actions">
-          <Button variant="ghost" onClick={onOpen}>
-            <FolderOpen size={16} aria-hidden="true" />
-            Open project
-          </Button>
-          <Button variant="primary" onClick={onNew}>
-            <Plus size={16} aria-hidden="true" />
-            New project
-          </Button>
-        </div>
-      </div>
-      {view === 'recent' ? (
-        <div className="search-line">
-          <Search size={16} aria-hidden="true" />
-          <input
-            aria-label="Filter recent collections"
-            placeholder="Filter recent collections and projects"
-            value={search}
-            onChange={(event) => set({ search: event.target.value })}
-          />
-          {search && (
-            <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
-              Clear filter
-            </button>
-          )}
-        </div>
-      ) : (
-        <>
-          <button
-            className="search-line library-search-trigger"
-            type="button"
-            data-testid="library-full-search"
-            onClick={() => void onSearch()}
-          >
-            <Search size={16} aria-hidden="true" />
-            <span>Search workspace</span>
-          </button>
-          <div className="search-line">
-            <Search size={16} aria-hidden="true" />
-            <input
-              aria-label="Search projects"
-              placeholder="Filter projects and local content"
-              maxLength={500}
-              value={search}
-              onChange={(event) => set({ search: event.target.value })}
-            />
-            {search && (
-              <button className="search-clear" type="button" onClick={() => set({ search: '' })}>
-                Clear search
-              </button>
-            )}
-          </div>
-        </>
-      )}
-      {view === 'recent' ? (
-        recent.length ? (
-          <div className="project-list">
-            {recent.map((entry) => (
-              <button
-                className="project-row"
-                key={`${entry.projectPath}:${entry.id}`}
-                onClick={() => void onOpenCollection(entry.projectPath, entry.id)}
-                title={collectionDisplayName(entry.name, entry.projectPath, entry.otherCollectionNames)}
-              >
-                <div className="project-symbol">
-                  <ProjectIcon icon={entry.icon} />
-                </div>
-                <div className="project-row-copy">
-                  <strong>
-                    {collectionDisplayName(entry.name, entry.projectPath, entry.otherCollectionNames)}
-                  </strong>
-                  <span>{entry.projectName}</span>
-                  <small>{relativeOpenedTime(entry.openedAt)}</small>
-                </div>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon={<FolderOpen size={22} aria-hidden="true" />}
-            title={search ? 'No matching collections' : 'No recent collections yet'}
-            description={
-              search
-                ? 'Try another collection or project name.'
-                : 'Open a project or collection to find it here next time.'
-            }
-            action={
-              !search ? <Button onClick={() => void onBrowseProjects()}>Browse projects</Button> : undefined
-            }
-          />
-        )
-      ) : normalizedQuery && settings.workspacePath ? (
-        <ContentSearchResults
-          query={normalizedQuery}
-          workspacePath={settings.workspacePath}
-          projects={projects}
-          favouritesOnly={view === 'favourites'}
-          scope={view === 'archived' ? 'archived' : 'active'}
-          onSelect={onSelectContentResult}
-        />
-      ) : filtered.length ? (
-        <div className="project-list">
-          {filtered.map((project) => (
-            <div className="project-row" key={project.id}>
-              <button className="project-row-main" onClick={() => onSelect(project.projectPath)}>
-                <div className="project-symbol">
-                  <ProjectIcon icon={project.icon} />
-                </div>
-                <div className="project-row-copy">
-                  <strong>{project.name}</strong>
-                  <span>{project.description || 'No description yet'}</span>
-                  <small>
-                    {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
-                    edited {new Date(project.updatedAt).toLocaleDateString()}
-                  </small>
-                </div>
-                <div className="project-row-meta">
-                  {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
-                </div>
-              </button>
-              <div className="project-row-actions">
-                <IconButton
-                  data-testid={`project-edit-${project.id}`}
-                  label={`Edit ${project.name}`}
-                  onClick={() => onEdit(project.projectPath)}
-                >
-                  <Pencil size={15} aria-hidden="true" />
-                </IconButton>
-                {project.status === 'archived' ? (
-                  <IconButton
-                    data-testid={`project-restore-${project.id}`}
-                    label={`Restore ${project.name}`}
-                    onClick={() => onRestore(project.projectPath)}
-                  >
-                    <ArchiveRestore size={15} aria-hidden="true" />
-                  </IconButton>
-                ) : (
-                  <IconButton
-                    data-testid={`project-archive-${project.id}`}
-                    label={`Archive ${project.name}`}
-                    onClick={() => onArchive(project.projectPath)}
-                  >
-                    <Archive size={15} aria-hidden="true" />
-                  </IconButton>
-                )}
-                <IconButton
-                  data-testid={`project-delete-${project.id}`}
-                  className="project-row-delete"
-                  label={`Delete ${project.name}`}
-                  onClick={() => onDelete(project.projectPath)}
-                >
-                  <Trash2 size={15} aria-hidden="true" />
-                </IconButton>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={<FolderOpen size={22} aria-hidden="true" />}
-          title={
-            view === 'favourites'
-              ? 'No favourite projects yet'
-              : view === 'archived'
-                ? 'No archived projects'
-                : 'Your project library is empty'
-          }
-          description={
-            view === 'favourites'
-              ? 'Open a project and use the heart button to keep it here.'
-              : view === 'archived'
-                ? 'Archived projects stay here until you restore them.'
-                : 'Create a local project, then add the screenshots that explain the work.'
-          }
-          action={
-            view !== 'favourites' && view !== 'archived' ? (
-              <Button variant="primary" onClick={onNew}>
-                <Plus size={16} aria-hidden="true" />
-                Create first project
-              </Button>
-            ) : undefined
-          }
-        />
-      )}
-    </section>
   );
 }

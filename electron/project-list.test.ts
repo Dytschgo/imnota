@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -10,6 +11,17 @@ import { emptyProject } from '../src/shared/utils.js';
 import { migrateProject } from './collections.js';
 import { SEARCH_LIMITS, WorkspaceContentSearch, isReservedProjectPath } from './content-search.js';
 import { listWorkspaceProjects } from './project-list.js';
+
+const WRITE_FLAGS =
+  fsConstants.O_WRONLY |
+  fsConstants.O_RDWR |
+  fsConstants.O_CREAT |
+  fsConstants.O_TRUNC |
+  fsConstants.O_APPEND;
+/** Listing and search may only open files for reading. */
+function readOnly(mode: unknown): boolean {
+  return mode === 'r' || (typeof mode === 'number' && (mode & WRITE_FLAGS) === 0);
+}
 
 const fixtures: string[] = [];
 afterEach(async () => {
@@ -55,113 +67,107 @@ describe('read-only project listing', () => {
     expect(isReservedProjectPath(path.join('workspace', '.private-project'))).toBe(false);
   });
 
-  it.each([3, 4] as const)(
-    'returns v%s display summaries and metadata search text without content reads',
-    async (schemaVersion) => {
-      const root = await workspace();
-      const project: ProjectData = {
-        ...emptyProject('Current', 'Project description'),
-        schemaVersion,
-        id: 'current',
-        status: 'archived',
-        favourite: true,
-        icon: 'code-2',
-        updatedAt: '2026-09-13',
-      };
-      const collection = project.collections[0];
-      collection.archived = true;
-      collection.overallContext = 'Context is not display data';
-      project.screenshots.push({
-        id: 'shot',
+  it.each([3, 4] as const)('returns v%s display summaries without content reads', async (schemaVersion) => {
+    const root = await workspace();
+    const project: ProjectData = {
+      ...emptyProject('Current', 'Project description'),
+      schemaVersion,
+      id: 'current',
+      status: 'archived',
+      favourite: true,
+      icon: 'code-2',
+      updatedAt: '2026-09-13',
+    };
+    const collection = project.collections[0];
+    collection.archived = true;
+    collection.overallContext = 'Context is not display data';
+    project.screenshots.push({
+      id: 'shot',
+      collectionId: collection.id,
+      originalFilename: 'example.png',
+      storedFilename: 'example.png',
+      title: 'Screenshot title',
+      description: 'Metadata description',
+      position: 0,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      priority: 'high',
+      annotationFile: `collections/${collection.id}/annotations/example.png.json`,
+      descriptionFile: `collections/${collection.id}/descriptions/example.png.md`,
+      originalWidth: 1,
+      originalHeight: 1,
+      includeInExport: true,
+    });
+    if (schemaVersion === 4) {
+      const common = {
         collectionId: collection.id,
-        originalFilename: 'example.png',
-        storedFilename: 'example.png',
-        title: 'Screenshot title',
-        description: 'Metadata description',
-        position: 0,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-        priority: 'high',
-        annotationFile: `collections/${collection.id}/annotations/example.png.json`,
-        descriptionFile: `collections/${collection.id}/descriptions/example.png.md`,
-        originalWidth: 1,
-        originalHeight: 1,
         includeInExport: true,
-      });
-      if (schemaVersion === 4) {
-        const common = {
-          collectionId: collection.id,
-          includeInExport: true,
-          createdAt: project.createdAt,
-          updatedAt: project.updatedAt,
-        };
-        project.contentItems = [
-          {
-            ...common,
-            id: 'drawing',
-            kind: 'drawing',
-            position: 1,
-            title: 'Drawing title',
-            sourceFilename: 'drawing.json',
-            imageFilename: 'drawing.png',
-            originalWidth: 1,
-            originalHeight: 1,
-          },
-          {
-            ...common,
-            id: 'text',
-            kind: 'text',
-            position: 2,
-            markdownFilename: 'text.md',
-            preview: 'Text preview',
-          },
-        ];
-      }
-      const projectPath = await writeProject(root, 'current', project);
-      // The on-disk description intentionally differs: listing uses metadata only.
-      const descriptionPath = path.join(projectPath, project.screenshots[0].descriptionFile);
-      await fs.mkdir(path.dirname(descriptionPath), { recursive: true });
-      await fs.writeFile(descriptionPath, 'Do not hydrate this description during listing');
-      await writeProject(root, 'older', { ...emptyProject('Older', ''), updatedAt: '2020-01-01' });
-      const open = vi.spyOn(fs, 'open');
-      const readFile = vi.spyOn(fs, 'readFile');
-      const listed = await listWorkspaceProjects(root);
-      expect(listed.map((item) => item.name)).toEqual(['Current', 'Older']);
-      expect(listed[0]).toEqual({
-        projectPath,
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        status: 'archived',
-        favourite: true,
-        icon: 'code-2',
-        projectRevision: createHash('sha256').update(JSON.stringify(project)).digest('hex'),
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
-        collections: [
-          {
-            id: collection.id,
-            name: collection.name,
-            archived: true,
-            createdAt: collection.createdAt,
-            updatedAt: collection.updatedAt,
-          },
-        ],
-        screenshots: [{ id: 'shot' }],
-        searchText:
-          'current project description archived screenshot title metadata description high' +
-          (schemaVersion === 4 ? ' drawing title text preview' : ''),
-      });
-      expectTypeOf<ProjectListItem>().not.toMatchTypeOf<ProjectData>();
-      expect(open).toHaveBeenCalledTimes(2);
-      expect(
-        open.mock.calls.every(
-          ([target, mode]) => path.basename(String(target)) === 'project.json' && mode === 'r',
-        ),
-      ).toBe(true);
-      expect(readFile).not.toHaveBeenCalled();
-    },
-  );
+      };
+      project.contentItems = [
+        {
+          ...common,
+          id: 'drawing',
+          kind: 'drawing',
+          position: 1,
+          title: 'Drawing title',
+          sourceFilename: 'drawing.json',
+          imageFilename: 'drawing.png',
+          originalWidth: 1,
+          originalHeight: 1,
+        },
+        {
+          ...common,
+          id: 'text',
+          kind: 'text',
+          position: 2,
+          markdownFilename: 'text.md',
+          preview: 'Text preview',
+        },
+      ];
+    }
+    const projectPath = await writeProject(root, 'current', project);
+    // The on-disk description intentionally differs: listing uses metadata only.
+    const descriptionPath = path.join(projectPath, project.screenshots[0].descriptionFile);
+    await fs.mkdir(path.dirname(descriptionPath), { recursive: true });
+    await fs.writeFile(descriptionPath, 'Do not hydrate this description during listing');
+    await writeProject(root, 'older', { ...emptyProject('Older', ''), updatedAt: '2020-01-01' });
+    const open = vi.spyOn(fs, 'open');
+    const readFile = vi.spyOn(fs, 'readFile');
+    const listed = await listWorkspaceProjects(root);
+    expect(listed.map((item) => item.name)).toEqual(['Current', 'Older']);
+    expect(listed[0]).toEqual({
+      projectPath,
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      status: 'archived',
+      favourite: true,
+      icon: 'code-2',
+      projectRevision: createHash('sha256').update(JSON.stringify(project)).digest('hex'),
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      collections: [
+        {
+          id: collection.id,
+          name: collection.name,
+          archived: true,
+          createdAt: collection.createdAt,
+          updatedAt: collection.updatedAt,
+        },
+      ],
+      screenshots: [{ id: 'shot' }],
+    });
+    expectTypeOf<ProjectListItem>().not.toMatchTypeOf<ProjectData>();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(
+      open.mock.calls.every(
+        ([target, mode]) => path.basename(String(target)) === 'project.json' && readOnly(mode),
+      ),
+    ).toBe(true);
+    expect(readFile).not.toHaveBeenCalled();
+  });
 
   it.each([1, 2] as const)(
     'lists then searches a real legacy v%s tree without writes; explicit open migration still works',
@@ -253,7 +259,6 @@ describe('read-only project listing', () => {
           },
         ],
       });
-      expect(summary.searchText).toContain('legacy screenshot original description critical');
       expect(summary).not.toHaveProperty('schemaVersion');
       expect(summary).not.toHaveProperty('exportPreferences');
       const response = await new WorkspaceContentSearch().search({
@@ -268,10 +273,11 @@ describe('read-only project listing', () => {
       });
       expect(response.warnings.join(' ')).toMatch(/Open them/);
       for (const write of writes) expect(write).not.toHaveBeenCalled();
-      expect(open.mock.calls).toEqual([
-        [path.join(projectPath, 'project.json'), 'r'],
-        [path.join(projectPath, 'project.json'), 'r'],
+      expect(open.mock.calls.map(([target]) => target)).toEqual([
+        path.join(projectPath, 'project.json'),
+        path.join(projectPath, 'project.json'),
       ]);
+      expect(open.mock.calls.every(([, mode]) => readOnly(mode))).toBe(true);
       expect(readFile).not.toHaveBeenCalled();
       vi.restoreAllMocks();
       expect(await tree(root)).toEqual(before);

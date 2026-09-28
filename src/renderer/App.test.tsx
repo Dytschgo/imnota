@@ -6,7 +6,13 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, matchesProjectSearch, SettingsView, userFacingErrorMessage } from './App';
+import App, {
+  CollectionControls,
+  SettingsView,
+  TOAST_ACTION_MS,
+  TOAST_STATUS_MS,
+  userFacingErrorMessage,
+} from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -65,14 +71,49 @@ const snapshot: ProjectSnapshot = {
   },
 };
 
+/** Open the collection rail's Add menu and return one of its items. */
+function addMenuItem(name: RegExp): HTMLElement {
+  fireEvent.click(screen.getByTestId('add-item-trigger'));
+  return screen.getByRole('menuitem', { name });
+}
+
+/** Choose a delay beside Take screenshot, then take it. */
+function takeDelayedScreenshot(seconds: 3 | 5): void {
+  fireEvent.click(screen.getByTestId('add-item-trigger'));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: `Capture after ${seconds} seconds` }));
+  fireEvent.click(screen.getByTestId('add-item-capture'));
+}
+
+function pasteFromAddMenu(): void {
+  fireEvent.click(addMenuItem(/^Paste from clipboard/));
+}
+
 describe('feedback controls', () => {
   let changeViewport: (narrow: boolean) => void;
-  function renderApp(overrides: Partial<ImnotaBridge & WorkflowBridge> = {}, narrowViewport = false) {
+  function renderApp(
+    overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
+    narrowViewport = false,
+    { resumeRecent = false }: { resumeRecent?: boolean } = {},
+  ) {
+    // Launch resumes the most recent project unless a saved session names another page.
+    // Most tests start from the Library, so they save that page first.
+    if (!resumeRecent && !localStorage.getItem('imnota:last-session'))
+      localStorage.setItem(
+        'imnota:last-session',
+        JSON.stringify({
+          workspacePath: '/workspace',
+          view: 'projects',
+          projectPath: null,
+          collectionId: '001-collection',
+          itemId: null,
+          search: '',
+          savedAt: new Date().toISOString(),
+        }),
+      );
     window.imnota = {
       getSettings: async () => ({
         ...useAppStore.getState().settings,
         workspacePath: '/workspace',
-        openRecentOnLaunch: false,
       }),
       listProjects: vi.fn(async () => []),
       onUpdateStatus: () => () => {},
@@ -102,7 +143,7 @@ describe('feedback controls', () => {
       }),
       getNativeCapabilities: async () => ({
         ok: true,
-        value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
+        value: { fileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
       raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
       onRegionCaptureHotkey: () => () => {},
@@ -209,18 +250,52 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
-  it('keeps the library open when launch restoration is disabled', async () => {
-    localStorage.removeItem('imnota:last-session');
-    const loadProject = vi.fn(async () => snapshot);
+  it('switches between all, favourite and archived projects from the Library filter', async () => {
     renderApp({
-      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' }],
-      loadProject,
+      listProjects: async () => [
+        { ...snapshot.project, projectPath: snapshot.projectPath, name: 'Loved', favourite: true },
+        {
+          ...snapshot.project,
+          id: 'old',
+          projectPath: '/workspace/old',
+          name: 'Old',
+          status: 'archived' as const,
+        },
+      ],
     });
-    await screen.findByTestId('library-full-search');
-    expect(loadProject).not.toHaveBeenCalled();
+    const filter = within(await screen.findByRole('group', { name: 'Show projects' }));
+    expect(filter.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(filter.getByRole('button', { name: 'Archived' }));
+    expect(await screen.findByRole('heading', { name: 'Archived projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Old/ })).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Show projects' })).getByRole('button', {
+        name: 'Favourites',
+      }),
+    );
+    expect(await screen.findByRole('heading', { name: 'Favourite projects' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
   });
 
-  it('restores a settings checkpoint even when recent launch is disabled', async () => {
+  it('resumes the most recent project when no session page is saved', async () => {
+    localStorage.removeItem('imnota:last-session');
+    const loadProject = vi.fn(async () => snapshot);
+    renderApp(
+      {
+        listProjects: async () => [
+          { ...snapshot.project, projectPath: snapshot.projectPath, icon: 'target' },
+        ],
+        loadProject,
+      },
+      false,
+      { resumeRecent: true },
+    );
+    await waitFor(() => expect(loadProject).toHaveBeenCalledWith(snapshot.projectPath));
+    expect(screen.queryByTestId('library-full-search')).not.toBeInTheDocument();
+  });
+
+  it('restores a settings checkpoint instead of the most recent project', async () => {
     localStorage.setItem(
       'imnota:last-session',
       JSON.stringify({
@@ -305,8 +380,6 @@ describe('feedback controls', () => {
       expect(screen.getByTestId('collection-picker')).toHaveTextContent(label);
       const recent = within(document.getElementById('quick-access-collections')!);
       expect(recent.getByRole('button', { name: /Imnota Feedback/ })).toHaveAttribute('title', label);
-      const favourites = within(document.getElementById('favourite-projects')!);
-      expect(favourites.getByRole('button', { name: label })).toHaveAttribute('title', label);
       fireEvent.click(screen.getByTestId('collection-picker'));
       expect(
         within(screen.getByRole('menu', { name: 'Collections' })).getByRole('menuitemradio', {
@@ -351,22 +424,19 @@ describe('feedback controls', () => {
     await screen.findByTestId('library-full-search');
     act(() => useAppStore.getState().setProject(current));
     const recent = within(document.getElementById('quick-access-collections')!);
-    const favourites = within(document.getElementById('favourite-projects')!);
-    expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible();
+    expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible();
     fireEvent.click(screen.getByTestId('collection-picker'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive Collection 01' }));
     await waitFor(() => expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(true));
     await waitFor(() =>
-      expect(favourites.queryByRole('button', { name: 'Collection 01' })).not.toBeInTheDocument(),
+      expect(recent.queryByRole('button', { name: /Collection 01/ })).not.toBeInTheDocument(),
     );
-    expect(recent.queryByRole('button', { name: /Collection 01/ })).not.toBeInTheDocument();
     expect(useAppStore.getState().recentCollections).toHaveLength(1);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore Collection 01' }));
     await waitFor(() =>
       expect(useAppStore.getState().snapshot?.project.collections[0]?.archived).toBe(false),
     );
-    await waitFor(() => expect(favourites.getByRole('button', { name: 'Collection 01' })).toBeVisible());
-    expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible();
+    await waitFor(() => expect(recent.getByRole('button', { name: /Collection 01/ })).toBeVisible());
     expect(listProjects).toHaveBeenCalledTimes(1);
   });
 
@@ -603,7 +673,13 @@ describe('feedback controls', () => {
       });
       expect(deleteScreenshot).toHaveBeenCalled();
       const undo = screen.getByRole('button', { name: 'Undo' });
-      act(() => vi.advanceTimersByTime(3501));
+      const notice = document.querySelector('.toast');
+      if (!notice) throw new Error('Delete confirmation did not appear.');
+      fireEvent.mouseEnter(notice);
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS));
+      expect(undo).toBeInTheDocument();
+      fireEvent.mouseLeave(notice);
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS + 1));
       expect(undo).toBeInTheDocument();
       fireEvent.click(undo);
       await act(async () => {
@@ -1300,7 +1376,7 @@ describe('feedback controls', () => {
         value: { snapshot: persisted, projectRevision: 'project-paste-2' },
       }),
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    pasteFromAddMenu();
     await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('pasted'));
   });
 
@@ -1310,20 +1386,21 @@ describe('feedback controls', () => {
     state.editingSnapshot = (await renderEditingProject({ pasteImage })).editingSnapshot;
     vi.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+      pasteFromAddMenu();
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
       });
       expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
 
-      act(() => vi.advanceTimersByTime(3000));
-      fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS));
+      expect(document.querySelector('.toast')).toBeNull();
+      pasteFromAddMenu();
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      act(() => vi.advanceTimersByTime(501));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS - 1));
       expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
       expect(pasteImage).toHaveBeenCalledTimes(2);
     } finally {
@@ -1340,7 +1417,7 @@ describe('feedback controls', () => {
       }),
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Paste from clipboard' }));
+    pasteFromAddMenu();
     const notification = await screen.findByTestId('error-toast');
     expect(notification).toHaveAttribute('role', 'alert');
     expect(notification).toHaveClass('toast', 'error-toast');
@@ -1356,26 +1433,20 @@ describe('feedback controls', () => {
     expect(userFacingErrorMessage('Errorless settings name')).toBe('Errorless settings name');
   });
 
-  it('keeps enabled import primary and capture absent until experimental capture is enabled', async () => {
+  it('offers capture on Windows even when an older profile saved it as off', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn();
+    const startRegionCapture = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'capture-cancelled', message: 'Cancelled.' },
+    }));
+    // DEFAULT_PREFERENCE_SETTINGS stores experimentalRegionCapture: false, like an older profile.
     await renderEditingProject({ startRegionCapture: startRegionCapture as never });
-    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const importClick = vi.fn();
-    fileInput.addEventListener('click', importClick);
 
-    const addScreenshot = screen.getByRole('button', { name: 'Add screenshot' });
-    expect(addScreenshot).toBeEnabled();
-    expect(screen.queryByRole('button', { name: /Capture area/ })).not.toBeInTheDocument();
-    fireEvent.click(addScreenshot);
-    expect(importClick).toHaveBeenCalledOnce();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add screenshot' }));
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
-    expect(startRegionCapture).not.toHaveBeenCalled();
-    fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
-    expect(startRegionCapture).not.toHaveBeenCalled();
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Screen capture is off — enable it in Settings → Features',
-    );
+    await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Screen capture is off/)).not.toBeInTheDocument();
   });
 
   it('admits one capture at a time and treats an overlay cancel as a quiet normal outcome', async () => {
@@ -1400,7 +1471,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture: startRegionCapture as never,
     });
-    const capture = await screen.findByRole('button', { name: /Capture area/ });
+    const capture = await screen.findByTestId('add-screenshot');
     fireEvent.click(capture);
     fireEvent.click(capture);
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
@@ -1466,7 +1537,7 @@ describe('feedback controls', () => {
     fireEvent.keyDown(window, { key: 'v', code: 'KeyV' });
     await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'select' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Capture area/ }));
+    fireEvent.click(screen.getByTestId('add-screenshot'));
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
     await screen.findByText('Screen capture added — annotate');
     await waitFor(() =>
@@ -1507,12 +1578,17 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
       repeatLastRegionCapture: repeatLastRegionCapture as never,
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
+    fireEvent.click(await screen.findByTestId('add-screenshot'));
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledOnce());
-    const progress = screen.getByRole('button', { name: 'Capture in progress…' });
+    const progress = screen.getByTestId('add-screenshot');
     expect(progress).toBeDisabled();
     expect(progress).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('button', { name: 'Capture delay' })).toBeDisabled();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(screen.getByRole('menuitemradio', { name: 'Capture after 3 seconds' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
 
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
     expect(repeatLastRegionCapture).not.toHaveBeenCalled();
@@ -1522,16 +1598,16 @@ describe('feedback controls', () => {
       resolveCapture({ ok: true, value: { snapshot: editingSnapshot, screenshotId: 'shot' } }),
     );
     await waitFor(() => expect(releaseProjects).toBeTypeOf('function'));
-    expect(screen.getByRole('button', { name: 'Capture in progress…' })).toBeDisabled();
+    expect(screen.getByTestId('add-screenshot')).toBeDisabled();
     await act(async () => releaseProjects([]));
-    const ready = await screen.findByRole('button', { name: /Capture area/ });
-    expect(ready).toBeEnabled();
+    const ready = screen.getByTestId('add-screenshot');
+    await waitFor(() => expect(ready).toBeEnabled());
     expect(ready).not.toHaveAttribute('aria-busy');
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledOnce());
   });
 
-  it('starts a cancellable 3s capture delay from the toolbar menu', async () => {
+  it('starts a cancellable 3s capture delay from the Add menu', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
       ok: false as const,
@@ -1550,8 +1626,8 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 3 seconds' }));
+    await screen.findByTestId('add-screenshot');
+    takeDelayedScreenshot(3);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1563,7 +1639,7 @@ describe('feedback controls', () => {
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
   });
 
-  it('starts a 5s capture delay from the toolbar control', async () => {
+  it('starts a 5s capture delay from the Add menu', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
       ok: false as const,
@@ -1582,8 +1658,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Capture delay' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Capture in 5 seconds' }));
+    takeDelayedScreenshot(5);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1688,7 +1763,6 @@ describe('feedback controls', () => {
       resolveSettings({
         ...useAppStore.getState().settings,
         workspacePath: null,
-        openRecentOnLaunch: false,
       }),
     );
     await waitFor(() => expect(captureRendererReady).toHaveBeenCalledOnce());
@@ -1710,7 +1784,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
+    fireEvent.click(await screen.findByTestId('add-screenshot'));
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1721,6 +1795,46 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('dialog', { name: 'Choose a display' })).not.toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: '5', code: 'Digit5', ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(2));
+  });
+
+  it('repairs the macOS Screen Recording permission and restarts from the error', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    const repairCapturePermission = vi.fn(async () => ({ ok: true as const, value: { reset: true } }));
+    const relaunchForCapturePermission = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: 'capture-permission-denied' as const,
+          message: 'Imnota is not allowed to record the screen.',
+          retryable: false,
+        },
+      })) as never,
+      repairCapturePermission,
+      relaunchForCapturePermission,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    const fix = await screen.findByRole('button', { name: 'Fix permission' });
+    fireEvent.click(fix);
+    await waitFor(() => expect(repairCapturePermission).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('then restart Imnota');
+    fireEvent.click(screen.getByRole('button', { name: 'Restart Imnota' }));
+    await waitFor(() => expect(relaunchForCapturePermission).toHaveBeenCalledOnce());
+  });
+
+  it('offers no permission repair for other capture errors', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: { code: 'capture-failed' as const, message: 'The selection window stopped.', retryable: true },
+      })) as never,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('The selection window stopped.');
+    expect(screen.queryByRole('button', { name: 'Fix permission' })).not.toBeInTheDocument();
   });
 
   it('starts capture from the primary Add screenshot action', async () => {
@@ -1810,7 +1924,7 @@ describe('feedback controls', () => {
       startRegionCapture: startRegionCapture as never,
     });
     fireEvent.change(note, { target: { value: 'Needs flushing' } });
-    fireEvent.click(await screen.findByRole('button', { name: /Capture area/ }));
+    fireEvent.click(await screen.findByTestId('add-screenshot'));
     await waitFor(() => expect(saveScreenshotContent).toHaveBeenCalledTimes(1));
     act(() => useAppStore.getState().set({ activeCollectionId: 'changed-during-flush' }));
     await act(async () =>
@@ -2751,7 +2865,7 @@ describe('feedback controls', () => {
         await Promise.resolve();
       });
       const undo = screen.getByRole('button', { name: 'Undo' });
-      act(() => vi.advanceTimersByTime(3501));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS + 1));
       expect(undo).toBeInTheDocument();
       fireEvent.click(undo);
       await act(async () => {
@@ -2774,6 +2888,20 @@ describe('feedback controls', () => {
       archived: false,
     });
     expect(await screen.findByTestId('project-archive-project-id')).toBeInTheDocument();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByTestId('project-archive-project-id'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS));
+      expect(document.querySelector('.toast')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports an archive without an Undo action when the backend returns no revision', async () => {
@@ -2892,7 +3020,8 @@ describe('feedback controls', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Second project' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Projects/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Second project/ }));
     await waitFor(() =>
       expect(useAppStore.getState().snapshot?.projectPath).toBe(secondSnapshot.projectPath),
     );
@@ -3090,15 +3219,6 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
-  it('trims project queries before matching project metadata', () => {
-    expect(
-      matchesProjectSearch(
-        { ...snapshot.project, projectPath: snapshot.projectPath, searchText: 'A design note' },
-        '  design  ',
-      ),
-    ).toBe(true);
-  });
-
   it('creates an automatically named empty collection and activates it', async () => {
     let finishCreate!: (result: ProjectSnapshot) => void;
     const editCollection = vi.fn(
@@ -3143,8 +3263,8 @@ describe('feedback controls', () => {
     expect(useAppStore.getState().activeScreenshotId).toBeNull();
   });
 
-  it('saves an accessible theme option and reports preference failures', async () => {
-    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings, theme: 'dark' as const }));
+  it('keeps appearance out of workspace settings and reports preference failures', async () => {
+    const setSettings = vi.fn(async () => ({ ...useAppStore.getState().settings }));
     window.imnota = {
       setSettings,
       onUpdateStatus: () => () => {},
@@ -3160,7 +3280,8 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
-    await waitFor(() => expect(setSettings).toHaveBeenCalledWith({ theme: 'dark' }));
+    await act(async () => undefined);
+    expect(setSettings).not.toHaveBeenCalled();
 
     setSettings.mockRejectedValueOnce(new Error('unavailable'));
     fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));

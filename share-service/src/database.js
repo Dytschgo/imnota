@@ -105,7 +105,7 @@ export function openDatabase(config) {
   const stored = db.prepare("SELECT value FROM service_metadata WHERE key = 'receipt-secret-sha256'").get();
   if (
     (stored && stored.value !== fingerprint) ||
-    (!stored && db.prepare('SELECT COUNT(*) AS count FROM shares').get().count > 0)
+    (!stored && Number(db.prepare('SELECT COUNT(*) AS count FROM shares').get().count) > 0)
   ) {
     db.close();
     throw new Error(

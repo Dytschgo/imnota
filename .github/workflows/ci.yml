@@ -105,6 +105,8 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: npm ci --prefix share-service
         if: env.RUN_APPLICATION == 'true'
+      - run: pnpm typecheck:share-service
+        if: env.RUN_APPLICATION == 'true'
       - run: pnpm test:share-contract
         if: env.RUN_APPLICATION == 'true'
       # Each package job builds and runs the native walkthrough against its distributable.

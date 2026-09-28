@@ -36,7 +36,6 @@
     "src/renderer/navigation-history.test.ts",
     "src/renderer/onboarding/OnboardingDemo.test.tsx",
     "src/renderer/pixelate.test.ts",
-    "src/renderer/prepare-context.test.ts",
     "src/renderer/prompt-bundle-render.test.ts",
     "src/renderer/search/ContentSearchResults.test.tsx",
     "src/renderer/search/SearchDialog.test.tsx",

@@ -1,6 +1,6 @@
 # Engineering audit — 2026-09-05
 
-> Historical audit of the schema-2 application. References below to feedback rounds, tags, statuses and ZIP/context exports describe the inspected revision, not the current collection and prompt-bundle workflow. See [the architecture](architecture.md) and [user guide](user-guide.md).
+> Historical audit of the schema-2 application. References below to feedback rounds, tags, statuses and ZIP/context exports describe the inspected revision, not the current collection and prompt-bundle workflow. See [the architecture](../architecture.md) and [user guide](../user-guide.md).
 
 The previous green CI runs verified compilation and packaging, but never launched Electron. A runtime check reproduced startup failures caused by the updater's CommonJS import, an ESM preload in a sandboxed renderer, an incorrect HTML path, and omitted shared runtime modules in packaged files.
 

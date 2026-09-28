@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronDown,
   Clipboard,
   FileImage,
   FileText,
@@ -102,7 +103,7 @@ export function OnboardingDemo({
   const [image, setImage] = useState<ImagePayload | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tool, setTool] = useState<'select' | AnnotationKind | 'eraser'>('select');
+  const [tool, setTool] = useState<'select' | AnnotationKind>('select');
   const [bundle, setBundle] = useState<OnboardingBundle | null>(null);
   const [handoff, setHandoff] = useState<OnboardingHandoffGrant | null>(null);
   const [copyOutcome, setCopyOutcome] = useState<PromptDeliveryOutcome>();
@@ -334,7 +335,6 @@ export function OnboardingDemo({
                 ) : (
                   <small>Canvas preview unavailable</small>
                 )}
-                <figcaption>component-search.png</figcaption>
               </figure>
               <div className="imnota-onboarding-instruction">
                 <h2>Start with a screenshot</h2>
@@ -456,27 +456,21 @@ export function OnboardingDemo({
                     <span>{copyVariantLabels[primaryCopyVariant].label}</span>
                   </button>
                   {fileClipboardAvailable && (
-                    <select
-                      className="imnota-copy-split-select"
-                      aria-label="Native copy function"
-                      title="Native copy function"
+                    <CopyFormatMenu
                       value={defaultCopyVariant}
+                      labels={copyVariantLabels}
                       disabled={busy || !onDefaultCopyVariantChange}
-                      onChange={async (event) => {
+                      onChange={async (variant) => {
                         setError('');
                         try {
-                          await onDefaultCopyVariantChange?.(event.target.value as WindowsCopyVariantId);
+                          await onDefaultCopyVariantChange?.(variant);
                         } catch {
                           setError(
                             'The primary copy action could not be saved. Your previous choice is still active.',
                           );
                         }
                       }}
-                    >
-                      <option value="files">Copy files · MD + PNG files</option>
-                      <option value="files-rich">Files + rich copy · Files, text + image</option>
-                      <option value="rich">Rich copy · Text + image</option>
-                    </select>
+                    />
                   )}
                   <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
                 </div>
@@ -576,6 +570,101 @@ export function OnboardingDemo({
           </footer>
         )}
       </section>
+    </div>
+  );
+}
+
+const COPY_VARIANTS: readonly WindowsCopyVariantId[] = ['files', 'files-rich', 'rich'];
+
+/** The copy-format chooser, styled like the app's own menus instead of an OS select popup. */
+function CopyFormatMenu({
+  value,
+  labels,
+  disabled,
+  onChange,
+}: {
+  value: WindowsCopyVariantId;
+  labels: Record<WindowsCopyVariantId, { label: string; detail: string }>;
+  disabled: boolean;
+  onChange(variant: WindowsCopyVariantId): void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const close = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    rootRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const outside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+
+  return (
+    <div className="imnota-copy-format" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="imnota-copy-format-trigger"
+        aria-label="Native copy function"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          className="imnota-copy-format-menu"
+          role="menu"
+          aria-label="Native copy function"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              close(true);
+              return;
+            }
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            const items = Array.from(
+              event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
+            );
+            const index = items.indexOf(document.activeElement as HTMLElement);
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            items[(index + step + items.length) % items.length]?.focus();
+          }}
+        >
+          {COPY_VARIANTS.map((variant) => (
+            <button
+              key={variant}
+              type="button"
+              role="menuitemradio"
+              aria-checked={value === variant}
+              data-variant={variant}
+              onClick={() => {
+                close(true);
+                if (variant !== value) void onChange(variant);
+              }}
+            >
+              <span className="imnota-copy-format-check" aria-hidden="true">
+                {value === variant && <Check size={14} />}
+              </span>
+              <span>
+                <strong>{labels[variant].label}</strong>
+                <small>{labels[variant].detail}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

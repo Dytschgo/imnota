@@ -26,7 +26,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
 - Collections with archive/restore controls and a single optional overall context
 - One optional Markdown description per screenshot and per drawing, plus Low, Medium or High agent priority per screenshot
-- Screenshot-first Add control, with the previous combined Add item menu available in Settings
+- Screenshot-first Add control with an adjacent menu for pasted images, drawings and text blocks
 - Direct include/exclude controls without deleting screenshots
 - Undo and redo for annotation edits
 - Timestamped Markdown + PNG prompt bundles for the current collection
@@ -85,7 +85,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-Stable [v0.2.8](https://github.com/Dytschgo/imnota/releases/tag/v0.2.8) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
+Stable [v0.3.0](https://github.com/Dytschgo/imnota/releases/tag/v0.3.0) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
 
 Quality checks:
 
@@ -102,15 +102,15 @@ corepack pnpm build
 When you ask to release a new version, the guarded release command requires a clean, exact `origin/main` commit and an acceptance record for that version. The record includes feature checks, platform package/install checks, independent review and recovery guidance. Formatting, linting, type checking, tests and a production build must also pass before tagging. See [the release-readiness process](docs/release-readiness.md).
 
 ```bash
-corepack pnpm release 0.3.0 --evidence .git/release-evidence.json
+corepack pnpm release 0.3.1 --evidence .git/release-evidence.json
 ```
 
-Prepare the new `package.json` version and changelog in a PR and obtain independent approval first. After merging and pulling main, collect evidence and publish that exact version; `0.3.0` above is an example, not an existing release. The release command does not push version changes directly to main. `patch`/`minor`/`major` identify the next version to prepare and report that requirement when it is not yet merged. This local guard is not a substitute for GitHub branch/tag protection.
+Prepare the new `package.json` version and changelog in a PR and obtain independent approval first. After merging and pulling main, collect evidence and publish that exact version; `0.3.1` above is an example, not an existing release. The release command does not push version changes directly to main. `patch`/`minor`/`major` identify the next version to prepare and report that requirement when it is not yet merged. This local guard is not a substitute for GitHub branch/tag protection.
 
 Use `--dry-run` to validate the repository and release checks without changing files or pushing anything:
 
 ```bash
-corepack pnpm release 0.3.0 --evidence .git/release-evidence.json --dry-run
+corepack pnpm release 0.3.1 --evidence .git/release-evidence.json --dry-run
 ```
 
 The `Publish release` workflow builds Windows, macOS and Linux artifacts and publishes a GitHub Release with the update manifests. Release tags must match the version in `package.json`.

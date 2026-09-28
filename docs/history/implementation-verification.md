@@ -1,6 +1,6 @@
 # Implementation verification
 
-Historical verification of the schema-3 implementation at `5a1e734`. The counts, bundle sizes and platform limits below describe that revision. Current mixed-content and hosted-sharing release status is recorded in the [implementation status](implementation-plan.md), the [September 8 repository review](repository-review-2026-09-08.md) and [sharing deployment evidence](../share-service/docs/deployment-verification.md).
+Historical verification of the schema-3 implementation at `5a1e734`. The counts, bundle sizes and platform limits below describe that revision. Current mixed-content and hosted-sharing release status is recorded in the [implementation status](../implementation-plan.md), the [September 8 repository review](repository-review-2026-09-08.md) and [sharing deployment evidence](../../share-service/docs/deployment-verification.md).
 
 The implementation followed the [original implementation plan](https://github.com/Dytschgo/imnota/blob/107fc5920a6e829ec1b8dec10a21ad8a711e0fe8/implementation%20plan.md). Work was committed locally on `feature/imnota-implementation`; no release, push, cloud service, AI integration, or user recruitment was performed.
 
@@ -72,6 +72,6 @@ Prompt timings include dialog preparation and the complete fresh-copy action. Pr
 
 ## Test isolation deviation
 
-Use the isolated runner in [development.md](development.md) for native verification. It creates temporary profiles/workspaces and validates cleanup paths.
+Use the isolated runner in [development.md](../development.md) for native verification. It creates temporary profiles/workspaces and validates cleanup paths.
 
 An early worker development launch used the default app profile rather than an isolated profile and wrote application cache/session data. No before-state snapshot exists, so absence of other effects cannot be established. The user was informed; no cleanup or restoration of that real profile was attempted. All subsequent acceptance runs used the isolated runner.

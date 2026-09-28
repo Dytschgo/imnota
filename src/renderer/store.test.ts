@@ -75,8 +75,6 @@ it('keeps project-list entries display-only after a project edit', () => {
   const item = useAppStore.getState().projects[0]!;
   expect(item.projectPath).toBe(value.projectPath);
   expect(item.name).toBe('Updated name');
-  expect(item.searchText).toContain('orbital lantern');
-  expect(item.searchText).toContain('searchable update');
   expect(item).not.toHaveProperty('schemaVersion');
   expect(item).not.toHaveProperty('contentItems');
   expect(item).not.toHaveProperty('exportPreferences');

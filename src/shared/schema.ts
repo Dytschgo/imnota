@@ -347,7 +347,6 @@ export const sharingSenderNameSchema = z
   );
 export const settingsPatchSchema = z
   .object({
-    theme: z.enum(['system', 'light', 'dark']).optional(),
     interfaceScale: z.number().min(0.75).max(2).optional(),
     openRecentOnLaunch: z.boolean().optional(),
     confirmBeforeDeletion: z.boolean().optional(),

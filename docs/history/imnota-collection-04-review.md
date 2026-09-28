@@ -88,7 +88,7 @@ All checks passed:
 - Align file and encoded preference limits, handle image errors and stale uploads, and permit only bundled presets or local image data.
 - Respect solid surfaces, reduced transparency, and conservative performance fallback.
 - Correct the new-collection button's CSS cascade.
-- Replace copy-only image prompts with four selectable, bundled GPT Image backdrops. See [artwork provenance and prompts](backdrop-artwork.md).
+- Replace copy-only image prompts with four selectable, bundled GPT Image backdrops. See [artwork provenance and prompts](../backdrop-artwork.md).
 - Separate Recent/Favourites navigation from submenu disclosure and protect rapid collection navigation.
 - Keep the screenshot-selection regression fix and add coverage for the new behavior.
 - Exercise native picker keyboard input, actual packaged backdrop image loading, saved selection, solid fallback, and removal in the release smoke workflow.

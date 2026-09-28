@@ -1,6 +1,6 @@
 # Imnota feedback plan — 2026-09-18
 
-Status: historical planning snapshot from before PRs #72–#76. No product behaviour is changed by this document. For current behaviour, use the [user guide](user-guide.md); retain the observations below as recorded rather than rewriting them to match later changes.
+Status: historical planning snapshot from before PRs #72–#76. No product behaviour is changed by this document. For current behaviour, use the [user guide](../user-guide.md); retain the observations below as recorded rather than rewriting them to match later changes.
 
 This plan consolidates the latest hands-on feedback from the smoke project and the experimental screen-capture test. It separates confirmed observations from hypotheses that still need reproduction before implementation.
 

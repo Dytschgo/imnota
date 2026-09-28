@@ -1,6 +1,6 @@
 # Stable and nightly builds
 
-Historical channel design proposal from 2026-09-05. The manual workflow is implemented and has published verified nightly releases, including [v0.2.6-nightly.20260907.34169995806](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806). See [nightly build instructions](nightly-builds.md) for the current process and the [implementation status](implementation-plan.md) for release evidence. The proposal below records the original decisions; unimplemented scheduling and policy changes are not implied by publication.
+Historical channel design proposal from 2026-09-05. The manual workflow is implemented and has published verified nightly releases, including [v0.2.6-nightly.20260907.34169995806](https://github.com/Dytschgo/imnota/releases/tag/v0.2.6-nightly.20260907.34169995806). See [nightly build instructions](../nightly-builds.md) for the current process and the [implementation status](../implementation-plan.md) for release evidence. The proposal below records the original decisions; unimplemented scheduling and policy changes are not implied by publication.
 
 Implementation adjustment: native Windows/Linux checks now use a generic feed pinned to the exact discovered GitHub release, avoiding the GitHub provider's missing-channel fallback. Channel changes are locked during checks as well as downloads, preventing stale native operations from crossing channels. Automatic downloads and install-on-quit are disabled. The schedule remains off until the manual publication path is proven.
 
@@ -65,7 +65,7 @@ Updating required checks or administrator enforcement is a separate repository-p
 
 ## Feature acceptance process
 
-Use [the release-readiness process](release-readiness.md). Before merging a feature, check the behaviour in a preview build rather than only checking that it compiles. Before tagging stable, revalidate the integrated candidate and record the exact SHA, version, CI/artifact evidence, platform checks, independent reviewer, known limitations and recovery procedure.
+Use [the release-readiness process](../release-readiness.md). Before merging a feature, check the behaviour in a preview build rather than only checking that it compiles. Before tagging stable, revalidate the integrated candidate and record the exact SHA, version, CI/artifact evidence, platform checks, independent reviewer, known limitations and recovery procedure.
 
 Clipboard changes specifically require tests of crop/redaction, inclusion/order, failure preservation and the exact target AI app versions. An Electron clipboard test is not evidence that ChatGPT, Claude or Copilot accepted both text and an attachment. Until those tests pass, keep combined copy explicitly experimental with a separate-image fallback.
 

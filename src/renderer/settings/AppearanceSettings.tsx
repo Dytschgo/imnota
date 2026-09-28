@@ -43,12 +43,8 @@ const ACCENTS: Array<{ value: AccentPreset; label: string; color: string }> = [
   { value: 'amber', label: 'Amber', color: '#c77c11' },
 ];
 
-const GLASS_LEVELS: Array<{ value: GlassLevel; label: string; description: string }> = [
-  { value: 'off', label: 'Solid', description: 'No transparency' },
-  { value: 'subtle', label: 'Subtle', description: '92% surface' },
-  { value: 'balanced', label: 'Balanced', description: '82% surface' },
-  { value: 'strong', label: 'Strong', description: '70% surface' },
-];
+/** Level used when glass is switched on. Older profiles may keep Subtle or Strong until switched off. */
+const GLASS_ON_LEVEL: GlassLevel = 'balanced';
 
 const BACKDROP_LABELS: Record<BackdropPreset, string> = {
   graphite: 'Graphite',
@@ -169,11 +165,7 @@ export function AppearanceSettings({
     setBusy(true);
     setError('');
     try {
-      await onChange({
-        ...valueRef.current,
-        ...patch,
-        ...('backgroundImage' in patch && !('desktopGlass' in patch) ? { desktopGlass: false } : {}),
-      });
+      await onChange({ ...valueRef.current, ...patch });
     } catch {
       setError('Appearance could not be saved. Your previous preference is still active.');
     } finally {
@@ -183,21 +175,14 @@ export function AppearanceSettings({
   };
 
   const controlsDisabled = disabled || busy;
-  const activeTheme = effectiveAppearance?.theme ?? (value.mode === 'light' ? 'light' : 'dark');
-  const activeBackdrop = appearanceBackdrop(value, activeTheme);
-  const desktopBackdrop = Boolean(value.desktopGlass && !activeBackdrop.image);
-  const updateBackdrop = (image: string) => {
-    if (value.useSameBackdropForBoth) return update({ backgroundImage: image });
-    return activeTheme === 'dark'
-      ? update({ darkBackgroundImage: image })
-      : update({ lightBackgroundImage: image });
-  };
-  const updateBackdropOpacity = (opacity: number) => {
-    if (value.useSameBackdropForBoth) return update({ backgroundOpacity: opacity });
-    return activeTheme === 'dark'
-      ? update({ darkBackgroundOpacity: opacity })
-      : update({ lightBackgroundOpacity: opacity });
-  };
+  const activeBackdrop = appearanceBackdrop(value);
+  // Choosing a backdrop while glass is off turns glass on, so the choice is visible.
+  const updateBackdrop = (image: string) =>
+    update({
+      backgroundImage: image,
+      ...(image && value.glassLevel === 'off' ? { glassLevel: GLASS_ON_LEVEL } : {}),
+    });
+  const showOpacity = value.glassLevel !== 'off' && Boolean(activeBackdrop.image);
   const fallbackMessage =
     effectiveAppearance?.glassFallbackReason === 'reduced-transparency'
       ? 'Solid surfaces are active because the operating system requests reduced transparency.'
@@ -268,61 +253,35 @@ export function AppearanceSettings({
         </div>
       </fieldset>
 
-      <fieldset className="imnota-preference-fieldset" disabled={controlsDisabled}>
-        <legend>Glass surfaces</legend>
-        <p>Glass is cosmetic and independent from the accent preset. Solid remains the safest default.</p>
-        <div className="imnota-glass-options">
-          {GLASS_LEVELS.map((option) => (
-            <label key={option.value} data-selected={value.glassLevel === option.value || undefined}>
-              <input
-                type="radio"
-                name="glass-level"
-                value={option.value}
-                checked={value.glassLevel === option.value}
-                onChange={() => void update({ glassLevel: option.value })}
-              />
-              <span
-                className={`imnota-glass-sample imnota-glass-sample-${option.value}`}
-                aria-hidden="true"
-              />
-              <span>
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
-              </span>
-            </label>
-          ))}
-        </div>
-        {value.glassLevel !== 'off' && (
-          <label className="imnota-check-row">
-            <input
-              type="checkbox"
-              checked={value.allowPerformanceFallback}
-              onChange={(event) => void update({ allowPerformanceFallback: event.target.checked })}
-            />
-            <span>
-              <strong>Allow conservative performance fallback</strong>
-              <small>
-                Use solid surfaces only when the host supplies an explicit constrained-performance signal.
-                Imnota does not guess device capability.
-              </small>
-            </span>
-          </label>
-        )}
+      <div className="imnota-preference-fieldset">
+        <label className="settings-switch">
+          <span>
+            <strong>Glass surfaces</strong>
+            <small>Let the backdrop show through panels. Off keeps solid surfaces.</small>
+          </span>
+          <input
+            type="checkbox"
+            name="glass-surfaces"
+            checked={value.glassLevel !== 'off'}
+            disabled={controlsDisabled}
+            onChange={(event) => void update({ glassLevel: event.target.checked ? GLASS_ON_LEVEL : 'off' })}
+          />
+        </label>
         {fallbackMessage && (
           <div className="imnota-inline-status" role="status">
             <Sparkles size={15} aria-hidden="true" />
             <span>{fallbackMessage}</span>
           </div>
         )}
-      </fieldset>
+      </div>
 
       <section className="imnota-background-settings" aria-labelledby="background-settings-title">
         <div className="imnota-background-heading">
           <div>
             <h3 id="background-settings-title">Backdrop</h3>
             <p>
-              Choose a bundled image or upload one from this device. Light mode automatically reveals the
-              image through glass surfaces.
+              Choose a bundled image or upload one from this device. It shows through panels while Glass
+              surfaces is on.
             </p>
           </div>
           <div className="imnota-background-actions">
@@ -392,125 +351,19 @@ export function AppearanceSettings({
             />
           </div>
         </div>
-        <div className="imnota-background-modes" role="group" aria-label="Backdrop source">
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            aria-pressed={!activeBackdrop.image && !value.desktopGlass}
-            onClick={() =>
-              void (value.useSameBackdropForBoth
-                ? update({ backgroundImage: '', desktopGlass: false })
-                : activeTheme === 'dark'
-                  ? update({ darkBackgroundImage: '', desktopGlass: false })
-                  : update({ lightBackgroundImage: '', desktopGlass: false }))
-            }
-          >
-            No image
-          </button>
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            aria-pressed={!activeBackdrop.image && Boolean(value.desktopGlass)}
-            onClick={() =>
-              void (value.useSameBackdropForBoth
-                ? update({
-                    backgroundImage: '',
-                    desktopGlass: true,
-                    glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                  })
-                : activeTheme === 'dark'
-                  ? update({
-                      darkBackgroundImage: '',
-                      desktopGlass: true,
-                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                    })
-                  : update({
-                      lightBackgroundImage: '',
-                      desktopGlass: true,
-                      glassLevel: value.glassLevel === 'off' ? 'balanced' : value.glassLevel,
-                    }))
-            }
-          >
-            Desktop glass (Beta)
-          </button>
-        </div>
-        {desktopBackdrop && (
-          <p className="imnota-background-hint" role="status">
-            {effectiveAppearance?.desktopGlassStatus === 'active'
-              ? 'Desktop glass (Beta) is active. '
-              : 'Solid fallback is active on this configuration. '}
-            Beta: scrolling or transparency may show rendering glitches. Choose No image or Solid surfaces if
-            this happens. Uses native desktop material on macOS and supported Windows 11 systems. Other
-            systems, reduced transparency, and constrained-performance mode use solid surfaces.
-          </p>
-        )}
-        <label className="imnota-range-row">
-          <span>
-            <strong>{desktopBackdrop ? 'Glass tint' : 'Background opacity'}</strong>
-            <small>
-              {desktopBackdrop
-                ? 'Lower the tint to reveal more of the desktop material.'
-                : 'Lower the image when it competes with screenshot details.'}
-            </small>
-          </span>
-          <span className="imnota-range-control">
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={activeBackdrop.opacity}
-              disabled={controlsDisabled || (!activeBackdrop.image && !value.desktopGlass)}
-              onChange={(event) => void updateBackdropOpacity(Number(event.target.value))}
-            />
-            <output>{Math.round(activeBackdrop.opacity * 100)}%</output>
-          </span>
-        </label>
-        <label className="imnota-check-row imnota-backdrop-theme-link">
-          <input
-            type="checkbox"
-            checked={value.useSameBackdropForBoth}
-            disabled={controlsDisabled}
-            onChange={(event) => {
-              if (event.target.checked) {
-                void update({
-                  useSameBackdropForBoth: true,
-                  backgroundImage: activeBackdrop.image,
-                  backgroundOpacity: activeBackdrop.opacity,
-                });
-              } else {
-                void update({
-                  useSameBackdropForBoth: false,
-                  ...(value.themeBackdropsInitialized
-                    ? {}
-                    : {
-                        themeBackdropsInitialized: true,
-                        lightBackgroundImage: activeBackdrop.image,
-                        darkBackgroundImage: activeBackdrop.image,
-                        lightBackgroundOpacity: activeBackdrop.opacity,
-                        darkBackgroundOpacity: activeBackdrop.opacity,
-                      }),
-                });
-              }
-            }}
+        {showOpacity && (
+          <BackdropOpacity
+            value={activeBackdrop.opacity}
+            disabled={disabled}
+            onCommit={(opacity) => update({ backgroundOpacity: opacity }, { invalidateUpload: false })}
           />
-          <span>
-            <strong>Use the same image and opacity in light and dark themes</strong>
-            <small>
-              Turn this off to choose a separate backdrop for {activeTheme} mode. System mode follows the
-              current operating-system theme.
-            </small>
-          </span>
-        </label>
+        )}
         {[
           { label: 'Generic', presets: GENERIC_BACKDROP_PRESETS },
           { label: 'Characters', presets: CHARACTER_BACKDROP_PRESETS },
         ].map(({ label, presets }) => (
           <div key={label} className="imnota-backdrop-presets" role="group" aria-label={`${label} backdrops`}>
-            <span>
-              {label}
-              {value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}
-            </span>
+            <span>{label}</span>
             <div>
               {presets.map((preset) => {
                 const selected = activeBackdrop.image === backdropPresetValue(preset);
@@ -533,7 +386,7 @@ export function AppearanceSettings({
           </div>
         ))}
         <div className="imnota-backdrop-presets" role="group" aria-label="Uploaded backdrops">
-          <span>Your images{value.useSameBackdropForBoth ? '' : ` for ${activeTheme} mode`}</span>
+          <span>Your images</span>
           <div>
             {library.map((entry) => (
               <div key={entry.id} className="imnota-uploaded-backdrop">
@@ -596,5 +449,66 @@ export function AppearanceSettings({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * The slider moves freely and previews on the live backdrop; the preference is
+ * saved once the drag pauses or ends, so saving never interrupts dragging.
+ */
+function BackdropOpacity({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: number;
+  disabled: boolean;
+  onCommit(opacity: number): Promise<void>;
+}) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const pending = useRef<number | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const shown = draft ?? value;
+
+  const commit = () => {
+    window.clearTimeout(timer.current);
+    const next = pending.current;
+    if (next === null) return;
+    pending.current = null;
+    void onCommit(next).finally(() => {
+      if (pending.current === null) setDraft(null);
+    });
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  return (
+    <label className="imnota-range-row">
+      <span>
+        <strong>Background opacity</strong>
+        <small>Lower the image when it competes with screenshot details.</small>
+      </span>
+      <span className="imnota-range-control">
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={shown}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            setDraft(next);
+            pending.current = next;
+            document.documentElement.style.setProperty('--imnota-background-opacity', String(next));
+            window.clearTimeout(timer.current);
+            timer.current = window.setTimeout(commit, 250);
+          }}
+          onPointerUp={commit}
+          onKeyUp={commit}
+          onBlur={commit}
+        />
+        <output>{Math.round(shown * 100)}%</output>
+      </span>
+    </label>
   );
 }

@@ -16,11 +16,6 @@ export function projectListItem(
           updatedAt: project.updatedAt,
         }))
       : project.collections;
-  const searchable = [project.name, project.description, project.status];
-  for (const shot of project.screenshots) searchable.push(shot.title, shot.description, shot.priority);
-  if ('contentItems' in project)
-    for (const item of project.contentItems ?? [])
-      searchable.push(item.kind === 'drawing' ? item.title : (item.preview ?? ''));
   return {
     projectPath,
     id: project.id,
@@ -39,6 +34,5 @@ export function projectListItem(
       updatedAt,
     })),
     screenshots: project.screenshots.map(({ id }) => ({ id })),
-    searchText: searchable.join(' ').toLowerCase(),
   };
 }

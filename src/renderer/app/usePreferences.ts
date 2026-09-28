@@ -2,12 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   DEFAULT_PREFERENCE_SETTINGS,
   type AppearancePreferences,
-  type CapturePreferences,
   type OnboardingPreferences,
   type PreferenceSettings,
   type PreferenceSettingsResult,
   type ShortcutPreferences,
-  type WorkbenchPreferences,
   type AgentAccessPreferences,
 } from '../../shared/preferences';
 import type { BackupPreferences } from '../../shared/backups';
@@ -25,7 +23,7 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reasons: [],
 };
 const UNKNOWN_CAPABILITIES: NativeCapabilities = {
-  windowsFileClipboard: false,
+  fileClipboard: false,
   globalCaptureShortcutRegistered: false,
 };
 
@@ -41,9 +39,7 @@ export interface PreferenceController {
   saveAppearance(value: AppearancePreferences): Promise<void>;
   saveShortcuts(value: ShortcutPreferences): Promise<void>;
   saveBackups(value: BackupPreferences): Promise<void>;
-  saveCapture(value: CapturePreferences): Promise<void>;
   saveOnboarding(value: OnboardingPreferences): Promise<void>;
-  saveWorkbench(value: WorkbenchPreferences): Promise<void>;
   saveNativeCopy(value: PreferenceSettings['nativeCopy']): Promise<void>;
   savePromptExport(value: PreferenceSettings['promptExport']): Promise<void>;
   saveUpdates(value: PreferenceSettings['updates']): Promise<void>;
@@ -129,14 +125,8 @@ export function usePreferences(): PreferenceController {
     saveBackups: async (backups) => {
       await save({ backups });
     },
-    saveCapture: async (capture) => {
-      await save({ capture });
-    },
     saveOnboarding: async (onboarding) => {
       await save({ onboarding });
-    },
-    saveWorkbench: async (workbench) => {
-      await save({ workbench });
     },
     saveNativeCopy: async (nativeCopy) => {
       await save({ nativeCopy });

@@ -19,7 +19,6 @@ export interface AppearanceEnvironment {
 }
 
 export interface EffectiveAppearance {
-  desktopGlassStatus?: 'active' | 'fallback' | 'off';
   theme: ResolvedTheme;
   accent: AccentPreset;
   requestedGlassLevel: GlassLevel;
@@ -141,10 +140,8 @@ export function resolveAppearance(
   environment: AppearanceEnvironment,
 ): EffectiveAppearance {
   const theme = preferences.mode === 'system' ? environment.systemTheme : preferences.mode;
-  const image = appearanceBackdrop(preferences, theme).image;
-  const automaticLightGlass = theme === 'light' && Boolean(image) && isAllowedBackgroundImage(image);
-  const glassLevel =
-    automaticLightGlass && preferences.glassLevel === 'off' ? 'strong' : preferences.glassLevel;
+  // Glass off always means solid surfaces, in every theme.
+  const glassLevel = preferences.glassLevel;
   if (glassLevel === 'off') {
     return {
       theme,
@@ -163,7 +160,7 @@ export function resolveAppearance(
       glassFallbackReason: 'reduced-transparency',
     };
   }
-  if (preferences.allowPerformanceFallback && environment.performanceConstrained) {
+  if (environment.performanceConstrained) {
     return {
       theme,
       accent: preferences.accent,
@@ -203,7 +200,6 @@ export function useAppearance(
   const [reducedTransparency, setReducedTransparency] = useState(() =>
     mediaMatches('(prefers-reduced-transparency: reduce)'),
   );
-  const [desktopActive, setDesktopActive] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -232,29 +228,6 @@ export function useAppearance(
   );
 
   useEffect(() => {
-    let current = true;
-    setDesktopActive(false);
-    const enabled = Boolean(
-      preferences.desktopGlass &&
-      !appearanceBackdrop(preferences, effective.theme).image &&
-      effective.glassLevel !== 'off',
-    );
-    if (typeof window.imnota?.setDesktopGlass === 'function') {
-      void window.imnota
-        .setDesktopGlass({ enabled })
-        .then((result) => {
-          if (current) setDesktopActive(result.ok && result.value.active);
-        })
-        .catch(() => {
-          if (current) setDesktopActive(false);
-        });
-    }
-    return () => {
-      current = false;
-    };
-  }, [effective.glassLevel, effective.theme, preferences]);
-
-  useEffect(() => {
     const root = options.root ?? (typeof document === 'undefined' ? null : document.documentElement);
     if (!root) return;
     const accent = accentTokens(effective.accent, effective.theme);
@@ -273,7 +246,7 @@ export function useAppearance(
     root.style.setProperty('--imnota-glass-opacity', `${Number(glass.alpha) * 100}%`);
     root.style.setProperty('--imnota-glass-blur', glass.blur);
     root.style.setProperty('--imnota-glass-saturation', glass.saturation);
-    const backdrop = appearanceBackdrop(preferences, effective.theme);
+    const backdrop = appearanceBackdrop(preferences);
     const backdropActive = effective.glassLevel !== 'off' && Boolean(backdrop.image);
     root.dataset.background = backdropActive ? 'active' : 'none';
     root.dataset.backgroundSource = backdropActive
@@ -281,12 +254,6 @@ export function useAppearance(
         ? 'preset'
         : 'upload'
       : 'none';
-    root.dataset.desktopGlass = desktopActive
-      ? 'active'
-      : preferences.desktopGlass && !backdrop.image
-        ? 'fallback'
-        : 'off';
-    root.style.setProperty('--imnota-desktop-tint', `${Math.max(15, backdrop.opacity * 100)}%`);
     root.style.setProperty(
       '--imnota-background-image',
       backdropActive ? cssBackgroundImage(backdrop.image) : 'none',
@@ -295,14 +262,7 @@ export function useAppearance(
     // Compatibility aliases let the current indigo-named shell adopt presets before its global tokens are renamed.
     root.style.setProperty('--indigo', accent.base);
     root.style.setProperty('--indigo-light', accent.hover);
-  }, [effective, options.root, preferences, desktopActive]);
+  }, [effective, options.root, preferences]);
 
-  return {
-    ...effective,
-    desktopGlassStatus: desktopActive
-      ? 'active'
-      : preferences.desktopGlass && !appearanceBackdrop(preferences, effective.theme).image
-        ? 'fallback'
-        : 'off',
-  };
+  return effective;
 }

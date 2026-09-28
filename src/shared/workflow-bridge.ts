@@ -57,7 +57,8 @@ export interface NativePerformanceProfile {
 
 export interface NativeCapabilities {
   /** True only when the running desktop host can write native Windows file clipboard entries. */
-  windowsFileClipboard: boolean;
+  /** Copy files (Markdown + PNG as clipboard files): Windows and macOS. */
+  fileClipboard: boolean;
   /** False when capture is off, unsupported, OS-owned, cleared, or register() failed. */
   globalCaptureShortcutRegistered: boolean;
 }
@@ -199,7 +200,6 @@ export interface ProjectWatchEvent {
 }
 
 export interface WorkflowBridge {
-  setDesktopGlass(input: { enabled: boolean }): Promise<WorkflowResult<{ active: boolean }>>;
   getPreferenceSettings(): Promise<WorkflowResult<PreferenceSettingsResult>>;
   setPreferenceSettings(update: PreferenceSettingsUpdate): Promise<WorkflowResult<PreferenceSettingsResult>>;
   getNativePerformanceProfile(): Promise<WorkflowResult<NativePerformanceProfile>>;
@@ -233,6 +233,10 @@ export interface WorkflowBridge {
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
+  /** macOS: reset Imnota's Screen Recording entry, ask again and open its Settings page. */
+  repairCapturePermission(): Promise<WorkflowResult<{ reset: boolean }>>;
+  /** macOS: restart so a new Screen Recording grant applies. */
+  relaunchForCapturePermission(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
   onCaptureTray(handler: (mode: 'region' | 'window' | 'display') => void): () => void;
 

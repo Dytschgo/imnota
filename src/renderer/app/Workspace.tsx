@@ -33,7 +33,6 @@ export interface WorkspaceProps {
   onDuplicateContent?(): void | Promise<void>;
   onDrawingTitle?(title: string): void;
   onDrawingDescription?(description: string): void;
-  screenshotFirstAdd?: boolean;
   image: ImagePayload | null;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
@@ -48,7 +47,7 @@ export interface WorkspaceProps {
   canRedo: boolean;
   canUndoDescription: boolean;
   shortcutLabels: Partial<Record<string, string>>;
-  onTool(tool: 'select' | AnnotationKind | 'eraser'): void;
+  onTool(tool: 'select' | AnnotationKind): void;
   onColor(color: string): void;
   onChangeAnnotations(next: Annotation[]): void;
   onSelectAnnotation(id: string | null): void;
@@ -214,12 +213,12 @@ export function Workspace(props: WorkspaceProps) {
         onMessage={props.onMessage}
         onSnapshot={props.onSnapshot}
         onAddContent={props.onAddContent}
-        screenshotFirstAdd={props.screenshotFirstAdd}
         onCapture={props.onCapture}
         capturePrimary={props.capturePrimary}
         captureEnabled={props.captureEnabled}
         captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
+        captureShortcut={props.captureShortcut}
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
@@ -238,11 +237,6 @@ export function Workspace(props: WorkspaceProps) {
                 onZoom={props.onZoom}
                 onFit={props.onFit}
                 onActualSize={props.onActualSize}
-                onCapture={props.onCapture}
-                captureEnabled={props.captureEnabled}
-                captureInProgress={props.captureInProgress}
-                captureShortcut={props.captureShortcut}
-                captureDisabledLabel={props.captureDisabledLabel}
                 onColorSelect={props.onColor}
                 selectedColor={props.paletteColor}
                 shortcutLabels={props.shortcutLabels}
@@ -421,6 +415,13 @@ export function Workspace(props: WorkspaceProps) {
                       item.id === props.selectedAnnotationId ? { ...item, ...patch } : item,
                     ),
                   );
+                }}
+                onDeleteAnnotation={() => {
+                  if (!props.selectedAnnotationId) return;
+                  props.onChangeAnnotations(
+                    props.annotations.filter((item) => item.id !== props.selectedAnnotationId),
+                  );
+                  props.onSelectAnnotation(null);
                 }}
                 onDuplicate={props.onDuplicate}
               />

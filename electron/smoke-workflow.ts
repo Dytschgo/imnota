@@ -2,6 +2,7 @@ import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
 import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
+import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
@@ -11,6 +12,8 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { readMacClipboardFiles } from './mac-clipboard.js';
+import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
@@ -322,23 +325,21 @@ async function exerciseOnboarding(
     { text: 'Continue to copy', exact: true },
   ]);
   const chooseNativeCopyFunction = async (value: 'files' | 'files-rich' | 'rich', label: string) => {
-    await driver.evaluate(`(() => {
-      const select = document.querySelector('select[aria-label="Native copy function"]');
-      if (!(select instanceof HTMLSelectElement)) throw new Error('Native copy function selector is missing.');
-      select.value = ${JSON.stringify(value)};
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`);
+    await driver.click({ selector: '.imnota-copy-format-trigger' });
+    await driver.click({
+      selector: `.imnota-copy-format-menu [role="menuitemradio"][data-variant="${value}"]`,
+    });
+    await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     await driver.waitFor({ text: 'Copy files', exact: true });
     const nativeDefault = await driver.evaluate<string>(`(async () => {
       const result = await window.imnota.getPreferenceSettings();
       if (!result.ok) throw new Error(result.error.message);
       return result.value.settings.nativeCopy.defaultFunction;
     })()`);
-    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    if (nativeDefault !== 'files') throw new Error('Native copy default was not Copy files.');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
@@ -467,6 +468,23 @@ async function exerciseOnboarding(
     )
       throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
     await assertExactImage('Choosing a native copy default');
+  }
+
+  if (process.platform === 'darwin') {
+    // macOS Copy files: two clipboard file URLs, so composers attach both files.
+    await chooseNativeCopyFunction('files', 'Copy files');
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+    const macFiles = await readMacClipboardFiles();
+    if (
+      macFiles.length !== 2 ||
+      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
+      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
+    )
+      throw new Error(
+        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
+      );
+    await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
   await driver.click({ text: 'Copy Markdown only', exact: true });
@@ -778,7 +796,7 @@ async function canvasGeometry(driver: NativeUiDriver): Promise<CanvasGeometry> {
 const ANNOTATION_TOOL_TEST_IDS: Record<string, string> = {
   Arrow: 'arrow',
   Crop: 'crop',
-  'Redaction mask': 'blur',
+  Redact: 'blur',
 };
 
 async function selectTool(driver: NativeUiDriver, label: string): Promise<void> {
@@ -974,7 +992,7 @@ async function exerciseNativeCanvas(
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
   await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
-  await selectTool(driver, 'Redaction mask');
+  await selectTool(driver, 'Redact');
   await driver.drag(
     {
       x: Math.round(geometry.image.x + geometry.image.width * 0.3),
@@ -1381,16 +1399,15 @@ async function captureWorkspaceMatrix(
   for (const viewport of [{ width: 1080, height: 680 }, SMOKE_VIEWPORTS[1]]) {
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
-    await driver.waitFor({ selector: '#features-title' });
+    await driver.waitFor({ selector: '#capture-title' });
     await driver.evaluate(`(() => {
       const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
-      const row = document.querySelector('[aria-label="Enable screen capture"]')?.closest('label');
-      if (!detail || !row) throw new Error('Capture feature controls are missing.');
+      const heading = document.querySelector('#capture-title');
+      if (!detail || !heading) throw new Error('Capture feature details are missing.');
       const detailBounds = detail.getBoundingClientRect();
-      const rowBounds = row.getBoundingClientRect();
-      if (detailBounds.top < rowBounds.bottom || detailBounds.height <= 0 ||
+      if (detailBounds.top < heading.getBoundingClientRect().bottom || detailBounds.height <= 0 ||
           detail.scrollWidth > detail.clientWidth)
-        throw new Error('Capture shortcut help overlaps or overflows its feature row.');
+        throw new Error('Capture shortcut help overlaps or overflows its section.');
     })()`);
     artifacts.push(
       await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-features.png`),
@@ -1466,7 +1483,6 @@ async function exercisePreferencesAndChannel(
     performanceClass: string;
     platform: string;
     appearanceMode: string;
-    allowPerformanceFallback: boolean;
   }>(`(async () => {
     ${bridgePrelude()}
     const nativeProfile = unwrap(await workflow.getNativePerformanceProfile());
@@ -1474,8 +1490,7 @@ async function exercisePreferencesAndChannel(
     return {
       performanceClass: nativeProfile.performanceClass,
       platform: nativeProfile.platform,
-      appearanceMode: preferences.settings.appearance.mode,
-      allowPerformanceFallback: preferences.settings.appearance.allowPerformanceFallback
+      appearanceMode: preferences.settings.appearance.mode
     };
   })()`);
   if (!['constrained', 'standard'].includes(profile.performanceClass) || !profile.appearanceMode)
@@ -1511,23 +1526,25 @@ async function exercisePreferencesAndChannel(
       await driver.waitFor({
         selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
       });
-      const glass = theme === 'light' ? 'off' : 'strong';
-      await driver.click({ selector: `label:has(input[name="glass-level"][value="${glass}"])` });
+      // Choosing a backdrop turns glass on; both themes reveal it through the switch.
+      const glassOn = true;
+      await setGlassSurfaces(driver, glassOn);
+      const glass = 'balanced';
       const reducedTransparency = await driver.evaluate<boolean>(
         `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
       );
       const expectedFallback = reducedTransparency
         ? 'reduced-transparency'
-        : profile.allowPerformanceFallback && profile.performanceClass === 'constrained'
+        : profile.performanceClass === 'constrained'
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
-      const expectedGlass = expectedFallback === 'none' ? 'strong' : 'off';
+      const expectedGlass = expectedFallback !== 'none' ? 'off' : 'balanced';
       await driver.waitFor({
-        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"][data-desktop-glass="off"]`,
+        selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
-        selector: `input[name="glass-level"][value="${glass}"]:checked:not(:disabled)`,
+        selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
         artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
@@ -1578,9 +1595,9 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-amber"][aria-pressed="true"]:not(:disabled)',
   });
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="balanced"])' });
+  await setGlassSurfaces(driver, true);
   await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
-  await driver.waitFor({ selector: 'input[name="glass-level"][value="balanced"]:checked:not(:disabled)' });
+  await driver.waitFor({ selector: 'input[name="glass-surfaces"]:checked:not(:disabled)' });
   await driver.evaluate(`(async () => {
     if (document.documentElement.dataset.glassLevel === 'off') return;
     const cssImage = getComputedStyle(document.querySelector('.app-shell'), '::after').backgroundImage;
@@ -1624,17 +1641,14 @@ async function exercisePreferencesAndChannel(
     await driver.click({ selector: '[data-testid="settings-button"]' });
     await driver.waitFor({ selector: '.settings-view' });
   }
-  await driver.click({ selector: 'label:has(input[name="glass-level"][value="off"])' });
+  await setGlassSurfaces(driver, false);
   await driver.waitFor({ selector: ':root[data-glass-requested="off"]' });
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
   await driver.evaluate(`(() => {
     const root = document.documentElement;
-    const fallback = ['reduced-transparency', 'performance'].includes(root.dataset.glassFallback);
-    if (root.dataset.glassLevel !== (fallback ? 'off' : 'strong'))
-      throw new Error('Light backdrop did not apply automatic glass or its accessibility fallback.');
-    if (!fallback && root.dataset.background !== 'active')
-      throw new Error('Automatic light glass did not reveal its backdrop.');
+    if (root.dataset.glassLevel !== 'off' || root.dataset.background !== 'none')
+      throw new Error('Glass off still revealed the backdrop in light mode.');
   })()`);
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
   await driver.waitFor({ selector: ':root[data-theme="dark"][data-glass-level="off"]' });
@@ -1644,17 +1658,9 @@ async function exercisePreferencesAndChannel(
   if (solidBackdrop !== 'none') throw new Error('Solid surfaces did not suppress the cosmetic backdrop.');
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: '[data-testid="backdrop-remove"]' }, { absent: true });
-  await driver.click({ text: 'Desktop glass (Beta)', exact: true });
-  await driver.waitFor({ selector: ':root[data-glass-requested="balanced"]' });
-  const desktopResult = await driver.evaluate<{ ok: boolean; value?: { active: boolean } }>(
-    `window.imnota.setDesktopGlass({ enabled: true })`,
-  );
-  if (!desktopResult.ok) throw new Error('Native desktop material bridge rejected its validated request.');
-  await driver.waitFor({
-    selector: ':root[data-desktop-glass="' + (desktopResult.value?.active ? 'active' : 'fallback') + '"]',
-  });
-  await driver.click({ text: 'No image', exact: true });
-  await driver.waitFor({ selector: ':root[data-desktop-glass="off"][data-background="none"]' });
+  await driver.waitFor({ selector: ':root[data-background="none"]' });
+  if (await driver.exists({ text: 'Desktop glass (Beta)', exact: true }))
+    throw new Error('The retired Desktop glass option is still offered.');
   const channelSelect = { selector: '[data-testid="update-channel"], .update-settings select' };
   await driver.click({ text: 'Updates & about', exact: true });
   const chooseNightly = async () => {
@@ -1877,65 +1883,7 @@ async function exerciseSharingPreferences(
     if (Date.now() - started > 10_000) throw new Error('Sharing sender name was not persisted.');
     await delay(50);
   }
-  await driver.fill({ selector: '[aria-label="New export preset name"]' }, 'Native review');
-  await driver.click({ text: 'Save current options', exact: true });
-  await driver.evaluate(`(async () => {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const result = await window.imnota.getPreferenceSettings();
-      if (result.ok && result.value.settings.exportPresets.some(preset => preset.name === 'Native review')) return;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    throw new Error('Export preset did not persist.');
-  })()`);
-  await driver.waitFor({ selector: '[aria-label="New export preset name"]:not(:disabled)' });
-  const preset = await driver.evaluate<{ id: string; includeRecognisedText: boolean }>(`(async () => {
-    const result = await window.imnota.getPreferenceSettings();
-    if (!result.ok) throw new Error('Could not read saved export preset.');
-    const preset = result.value.settings.exportPresets.find(preset => preset.name === 'Native review');
-    if (!preset) throw new Error('Export preset was not saved.');
-    return preset;
-  })()`);
-  // Saving selects the new preset through the real UI. OS select popups do not
-  // consistently receive webContents input; component tests cover selection changes.
-  await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
-  await driver.click({ selector: '[aria-label="Include recognised text in Markdown"]' });
-  await driver.evaluate(`(async () => {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const result = await window.imnota.getPreferenceSettings();
-      if (result.ok && result.value.settings.promptExport.includeRecognisedText === ${!preset.includeRecognisedText}) return;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    throw new Error('Recognised-text option did not change before applying the preset.');
-  })()`);
-  await driver.waitFor({ selector: '[aria-label="Include recognised text in Markdown"]:not(:disabled)' });
-  await driver.click({ selector: '.settings-navigation button', text: 'Sharing', exact: true });
-  const reselected = await driver.evaluate<boolean>(`(() => {
-    const select = document.querySelector('[aria-label="Saved export preset"]');
-    if (!(select instanceof HTMLSelectElement)) throw new Error('Saved export preset selector is missing.');
-    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    if (!setValue) throw new Error('Saved export preset selector cannot be restored.');
-    setValue.call(select, ${JSON.stringify(preset.id)});
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    return select.value === ${JSON.stringify(preset.id)};
-  })()`);
-  if (!reselected) throw new Error('Saved export preset selection was lost when switching settings pages.');
-  await driver.click({ text: 'Apply preset', exact: true });
-  await driver.waitFor({ selector: '[aria-label="New export preset name"]:not(:disabled)' });
-  const applied = await driver.evaluate<boolean>(`(async () => {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const result = await window.imnota.getPreferenceSettings();
-      const saved = result.ok && result.value.settings.exportPresets.find(preset => preset.id === ${JSON.stringify(preset.id)});
-      if (saved && result.value.settings.promptExport.includeRecognisedText === saved.includeRecognisedText && result.value.settings.nativeCopy.defaultFunction === saved.defaultFunction) return true;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    return false;
-  })()`);
-  if (!applied) throw new Error('Applying a saved export preset did not restore its options.');
-  if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, 'export-presets-settings.png'));
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'sharing-settings.png'));
   driver.setWindow(await host.reopenWindow());
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.click({ text: 'Sharing', exact: true });
@@ -1944,13 +1892,6 @@ async function exerciseSharingPreferences(
     `document.querySelector('[data-testid="sharing-sender-name"]').value`,
   );
   if (remembered !== 'Native Sharing') throw new Error('Sharing sender name was lost on window reopen.');
-  const restored = await driver.evaluate<boolean>(`(async () => {
-    const result = await window.imnota.getPreferenceSettings();
-    const saved = result.ok && result.value.settings.exportPresets.find(preset => preset.id === ${JSON.stringify(preset.id)});
-    const visible = [...document.querySelectorAll('[aria-label="Saved export preset"] option')].some(option => option.value === ${JSON.stringify(preset.id)} && option.textContent === 'Native review');
-    return Boolean(saved && visible && result.value.settings.promptExport.includeRecognisedText === saved.includeRecognisedText && result.value.settings.nativeCopy.defaultFunction === saved.defaultFunction);
-  })()`);
-  if (!restored) throw new Error('Export preset or applied options were lost on window reopen.');
   const hasOwnerLink = await driver.evaluate<boolean>(
     `Boolean(document.querySelector('a[href="https://app.imnota.xyz/owner"]'))`,
   );
@@ -2400,12 +2341,18 @@ async function exercisePromptWorkflow(
   const rejectedClipboard = await assertPromptRichClipboard(latestSet, copiedIndex, 'Rejected prompt copy');
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
-  if (process.platform === 'win32' && options.verifyWindowsCopyVariants)
+  if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
     await exerciseOleClipboardSmoke(
       driver.browserWindow.getNativeWindowHandle(),
       await promptBundlePaths(latestSet, copiedIndex),
       (stage) => console.info(`Windows OLE clipboard smoke: ${stage}.`),
     );
+    await exerciseChromiumClipboardSmoke(
+      driver.browserWindow.getNativeWindowHandle(),
+      await promptBundlePaths(latestSet, copiedIndex),
+      (stage) => console.info(`Windows Chromium clipboard smoke: ${stage}.`),
+    );
+  }
   return {
     bundleCount: cards.length,
     renderMs: Math.round(performance.now() - renderStarted),
@@ -2823,9 +2770,7 @@ export async function runSmokeWorkflow(
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push('preferences, performance profile, update channel confirmation and persistence');
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
-  assertions.push(
-    'Sharing sender name and export presets persist across reopen; presets restore current options',
-  );
+  assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });

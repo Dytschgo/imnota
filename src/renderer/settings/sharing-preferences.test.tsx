@@ -10,7 +10,6 @@ import {
 
 const settings = (sharingSenderName?: string): WorkspaceSettings => ({
   workspacePath: null,
-  theme: 'system',
   interfaceScale: 1,
   openRecentOnLaunch: true,
   confirmBeforeDeletion: true,

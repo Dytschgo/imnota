@@ -12,10 +12,11 @@ import {
   Trash2,
   Pencil,
   Plus,
+  Timer,
   Upload,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { CaptureDelaySeconds } from '../../shared/capture';
+import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import { collectionDisplayName } from './collection-display-name';
 import { orderedCollectionItems } from '../../shared/content-items';
@@ -35,15 +36,14 @@ export interface CollectionRailProps {
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
-  /** Default true: Add screenshot is primary. False restores the combined Add item menu. */
-  screenshotFirstAdd?: boolean;
-  /** Same capture entry point as the toolbar camera; shares its enablement and platform limits. */
+  /** The only in-window capture entry point besides the shortcut; shares its enablement and platform limits. */
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
   capturePrimary?: boolean;
   captureEnabled?: boolean;
   captureInProgress?: boolean;
   captureDisabledLabel?: string;
+  captureShortcut?: string;
 }
 
 export function CollectionControls({
@@ -418,17 +418,20 @@ export function CollectionRail({
   onSnapshot,
   onAddContent,
   onDeleteItem,
-  screenshotFirstAdd = true,
   onCapture,
   capturePrimary = false,
   captureEnabled = false,
   captureInProgress = false,
   captureDisabledLabel,
+  captureShortcut,
 }: CollectionRailProps) {
   const store = useAppStore();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuFocusedIndex, setAddMenuFocusedIndex] = useState(0);
+  /** Delay for Take screenshot, chosen beside it in the Add menu. */
+  const [captureDelay, setCaptureDelay] = useState<0 | CaptureDelaySeconds>(0);
+  const captureDelayRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const addMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -456,15 +459,24 @@ export function CollectionRail({
           {
             id: 'capture',
             label: 'Take screenshot',
-            description: captureEnabled
-              ? 'Capture an area on a chosen display'
-              : (captureDisabledLabel ?? 'Screen capture is off — enable it in Settings → Features'),
-            icon: Camera,
-            run: () => onCapture(),
+            description: !captureEnabled
+              ? (captureDisabledLabel ?? 'Screen capture is unavailable')
+              : captureDelay
+                ? `Captures after ${captureDelay} seconds, so menus can open first`
+                : `Capture a screen area${captureShortcut ? ` (${captureShortcut})` : ''}`,
+            icon: captureDelay ? Timer : Camera,
+            run: () => (captureDelay ? onCapture(captureDelay) : onCapture()),
             disabled: !captureEnabled || captureInProgress,
           },
         ]
       : []),
+    {
+      id: 'paste',
+      label: 'Paste from clipboard',
+      description: 'Add a copied image',
+      icon: Clipboard,
+      run: () => void onPaste(),
+    },
     ...(onAddContent
       ? [
           {
@@ -711,53 +723,33 @@ export function CollectionRail({
             ))}
           </div>
           <div className="rail-actions">
-            <div className="add-item-menu" ref={addMenuRef}>
-              {screenshotFirstAdd ? (
-                <div className="add-item-primary">
-                  <Button
-                    variant="primary"
-                    disabled={captureIsPrimary && captureInProgress}
-                    busy={captureIsPrimary && captureInProgress}
-                    data-testid="add-screenshot"
-                    onClick={captureIsPrimary ? () => onCapture?.() : onImport}
-                  >
-                    {captureIsPrimary ? (
-                      <Camera size={15} aria-hidden="true" />
-                    ) : (
-                      <Upload size={15} aria-hidden="true" />
-                    )}
-                    Add screenshot
-                  </Button>
-                  <Button
-                    ref={addMenuTriggerRef}
-                    data-testid="add-item-trigger"
-                    variant="soft"
-                    aria-label="More ways to add"
-                    aria-expanded={addMenuOpen}
-                    aria-haspopup="menu"
-                    aria-controls={addMenuId}
-                    onClick={() => (addMenuOpen ? closeAddMenu() : openAddMenu())}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowDown' || event.key === 'Home') {
-                        event.preventDefault();
-                        openAddMenu(0);
-                      } else if (event.key === 'ArrowUp' || event.key === 'End') {
-                        event.preventDefault();
-                        openAddMenu(addItemOptions.length - 1);
-                      } else if (event.key === 'Escape' && addMenuOpen) {
-                        event.preventDefault();
-                        closeAddMenu(true);
-                      }
-                    }}
-                  >
-                    <ChevronDown size={14} aria-hidden="true" />
-                  </Button>
-                </div>
-              ) : (
+            <div
+              className="add-item-menu"
+              ref={addMenuRef}
+              data-capture-state={
+                !onCapture ? undefined : captureInProgress ? 'busy' : captureEnabled ? 'ready' : 'unavailable'
+              }
+            >
+              <div className="add-item-primary">
+                <Button
+                  variant="primary"
+                  disabled={captureIsPrimary && captureInProgress}
+                  busy={captureIsPrimary && captureInProgress}
+                  data-testid="add-screenshot"
+                  onClick={captureIsPrimary ? () => onCapture?.() : onImport}
+                >
+                  {captureIsPrimary ? (
+                    <Camera size={15} aria-hidden="true" />
+                  ) : (
+                    <Upload size={15} aria-hidden="true" />
+                  )}
+                  Add screenshot
+                </Button>
                 <Button
                   ref={addMenuTriggerRef}
                   data-testid="add-item-trigger"
-                  variant="primary"
+                  variant="soft"
+                  aria-label="More ways to add"
                   aria-expanded={addMenuOpen}
                   aria-haspopup="menu"
                   aria-controls={addMenuId}
@@ -775,11 +767,9 @@ export function CollectionRail({
                     }
                   }}
                 >
-                  <Plus size={15} aria-hidden="true" />
-                  Add item
                   <ChevronDown size={14} aria-hidden="true" />
                 </Button>
-              )}
+              </div>
               {addMenuOpen && (
                 <div
                   className="add-item-popover"
@@ -792,7 +782,7 @@ export function CollectionRail({
                 >
                   {addItemOptions.map((option, index) => {
                     const Icon = option.icon;
-                    return (
+                    const item = (
                       <button
                         key={option.id}
                         ref={(element) => {
@@ -823,6 +813,9 @@ export function CollectionRail({
                           } else if (event.key === 'End') {
                             event.preventDefault();
                             setAddMenuFocusedIndex(addItemOptions.length - 1);
+                          } else if (event.key === 'ArrowRight' && option.id === 'capture') {
+                            event.preventDefault();
+                            captureDelayRefs.current[0]?.focus();
                           } else if (event.key === 'Escape') {
                             event.preventDefault();
                             closeAddMenu(true);
@@ -836,14 +829,53 @@ export function CollectionRail({
                         </span>
                       </button>
                     );
+                    if (option.id !== 'capture') return item;
+                    const delays = [0, ...CAPTURE_DELAY_SECONDS] as const;
+                    return (
+                      <div key={option.id} className="add-item-row">
+                        {item}
+                        <div className="add-item-delay" role="group" aria-label="Capture delay">
+                          {delays.map((delay, delayIndex) => (
+                            <button
+                              key={delay}
+                              ref={(element) => {
+                                captureDelayRefs.current[delayIndex] = element;
+                              }}
+                              type="button"
+                              role="menuitemradio"
+                              tabIndex={-1}
+                              aria-checked={captureDelay === delay}
+                              aria-disabled={option.disabled || undefined}
+                              aria-label={delay ? `Capture after ${delay} seconds` : 'Capture immediately'}
+                              data-testid={`add-item-capture-delay-${delay}`}
+                              onClick={() => {
+                                if (!option.disabled) setCaptureDelay(delay);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                                  event.preventDefault();
+                                  const next = delayIndex + (event.key === 'ArrowRight' ? 1 : -1);
+                                  if (next < 0) addMenuItemRefs.current[index]?.focus();
+                                  else captureDelayRefs.current[Math.min(next, delays.length - 1)]?.focus();
+                                } else if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  if (!option.disabled) setCaptureDelay(delay);
+                                } else if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  closeAddMenu(true);
+                                }
+                              }}
+                            >
+                              {delay ? `${delay}s` : 'Now'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
                   })}
                 </div>
               )}
             </div>
-            <Button variant="ghost" onClick={() => void onPaste()}>
-              <Clipboard size={15} aria-hidden="true" />
-              Paste from clipboard
-            </Button>
           </div>
         </>
       )}

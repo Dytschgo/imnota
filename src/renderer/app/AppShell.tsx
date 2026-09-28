@@ -23,7 +23,6 @@ export interface AppShellProps {
   onToggleFavourite(): void | Promise<void>;
   onAbout(): void;
   onDropFiles?(files: FileList): void | Promise<void>;
-  onSelectProject?(projectPath: string): void | Promise<void>;
   navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites', string>>;
   /** Rendered beside About while navigation is open; otherwise in the top bar. */
   renderUpdateControl?(placement: 'nav' | 'topbar'): ReactNode;
@@ -47,7 +46,6 @@ export function AppShell({
   onToggleFavourite,
   onAbout,
   onDropFiles,
-  onSelectProject,
   navigationShortcuts,
   renderUpdateControl,
 }: AppShellProps) {
@@ -108,7 +106,6 @@ export function AppShell({
         onNewProject={onNewProject}
         onOpenCollection={onOpenCollection}
         onSetNavigationOpen={(navigationOpen) => store.set({ navigationOpen })}
-        onSelectProject={onSelectProject}
         updateControl={store.navigationOpen ? renderUpdateControl?.('nav') : undefined}
       />
       <main className="main-shell">

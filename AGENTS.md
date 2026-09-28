@@ -42,7 +42,7 @@ Use existing commands rather than inventing duplicate check runners:
 - Static checks: `corepack pnpm lint` and `corepack pnpm typecheck`.
 - Tests: `corepack pnpm exec vitest run <test-files>` for targeted application tests, `node --test <script-tests>` for script tests, and `corepack pnpm test` for the full application/script suite.
 - Build and walkthrough: `corepack pnpm build`, then `corepack pnpm smoke`; use the existing platform verification scripts for packaged applications.
-- Sharing changes: run the relevant service tests and `corepack pnpm test:share-contract` with the service dependencies installed.
+- Sharing changes: run the relevant service tests, `corepack pnpm typecheck:share-service` and `corepack pnpm test:share-contract` with the service dependencies installed.
 
 Keep regression tests with the code they protect. Prefer observable outcomes and failure boundaries over assertions that mirror implementation. Native verification should wait for the intended state, content, revision, or save completion; arbitrary delays and automatic retries must not hide failures. Preserve real filesystem/native coverage when replacing timing logic with deterministic tests.
 

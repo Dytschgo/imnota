@@ -1,8 +1,7 @@
-import { ChevronDown, ChevronRight, Info, Archive, Layers3, PanelLeft, Plus, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Layers3, PanelLeft, Plus, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
-import { ProjectIcon } from '../components/ProjectIcon';
 import { collectionDisplayName } from '../collection/collection-display-name';
 import { IconButton } from '../components/ui';
 import type { AppView } from '../store';
@@ -17,8 +16,6 @@ type RecentCollectionHistory = {
 
 interface DisclosureState {
   quickAccess: boolean;
-  favourites: boolean;
-  projects: Record<string, boolean>;
 }
 
 export interface SideNavProps {
@@ -27,14 +24,13 @@ export interface SideNavProps {
   navigationOpen: boolean;
   projects: ProjectListItem[];
   recentCollections: RecentCollectionHistory[];
-  navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites' | 'archived', string>>;
+  navigationShortcuts?: Partial<Record<'projects' | 'recent', string>>;
   view: AppView;
   onAbout(): void;
   onNavigate(view: AppView): void | Promise<void>;
   onNewProject(): void;
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
   onSetNavigationOpen(open: boolean): void;
-  onSelectProject?(projectPath: string): void | Promise<void>;
   /** Update indicator rendered beside About; null while no update needs attention. */
   updateControl?: ReactNode;
 }
@@ -44,21 +40,12 @@ const disclosureKey = 'imnota:sidenav-disclosures';
 function getStoredDisclosures(): DisclosureState {
   try {
     const stored = localStorage.getItem(disclosureKey);
-    if (!stored) return { quickAccess: true, favourites: true, projects: {} };
+    if (!stored) return { quickAccess: true };
+    // Older builds also stored favourite-section state; only Recent remains.
     const value = JSON.parse(stored) as Partial<DisclosureState>;
-    const projects: Record<string, boolean> = {};
-    if (value.projects && typeof value.projects === 'object' && !Array.isArray(value.projects)) {
-      for (const [projectPath, expanded] of Object.entries(value.projects)) {
-        if (typeof expanded === 'boolean') projects[projectPath] = expanded;
-      }
-    }
-    return {
-      quickAccess: typeof value.quickAccess === 'boolean' ? value.quickAccess : true,
-      favourites: typeof value.favourites === 'boolean' ? value.favourites : true,
-      projects,
-    };
+    return { quickAccess: typeof value.quickAccess === 'boolean' ? value.quickAccess : true };
   } catch {
-    return { quickAccess: true, favourites: true, projects: {} };
+    return { quickAccess: true };
   }
 }
 
@@ -83,21 +70,12 @@ export function SideNav({
   onNewProject,
   onOpenCollection,
   onSetNavigationOpen,
-  onSelectProject,
   updateControl,
 }: SideNavProps) {
   const [disclosures, setDisclosures] = useState<DisclosureState>(getStoredDisclosures);
   const recentCollections = useMemo(
     () => resolveRecentCollections(projects, recentHistory).slice(0, 6),
     [projects, recentHistory],
-  );
-  const activeProjects = useMemo(
-    () => projects.filter((project) => project.status !== 'archived'),
-    [projects],
-  );
-  const favouriteProjects = useMemo(
-    () => activeProjects.filter((project) => project.favourite),
-    [activeProjects],
   );
   const lastActiveIdentity = useRef<string | null>(null);
   const revealedActiveIdentity = useRef<string | null>(null);
@@ -112,18 +90,10 @@ export function SideNav({
     const isRecent = recentCollections.some(
       (collection) => collection.projectPath === activeProjectPath && collection.id === activeCollectionId,
     );
-    const favouriteProject = favouriteProjects.find((project) => project.projectPath === activeProjectPath);
-    if ((!isRecent && !favouriteProject) || revealedActiveIdentity.current === activeIdentity) return;
+    if (!isRecent || revealedActiveIdentity.current === activeIdentity) return;
     revealedActiveIdentity.current = activeIdentity;
-    setDisclosures((current) => ({
-      ...current,
-      quickAccess: current.quickAccess || isRecent,
-      favourites: current.favourites || Boolean(favouriteProject),
-      projects: favouriteProject
-        ? { ...current.projects, [favouriteProject.projectPath]: true }
-        : current.projects,
-    }));
-  }, [activeCollectionId, activeProjectPath, favouriteProjects, recentCollections]);
+    setDisclosures((current) => ({ ...current, quickAccess: true }));
+  }, [activeCollectionId, activeProjectPath, recentCollections]);
 
   const updateDisclosures = (updater: (current: DisclosureState) => DisclosureState) => {
     setDisclosures((current) => {
@@ -191,15 +161,6 @@ export function SideNav({
               <Plus size={16} aria-hidden="true" />
             </IconButton>
           </div>
-          <button
-            className={`nav-item ${view === 'archived' ? 'active' : ''}`}
-            aria-current={view === 'archived' ? 'page' : undefined}
-            title={navigationShortcuts?.archived ? `Archived (${navigationShortcuts.archived})` : 'Archived'}
-            onClick={() => void onNavigate('archived')}
-          >
-            <Archive size={16} aria-hidden="true" />
-            <span>Archived</span>
-          </button>
         </nav>
 
         <section className="side-nav-section" aria-labelledby="quick-access-heading">
@@ -264,143 +225,6 @@ export function SideNav({
               onClick={() => void onNavigate('recent')}
             >
               View all recent
-              <ChevronRight size={14} aria-hidden="true" />
-            </button>
-          </div>
-        </section>
-
-        <section className="side-nav-section" aria-labelledby="favourite-projects-heading">
-          <div className="side-nav-section-heading">
-            <h2 className="nav-label" id="favourite-projects-heading">
-              Favourite projects{favouriteProjects.length ? ` (${favouriteProjects.length})` : ''}
-            </h2>
-            <button
-              type="button"
-              className="nav-disclosure"
-              aria-label={`${disclosures.favourites ? 'Collapse' : 'Expand'} favourite projects`}
-              aria-controls="favourite-projects"
-              aria-expanded={disclosures.favourites}
-              onClick={() =>
-                updateDisclosures((current) => ({ ...current, favourites: !current.favourites }))
-              }
-            >
-              <ChevronDown size={14} aria-hidden="true" />
-            </button>
-          </div>
-          <div
-            id="favourite-projects"
-            className="side-nav-list side-nav-favourites"
-            hidden={!disclosures.favourites}
-          >
-            {favouriteProjects.length ? (
-              <>
-                {favouriteProjects.map((project) => {
-                  const openCollections = project.collections.filter((collection) => !collection.archived);
-                  const openCollection = openCollections[0];
-                  const isProjectExpanded = disclosures.projects[project.projectPath] !== false;
-                  const projectIsActive = activeProjectPath === project.projectPath;
-                  return (
-                    <div
-                      className={`side-nav-project ${projectIsActive ? 'active-project' : ''}`}
-                      key={project.projectPath}
-                    >
-                      <div className="side-nav-project-row">
-                        <button
-                          type="button"
-                          className="side-nav-project-button"
-                          title={project.name}
-                          disabled={!onSelectProject && !openCollection}
-                          onClick={() => {
-                            if (onSelectProject) void onSelectProject(project.projectPath);
-                            else if (openCollection)
-                              void onOpenCollection(project.projectPath, openCollection.id);
-                          }}
-                        >
-                          <ProjectIcon icon={project.icon} size={15} />
-                          <span>{project.name}</span>
-                        </button>
-                        {openCollections.length > 0 && (
-                          <button
-                            type="button"
-                            className="nav-disclosure"
-                            aria-label={`${isProjectExpanded ? 'Collapse' : 'Expand'} ${project.name} collections`}
-                            aria-controls={`favourite-project-${project.id}`}
-                            aria-expanded={isProjectExpanded}
-                            onClick={() =>
-                              updateDisclosures((current) => ({
-                                ...current,
-                                projects: {
-                                  ...current.projects,
-                                  [project.projectPath]: !isProjectExpanded,
-                                },
-                              }))
-                            }
-                          >
-                            <ChevronDown size={14} aria-hidden="true" />
-                          </button>
-                        )}
-                      </div>
-                      {openCollections.length > 0 ? (
-                        <div
-                          id={`favourite-project-${project.id}`}
-                          className="side-nav-project-collections"
-                          hidden={!isProjectExpanded}
-                        >
-                          {openCollections.map((collection) => (
-                            <button
-                              type="button"
-                              className={`side-nav-collection ${
-                                isActiveCollection(project.projectPath, collection.id) ? 'active' : ''
-                              }`}
-                              key={collection.id}
-                              aria-current={
-                                isActiveCollection(project.projectPath, collection.id)
-                                  ? 'location'
-                                  : undefined
-                              }
-                              title={collectionDisplayName(
-                                collection.name,
-                                project.projectPath,
-                                project.collections
-                                  .filter((other) => other.id !== collection.id)
-                                  .map((other) => other.name),
-                              )}
-                              onClick={() => void onOpenCollection(project.projectPath, collection.id)}
-                            >
-                              <span className="side-nav-collection-name">
-                                {collectionDisplayName(
-                                  collection.name,
-                                  project.projectPath,
-                                  project.collections
-                                    .filter((other) => other.id !== collection.id)
-                                    .map((other) => other.name),
-                                )}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="side-nav-empty side-nav-empty-collections">No active collections.</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
-            ) : (
-              <p className="side-nav-empty">No favourite projects yet.</p>
-            )}
-            <button
-              type="button"
-              className="side-nav-view-all"
-              aria-current={view === 'favourites' ? 'page' : undefined}
-              title={
-                navigationShortcuts?.favourites
-                  ? `Favourites (${navigationShortcuts.favourites})`
-                  : 'Favourites'
-              }
-              onClick={() => void onNavigate('favourites')}
-            >
-              View all favourites
               <ChevronRight size={14} aria-hidden="true" />
             </button>
           </div>

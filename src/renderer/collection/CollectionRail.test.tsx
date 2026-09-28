@@ -278,7 +278,7 @@ describe('CollectionRail', () => {
   it('makes Add screenshot the primary action and can restore the combined Add item button', () => {
     const onImport = vi.fn();
     const onCapture = vi.fn();
-    const { rerender } = render(
+    render(
       <CollectionRail
         {...props({
           onImport,
@@ -296,8 +296,6 @@ describe('CollectionRail', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /Import screenshot/ }));
     expect(onImport).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Add item' })).toBeNull();
-    rerender(<CollectionRail {...props({ onImport, onAddContent: vi.fn(), screenshotFirstAdd: false })} />);
-    expect(screen.getByRole('button', { name: 'Add item' })).toBeVisible();
   });
 
   it('keeps import as the primary screenshot action outside Windows', () => {
@@ -342,18 +340,46 @@ describe('CollectionRail', () => {
     expect(screen.queryByTestId('add-item-capture')).not.toBeInTheDocument();
   });
 
-  it('offers Take screenshot in both Add menus with the toolbar capture enablement', async () => {
+  it('offers immediate and delayed capture plus paste in the Add menu', async () => {
     const onCapture = vi.fn();
+    const onPaste = vi.fn();
     const { rerender } = render(
-      <CollectionRail {...props({ onAddContent: vi.fn(), onCapture, captureEnabled: true })} />,
+      <CollectionRail
+        {...props({
+          onAddContent: vi.fn(),
+          onCapture,
+          onPaste,
+          captureEnabled: true,
+          captureShortcut: 'Ctrl+Shift+5',
+        })}
+      />,
     );
+    expect(document.querySelector('.add-item-menu')).toHaveAttribute('data-capture-state', 'ready');
     fireEvent.click(screen.getByTestId('add-item-trigger'));
     const capture = await screen.findByTestId('add-item-capture');
-    expect(capture).toHaveTextContent('Capture an area on a chosen display');
+    expect(capture).toHaveTextContent('Capture a screen area (Ctrl+Shift+5)');
     fireEvent.click(capture);
     expect(onCapture).toHaveBeenCalledOnce();
     expect(onCapture).toHaveBeenCalledWith();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-item-capture-3')).not.toBeInTheDocument();
+    for (const delay of [3, 5]) {
+      fireEvent.click(screen.getByTestId('add-item-trigger'));
+      fireEvent.click(await screen.findByTestId(`add-item-capture-delay-${delay}`));
+      // Choosing a delay keeps the menu open and relabels Take screenshot.
+      expect(screen.getByTestId(`add-item-capture-delay-${delay}`)).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByTestId('add-item-capture')).toHaveTextContent(`Captures after ${delay} seconds`);
+      fireEvent.click(screen.getByTestId('add-item-capture'));
+      expect(onCapture).toHaveBeenLastCalledWith(delay);
+    }
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture-delay-0'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    expect(onCapture).toHaveBeenLastCalledWith();
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(await screen.findByTestId('add-item-paste'));
+    expect(onPaste).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /Paste from clipboard/ })).not.toBeInTheDocument();
 
     rerender(
       <CollectionRail
@@ -362,16 +388,16 @@ describe('CollectionRail', () => {
           onCapture,
           captureEnabled: false,
           captureDisabledLabel: 'Choose a current collection before capturing',
-          screenshotFirstAdd: false,
         })}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(document.querySelector('.add-item-menu')).toHaveAttribute('data-capture-state', 'unavailable');
     const disabledCapture = await screen.findByTestId('add-item-capture');
     expect(disabledCapture).toHaveAttribute('aria-disabled', 'true');
     expect(disabledCapture).toHaveTextContent('Choose a current collection before capturing');
     fireEvent.click(disabledCapture);
-    expect(onCapture).toHaveBeenCalledOnce();
+    expect(onCapture).toHaveBeenCalledTimes(4);
     expect(screen.getByRole('menu')).toBeVisible();
 
     rerender(<CollectionRail {...props({ onAddContent: vi.fn() })} />);
@@ -412,7 +438,7 @@ describe('CollectionRail', () => {
     'closes both popovers after focus leaves with Tab (reverse=%s)',
     async (shiftKey) => {
       render(<CollectionRail {...props()} />);
-      const destination = screen.getByRole('button', { name: /Paste from clipboard/i });
+      const destination = screen.getByRole('button', { name: 'Add screenshot' });
       for (const [trigger, name] of [
         [screen.getByRole('button', { name: 'Collection' }), 'Collections'],
         [screen.getByTestId('add-item-trigger'), 'Add item'],
@@ -542,7 +568,6 @@ describe('CollectionRail', () => {
     expect(useAppStore.getState().snapshot?.project.collections[0].archived).toBe(true);
     expect(screen.getByRole('button', { name: 'Add screenshot' })).toBeEnabled();
     expect(screen.getByTestId('add-item-trigger')).toBeEnabled();
-    expect(screen.getByRole('button', { name: /paste from clipboard/i })).toBeEnabled();
 
     const restore = within(menu).getByRole('menuitem', { name: 'Restore Collection A' });
     restore.focus();

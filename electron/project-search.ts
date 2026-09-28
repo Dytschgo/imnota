@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import type { Annotation, ProjectData } from '../src/shared/types.js';
 import type {
@@ -10,7 +9,7 @@ import type {
   ProjectSearchTarget,
 } from '../src/shared/project-search.js';
 import { contentItemRelativePaths } from './content-paths.js';
-import { isWithin } from './files.js';
+import { FileReadLimitError, isWithin, readStableRegularFile } from './files.js';
 import { validateProject } from '../src/shared/schema.js';
 
 export const SEARCH_LIMITS = {
@@ -56,8 +55,6 @@ export interface ProjectSearchDependencies {
   beforeFileOpen?(targetPath: string): Promise<void>;
   afterFileOpen?(targetPath: string): Promise<void>;
 }
-
-const textDecoder = new TextDecoder('utf-8', { fatal: false });
 
 function normalized(value: string): string {
   return value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase();
@@ -144,56 +141,22 @@ async function readBoundedText(
   }
   budget.remainingFileOperations -= 1;
   await dependencies.assertNoLinks(filePath);
-  await dependencies.beforeFileOpen?.(filePath);
-  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
-  const handle = await fs
-    .open(filePath, fsConstants.O_RDONLY | noFollow)
-    .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return null;
-      budget.unreadableFiles += 1;
-      budget.truncated = true;
-      throw error;
-    });
-  if (!handle) return null;
   try {
-    await dependencies.afterFileOpen?.(filePath);
-    await dependencies.assertNoLinks(filePath);
-    const stat = await handle.stat();
-    const pathStat = await fs.lstat(filePath);
-    if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) {
-      budget.unreadableFiles += 1;
-      budget.truncated = true;
-      throw new Error('A project content path changed while it was opened.');
-    }
-    if (!stat.isFile() || stat.size > maxBytes || stat.size > budget.remainingBytes) {
+    const result = await readStableRegularFile(filePath, Math.min(maxBytes, budget.remainingBytes), {
+      beforeOpen: dependencies.beforeFileOpen,
+      afterOpen: dependencies.afterFileOpen,
+    });
+    if (!result) return null;
+    budget.remainingBytes -= result.bytes;
+    return result.text;
+  } catch (error) {
+    budget.truncated = true;
+    if (error instanceof FileReadLimitError) {
       budget.skippedFiles += 1;
-      budget.truncated = true;
       return null;
     }
-    const bytes = new Uint8Array(stat.size + 1);
-    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-    if (bytesRead > stat.size) {
-      budget.skippedFiles += 1;
-      budget.truncated = true;
-      return null;
-    }
-    budget.remainingBytes -= bytesRead;
-    const finalPathStat = await fs.lstat(filePath);
-    const finalHandleStat = await handle.stat();
-    if (
-      stat.dev !== finalPathStat.dev ||
-      stat.ino !== finalPathStat.ino ||
-      stat.size !== finalHandleStat.size ||
-      stat.mtimeMs !== finalHandleStat.mtimeMs ||
-      stat.ctimeMs !== finalHandleStat.ctimeMs
-    ) {
-      budget.unreadableFiles += 1;
-      budget.truncated = true;
-      throw new Error('A project content path changed while it was read.');
-    }
-    return textDecoder.decode(bytes.subarray(0, bytesRead));
-  } finally {
-    await handle.close();
+    budget.unreadableFiles += 1;
+    throw error;
   }
 }
 

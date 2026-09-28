@@ -132,9 +132,10 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
     };
     const executable = packagedExecutable ?? electron;
     const args = packagedExecutable ? [] : ['.'];
-    // The full walkthrough includes responsive feedback captures and recovery.
-    // Keep each native operation bounded while allowing the complete sequence.
-    const timeoutMs = mode === 'stress' ? 15 * 60_000 : 4 * 60_000;
+    // The Windows walkthrough completed its assertions in 225 seconds in run
+    // 36265303628; portable extraction/startup and shutdown also share this budget.
+    // Per-operation deadlines remain unchanged, and a timed-out run still fails.
+    const timeoutMs = mode === 'stress' ? 15 * 60_000 : 6 * 60_000;
     const result = await runChild(executable, args, env, timeoutMs);
     let report;
     try {

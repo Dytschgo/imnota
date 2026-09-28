@@ -4,7 +4,7 @@ Updated 2026-09-21 after the v0.2.8 stable release and the current nightly. This
 
 ## Released baseline
 
-- Stable: [v0.2.8](https://github.com/Dytschgo/imnota/releases/tag/v0.2.8).
+- Stable: [v0.3.0](https://github.com/Dytschgo/imnota/releases/tag/v0.3.0), published 2026-09-26. The nightly evidence below predates it and describes the v0.2.8 period.
 - Verified nightly baseline: [v0.2.9-nightly.20260921.35645731983](https://github.com/Dytschgo/imnota/releases/tag/v0.2.9-nightly.20260921.35645731983), commit `bf8d24e664778a4d643a295350af6e5561a09ace`.
 - Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/35645731983) passed its Windows, macOS, and Linux checks. The published manifests and assets identify that candidate, and the installed application reported the same version. Stable v0.2.8 remained Latest.
 - Hosted static sharing is deployed at `app.imnota.xyz`; see the [deployment evidence](../share-service/docs/deployment-verification.md).
@@ -52,6 +52,6 @@ The [product roadmap](product-roadmap.md) consolidates still-relevant proposals:
 
 The current nightly includes save-before-close protection after failed updates and guards against duplicate collection actions during pending saves. The repository review records their regression coverage and any subsequent fixes.
 
-Use [the current repository review](repository-review-2026-09-08.md) for the disposition of older plans and dependency work. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.
+Use [the current repository review](history/repository-review-2026-09-08.md) for the disposition of older plans and dependency work. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.
 
 For each subsequent change, preserve user work, use an isolated branch, verify meaningful behavior, obtain independent review where risk warrants it and pass the applicable CI checks. Merge through the normal PR process. A merge alone does not publish a new nightly or promote stable. Agents should use [docs/README.md](README.md) to locate the authoritative document for each question before relying on dated records.

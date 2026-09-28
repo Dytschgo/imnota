@@ -4,7 +4,7 @@ Status: Phase 0 housekeeping is complete in this repository. Phases 1–3 are a 
 
 Historical baseline for measurements below: `main` at `36ff189` (2026-09-18), when PRs #72–#76 were open. It is not a statement about the current branch.
 
-Principles, taken from [AGENTS.md](../AGENTS.md):
+Principles, taken from [AGENTS.md](../../AGENTS.md):
 
 - One reviewable outcome per PR; mechanical moves separate from behaviour changes.
 - No refactor as a prerequisite for a fix. Extract when the next fix in that area needs the boundary.
@@ -16,7 +16,7 @@ Principles, taken from [AGENTS.md](../AGENTS.md):
 
 Why: At the time of this plan, 11 Markdown files sat in the repository root. Five were dated execution plans (`Dependency-Migration-Plan.md`, `Nightly-UI-Merge-Plan.md`, `UI-Improvemnts.md`, `appUIoverhaul.md`, `implementation plan.md`) that belonged with historical records once their delivery and release status were verified. Every agent session paid context cost for them; filenames with spaces required quoting in shell commands.
 
-Outcome: the four completed execution records now live under [`docs/history`](history/README.md), with corrected descriptive filenames. The living status document is [`docs/implementation-plan.md`](implementation-plan.md), not history, because it contains current release status and open acceptance work. Root-level policy, contribution, security and release files remain in place.
+Outcome: the four completed execution records now live under [`docs/history`](README.md), with corrected descriptive filenames. The living status document is [`docs/implementation-plan.md`](../implementation-plan.md), not history, because it contains current release status and open acceptance work. Root-level policy, contribution, security and release files remain in place.
 
 Verification: documentation tier — Prettier and link checks cover the moved files and current references.
 

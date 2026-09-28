@@ -70,11 +70,8 @@ describe('useAppearance', () => {
     expect(root.style.getPropertyValue('--imnota-background-image')).toBe('none');
   });
 
-  it('derives light image glass without changing saved dark or native desktop choices', async () => {
+  it('shows the backdrop only while glass is on, in light and dark', async () => {
     const root = document.createElement('div');
-    const setDesktopGlass = vi.fn().mockResolvedValue({ ok: true, value: { active: false } });
-    const previous = window.imnota;
-    window.imnota = { ...previous, setDesktopGlass };
     const preferences = {
       ...DEFAULT_APPEARANCE,
       mode: 'light' as const,
@@ -82,67 +79,26 @@ describe('useAppearance', () => {
       backgroundImage: 'preset:graphite',
     };
     const { result, rerender, unmount } = renderHook(
-      ({ mode, image }: { mode: 'light' | 'dark'; image: string }) =>
-        useAppearance({ ...preferences, mode, backgroundImage: image }, { root }),
-      { initialProps: { mode: 'light' as 'light' | 'dark', image: preferences.backgroundImage } },
-    );
-    await act(async () => undefined);
-    expect(result.current.glassLevel).toBe('strong');
-    expect(root.dataset.background).toBe('active');
-    expect(root.dataset.desktopGlass).toBe('off');
-    expect(setDesktopGlass).toHaveBeenLastCalledWith({ enabled: false });
-    expect(preferences.glassLevel).toBe('off');
-    rerender({ mode: 'dark', image: preferences.backgroundImage });
-    expect(result.current.glassLevel).toBe('off');
-    expect(root.dataset.background).toBe('none');
-    rerender({ mode: 'light', image: 'data:image/png;base64,AA==' });
-    expect(root.dataset.backgroundSource).toBe('upload');
-    rerender({ mode: 'light', image: '' });
-    expect(result.current.glassLevel).toBe('off');
-    expect(root.dataset.background).toBe('none');
-    await act(async () => undefined);
-    unmount();
-    window.imnota = previous;
-  });
-
-  it('selects the saved theme-specific backdrop as System changes', () => {
-    let light = false;
-    const listeners = new Set<() => void>();
-    window.matchMedia = vi.fn((query: string) => ({
-      get matches() {
-        return query.includes('color-scheme') ? light : false;
-      },
-      media: query,
-      onchange: null,
-      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
-      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })) as unknown as typeof window.matchMedia;
-    const root = document.createElement('div');
-    renderHook(() =>
-      useAppearance(
-        {
-          ...DEFAULT_APPEARANCE,
-          glassLevel: 'balanced',
-          useSameBackdropForBoth: false,
-          darkBackgroundImage: 'preset:graphite',
-          darkBackgroundOpacity: 0.35,
-          lightBackgroundImage: 'preset:amber',
-          lightBackgroundOpacity: 0.7,
+      ({ mode, glass, image }: { mode: 'light' | 'dark'; glass: 'off' | 'balanced'; image: string }) =>
+        useAppearance({ ...preferences, mode, glassLevel: glass, backgroundImage: image }, { root }),
+      {
+        initialProps: {
+          mode: 'light' as 'light' | 'dark',
+          glass: 'off' as 'off' | 'balanced',
+          image: preferences.backgroundImage,
         },
-        { root },
-      ),
+      },
     );
-    expect(root.style.getPropertyValue('--imnota-background-image')).toContain('graphite.png');
-    expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0.35');
-    expect(root.dataset.backgroundSource).toBe('preset');
-
-    light = true;
-    act(() => listeners.forEach((listener) => listener()));
-    expect(root.style.getPropertyValue('--imnota-background-image')).toContain('amber.png');
-    expect(root.style.getPropertyValue('--imnota-background-opacity')).toBe('0.7');
+    await act(async () => undefined);
+    expect(result.current.glassLevel).toBe('off');
+    expect(root.dataset.background).toBe('none');
+    rerender({ mode: 'light', glass: 'balanced', image: preferences.backgroundImage });
+    expect(root.dataset.background).toBe('active');
+    rerender({ mode: 'dark', glass: 'balanced', image: 'data:image/png;base64,AA==' });
+    expect(root.dataset.backgroundSource).toBe('upload');
+    rerender({ mode: 'dark', glass: 'off', image: 'data:image/png;base64,AA==' });
+    expect(root.dataset.background).toBe('none');
+    unmount();
   });
 
   it('injects darker light-mode accent hover, stronger soft, and onAccent', () => {

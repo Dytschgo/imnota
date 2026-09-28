@@ -1,6 +1,7 @@
 import { clipboard, ClipboardItem, nativeImage, type NativeImage } from 'electron';
 import path from 'node:path';
 import type { ClipboardFormatsReport } from '../src/shared/workflow-bridge.js';
+import { macFilePair, writeMacClipboardFiles } from './mac-clipboard.js';
 import {
   readWindowsClipboardFilesWhenAvailable,
   windowsDibV5Buffer,
@@ -131,6 +132,30 @@ export const nativeClipboard = {
         }),
       ]);
       return verifiedContext(text, html, image);
+    });
+  },
+  /**
+   * macOS: the Markdown and PNG as two clipboard files, optionally with the
+   * Markdown text. Reports what the pasteboard kept; images are not duplicated.
+   */
+  async writeMacFiles(filePaths: readonly string[], withText = false): Promise<ClipboardFormatsReport> {
+    if (process.platform !== 'darwin')
+      throw new Error('The macOS file clipboard is available only on macOS.');
+    const pair = macFilePair(filePaths);
+    return serializeWrite(async () => {
+      const kept = await writeMacClipboardFiles(pair, { withText });
+      const files =
+        kept.length === pair.length &&
+        kept.every((file, index) => path.resolve(file) === path.resolve(pair[index]));
+      if (!withText) return { text: false, html: false, image: false, files };
+      let text = false;
+      try {
+        const { readFile } = await import('node:fs/promises');
+        text = (await clipboard.readText()) === (await readFile(pair[0], 'utf8'));
+      } catch {
+        text = false;
+      }
+      return { text, html: false, image: false, files };
     });
   },
   async writeWindowsFiles(

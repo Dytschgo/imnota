@@ -14,7 +14,7 @@ The September 22 review additionally classified `CaptureDestinationDialog`, `cap
 
 ## Inventory and measurements
 
-Each application test below was collected by Vitest, with discovery checked against the platform configuration: full 78 files, platform 37, and the difference exactly equals the 41 reviewed policy entries. Nothing is removed from full-suite execution. Seven renderer tests written after that inventory (`AppDialogs`, `DrawingEditor`, `PromptBundlePreview`, `clipboard-delivery`, `ContentSearchResults`, `BackupSettings`, and `light-theme-tokens`) were later classified the same way: they exercise jsdom rendering, injected bridges, and pure token/planning logic, bringing that earlier inventory to 48 policy entries and 61 platform files out of 109. The current inventory is recorded above. The table records a local Windows baseline at `e127d47` (567 passing tests), measured per-file execution time; parallel file times are not additive wall time. Hosted PR job timings are recorded in the [improvement plan](improvement-plan.md); these local times are a coverage baseline, not a promise about release speed.
+Each application test below was collected by Vitest, with discovery checked against the platform configuration: full 78 files, platform 37, and the difference exactly equals the 41 reviewed policy entries. Nothing is removed from full-suite execution. Seven renderer tests written after that inventory (`AppDialogs`, `DrawingEditor`, `PromptBundlePreview`, `clipboard-delivery`, `ContentSearchResults`, `BackupSettings`, and `light-theme-tokens`) were later classified the same way: they exercise jsdom rendering, injected bridges, and pure token/planning logic, bringing that earlier inventory to 48 policy entries and 61 platform files out of 109. The current inventory is recorded above. The legacy overview-Markdown generator, its `prepare-context` caller and their tests were later removed because prompt bundles use the planner exclusively. The table records a local Windows baseline at `e127d47` (567 passing tests), measured per-file execution time; parallel file times are not additive wall time. Hosted PR job timings are recorded in the [improvement plan](improvement-plan.md); these local times are a coverage baseline, not a promise about release speed.
 
 | Test file                                                   | PR execution            | Local baseline seconds |
 | ----------------------------------------------------------- | ----------------------- | ---------------------: |
@@ -61,7 +61,6 @@ Each application test below was collected by Vitest, with discovery checked agai
 | `src/renderer/navigation-history.test.ts`                   | Linux quality           |                  0.008 |
 | `src/renderer/onboarding/OnboardingDemo.test.tsx`           | Linux quality           |                  0.274 |
 | `src/renderer/pixelate.test.ts`                             | Linux quality           |                  0.007 |
-| `src/renderer/prepare-context.test.ts`                      | Linux quality           |                  0.004 |
 | `src/renderer/prompt-bundle-render.test.ts`                 | Linux quality           |                  0.008 |
 | `src/renderer/search/SearchDialog.test.tsx`                 | Linux quality           |                  0.094 |
 | `src/renderer/settings/AppearanceSettings.test.tsx`         | Linux quality           |                  0.363 |
@@ -81,7 +80,6 @@ Each application test below was collected by Vitest, with discovery checked agai
 | `src/shared/__tests__/content-items.test.ts`                | Quality + all platforms |                  0.007 |
 | `src/shared/__tests__/crop.test.ts`                         | Quality + all platforms |                  0.017 |
 | `src/shared/__tests__/file-safety.test.ts`                  | Quality + all platforms |                  0.053 |
-| `src/shared/__tests__/markdown.test.ts`                     | Quality + all platforms |                  0.003 |
 | `src/shared/__tests__/notes.test.ts`                        | Quality + all platforms |                  0.001 |
 | `src/shared/__tests__/preference-settings.test.ts`          | Quality + all platforms |                  0.009 |
 | `src/shared/__tests__/recovery-migration.test.ts`           | Quality + all platforms |                  0.005 |

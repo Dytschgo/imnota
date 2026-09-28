@@ -243,6 +243,61 @@ describe('native smoke driver', () => {
     expect(window.webContents.insertText).toHaveBeenCalledWith('Typed text');
   });
 
+  it.each([true, false])(
+    'requires the trusted drag endpoint before release and fails closed when absent (delivered: %s)',
+    async (delivered) => {
+      type Move = { isTrusted: boolean; buttons: number; clientX: number; clientY: number };
+      const listeners = new Set<(event: Move) => void>();
+      const frames: Array<() => void> = [];
+      const renderer: Record<string, unknown> = {};
+      const executeJavaScript = vi.fn(async (source: string) =>
+        runInNewContext(source, {
+          window: renderer,
+          document: {
+            addEventListener: (_type: string, listener: (event: Move) => void) => listeners.add(listener),
+            removeEventListener: (_type: string, listener: (event: Move) => void) =>
+              listeners.delete(listener),
+          },
+          requestAnimationFrame: (callback: () => void) => frames.push(callback),
+          cancelAnimationFrame: () => frames.splice(0),
+        }),
+      );
+      const sendInputEvent = vi.fn();
+      const window = { webContents: { executeJavaScript, sendInputEvent } } as unknown as BrowserWindow;
+      const action = new NativeUiDriver(window, delivered ? 2_000 : 100).drag(
+        { x: 1, y: 2 },
+        { x: 9, y: 10 },
+        1,
+      );
+      const result = delivered ? action : expect(action).rejects.toThrow('Renderer evaluation timed out');
+      await vi.waitFor(() =>
+        expect(executeJavaScript).toHaveBeenCalledWith('window.__imnotaSmokeDrag.ready', true),
+      );
+      const emit = (event: Move) => {
+        for (const listener of listeners) listener(event);
+      };
+      emit({ isTrusted: false, buttons: 1, clientX: 9, clientY: 10 });
+      emit({ isTrusted: true, buttons: 1, clientX: 8, clientY: 10 });
+      emit({ isTrusted: true, buttons: 0, clientX: 9, clientY: 10 });
+      expect(frames).toHaveLength(0);
+      expect(sendInputEvent.mock.calls.some(([event]) => event.type === 'mouseUp')).toBe(false);
+      if (delivered) {
+        emit({ isTrusted: true, buttons: 1, clientX: 9, clientY: 10 });
+        expect(frames).toHaveLength(1);
+        frames.shift()!();
+        expect(sendInputEvent.mock.calls.some(([event]) => event.type === 'mouseUp')).toBe(false);
+        frames.shift()!();
+      }
+      await result;
+      expect(sendInputEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseUp', x: 9, y: 10 }));
+      expect(sendInputEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'mouseMove', x: 9, y: 10, modifiers: ['leftbuttondown'] }),
+      );
+      expect(listeners.size).toBe(0);
+      expect(renderer).not.toHaveProperty('__imnotaSmokeDrag');
+    },
+  );
+
   it('waits for a temporarily disabled control before sending native mouse input', async () => {
     let reads = 0;
     const sendInputEvent = vi.fn(() => {
