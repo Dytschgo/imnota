@@ -41,7 +41,8 @@ export function registerPreferenceIpc(router: IpcRouter, host: IpcHost): void {
   handleWorkflow('workflow:capabilities:get', (_event, ...args) => {
     z.tuple([]).parse(args);
     return {
-      windowsFileClipboard: windowsFileClipboardAvailable(),
+      // macOS writes file URLs through AppKit via osascript, available on every Mac.
+      fileClipboard: process.platform === 'darwin' || windowsFileClipboardAvailable(),
       globalCaptureShortcutRegistered: captureGlobalShortcut.registeredAccelerator !== null,
     };
   });

@@ -12,6 +12,7 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { readMacClipboardFiles } from './mac-clipboard.js';
 import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
@@ -331,14 +332,14 @@ async function exerciseOnboarding(
     await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     await driver.waitFor({ text: 'Copy files', exact: true });
     const nativeDefault = await driver.evaluate<string>(`(async () => {
       const result = await window.imnota.getPreferenceSettings();
       if (!result.ok) throw new Error(result.error.message);
       return result.value.settings.nativeCopy.defaultFunction;
     })()`);
-    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    if (nativeDefault !== 'files') throw new Error('Native copy default was not Copy files.');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
@@ -467,6 +468,23 @@ async function exerciseOnboarding(
     )
       throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
     await assertExactImage('Choosing a native copy default');
+  }
+
+  if (process.platform === 'darwin') {
+    // macOS Copy files: two clipboard file URLs, so composers attach both files.
+    await chooseNativeCopyFunction('files', 'Copy files');
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+    const macFiles = await readMacClipboardFiles();
+    if (
+      macFiles.length !== 2 ||
+      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
+      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
+    )
+      throw new Error(
+        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
+      );
+    await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
   await driver.click({ text: 'Copy Markdown only', exact: true });

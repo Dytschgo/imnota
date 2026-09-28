@@ -130,7 +130,7 @@ describe('feedback controls', () => {
       }),
       getNativeCapabilities: async () => ({
         ok: true,
-        value: { windowsFileClipboard: true, globalCaptureShortcutRegistered: true },
+        value: { fileClipboard: true, globalCaptureShortcutRegistered: true },
       }),
       raiseMainWindow: async () => ({ ok: true as const, value: undefined }),
       onRegionCaptureHotkey: () => () => {},

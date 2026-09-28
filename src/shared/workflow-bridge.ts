@@ -57,7 +57,8 @@ export interface NativePerformanceProfile {
 
 export interface NativeCapabilities {
   /** True only when the running desktop host can write native Windows file clipboard entries. */
-  windowsFileClipboard: boolean;
+  /** Copy files (Markdown + PNG as clipboard files): Windows and macOS. */
+  fileClipboard: boolean;
   /** False when capture is off, unsupported, OS-owned, cleared, or register() failed. */
   globalCaptureShortcutRegistered: boolean;
 }

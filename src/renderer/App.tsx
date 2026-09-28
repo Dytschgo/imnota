@@ -2236,7 +2236,7 @@ export default function App() {
       <PromptBundleDialogHost
         controller={promptBundles}
         onError={setError}
-        fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+        fileClipboardAvailable={preferences.capabilities.fileClipboard}
         defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
         onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
       />
@@ -2249,7 +2249,7 @@ export default function App() {
       />
       {showOnboarding && (
         <OnboardingDemo
-          fileClipboardAvailable={preferences.capabilities.windowsFileClipboard}
+          fileClipboardAvailable={preferences.capabilities.fileClipboard}
           defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
           onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
           onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>
