@@ -71,6 +71,13 @@ function addMenuItem(name: RegExp): HTMLElement {
   return screen.getByRole('menuitem', { name });
 }
 
+/** Choose a delay beside Take screenshot, then take it. */
+function takeDelayedScreenshot(seconds: 3 | 5): void {
+  fireEvent.click(screen.getByTestId('add-item-trigger'));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: `Capture after ${seconds} seconds` }));
+  fireEvent.click(screen.getByTestId('add-item-capture'));
+}
+
 function pasteFromAddMenu(): void {
   fireEvent.click(addMenuItem(/^Paste from clipboard/));
 }
@@ -1563,7 +1570,11 @@ describe('feedback controls', () => {
     const progress = screen.getByTestId('add-screenshot');
     expect(progress).toBeDisabled();
     expect(progress).toHaveAttribute('aria-busy', 'true');
-    expect(addMenuItem(/^Take screenshot in 3 seconds/)).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    expect(screen.getByRole('menuitemradio', { name: 'Capture after 3 seconds' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
     fireEvent.click(screen.getByTestId('add-item-trigger'));
 
     fireEvent.keyDown(document.body, { key: '6', code: 'Digit6', ctrlKey: true, shiftKey: true });
@@ -1603,7 +1614,7 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
     await screen.findByTestId('add-screenshot');
-    fireEvent.click(addMenuItem(/^Take screenshot in 3 seconds/));
+    takeDelayedScreenshot(3);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
@@ -1634,7 +1645,7 @@ describe('feedback controls', () => {
       }),
       startRegionCapture,
     });
-    fireEvent.click(addMenuItem(/^Take screenshot in 5 seconds/));
+    takeDelayedScreenshot(5);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',

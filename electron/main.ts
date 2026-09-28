@@ -100,7 +100,12 @@ import { recoverContentTrashTransactions, type ContentTrashOperations } from './
 import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
+import type {
+  CaptureDelaySeconds,
+  CaptureDisplay,
+  CaptureOverlayMode,
+  CaptureRectangle,
+} from '../src/shared/capture.js';
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
@@ -1095,6 +1100,15 @@ function settleCaptureOverlay(selection: CaptureRectangle | null, mode: CaptureO
   closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
 }
 
+function retakeCaptureAfterDelay(delaySeconds: CaptureDelaySeconds): void {
+  const active = captureOverlay;
+  if (!active || !active.session.retake(delaySeconds)) return;
+  captureOverlay = null;
+  active.readiness.dispose();
+  active.disposeDisplayListeners();
+  closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
+}
+
 function failCaptureOverlay(reason: CaptureOverlayFailure = 'not-ready'): void {
   const active = captureOverlay;
   if (!active || !active.session.fail(reason)) return;
@@ -1711,6 +1725,17 @@ function registerIpc(): void {
     if (!source) throw new Error('Capture overlay is no longer available.');
     active.selection.applyLastRegion(lastCaptureRegionMemory.peek(), source.capture.display.id);
     broadcastCaptureSelection();
+  });
+  ipcMain.handle('capture-overlay:retake-delayed', (event, raw) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    retakeCaptureAfterDelay(z.union([z.literal(3), z.literal(5)]).parse(raw));
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
     if (isCaptureDelayHudSender(event)) {

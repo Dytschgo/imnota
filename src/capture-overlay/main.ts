@@ -22,6 +22,7 @@ declare global {
       annotate(): Promise<void>;
       copy(): Promise<{ image: boolean }>;
       cancel(): Promise<void>;
+      retakeAfter(delaySeconds: 3 | 5): Promise<void>;
       onCountdown(handler: (payload: { remainingSeconds: number }) => void): () => void;
       onPayload(
         handler: (payload: {
@@ -56,7 +57,7 @@ function setupCaptureDelayCountdown() {
 }
 
 function setupRegionSelection() {
-  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-label="Area" title="Area" aria-checked="true" data-mode="region"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4" /></svg></button><button type="button" role="radio" aria-label="Window" title="Window" aria-checked="false" data-mode="window"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="13" height="12" rx="1.5" /><path d="M8 19h12V9" /></svg></button><button type="button" role="radio" aria-label="Display" title="Display" aria-checked="false" data-mode="display"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8m-4-4v4" /></svg></button></div><button type="button" data-action="last-region" disabled>Last area</button><strong class="capture-instruction">Drag to select an area</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
+  root.innerHTML = `<main class="capture-overlay mode-region" aria-label="Capture a screenshot"><img class="capture-freeze-frame" alt="" draggable="false" /><div class="capture-toolbar" role="status"><div class="capture-modes" role="radiogroup" aria-label="Capture mode"><button type="button" role="radio" aria-label="Area" title="Area" aria-checked="true" data-mode="region"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4" /></svg></button><button type="button" role="radio" aria-label="Window" title="Window" aria-checked="false" data-mode="window"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="13" height="12" rx="1.5" /><path d="M8 19h12V9" /></svg></button><button type="button" role="radio" aria-label="Display" title="Display" aria-checked="false" data-mode="display"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8m-4-4v4" /></svg></button></div><div class="capture-timer" role="group" aria-label="Capture again after a delay" title="Capture again after a delay, so menus and tooltips can open first"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7" /><path d="M12 9.5V13l2.5 1.5M10 3h4" /></svg><button type="button" data-delay="3" aria-label="Capture again in 3 seconds">3s</button><button type="button" data-delay="5" aria-label="Capture again in 5 seconds">5s</button></div><button type="button" data-action="last-region" disabled>Last area</button><strong class="capture-instruction">Drag to select an area</strong><span class="capture-dimensions">Press Escape to cancel</span></div><div class="capture-selection" aria-hidden="true" hidden></div><div class="capture-actions" hidden><button type="button" data-action="retake">Retake</button><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="copy">Copy image</button><button type="button" data-action="save" class="primary">Save to collection</button><button type="button" data-action="annotate">Annotate</button></div></main>`;
 
   const surface = root.querySelector<HTMLElement>('.capture-overlay')!;
   const freezeFrame = root.querySelector<HTMLImageElement>('.capture-freeze-frame')!;
@@ -225,6 +226,12 @@ function setupRegionSelection() {
       const next = buttons[(currentIndex + direction + buttons.length) % buttons.length];
       next?.focus();
       next?.click();
+    });
+  }
+  for (const button of surface.querySelectorAll<HTMLButtonElement>('.capture-timer [data-delay]')) {
+    button.addEventListener('click', () => {
+      const delay = Number(button.dataset.delay);
+      if (delay === 3 || delay === 5) void window.imnotaCapture.retakeAfter(delay);
     });
   }
   lastRegionButton.addEventListener('click', () => {

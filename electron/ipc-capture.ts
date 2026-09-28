@@ -2,6 +2,7 @@ import { CAPTURE_OVERLAY_MODES } from '../src/shared/capture.js';
 import { filenameSchema } from '../src/shared/schema.js';
 import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
 import { captureAllDisplaysWithStableGeometry } from './capture-display-selection.js';
+import { hideWindowForCapture, restoreWindowAfterCapture } from './capture-window-hide.js';
 import type { CaptureOverlayOutcome } from './capture-overlay-session.js';
 import { type CapturedDisplayImage, CaptureServiceError } from './capture-service.js';
 import { pathInput } from './ipc-contracts.js';
@@ -99,98 +100,111 @@ export function registerCaptureIpc(
     try {
       // Capture before creating the overlay; otherwise the selection UI would
       // be present in the image. Hiding the main window prevents self-capture.
-      if (wasVisible) host.mainWindow?.hide();
-      if (input.delaySeconds) {
-        let remainingSeconds: number = input.delaySeconds;
-        const sendTick = (seconds: number) => {
-          remainingSeconds = seconds;
-          if (host.captureDelayHud && !host.captureDelayHud.isDestroyed())
-            host.captureDelayHud.webContents.send('capture-overlay:countdown', { remainingSeconds: seconds });
-        };
-        const delay = new CaptureDelaySession(input.delaySeconds, undefined, sendTick);
-        host.captureDelaySession = delay;
-        const unbindDelayCancel = bindCaptureDelayCancel(
-          (accelerator, callback) => globalShortcut.register(accelerator, callback),
-          (accelerator) => {
-            globalShortcut.unregister(accelerator);
-          },
-          () => delay.cancel(),
-        );
-        const hudDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-        void openCaptureDelayHud(hudDisplay.bounds)
-          .then((hud) => {
-            if (hud && !hud.isDestroyed()) {
-              hud.once('closed', () => delay.cancel());
-              sendTick(remainingSeconds);
-            }
-          })
-          .catch(() => undefined);
+      if (wasVisible) await hideWindowForCapture(host.mainWindow);
+      let captured: CapturedDisplayImage[];
+      let outcome: CaptureOverlayOutcome;
+      const service = captureService();
+      // The overlay toolbar can ask for a fresh still after a countdown; loop until
+      // the user selects, cancels, or the overlay fails.
+      let delaySeconds = input.delaySeconds;
+      for (;;) {
+        if (delaySeconds) {
+          let remainingSeconds: number = delaySeconds;
+          const sendTick = (seconds: number) => {
+            remainingSeconds = seconds;
+            if (host.captureDelayHud && !host.captureDelayHud.isDestroyed())
+              host.captureDelayHud.webContents.send('capture-overlay:countdown', {
+                remainingSeconds: seconds,
+              });
+          };
+          const delay = new CaptureDelaySession(delaySeconds, undefined, sendTick);
+          host.captureDelaySession = delay;
+          const unbindDelayCancel = bindCaptureDelayCancel(
+            (accelerator, callback) => globalShortcut.register(accelerator, callback),
+            (accelerator) => {
+              globalShortcut.unregister(accelerator);
+            },
+            () => delay.cancel(),
+          );
+          const hudDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+          void openCaptureDelayHud(hudDisplay.bounds)
+            .then((hud) => {
+              if (hud && !hud.isDestroyed()) {
+                hud.once('closed', () => delay.cancel());
+                sendTick(remainingSeconds);
+              }
+            })
+            .catch(() => undefined);
+          try {
+            if (!captureAdmissionGate.isActive(admission)) delay.cancel();
+            if ((await delay.result) === 'cancelled')
+              throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
+          } finally {
+            unbindDelayCancel();
+            if (host.captureDelaySession === delay) host.captureDelaySession = null;
+            await closeCaptureDelayHud();
+          }
+          assertLiveCaptureAdmission(event, admission);
+        }
         try {
-          if (!captureAdmissionGate.isActive(admission)) delay.cancel();
-          if ((await delay.result) === 'cancelled')
-            throw new NativeWorkflowError('capture-cancelled', 'Screen capture cancelled.');
-        } finally {
-          unbindDelayCancel();
-          if (host.captureDelaySession === delay) host.captureDelaySession = null;
-          await closeCaptureDelayHud();
+          const stableCapture = await captureAllDisplaysWithStableGeometry(
+            displays,
+            (current) => service.captureDisplays(current),
+            () => screen.getAllDisplays(),
+          );
+          if (!stableCapture)
+            throw new NativeWorkflowError(
+              'capture-sources-unavailable',
+              'The display layout changed while capture was being prepared. Try again after the displays settle.',
+              true,
+            );
+          captured = stableCapture;
+        } catch (error) {
+          if (error instanceof NativeWorkflowError) throw error;
+          if (error instanceof CaptureServiceError) {
+            if (
+              process.platform === 'darwin' &&
+              systemPreferences.getMediaAccessStatus('screen') !== 'granted'
+            )
+              throw new NativeWorkflowError(
+                'capture-permission-denied',
+                'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+              );
+            throw new NativeWorkflowError(
+              error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
+              `${error.message} Use Import or Paste instead.`,
+              true,
+            );
+          }
+          throw new NativeWorkflowError(
+            'capture-sources-unavailable',
+            'The screen capture source could not be read. Use Import or Paste instead.',
+            true,
+          );
         }
         assertLiveCaptureAdmission(event, admission);
-      }
-      let captured: CapturedDisplayImage[];
-      const service = captureService();
-      try {
-        const stableCapture = await captureAllDisplaysWithStableGeometry(
-          displays,
-          (current) => service.captureDisplays(current),
-          () => screen.getAllDisplays(),
-        );
-        if (!stableCapture)
-          throw new NativeWorkflowError(
-            'capture-sources-unavailable',
-            'The display layout changed while capture was being prepared. Try again after the displays settle.',
-            true,
+        try {
+          outcome = await chooseCaptureRegion(
+            captured,
+            listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+            input.overlayMode ?? 'region',
           );
-        captured = stableCapture;
-      } catch (error) {
-        if (error instanceof NativeWorkflowError) throw error;
-        if (error instanceof CaptureServiceError) {
-          if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
+        } catch (error) {
+          if (error instanceof CaptureServiceError)
             throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
+              'capture-sources-unavailable',
+              `${error.message} Use Import or Paste instead.`,
+              true,
             );
           throw new NativeWorkflowError(
-            error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
+            'capture-sources-unavailable',
+            'The screen selection window could not be opened. Use Import or Paste instead.',
             true,
           );
         }
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The screen capture source could not be read. Use Import or Paste instead.',
-          true,
-        );
-      }
-      assertLiveCaptureAdmission(event, admission);
-      let outcome: CaptureOverlayOutcome;
-      try {
-        outcome = await chooseCaptureRegion(
-          captured,
-          listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
-          input.overlayMode ?? 'region',
-        );
-      } catch (error) {
-        if (error instanceof CaptureServiceError)
-          throw new NativeWorkflowError(
-            'capture-sources-unavailable',
-            `${error.message} Use Import or Paste instead.`,
-            true,
-          );
-        throw new NativeWorkflowError(
-          'capture-sources-unavailable',
-          'The screen selection window could not be opened. Use Import or Paste instead.',
-          true,
-        );
+        if (outcome.kind !== 'retake') break;
+        delaySeconds = outcome.delaySeconds;
+        assertLiveCaptureAdmission(event, admission);
       }
       assertLiveCaptureAdmission(event, admission);
       if (outcome.kind === 'cancelled')
@@ -238,7 +252,7 @@ export function registerCaptureIpc(
       return { ...inserted, overlayAction: host.lastOverlayCommit };
     } finally {
       if (wasVisible && host.mainWindow && !host.mainWindow.isDestroyed()) {
-        host.mainWindow.show();
+        restoreWindowAfterCapture(host.mainWindow);
         if (wasFocused) host.mainWindow.focus();
       }
     }
@@ -286,7 +300,7 @@ export function registerCaptureIpc(
       host.mainWindow && !host.mainWindow.isDestroyed() && host.mainWindow.isFocused(),
     );
     try {
-      if (wasVisible) host.mainWindow?.hide();
+      if (wasVisible) await hideWindowForCapture(host.mainWindow);
       let captured: CapturedDisplayImage[];
       const service = captureService();
       try {
@@ -350,7 +364,7 @@ export function registerCaptureIpc(
       );
     } finally {
       if (wasVisible && host.mainWindow && !host.mainWindow.isDestroyed()) {
-        host.mainWindow.show();
+        restoreWindowAfterCapture(host.mainWindow);
         if (wasFocused) host.mainWindow.focus();
       }
     }
