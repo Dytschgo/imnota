@@ -12,4 +12,8 @@ ditto -x -k "$archive" "$destination"
 codesign --verify --deep --strict "$destination/Imnota.app"
 test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$destination/Imnota.app/Contents/Info.plist")" = "13.0.0"
 lipo "$destination/Imnota.app/Contents/MacOS/Imnota" -verify_arch arm64 x86_64
+capture_helper="$destination/Imnota.app/Contents/Resources/imnota-capture-helper"
+test -x "$capture_helper"
+lipo "$capture_helper" -verify_arch arm64 x86_64
+"$capture_helper" windows 0 | node -e 'let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => { if (!Array.isArray(JSON.parse(text))) process.exit(1); });'
 node scripts/smoke.mjs "$destination/Imnota.app/Contents/MacOS/Imnota"
