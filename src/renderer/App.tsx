@@ -81,9 +81,16 @@ type PendingDeletion = {
   title: string;
 };
 
+/** Plain confirmations. Long enough to read one short sentence, then gone. */
+export const TOAST_STATUS_MS = 2000;
+/** Undo confirmations. Longer than a plain confirmation, then gone on their own. */
+export const TOAST_ACTION_MS = 4000;
+
 type ToastNotification = {
   message: string;
   action?: { label: string; run(): void };
+  durationMs: number;
+  generation: number;
 };
 
 export function userFacingErrorMessage(message: string): string {
@@ -122,6 +129,9 @@ export default function App() {
   } | null>(null);
   const [toast, setToast] = useState<ToastNotification | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const toastGeneration = useRef(0);
+  const toastHold = useRef(0);
+  const toastLifetime = useRef<{ generation: number; durationMs: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -254,24 +264,57 @@ export default function App() {
     [promptBundles],
   );
 
-  useEffect(
-    () => () => {
-      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    },
-    [],
-  );
-  const showToast = useCallback((message: string, action?: ToastNotification['action']) => {
-    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    setToast({ message, action });
-    if (action) {
+  const clearToastTimer = useCallback(() => {
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
       toastTimer.current = null;
-      return;
     }
-    toastTimer.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimer.current = null;
-    }, 3500);
   }, []);
+  const armToastTimer = useCallback(
+    (generation: number, durationMs: number) => {
+      clearToastTimer();
+      toastTimer.current = window.setTimeout(() => {
+        if (toastGeneration.current !== generation) return;
+        toastTimer.current = null;
+        toastLifetime.current = null;
+        toastHold.current = 0;
+        setToast(null);
+      }, durationMs);
+    },
+    [clearToastTimer],
+  );
+  useEffect(() => clearToastTimer, [clearToastTimer]);
+  const showToast = useCallback(
+    (message: string, action?: ToastNotification['action']) => {
+      const generation = ++toastGeneration.current;
+      const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
+      toastHold.current = 0;
+      toastLifetime.current = { generation, durationMs };
+      setToast({ message, action, durationMs, generation });
+      armToastTimer(generation, durationMs);
+    },
+    [armToastTimer],
+  );
+  const holdToast = useCallback(() => {
+    toastHold.current += 1;
+    clearToastTimer();
+  }, [clearToastTimer]);
+  const releaseToast = useCallback(() => {
+    toastHold.current = Math.max(0, toastHold.current - 1);
+    const lifetime = toastLifetime.current;
+    if (toastHold.current > 0 || !lifetime) return;
+    armToastTimer(lifetime.generation, lifetime.durationMs);
+  }, [armToastTimer]);
+  const dismissToast = useCallback(
+    (generation?: number) => {
+      if (generation !== undefined && toastGeneration.current !== generation) return;
+      toastHold.current = 0;
+      toastLifetime.current = null;
+      clearToastTimer();
+      setToast(null);
+    },
+    [clearToastTimer],
+  );
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -2165,11 +2208,26 @@ export default function App() {
         />
       </AppShell>
       {toast && !visibleError && (
-        <div className="toast" role="status">
-          <Check size={16} aria-hidden="true" />
+        <div
+          className="toast"
+          role="status"
+          onMouseEnter={holdToast}
+          onMouseLeave={releaseToast}
+          onFocus={holdToast}
+          onBlur={releaseToast}
+        >
+          <Check size={14} aria-hidden="true" />
           <span>{toast.message}</span>
           {toast.action && (
-            <button type="button" onClick={toast.action.run}>
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                const generation = toast.generation;
+                toast.action?.run();
+                dismissToast(generation);
+              }}
+            >
               {toast.action.label}
             </button>
           )}
