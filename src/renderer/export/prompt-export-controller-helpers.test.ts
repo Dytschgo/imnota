@@ -3,6 +3,7 @@ import {
   cancelledFailure,
   estimatedBytes,
   failure,
+  nativeFailure,
   publicError,
   selectionNumber,
   throwIfAborted,
@@ -16,18 +17,22 @@ describe('prompt export controller helpers', () => {
       retryable: false,
       fallbackAvailable: true,
       nativeCode: undefined,
+      technicalDetails: undefined,
     });
     expect(publicError(new Error('Bundle 2 is above the safe renderer limit.'))).toMatchObject({
       code: 'render-limit',
       retryable: true,
     });
-    expect(publicError(new Error('  disk full  '))).toEqual({
+    expect(publicError(new Error('  disk full at P:/private/project  '))).toEqual({
       code: 'unexpected',
-      message: 'disk full',
+      message: 'Prompt export failed unexpectedly. Try Prepare fresh files.',
       retryable: true,
       fallbackAvailable: false,
+      technicalDetails: 'disk full at P:/private/project',
     });
-    expect(publicError('not an error').message).toBe('Prompt export failed unexpectedly. Try again.');
+    expect(publicError('not an error').message).toBe(
+      'Prompt export failed unexpectedly. Try Prepare fresh files.',
+    );
   });
 
   it('reports cancellation only after the signal aborts', () => {
@@ -38,10 +43,33 @@ describe('prompt export controller helpers', () => {
     expect(publicError(cancelledFailure()).code).toBe('cancelled');
   });
 
+  it('keeps native paths in optional details and gives a recovery step in the alert', () => {
+    expect(
+      nativeFailure({ code: 'io-failure', message: 'ENOENT P:/private/export.png', retryable: true }).detail,
+    ).toMatchObject({
+      message: 'An export file is missing. Choose Prepare fresh files to create a new copy.',
+      technicalDetails: 'ENOENT P:/private/export.png',
+    });
+    expect(
+      nativeFailure({ code: 'io-failure', message: 'EACCES P:/private/export', retryable: true }).detail,
+    ).toMatchObject({
+      code: 'native-failure',
+      message: expect.stringMatching(/Check available space and folder access/i),
+      technicalDetails: 'EACCES P:/private/export',
+    });
+    expect(
+      nativeFailure({ code: 'session-not-found', message: 'Missing P:/private/export', retryable: true })
+        .detail.message,
+    ).toMatch(/Prepare fresh files/i);
+  });
+
   it('estimates decoded bytes and resolves bundle selections', () => {
     expect(estimatedBytes(undefined)).toBeUndefined();
+    expect(estimatedBytes(undefined, 'text')).toBeUndefined();
     expect(estimatedBytes(4)).toBe(3);
     expect(estimatedBytes(-8)).toBe(0);
+    expect(estimatedBytes(0, 'é')).toBe(2);
+    expect(estimatedBytes(4, 'é')).toBe(5);
     expect(selectionNumber(3)).toBe(3);
     expect(selectionNumber({ bundleNumber: 2 } as Parameters<typeof selectionNumber>[0])).toBe(2);
     expect(selectionNumber()).toBeUndefined();

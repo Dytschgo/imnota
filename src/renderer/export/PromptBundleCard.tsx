@@ -8,7 +8,7 @@ import './prompt-bundles.css';
 export type PromptBundleCardState =
   'idle' | 'preparing' | 'writing' | 'copying' | 'copied' | 'cancelled' | 'error';
 
-export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files';
+export type PromptDeliveryOutcome = 'combined' | 'markdown' | 'image' | 'paths' | 'files' | 'opened';
 
 const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
   combined: 'Markdown + image prepared',
@@ -16,6 +16,7 @@ const outcomeLabels: Record<PromptDeliveryOutcome, string> = {
   image: 'Image copied',
   paths: 'File paths copied',
   files: 'Files ready',
+  opened: 'Files opened',
 };
 
 export interface PromptBundleCardModel {
