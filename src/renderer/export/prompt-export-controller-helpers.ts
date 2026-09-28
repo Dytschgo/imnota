@@ -121,12 +121,12 @@ export function actionableMessage(error: unknown, fallback: string): string {
 export function nativeFailure(error: WorkflowError, fallbackAvailable = false): ControllerFailure {
   const messages: Partial<Record<WorkflowError['code'], string>> = {
     'io-failure': /\bENOENT\b/.test(error.message)
-      ? 'An export file is missing. Choose Prepare fresh files to create a new copy.'
+      ? 'An export file is missing. Choose Rebuild bundles to create a new copy.'
       : 'The export files could not be read or written. Check available space and folder access, then try again.',
-    'session-not-found': 'The saved export is no longer available. Choose Prepare fresh files and try again.',
-    'bundle-not-found': 'A saved bundle is no longer available. Choose Prepare fresh files and try again.',
-    'project-not-found': 'The project is no longer available. Open it again and prepare fresh files.',
-    'collection-not-found': 'The collection is no longer available. Open it again and prepare fresh files.',
+    'session-not-found': 'The saved export is no longer available. Choose Rebuild bundles and try again.',
+    'bundle-not-found': 'A saved bundle is no longer available. Choose Rebuild bundles and try again.',
+    'project-not-found': 'The project is no longer available. Open it again and rebuild the bundles.',
+    'collection-not-found': 'The collection is no longer available. Open it again and rebuild the bundles.',
     'permission-denied': 'The export folder cannot be accessed. Check its permissions and try again.',
   };
   return failure(
@@ -350,7 +350,7 @@ export function publicError(error: unknown): PromptBundleControllerError {
     return { code: 'render-limit', message, retryable: true, fallbackAvailable: false };
   return {
     code: 'unexpected',
-    message: 'Prompt export failed unexpectedly. Try Prepare fresh files.',
+    message: 'Prompt export failed unexpectedly. Try Rebuild bundles.',
     retryable: true,
     fallbackAvailable: false,
     technicalDetails: error instanceof Error ? message : undefined,

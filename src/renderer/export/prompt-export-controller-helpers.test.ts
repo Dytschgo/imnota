@@ -25,13 +25,13 @@ describe('prompt export controller helpers', () => {
     });
     expect(publicError(new Error('  disk full at P:/private/project  '))).toEqual({
       code: 'unexpected',
-      message: 'Prompt export failed unexpectedly. Try Prepare fresh files.',
+      message: 'Prompt export failed unexpectedly. Try Rebuild bundles.',
       retryable: true,
       fallbackAvailable: false,
       technicalDetails: 'disk full at P:/private/project',
     });
     expect(publicError('not an error').message).toBe(
-      'Prompt export failed unexpectedly. Try Prepare fresh files.',
+      'Prompt export failed unexpectedly. Try Rebuild bundles.',
     );
   });
 
@@ -47,7 +47,7 @@ describe('prompt export controller helpers', () => {
     expect(
       nativeFailure({ code: 'io-failure', message: 'ENOENT P:/private/export.png', retryable: true }).detail,
     ).toMatchObject({
-      message: 'An export file is missing. Choose Prepare fresh files to create a new copy.',
+      message: 'An export file is missing. Choose Rebuild bundles to create a new copy.',
       technicalDetails: 'ENOENT P:/private/export.png',
     });
     expect(
@@ -60,7 +60,7 @@ describe('prompt export controller helpers', () => {
     expect(
       nativeFailure({ code: 'session-not-found', message: 'Missing P:/private/export', retryable: true })
         .detail.message,
-    ).toMatch(/Prepare fresh files/i);
+    ).toMatch(/Rebuild bundles/i);
   });
 
   it('estimates decoded bytes and resolves bundle selections', () => {
