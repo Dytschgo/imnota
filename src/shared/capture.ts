@@ -20,6 +20,10 @@ export const CAPTURE_OVERLAY_MODES = ['region', 'window', 'display'] as const;
 export type CaptureOverlayMode = (typeof CAPTURE_OVERLAY_MODES)[number];
 
 /** Shown when Window mode is selected but the OS did not identify any windows. */
+/** macOS denies screen access; ad-hoc signed updates lose the earlier grant. */
+export const MAC_CAPTURE_PERMISSION_MESSAGE =
+  'Imnota is not allowed to record the screen. macOS resets this permission after each Imnota update. Choose Fix permission, or use Import or Paste.';
+
 export const WINDOW_CAPTURE_UNAVAILABLE_MESSAGE =
   'Imnota could not identify windows on this device. Choose Area to select manually.';
 
