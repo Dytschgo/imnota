@@ -124,6 +124,15 @@ async function fetchArtifact(
   return new Blob(chunks, { type: blobType });
 }
 
+/** Mirrors clipboardContextHtml in src/shared/clipboard-context.ts. */
+export function clipboardContextHtml(markdown) {
+  const escaped = markdown.replace(
+    /[&<>"']/g,
+    (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character],
+  );
+  return `<pre>${escaped}</pre>`;
+}
+
 function clipboardParts(markdownPath, pngPath, options) {
   const parts = {};
   if (markdownPath)
@@ -137,6 +146,12 @@ function clipboardParts(markdownPath, pngPath, options) {
     );
   if (pngPath)
     parts['image/png'] = fetchArtifact(pngPath, 'png', 'image/png', 'image/png', MAX_PNG_BYTES, options);
+  // Match the desktop Rich copy: combined Markdown and PNG also carry the Markdown as escaped HTML.
+  if (markdownPath && pngPath)
+    parts['text/html'] = parts['text/plain'].then(async (blob) => {
+      const html = clipboardContextHtml(await blob.text());
+      return new Blob([html], { type: 'text/html' });
+    });
   return parts;
 }
 

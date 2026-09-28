@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ClipboardUnavailableError, writeShareClipboard } from '../public/share-copy.js';
+import {
+  ClipboardUnavailableError,
+  clipboardContextHtml,
+  writeShareClipboard,
+} from '../public/share-copy.js';
 
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -59,12 +63,39 @@ test('starts fetches and clipboard.write in the click turn, then preserves exact
   });
 
   assert.deepEqual(calls, [`${sharePath}/markdown`, `${sharePath}/assets/prompt-001.png`, 'write']);
-  assert.deepEqual(Object.keys(item.parts).sort(), ['image/png', 'text/plain']);
+  assert.deepEqual(Object.keys(item.parts).sort(), ['image/png', 'text/html', 'text/plain']);
   resolveMarkdown(response(markdown, 'text/markdown; charset=utf-8'));
   resolvePng(response(png, 'image/png'));
   await result;
   assert.deepEqual(Buffer.from(await item.parts['text/plain'].then((blob) => blob.arrayBuffer())), markdown);
   assert.deepEqual(Buffer.from(await item.parts['image/png'].then((blob) => blob.arrayBuffer())), png);
+  const html = await item.parts['text/html'];
+  assert.equal(html.type, 'text/html');
+  assert.equal(await html.text(), `<pre>${markdown.toString('utf8')}</pre>`);
+});
+
+test('escapes the HTML clipboard copy exactly like the desktop rich copy', () => {
+  assert.equal(
+    clipboardContextHtml(`<script>alert("x")</script> & 'q'`),
+    '<pre>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;q&#39;</pre>',
+  );
+});
+
+test('copies Markdown-only requests as plain text only, like the desktop fallback', async () => {
+  let item;
+  await writeShareClipboard({
+    markdownPath: `${sharePath}/markdown`,
+    clipboard: {
+      write(items) {
+        [item] = items;
+        return Promise.all(Object.values(item.parts));
+      },
+    },
+    ClipboardItemCtor: TestClipboardItem,
+    locationObject,
+    fetchImpl: async () => response(markdown, 'text/markdown; charset=utf-8'),
+  });
+  assert.deepEqual(Object.keys(item.parts), ['text/plain']);
 });
 
 test('keeps PNG-only copy explicit and rejects invalid image responses', async () => {
