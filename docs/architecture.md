@@ -32,7 +32,7 @@ Deleting an individual screenshot sends its source, annotations and description 
 
 ## Prompt export
 
-Export is scoped to the current collection. The renderer produces annotated, expanded screenshot renders and structured bundle input; export helpers split content automatically using dimensions, pixel count, readability, memory and clipboard limits. The main process writes a fresh timestamped `.png` + `.md` set into that collection's `exports` directory.
+Export is scoped to the current collection. The renderer captures one immutable prompt input snapshot, including the saved content revisions and export preferences, before planning. A versioned in-memory fingerprint identifies that exact input when deciding whether finalized files can be reused. Snapshot capture is separate from the renderer pipeline that plans, renders, settles actual encoded-size splits and validates source revisions. The main process writes a fresh timestamped `.png` + `.md` set into that collection's `exports` directory.
 
 Prompt PNGs use a neutral white background and export-only contrast correction. Source screenshots and saved annotation colors are never rewritten. Excluded screenshots are absent from PNGs but retained as explicit Markdown exclusions with their original export-time Picture numbers.
 
@@ -40,7 +40,7 @@ The clipboard bridge can write Markdown and an image representation together. Th
 
 ## Hosted sharing boundary
 
-The renderer requests finalized prompt bundles by session and bundle identity. The main process reads and validates the committed artifacts, displays an exact manifest through the sharing flow, and uploads only after explicit confirmation and one-use browser pairing. Native transport validates origins and bounded responses, refuses redirects and preserves local recovery/history state for ambiguous network outcomes.
+The renderer requests finalized prompt bundles by session and bundle identity. Opening sharing review reuses the current export only after checking the saved source fingerprint, complete bundle membership and readable grants. Missing files or changed inputs require a fresh local export; review alone never starts an upload. The main process reads and validates the committed artifacts, displays an exact manifest through the sharing flow, and uploads only after explicit confirmation and one-use browser pairing. Native transport validates origins and bounded responses, refuses redirects and preserves local recovery/history state for ambiguous network outcomes.
 
 The service canonicalizes bounded PNGs, sanitizes Markdown, stores artifacts outside the public web root and serves them through expiring public tokens. Management credentials support revocation. Quotas, rate limits, idempotent receipts, cleanup and metadata backups belong to the service, not project persistence. There is no project sync or background content upload. See [service architecture and operations](../share-service/README.md).
 
