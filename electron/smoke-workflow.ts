@@ -1508,10 +1508,10 @@ async function exercisePreferencesAndChannel(
       await driver.waitFor({
         selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
       });
-      // Light mode reveals the backdrop with automatic strong glass; dark mode uses the switch.
-      const glassOn = theme === 'dark';
+      // Choosing a backdrop turns glass on; both themes reveal it through the switch.
+      const glassOn = true;
       await setGlassSurfaces(driver, glassOn);
-      const glass = glassOn ? 'balanced' : 'off';
+      const glass = 'balanced';
       const reducedTransparency = await driver.evaluate<boolean>(
         `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
       );
@@ -1521,12 +1521,12 @@ async function exercisePreferencesAndChannel(
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
-      const expectedGlass = expectedFallback !== 'none' ? 'off' : glassOn ? 'balanced' : 'strong';
+      const expectedGlass = expectedFallback !== 'none' ? 'off' : 'balanced';
       await driver.waitFor({
         selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
-        selector: `input[name="glass-surfaces"]${glassOn ? ':checked' : ':not(:checked)'}:not(:disabled)`,
+        selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
         artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
@@ -1629,11 +1629,8 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
   await driver.evaluate(`(() => {
     const root = document.documentElement;
-    const fallback = ['reduced-transparency', 'performance'].includes(root.dataset.glassFallback);
-    if (root.dataset.glassLevel !== (fallback ? 'off' : 'strong'))
-      throw new Error('Light backdrop did not apply automatic glass or its accessibility fallback.');
-    if (!fallback && root.dataset.background !== 'active')
-      throw new Error('Automatic light glass did not reveal its backdrop.');
+    if (root.dataset.glassLevel !== 'off' || root.dataset.background !== 'none')
+      throw new Error('Glass off still revealed the backdrop in light mode.');
   })()`);
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
   await driver.waitFor({ selector: ':root[data-theme="dark"][data-glass-level="off"]' });

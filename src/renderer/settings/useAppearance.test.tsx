@@ -70,7 +70,7 @@ describe('useAppearance', () => {
     expect(root.style.getPropertyValue('--imnota-background-image')).toBe('none');
   });
 
-  it('derives light image glass without changing saved dark choices', async () => {
+  it('shows the backdrop only while glass is on, in light and dark', async () => {
     const root = document.createElement('div');
     const preferences = {
       ...DEFAULT_APPEARANCE,
@@ -79,23 +79,25 @@ describe('useAppearance', () => {
       backgroundImage: 'preset:graphite',
     };
     const { result, rerender, unmount } = renderHook(
-      ({ mode, image }: { mode: 'light' | 'dark'; image: string }) =>
-        useAppearance({ ...preferences, mode, backgroundImage: image }, { root }),
-      { initialProps: { mode: 'light' as 'light' | 'dark', image: preferences.backgroundImage } },
+      ({ mode, glass, image }: { mode: 'light' | 'dark'; glass: 'off' | 'balanced'; image: string }) =>
+        useAppearance({ ...preferences, mode, glassLevel: glass, backgroundImage: image }, { root }),
+      {
+        initialProps: {
+          mode: 'light' as 'light' | 'dark',
+          glass: 'off' as 'off' | 'balanced',
+          image: preferences.backgroundImage,
+        },
+      },
     );
     await act(async () => undefined);
-    expect(result.current.glassLevel).toBe('strong');
+    expect(result.current.glassLevel).toBe('off');
+    expect(root.dataset.background).toBe('none');
+    rerender({ mode: 'light', glass: 'balanced', image: preferences.backgroundImage });
     expect(root.dataset.background).toBe('active');
-    expect(preferences.glassLevel).toBe('off');
-    rerender({ mode: 'dark', image: preferences.backgroundImage });
-    expect(result.current.glassLevel).toBe('off');
-    expect(root.dataset.background).toBe('none');
-    rerender({ mode: 'light', image: 'data:image/png;base64,AA==' });
+    rerender({ mode: 'dark', glass: 'balanced', image: 'data:image/png;base64,AA==' });
     expect(root.dataset.backgroundSource).toBe('upload');
-    rerender({ mode: 'light', image: '' });
-    expect(result.current.glassLevel).toBe('off');
+    rerender({ mode: 'dark', glass: 'off', image: 'data:image/png;base64,AA==' });
     expect(root.dataset.background).toBe('none');
-    await act(async () => undefined);
     unmount();
   });
 
