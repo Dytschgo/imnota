@@ -12,6 +12,7 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { readMacClipboardFiles } from './mac-clipboard.js';
 import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
@@ -331,14 +332,14 @@ async function exerciseOnboarding(
     await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     await driver.waitFor({ text: 'Copy files', exact: true });
     const nativeDefault = await driver.evaluate<string>(`(async () => {
       const result = await window.imnota.getPreferenceSettings();
       if (!result.ok) throw new Error(result.error.message);
       return result.value.settings.nativeCopy.defaultFunction;
     })()`);
-    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    if (nativeDefault !== 'files') throw new Error('Native copy default was not Copy files.');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
@@ -467,6 +468,23 @@ async function exerciseOnboarding(
     )
       throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
     await assertExactImage('Choosing a native copy default');
+  }
+
+  if (process.platform === 'darwin') {
+    // macOS Copy files: two clipboard file URLs, so composers attach both files.
+    await chooseNativeCopyFunction('files', 'Copy files');
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+    const macFiles = await readMacClipboardFiles();
+    if (
+      macFiles.length !== 2 ||
+      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
+      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
+    )
+      throw new Error(
+        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
+      );
+    await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
   await driver.click({ text: 'Copy Markdown only', exact: true });
@@ -1508,10 +1526,10 @@ async function exercisePreferencesAndChannel(
       await driver.waitFor({
         selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
       });
-      // Light mode reveals the backdrop with automatic strong glass; dark mode uses the switch.
-      const glassOn = theme === 'dark';
+      // Choosing a backdrop turns glass on; both themes reveal it through the switch.
+      const glassOn = true;
       await setGlassSurfaces(driver, glassOn);
-      const glass = glassOn ? 'balanced' : 'off';
+      const glass = 'balanced';
       const reducedTransparency = await driver.evaluate<boolean>(
         `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
       );
@@ -1521,12 +1539,12 @@ async function exercisePreferencesAndChannel(
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
-      const expectedGlass = expectedFallback !== 'none' ? 'off' : glassOn ? 'balanced' : 'strong';
+      const expectedGlass = expectedFallback !== 'none' ? 'off' : 'balanced';
       await driver.waitFor({
         selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
-        selector: `input[name="glass-surfaces"]${glassOn ? ':checked' : ':not(:checked)'}:not(:disabled)`,
+        selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
         artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
@@ -1629,11 +1647,8 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
   await driver.evaluate(`(() => {
     const root = document.documentElement;
-    const fallback = ['reduced-transparency', 'performance'].includes(root.dataset.glassFallback);
-    if (root.dataset.glassLevel !== (fallback ? 'off' : 'strong'))
-      throw new Error('Light backdrop did not apply automatic glass or its accessibility fallback.');
-    if (!fallback && root.dataset.background !== 'active')
-      throw new Error('Automatic light glass did not reveal its backdrop.');
+    if (root.dataset.glassLevel !== 'off' || root.dataset.background !== 'none')
+      throw new Error('Glass off still revealed the backdrop in light mode.');
   })()`);
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
   await driver.waitFor({ selector: ':root[data-theme="dark"][data-glass-level="off"]' });

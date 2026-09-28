@@ -96,6 +96,42 @@ button {
   background: transparent;
   cursor: pointer;
 }
+.capture-timer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 8px;
+  border-radius: 8px;
+  color: #e5e7eb;
+  background: rgb(255 255 255 / 0.08);
+}
+.capture-timer svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.capture-timer button {
+  min-width: 34px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px;
+  color: #e5e7eb;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.capture-timer button:hover,
+.capture-timer button:focus-visible {
+  background: rgb(255 255 255 / 0.14);
+  outline: none;
+}
 .capture-modes button svg {
   width: 18px;
   height: 18px;

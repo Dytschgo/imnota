@@ -3039,6 +3039,42 @@ kbd {
   line-height: 1.35;
 }
 
+.add-item-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.add-item-row > button {
+  flex: 1;
+  min-width: 0;
+}
+
+.add-item-delay {
+  display: flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--input);
+}
+
+.add-item-popover .add-item-delay button {
+  width: auto;
+  display: block;
+  min-width: 34px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.add-item-popover .add-item-delay button[aria-checked='true'] {
+  background: var(--surface-3);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 .toolbar-group-label {
   align-self: stretch;
   display: flex;

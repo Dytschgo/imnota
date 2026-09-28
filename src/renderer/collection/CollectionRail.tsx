@@ -16,7 +16,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import type { CaptureDelaySeconds } from '../../shared/capture';
+import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import { collectionDisplayName } from './collection-display-name';
 import { orderedCollectionItems } from '../../shared/content-items';
@@ -429,6 +429,9 @@ export function CollectionRail({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuFocusedIndex, setAddMenuFocusedIndex] = useState(0);
+  /** Delay for Take screenshot, chosen beside it in the Add menu. */
+  const [captureDelay, setCaptureDelay] = useState<0 | CaptureDelaySeconds>(0);
+  const captureDelayRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const addMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -452,18 +455,20 @@ export function CollectionRail({
       run: onImport,
     },
     ...(onCapture
-      ? ([undefined, 3, 5] as const).map((delaySeconds) => ({
-          id: delaySeconds ? `capture-${delaySeconds}` : 'capture',
-          label: delaySeconds ? `Take screenshot in ${delaySeconds} seconds` : 'Take screenshot',
-          description: !captureEnabled
-            ? (captureDisabledLabel ?? 'Screen capture is unavailable')
-            : delaySeconds
-              ? 'Time to open a menu or tooltip first'
-              : `Capture a screen area${captureShortcut ? ` (${captureShortcut})` : ''}`,
-          icon: delaySeconds ? Timer : Camera,
-          run: () => (delaySeconds ? onCapture(delaySeconds) : onCapture()),
-          disabled: !captureEnabled || captureInProgress,
-        }))
+      ? [
+          {
+            id: 'capture',
+            label: 'Take screenshot',
+            description: !captureEnabled
+              ? (captureDisabledLabel ?? 'Screen capture is unavailable')
+              : captureDelay
+                ? `Captures after ${captureDelay} seconds, so menus can open first`
+                : `Capture a screen area${captureShortcut ? ` (${captureShortcut})` : ''}`,
+            icon: captureDelay ? Timer : Camera,
+            run: () => (captureDelay ? onCapture(captureDelay) : onCapture()),
+            disabled: !captureEnabled || captureInProgress,
+          },
+        ]
       : []),
     {
       id: 'paste',
@@ -777,7 +782,7 @@ export function CollectionRail({
                 >
                   {addItemOptions.map((option, index) => {
                     const Icon = option.icon;
-                    return (
+                    const item = (
                       <button
                         key={option.id}
                         ref={(element) => {
@@ -808,6 +813,9 @@ export function CollectionRail({
                           } else if (event.key === 'End') {
                             event.preventDefault();
                             setAddMenuFocusedIndex(addItemOptions.length - 1);
+                          } else if (event.key === 'ArrowRight' && option.id === 'capture') {
+                            event.preventDefault();
+                            captureDelayRefs.current[0]?.focus();
                           } else if (event.key === 'Escape') {
                             event.preventDefault();
                             closeAddMenu(true);
@@ -820,6 +828,49 @@ export function CollectionRail({
                           <small>{option.description}</small>
                         </span>
                       </button>
+                    );
+                    if (option.id !== 'capture') return item;
+                    const delays = [0, ...CAPTURE_DELAY_SECONDS] as const;
+                    return (
+                      <div key={option.id} className="add-item-row">
+                        {item}
+                        <div className="add-item-delay" role="group" aria-label="Capture delay">
+                          {delays.map((delay, delayIndex) => (
+                            <button
+                              key={delay}
+                              ref={(element) => {
+                                captureDelayRefs.current[delayIndex] = element;
+                              }}
+                              type="button"
+                              role="menuitemradio"
+                              tabIndex={-1}
+                              aria-checked={captureDelay === delay}
+                              aria-disabled={option.disabled || undefined}
+                              aria-label={delay ? `Capture after ${delay} seconds` : 'Capture immediately'}
+                              data-testid={`add-item-capture-delay-${delay}`}
+                              onClick={() => {
+                                if (!option.disabled) setCaptureDelay(delay);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                                  event.preventDefault();
+                                  const next = delayIndex + (event.key === 'ArrowRight' ? 1 : -1);
+                                  if (next < 0) addMenuItemRefs.current[index]?.focus();
+                                  else captureDelayRefs.current[Math.min(next, delays.length - 1)]?.focus();
+                                } else if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  if (!option.disabled) setCaptureDelay(delay);
+                                } else if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  closeAddMenu(true);
+                                }
+                              }}
+                            >
+                              {delay ? `${delay}s` : 'Now'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
