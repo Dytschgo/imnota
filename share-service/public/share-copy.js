@@ -208,6 +208,7 @@ function messageFor(error, fallback) {
 }
 
 const DOWNLOAD_FALLBACK = 'Use the downloads in the arrow menu instead.';
+const SUCCESS_TOAST_MS = 4_000;
 
 export function boot(documentObject = globalThis.document) {
   const root = documentObject?.querySelector?.('[data-share-copy-root]');
@@ -215,11 +216,17 @@ export function boot(documentObject = globalThis.document) {
   const status = root.querySelector('[data-copy-status]');
   const controls = root.querySelectorAll('[data-copy-markdown], [data-copy-png], [data-copy-bundle]');
   let copying = false;
+  let hideTimer;
   const setStatus = (message, state) => {
     if (!status) return;
+    clearTimeout(hideTimer);
     status.textContent = message;
     status.classList.toggle('error', state === 'error');
     status.classList.toggle('is-visible', Boolean(message));
+    // Success fades after a moment; errors stay until the next action. The text remains for
+    // assistive technology either way.
+    if (state === 'success')
+      hideTimer = setTimeout(() => status.classList.remove('is-visible'), SUCCESS_TOAST_MS);
   };
   const markCopied = (scope, button) => {
     scope.classList.add('is-copied');
@@ -240,7 +247,7 @@ export function boot(documentObject = globalThis.document) {
       try {
         // action reaches clipboard.write before this handler awaits its result.
         await action();
-        setStatus(success);
+        setStatus(success, 'success');
         markCopied(scope, button);
       } catch (error) {
         setStatus(messageFor(error, fallback), 'error');
