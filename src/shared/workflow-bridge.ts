@@ -232,6 +232,10 @@ export interface WorkflowBridge {
   }): Promise<WorkflowResult<{ snapshot: ProjectSnapshot; screenshotId: string }>>;
   discardBufferedCapture(): Promise<WorkflowResult<void>>;
   captureRendererReady(): Promise<WorkflowResult<void>>;
+  /** macOS: reset Imnota's Screen Recording entry, ask again and open its Settings page. */
+  repairCapturePermission(): Promise<WorkflowResult<{ reset: boolean }>>;
+  /** macOS: restart so a new Screen Recording grant applies. */
+  relaunchForCapturePermission(): Promise<WorkflowResult<void>>;
   onRegionCaptureHotkey(handler: () => void): () => void;
   onCaptureTray(handler: (mode: 'region' | 'window' | 'display') => void): () => void;
 

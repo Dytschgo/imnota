@@ -1,4 +1,4 @@
-import { CAPTURE_OVERLAY_MODES } from '../src/shared/capture.js';
+import { CAPTURE_OVERLAY_MODES, MAC_CAPTURE_PERMISSION_MESSAGE } from '../src/shared/capture.js';
 import { filenameSchema } from '../src/shared/schema.js';
 import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
 import { captureAllDisplaysWithStableGeometry } from './capture-display-selection.js';
@@ -6,7 +6,11 @@ import type { CaptureOverlayOutcome } from './capture-overlay-session.js';
 import { type CapturedDisplayImage, CaptureServiceError } from './capture-service.js';
 import { pathInput } from './ipc-contracts.js';
 import { NativeWorkflowError } from './workflow-errors.js';
-import { globalShortcut, screen, systemPreferences } from 'electron';
+import { app, desktopCapturer, globalShortcut, screen, shell, systemPreferences } from 'electron';
+import {
+  nativeMacPermissionRepairHost,
+  repairMacScreenRecordingPermission,
+} from './mac-capture-permission.js';
 import { z } from 'zod';
 import type { IpcRouter } from './ipc-router.js';
 import type { CaptureWorkflowRegistrar, IpcHost } from './main.js';
@@ -32,6 +36,30 @@ export function registerCaptureIpc(
     readProjectMetadata,
     sendCaptureRequest,
   } = host;
+  handleWorkflow('workflow:capture:repair-permission', async (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (process.platform !== 'darwin')
+      throw new NativeWorkflowError(
+        'capture-unavailable',
+        'Screen Recording repair is available only on macOS.',
+      );
+    return repairMacScreenRecordingPermission(
+      nativeMacPermissionRepairHost(
+        async () => {
+          await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+        },
+        (url) => shell.openExternal(url),
+      ),
+    );
+  });
+  // macOS applies a new Screen Recording grant only to a freshly started process.
+  handleWorkflow('workflow:capture:relaunch', (_event, ...args) => {
+    z.tuple([]).parse(args);
+    if (process.platform !== 'darwin')
+      throw new NativeWorkflowError('capture-unavailable', 'Restarting for Screen Recording is macOS only.');
+    app.relaunch();
+    app.quit();
+  });
   handleWorkflow('workflow:capture:renderer-ready', (event) => {
     const request = captureRequests.rendererReady(event.sender);
     if (request) sendCaptureRequest(request);
@@ -65,10 +93,7 @@ export function registerCaptureIpc(
     if (process.platform === 'darwin') {
       const permission = systemPreferences.getMediaAccessStatus('screen');
       if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
+        throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_MESSAGE);
     }
     let safeProjectPath: string | undefined;
     if (input.projectPath && input.collectionId) {
@@ -155,10 +180,7 @@ export function registerCaptureIpc(
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
+            throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_MESSAGE);
           throw new NativeWorkflowError(
             error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
             `${error.message} Use Import or Paste instead.`,
@@ -261,10 +283,7 @@ export function registerCaptureIpc(
     if (process.platform === 'darwin') {
       const permission = systemPreferences.getMediaAccessStatus('screen');
       if (permission === 'denied' || permission === 'restricted')
-        throw new NativeWorkflowError(
-          'capture-permission-denied',
-          'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-        );
+        throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_MESSAGE);
     }
     const safeProjectPath = await assertProjectPath(input.projectPath);
     const beforeCapture = await readProjectMetadata(safeProjectPath);
@@ -306,10 +325,7 @@ export function registerCaptureIpc(
         if (error instanceof NativeWorkflowError) throw error;
         if (error instanceof CaptureServiceError) {
           if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-            throw new NativeWorkflowError(
-              'capture-permission-denied',
-              'Allow Screen Recording for Imnota in macOS System Settings, then try again. You can also use Import or Paste.',
-            );
+            throw new NativeWorkflowError('capture-permission-denied', MAC_CAPTURE_PERMISSION_MESSAGE);
           throw new NativeWorkflowError(
             error.kind === 'empty-region' ? 'capture-empty-region' : 'capture-sources-unavailable',
             `${error.message} Use Import or Paste instead.`,

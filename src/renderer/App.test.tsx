@@ -1773,6 +1773,46 @@ describe('feedback controls', () => {
     await waitFor(() => expect(startRegionCapture).toHaveBeenCalledTimes(2));
   });
 
+  it('repairs the macOS Screen Recording permission and restarts from the error', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    const repairCapturePermission = vi.fn(async () => ({ ok: true as const, value: { reset: true } }));
+    const relaunchForCapturePermission = vi.fn(async () => ({ ok: true as const, value: undefined }));
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: 'capture-permission-denied' as const,
+          message: 'Imnota is not allowed to record the screen.',
+          retryable: false,
+        },
+      })) as never,
+      repairCapturePermission,
+      relaunchForCapturePermission,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    const fix = await screen.findByRole('button', { name: 'Fix permission' });
+    fireEvent.click(fix);
+    await waitFor(() => expect(repairCapturePermission).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('then restart Imnota');
+    fireEvent.click(screen.getByRole('button', { name: 'Restart Imnota' }));
+    await waitFor(() => expect(relaunchForCapturePermission).toHaveBeenCalledOnce());
+  });
+
+  it('offers no permission repair for other capture errors', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });
+    await renderEditingProject({
+      startRegionCapture: vi.fn(async () => ({
+        ok: false as const,
+        error: { code: 'capture-failed' as const, message: 'The selection window stopped.', retryable: true },
+      })) as never,
+    });
+    fireEvent.click(screen.getByTestId('add-item-trigger'));
+    fireEvent.click(screen.getByTestId('add-item-capture'));
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('The selection window stopped.');
+    expect(screen.queryByRole('button', { name: 'Fix permission' })).not.toBeInTheDocument();
+  });
+
   it('starts capture from the primary Add screenshot action', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
