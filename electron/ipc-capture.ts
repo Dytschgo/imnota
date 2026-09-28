@@ -208,7 +208,7 @@ export function registerCaptureIpc(
         try {
           outcome = await chooseCaptureRegion(
             captured,
-            listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
+            await listIdentifiableCaptureWindows(captured.map(({ display }) => display)),
             input.overlayMode ?? 'region',
           );
         } catch (error) {
