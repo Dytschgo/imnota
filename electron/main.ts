@@ -933,6 +933,8 @@ async function copyBundleToClipboard(
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
   if (variant === 'rich') return nativeClipboard.writeContext(markdown, html, image);
+  if (process.platform === 'darwin')
+    return nativeClipboard.writeMacFiles(filePaths, variant === 'files-rich');
   return nativeClipboard.writeWindowsFiles(
     clipboardOwnerHandle(),
     filePaths,
