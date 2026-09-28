@@ -207,7 +207,6 @@ function messageFor(error, fallback) {
   return `Couldn’t copy. ${fallback}`;
 }
 
-const DOWNLOAD_FALLBACK = 'Use the downloads in the arrow menu instead.';
 const SUCCESS_TOAST_MS = 4_000;
 
 export function boot(documentObject = globalThis.document) {
@@ -251,6 +250,9 @@ export function boot(documentObject = globalThis.document) {
         markCopied(scope, button);
       } catch (error) {
         setStatus(messageFor(error, fallback), 'error');
+        // Open this bundle's menu so the named downloads are immediately reachable. Wait until
+        // this click finishes bubbling, or the outside-click handler would close it again.
+        setTimeout(() => scope.querySelector('details.copy-options')?.setAttribute('open', ''), 0);
       } finally {
         copying = false;
         for (const control of controls) control.disabled = false;
@@ -270,11 +272,17 @@ export function boot(documentObject = globalThis.document) {
         copyMarkdown,
         () => writeShareClipboard({ markdownPath }),
         `${name} Markdown copied. Paste it into your coding agent.`,
-        DOWNLOAD_FALLBACK,
+        'Use Download Markdown in the open menu instead.',
       );
     const copyPng = scope.querySelector('[data-copy-png]');
     if (copyPng)
-      run(scope, copyPng, () => writeShareClipboard({ pngPath }), `${name} image copied.`, DOWNLOAD_FALLBACK);
+      run(
+        scope,
+        copyPng,
+        () => writeShareClipboard({ pngPath }),
+        `${name} image copied.`,
+        'Use Download PNG in the open menu instead.',
+      );
     const copyBundle = scope.querySelector('[data-copy-bundle]');
     if (copyBundle)
       run(
@@ -282,7 +290,7 @@ export function boot(documentObject = globalThis.document) {
         copyBundle,
         () => writeShareClipboard({ markdownPath, pngPath }),
         `${name} copied. Paste it into your coding agent.`,
-        DOWNLOAD_FALLBACK,
+        `Use Download Markdown${pngPath ? ' and Download PNG' : ''} in the open menu instead.`,
       );
   }
   root.addEventListener('keydown', (event) => {
