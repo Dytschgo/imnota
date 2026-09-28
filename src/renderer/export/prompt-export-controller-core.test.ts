@@ -541,7 +541,7 @@ describe('prompt export controller orchestration', () => {
     );
 
     await controller.open();
-    const result = await controller.copyFresh(1);
+    const result = await controller.copyFresh(controller.getState().cards[0]);
 
     expect(result.ok).toBe(true);
     expect(native.writes[0].markdown).toContain('Latest saved title');
@@ -607,6 +607,73 @@ describe('prompt export controller orchestration', () => {
     expect(native.writes[0].markdown).toContain('Bundle 1 of 2');
     expect(native.writes[1].markdown).toContain('Shared collection context is included in Bundle 1.');
     expect(native.writes[1].markdown).not.toContain('## Overall context');
+  });
+
+  test('does not copy a changed bundle after an encoded split and reuses finalized files on retry', async () => {
+    let overflowReturned = false;
+    const native = fakeBridge();
+    const renderer = fakeRendering({
+      compose: async (_number, pictureIds, _options, defaultCompose) => {
+        if (!overflowReturned && pictureIds.length === 4) {
+          overflowReturned = true;
+          return {
+            kind: 'encoded-overflow',
+            encodedCharacters: 40_000_000,
+            breakBeforeScreenshotId: pictureIds[2],
+            message: 'split',
+          };
+        }
+        return defaultCompose();
+      },
+    });
+    const controller = engine(
+      async () => savedContext(Array.from({ length: 4 }, (_, index) => screenshot(index))),
+      native.bridge,
+      renderer.rendering,
+    );
+
+    expect((await controller.open()).ok).toBe(true);
+    const selected = controller.getState().cards[0];
+    expect(selected.pictureNumbers).toEqual([1, 2, 3, 4]);
+
+    const firstCopy = await controller.copyFresh(selected);
+    expect(firstCopy).toMatchObject({ ok: false, error: { code: 'content-changed' } });
+    expect(native.copies).toEqual([]);
+    expect(native.starts).toHaveLength(1);
+    expect(native.finishes).toHaveLength(1);
+    expect(controller.getState().cards.map((card) => card.pictureNumbers)).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
+
+    const retry = await controller.copyFresh(controller.getState().cards[0]);
+    expect(retry).toMatchObject({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
+    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'rich' }]);
+    expect(native.starts).toHaveLength(1);
+  });
+
+  test('does not copy a same-number bundle from a different project after preparation', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+
+    expect((await controller.open()).ok).toBe(true);
+    const selected = controller.getState().cards[0];
+    context = savedContext([screenshot(0)]);
+    context.snapshot.projectPath = 'P:/another-project';
+    context.snapshot.project.id = 'another-project';
+
+    expect(await controller.copyFresh(selected)).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.copies).toEqual([]);
+    expect(native.finishes).toHaveLength(1);
+    expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
+
+    expect((await controller.copyFresh(controller.getState().cards[0])).ok).toBe(true);
+    expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'rich' }]);
   });
 
   test('cancellation stops rendering and keeps only complete native pairs', async () => {
@@ -853,6 +920,187 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().cards[0].outcome).toBe('markdown');
   });
 
+  test('direct Markdown fallback refreshes a changed card without copying or rendering', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    native.bridge.copyText = vi.fn(async () => undefined);
+    const renderer = fakeRendering();
+    renderer.rendering.compose = vi.fn(async () => {
+      throw new Error('Markdown fallback must not render an image');
+    });
+    const controller = engine(async () => context, native.bridge, renderer.rendering);
+
+    expect((await controller.open()).ok).toBe(true);
+    const selected = controller.getState().cards[0];
+    context = savedContext([screenshot(1)]);
+    expect(await controller.copyMarkdown(selected)).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.bridge.copyText).not.toHaveBeenCalled();
+    expect(native.starts).toEqual([]);
+    expect(controller.getState().cards[0].pictureNumbers).toEqual([1]);
+    expect(controller.getState().cards[0].planId).not.toBe(selected.planId);
+
+    expect((await controller.copyMarkdown(controller.getState().cards[0])).ok).toBe(true);
+    expect(native.bridge.copyText).toHaveBeenCalledWith(expect.stringContaining('Description 2'));
+    expect(renderer.rendering.compose).not.toHaveBeenCalled();
+    expect(native.starts).toEqual([]);
+  });
+
+  test('direct Markdown fallback replaces a selected card that disappeared during replanning', async () => {
+    let context = savedContext([screenshot(0), screenshot(1)]);
+    const native = fakeBridge();
+    native.bridge.copyText = vi.fn(async () => undefined);
+    const controller = engine(
+      async () => context,
+      native.bridge,
+      fakeRendering({ preflightSize: { width: 7000, height: 5000 } }).rendering,
+    );
+
+    expect((await controller.open()).ok).toBe(true);
+    expect(controller.getState().cards).toHaveLength(2);
+    const selected = controller.getState().cards[1];
+    context = savedContext([screenshot(0)]);
+
+    expect(await controller.copyMarkdown(selected)).toMatchObject({
+      ok: false,
+      error: { code: 'content-changed' },
+    });
+    expect(native.bridge.copyText).not.toHaveBeenCalled();
+    expect(controller.getState().cards).toHaveLength(1);
+    expect((await controller.copyMarkdown(controller.getState().cards[0])).ok).toBe(true);
+    expect(native.bridge.copyText).toHaveBeenCalledTimes(1);
+    expect(native.starts).toEqual([]);
+  });
+
+  test('saved grants do not imply copied state, and only the latest successful copy keeps that state', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0), screenshot(1)]),
+      native.bridge,
+      fakeRendering({ preflightSize: { width: 7000, height: 5000 } }).rendering,
+    );
+    await controller.prepareFreshFiles();
+    expect(controller.getState().cards).toHaveLength(2);
+    expect(controller.getState().cards.map((card) => card.outcome)).toEqual([undefined, undefined]);
+    expect(controller.getState().cards.every((card) => Boolean(card.artifactSessionId))).toBe(true);
+
+    await controller.copyMarkdown(controller.getState().cards[0]);
+    expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'markdown' });
+    expect(controller.getState().cards[0].estimatedBytes).toBeGreaterThan(0);
+    await controller.copyMarkdown(controller.getState().cards[1]);
+    expect(controller.getState().cards[0].outcome).toBeUndefined();
+    expect(controller.getState().cards[1]).toMatchObject({ state: 'copied', outcome: 'markdown' });
+    await controller.openFiles(controller.getState().cards[0]);
+    expect(controller.getState().cards[0]).toMatchObject({ state: 'idle', opened: 'files' });
+    expect(controller.getState().cards[1].outcome).toBe('markdown');
+  });
+
+  test('opening files and the folder preserves the current Last copied result', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    const copyResult = { state: 'copied', outcome: 'combined' };
+    expect(controller.getState().cards[0]).toMatchObject(copyResult);
+
+    const originalOpen = native.bridge.openPromptExportBundle;
+    let failNextOpen = true;
+    native.bridge.openPromptExportBundle = async (input) => {
+      if (failNextOpen) {
+        failNextOpen = false;
+        return { ok: false, error: { code: 'io-failure', message: 'Open failed', retryable: true } };
+      }
+      return originalOpen(input);
+    };
+    expect(await controller.openFiles(controller.getState().cards[0])).toMatchObject({
+      ok: false,
+      error: { code: 'native-failure' },
+    });
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'error',
+      outcome: 'combined',
+    });
+
+    expect((await controller.openFiles(controller.getState().cards[0])).ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({ ...copyResult, opened: 'files' });
+    expect((await controller.openFolder()).ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({ ...copyResult, opened: 'folder' });
+
+    expect((await controller.copyFresh(controller.getState().cards[0])).ok).toBe(true);
+    expect(controller.getState().cards[0]).toMatchObject({ ...copyResult, opened: undefined });
+    expect(native.copies).toHaveLength(2);
+  });
+
+  test('leaves image size unknown until a PNG estimate or encoded output is available', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    renderer.rendering.preflight = async () => ({ screenshotId: '', width: 100, height: 80 });
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+
+    expect((await controller.open()).ok).toBe(true);
+    expect(controller.getState().cards[0].estimatedBytes).toBeUndefined();
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+    expect(controller.getState().cards[0].estimatedBytes).toBeGreaterThan(0);
+  });
+
+  test('a failed retry clears the old copied result while retaining saved files', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    native.bridge.copyPromptExportBundle = async () => ({
+      ok: false,
+      error: { code: 'io-failure', message: 'EACCES P:/private/export', retryable: true },
+    });
+    expect(await controller.copyFresh(controller.getState().cards[0])).toMatchObject({
+      ok: false,
+      error: {
+        code: 'native-failure',
+        message: expect.not.stringContaining('P:/private'),
+        technicalDetails: 'EACCES P:/private/export',
+      },
+    });
+    expect(controller.getState().cards[0]).toMatchObject({
+      state: 'error',
+      outcome: undefined,
+      artifactSessionId: 'session-1',
+    });
+  });
+
+  test.each(['copyMarkdown', 'copyImage', 'copyPaths', 'openFiles'] as const)(
+    '%s fallback waits for a new choice when preparation changes bundle membership',
+    async (action) => {
+      let context = savedContext([screenshot(0)]);
+      const native = fakeBridge();
+      const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+
+      expect((await controller.open()).ok).toBe(true);
+      const selected = controller.getState().cards[0];
+      context = savedContext([screenshot(1)]);
+      expect(await controller[action](selected)).toMatchObject({
+        ok: false,
+        error: { code: 'content-changed' },
+      });
+      expect(native.finishes).toHaveLength(1);
+      expect(native.copies).toEqual([]);
+      expect(native.opens).toEqual([]);
+      expect(controller.getState().cards[0].artifactSessionId).toBe('session-1');
+
+      expect((await controller[action](controller.getState().cards[0])).ok).toBe(true);
+      expect(native.starts).toHaveLength(1);
+      if (action === 'openFiles') expect(native.opens).toHaveLength(2);
+      else expect(native.copies).toHaveLength(1);
+    },
+  );
+
   test('prepares files on demand for path copying and serializes fallback clipboard actions', async () => {
     const native = fakeBridge();
     const renderer = fakeRendering();
@@ -1018,6 +1266,37 @@ describe('prompt export controller orchestration', () => {
     expect(native.starts).toHaveLength(1);
   });
 
+  test('failed reopening hides saved cards until the new project can be validated', async () => {
+    let context = savedContext([screenshot(0)]);
+    let saveFails = false;
+    const native = fakeBridge();
+    const controller = engine(
+      async () => {
+        if (saveFails) throw new Error('Project save failed');
+        return context;
+      },
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.copyFresh(1)).ok).toBe(true);
+    controller.close();
+
+    context = savedContext([screenshot(1)]);
+    context.snapshot.projectPath = 'P:/another-project';
+    context.snapshot.project.id = 'another-project';
+    saveFails = true;
+    expect(await controller.open()).toMatchObject({ ok: false, error: { code: 'save-failed' } });
+    expect(controller.getState().cards).toEqual([]);
+    expect(native.copies).toHaveLength(1);
+
+    saveFails = false;
+    expect((await controller.open()).ok).toBe(true);
+    expect(controller.getState().cards).toHaveLength(1);
+    expect(controller.getState().cards[0].artifactSessionId).toBeUndefined();
+    expect((await controller.copyFresh(controller.getState().cards[0])).ok).toBe(true);
+    expect(native.copies.at(-1)).toEqual({ sessionId: 'session-2', bundleNumber: 1, target: 'rich' });
+  });
+
   test('cancelling saved-bundle validation keeps the finalized cards', async () => {
     let release!: () => void;
     let pause = false;
@@ -1141,7 +1420,7 @@ describe('prompt export controller orchestration', () => {
     expect(copy.ok).toBe(true);
     expect(controller.getState().cards[0].outcome).toBeUndefined();
     expect(controller.getState().cards[0]).toMatchObject({
-      state: 'copied',
+      state: 'idle',
       warning: expect.stringMatching(
         /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
       ),
@@ -1408,7 +1687,7 @@ describe('prompt export controller orchestration', () => {
         : controller.copyImage(card));
       expect(result.ok).toBe(true);
       expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target }]);
-      expect(controller.getState().cards[0].state).not.toBe('copied');
+      expect(controller.getState().cards[0].state).toBe('copied');
     },
   );
 
@@ -1486,6 +1765,50 @@ describe('prompt export controller orchestration', () => {
     expect(native.copies).toHaveLength(0);
   });
 
+  test.each([
+    'Save the current drawing or text before preparing the prompt.',
+    'Reload and review the pending workspace change before preparing prompt bundles.',
+    'Current screenshot edits could not be saved.',
+    'Project details could not be saved. Prompt preparation was cancelled.',
+    'The workspace changed while prompt bundles were being prepared. Reload and review it, then try again.',
+    'Open a project before preparing prompt bundles.',
+    'The selected collection is no longer available.',
+  ])('preserves saved-context recovery guidance: %s', async (message) => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => {
+        throw new Error(message);
+      },
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect(await controller.prepareFreshFiles()).toMatchObject({
+      ok: false,
+      error: { code: 'save-failed', message },
+    });
+    expect(native.starts).toHaveLength(0);
+  });
+
+  test('hides an unknown saved-context path while retaining it in technical details', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => {
+        throw new Error('EACCES P:/private/project.json');
+      },
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect(await controller.prepareFreshFiles()).toMatchObject({
+      ok: false,
+      error: {
+        code: 'save-failed',
+        message: 'Latest changes could not be saved. Check the project folder and try again.',
+        technicalDetails: 'EACCES P:/private/project.json',
+      },
+    });
+    expect(native.starts).toHaveLength(0);
+  });
+
   test('exports an all-text collection as Markdown only without a fake image', async () => {
     const context = savedContext([]);
     (context.snapshot.project as ProjectData & { contentItems: unknown[] }).contentItems = [
@@ -1515,6 +1838,7 @@ describe('prompt export controller orchestration', () => {
     expect(renderer.stats.renderCount).toBe(0);
     expect(native.copies).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'rich' }]);
     expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'markdown' });
+    expect(controller.getState().cards[0].estimatedBytes).toBeGreaterThan(0);
     expect((await controller.openFiles(1)).ok).toBe(true);
     expect(native.opens).toEqual([{ sessionId: 'session-1', bundleNumber: 1, target: 'markdown' }]);
     expect((await controller.loadPreview(1)).ok).toBe(false);
@@ -1589,6 +1913,134 @@ describe('prompt export controller orchestration', () => {
       ok: true,
       value: { bundleNumbers: [1], imageBundleNumbers: [] },
     });
+  });
+
+  test('reuses a complete current export for hosted review after checking saved content and every file', async () => {
+    const native = fakeBridge();
+    const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    expect((await controller.prepareFreshFiles()).ok).toBe(true);
+
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-1', bundleNumbers: [1], imageBundleNumbers: [1] },
+    });
+    expect(native.starts).toHaveLength(1);
+    expect(read).toHaveBeenCalledWith({ sessionId: 'session-1', bundleNumber: 1 });
+    expect(native.copies).toEqual([]);
+  });
+
+  test('refreshes hosted files after source content or project changes', async () => {
+    let context = savedContext([screenshot(0)]);
+    let revision = 'original';
+    const native = fakeBridge({ revisionForLoad: () => revision });
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    revision = 'edited';
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-2' },
+    });
+    context = structuredClone(context);
+    context.snapshot.project.id = 'new-project';
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-3' },
+    });
+    expect(native.starts).toHaveLength(3);
+  });
+
+  test('refreshes hosted files when a saved artifact is unreadable', async () => {
+    const native = fakeBridge();
+    const originalRead = native.bridge.readPromptExportBundle;
+    native.bridge.readPromptExportBundle = vi.fn<typeof originalRead>(async (input) =>
+      input.sessionId === 'session-1'
+        ? { ok: false, error: { code: 'bundle-not-found', message: 'Missing', retryable: true } }
+        : originalRead(input),
+    );
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    await controller.prepareFreshFiles();
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-2' },
+    });
+    expect(native.starts).toHaveLength(2);
+  });
+
+  test('does not reuse hosted files if the project switches while a grant is read', async () => {
+    let context = savedContext([screenshot(0)]);
+    const native = fakeBridge();
+    const originalRead = native.bridge.readPromptExportBundle;
+    native.bridge.readPromptExportBundle = async (input) => {
+      const result = await originalRead(input);
+      context = structuredClone(context);
+      context.snapshot.projectPath = 'P:/new-project';
+      return result;
+    };
+    const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
+    await controller.prepareFreshFiles();
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-2' },
+    });
+    expect(native.starts[1].projectPath).toBe('P:/new-project');
+  });
+
+  test('refreshes an incomplete hosted artifact instead of sharing its partial grants', async () => {
+    const native = fakeBridge();
+    const originalFinish = native.bridge.finishPromptExport;
+    native.bridge.finishPromptExport = async (input) => {
+      const result = await originalFinish(input);
+      return result.ok && input.sessionId === 'session-1'
+        ? { ok: true, value: { ...result.value, bundles: result.value.bundles.slice(0, 1) } }
+        : result;
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0), screenshot(1)]),
+      native.bridge,
+      fakeRendering({ preflightSize: { width: 7000, height: 5000 } }).rendering,
+    );
+    await controller.prepareFreshFiles();
+    expect(controller.getState().cards).toHaveLength(2);
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-2', bundleNumbers: [1, 2] },
+    });
+    expect(native.starts).toHaveLength(2);
+  });
+
+  test('a cancelled hosted reuse check does not create another export', async () => {
+    const native = fakeBridge();
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    await controller.prepareFreshFiles();
+    let release!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const originalRead = native.bridge.readPromptExportBundle;
+    native.bridge.readPromptExportBundle = async (input) => {
+      entered();
+      await waiting;
+      return originalRead(input);
+    };
+    const pending = controller.prepareHostedShare();
+    await started;
+    await controller.cancel();
+    release();
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(native.starts).toHaveLength(1);
   });
 
   test('uses final drawing PNG dimensions without screenshot annotation padding', async () => {
