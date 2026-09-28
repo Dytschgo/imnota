@@ -6,7 +6,13 @@ import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import { useAppStore } from './store';
-import App, { CollectionControls, SettingsView, userFacingErrorMessage } from './App';
+import App, {
+  CollectionControls,
+  SettingsView,
+  TOAST_ACTION_MS,
+  TOAST_STATUS_MS,
+  userFacingErrorMessage,
+} from './App';
 
 // These tests exercise navigation and the real note editor; canvas rendering is covered by Electron smoke.
 const annotationCanvasSpy = vi.hoisted(() => vi.fn());
@@ -660,7 +666,13 @@ describe('feedback controls', () => {
       });
       expect(deleteScreenshot).toHaveBeenCalled();
       const undo = screen.getByRole('button', { name: 'Undo' });
-      act(() => vi.advanceTimersByTime(3501));
+      const notice = document.querySelector('.toast');
+      if (!notice) throw new Error('Delete confirmation did not appear.');
+      fireEvent.mouseEnter(notice);
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS));
+      expect(undo).toBeInTheDocument();
+      fireEvent.mouseLeave(notice);
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS + 1));
       expect(undo).toBeInTheDocument();
       fireEvent.click(undo);
       await act(async () => {
@@ -1374,13 +1386,14 @@ describe('feedback controls', () => {
       });
       expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
 
-      act(() => vi.advanceTimersByTime(3000));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS));
+      expect(document.querySelector('.toast')).toBeNull();
       pasteFromAddMenu();
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      act(() => vi.advanceTimersByTime(501));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS - 1));
       expect(document.querySelector('.toast')).toHaveTextContent('Screenshot pasted');
       expect(pasteImage).toHaveBeenCalledTimes(2);
     } finally {
@@ -2801,7 +2814,7 @@ describe('feedback controls', () => {
         await Promise.resolve();
       });
       const undo = screen.getByRole('button', { name: 'Undo' });
-      act(() => vi.advanceTimersByTime(3501));
+      act(() => vi.advanceTimersByTime(TOAST_STATUS_MS + 1));
       expect(undo).toBeInTheDocument();
       fireEvent.click(undo);
       await act(async () => {
@@ -2824,6 +2837,20 @@ describe('feedback controls', () => {
       archived: false,
     });
     expect(await screen.findByTestId('project-archive-project-id')).toBeInTheDocument();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByTestId('project-archive-project-id'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS));
+      expect(document.querySelector('.toast')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports an archive without an Undo action when the backend returns no revision', async () => {
