@@ -1,4 +1,5 @@
 import type {
+  CaptureDelaySeconds,
   CaptureDisplay,
   CaptureOverlayMode,
   CaptureRectangle,
@@ -17,6 +18,8 @@ export type CaptureOverlayFailure = 'not-ready' | 'misplaced' | 'display-changed
 export type CaptureOverlayOutcome =
   | { kind: 'selected'; selection: CaptureRectangle; mode: CaptureOverlayMode }
   | { kind: 'cancelled' }
+  /** The user asked for a fresh still after a countdown, from the overlay toolbar. */
+  | { kind: 'retake'; delaySeconds: CaptureDelaySeconds }
   | { kind: 'failed'; reason: CaptureOverlayFailure };
 
 export interface OverlayReadinessTimer {
@@ -45,6 +48,13 @@ export class CaptureOverlaySession {
     if (this.finished) return false;
     this.finished = true;
     this.complete(selection ? { kind: 'selected', selection, mode } : { kind: 'cancelled' });
+    return true;
+  }
+
+  retake(delaySeconds: CaptureDelaySeconds): boolean {
+    if (this.finished) return false;
+    this.finished = true;
+    this.complete({ kind: 'retake', delaySeconds });
     return true;
   }
 

@@ -1,6 +1,6 @@
 # Recovery unification plan
 
-Status: plan only. Do not implement in this change.
+Status: plan only. The [recovery unification design](recovery-unification-design.md) (2026-09-26) makes the recommended sequence below concrete and needs approval before implementation.
 
 ## September 22 targeted reliability work
 

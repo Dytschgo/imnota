@@ -33,6 +33,7 @@
     "test:watch": "vitest",
     "release": "node scripts/release.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:clipboard": "cross-env IMNOTA_SMOKE_MODE=clipboard node scripts/smoke.mjs",
     "package:linux": "tsc -p tsconfig.electron.build.json && vite build && electron-builder --linux --publish never",
     "package:win": "tsc -p tsconfig.electron.build.json && vite build && electron-builder --win --publish never",
     "package:mac": "tsc -p tsconfig.electron.build.json && vite build && electron-builder --mac --universal --publish never",

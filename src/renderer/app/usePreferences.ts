@@ -23,7 +23,7 @@ const UNKNOWN_PERFORMANCE: NativePerformanceProfile = {
   reasons: [],
 };
 const UNKNOWN_CAPABILITIES: NativeCapabilities = {
-  windowsFileClipboard: false,
+  fileClipboard: false,
   globalCaptureShortcutRegistered: false,
 };
 

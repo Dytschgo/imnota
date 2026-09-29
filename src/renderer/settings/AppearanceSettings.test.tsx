@@ -121,6 +121,17 @@ describe('AppearanceSettings backdrop upload ownership', () => {
     }
   });
 
+  it('turns glass on when a backdrop is chosen while glass is off', async () => {
+    const onChange = vi.fn();
+    render(<AppearanceSettings value={DEFAULT_APPEARANCE} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mist light' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ backgroundImage: 'preset:mist-light', glassLevel: 'balanced' }),
+      ),
+    );
+  });
+
   it('keeps the selected character and offers generic artwork as explicit choices', async () => {
     const onChange = vi.fn();
     renderSettings(onChange, 'preset:emerald');

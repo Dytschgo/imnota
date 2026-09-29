@@ -30,6 +30,14 @@ function regionState(
 }
 
 describe('capture overlay session', () => {
+  it('settles once with a delayed retake, which later results cannot override', async () => {
+    const session = new CaptureOverlaySession();
+    expect(session.retake(3)).toBe(true);
+    expect(session.settle({ x: 0, y: 0, width: 10, height: 10 })).toBe(false);
+    expect(session.fail()).toBe(false);
+    await expect(session.result).resolves.toEqual({ kind: 'retake', delaySeconds: 3 });
+  });
+
   it('only accepts the current overlay main frame', () => {
     expect(isCaptureOverlaySender([7, 9], 7, true)).toBe(true);
     expect(isCaptureOverlaySender([7, 9], 8, true)).toBe(false);

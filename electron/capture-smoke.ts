@@ -592,8 +592,14 @@ export async function exerciseRegionCapture(
     for (const cancel of [true, false]) {
       await waitForCaptureReady(driver);
       await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+      await driver.click({ selector: `[data-testid="add-item-capture-delay-${seconds}"]` });
+      await driver.waitFor({
+        selector: `[data-testid="add-item-capture-delay-${seconds}"][aria-checked="true"]`,
+      });
+      if (artifactDirectory && seconds === 3 && cancel)
+        artifacts.push(await driver.capture(artifactDirectory, 'capture-add-menu.png'));
       const started = Date.now();
-      await driver.click({ selector: `[data-testid="add-item-capture-${seconds}"]` });
+      await driver.click({ selector: '[data-testid="add-item-capture"]' });
       let hud: BrowserWindow | undefined;
       while (Date.now() - started < 5000) {
         hud = BrowserWindow.getAllWindows().find(
@@ -643,6 +649,32 @@ export async function exerciseRegionCapture(
         throw new Error('Cancelled delayed capture wrote screenshot files.');
     }
   }
+
+  // Return Take screenshot to immediate capture for the rest of the walkthrough.
+  await waitForCaptureReady(driver);
+  await driver.click({ selector: '[data-testid="add-item-trigger"]' });
+  await driver.click({ selector: '[data-testid="add-item-capture-delay-0"]' });
+  await driver.press('Escape');
+
+  // The overlay toolbar timer closes the still and starts a countdown for a fresh one.
+  const timerOverlay = await startCapture(driver, 'menu');
+  await timerOverlay.click({ selector: '.capture-timer [data-delay="3"]' });
+  let timerHud: BrowserWindow | undefined;
+  const timerStarted = Date.now();
+  while (!timerHud && Date.now() - timerStarted < 5000) {
+    timerHud = BrowserWindow.getAllWindows().find(
+      (window) =>
+        !window.isDestroyed() && window.webContents.getURL().includes('countdown=1') && window.isVisible(),
+    );
+    if (!timerHud) await delay(25);
+  }
+  if (!timerHud) throw new Error('The overlay timer did not start a capture countdown.');
+  if (captureOverlayWindows(driver.browserWindow).length)
+    throw new Error('The overlay stayed open after choosing its timer.');
+  await new NativeUiDriver(timerHud).press('Escape');
+  await waitForClosed(timerHud, 'Overlay timer countdown');
+  await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Overlay timer cancellation');
+  await waitForScreenshotCount(host, projectPath, baseline.screenshots.length);
 
   let overlay = await startCapture(driver, process.platform === 'win32' ? 'global-shortcut' : 'menu');
   const defaultRegion = await overlay.evaluate<boolean>(

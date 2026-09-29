@@ -100,7 +100,13 @@ import { recoverContentTrashTransactions, type ContentTrashOperations } from './
 import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
-import type { CaptureDisplay, CaptureOverlayMode, CaptureRectangle } from '../src/shared/capture.js';
+import { listMacCaptureWindows, type MacCaptureHelperLocation } from './macos-capture-windows.js';
+import type {
+  CaptureDelaySeconds,
+  CaptureDisplay,
+  CaptureOverlayMode,
+  CaptureRectangle,
+} from '../src/shared/capture.js';
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
@@ -257,7 +263,7 @@ function createAppTray(): void {
   appTray.setContextMenu(
     Menu.buildFromTemplate(
       captureTrayTemplate({
-        windowCapture: process.platform === 'win32',
+        windowCapture: process.platform === 'win32' || process.platform === 'darwin',
         onCapture: (mode) => requestCapture({ source: 'tray', mode }),
         onOpen: () => {
           if (!mainWindow || mainWindow.isDestroyed())
@@ -928,6 +934,8 @@ async function copyBundleToClipboard(
   const image = clipboardImage(imageDataUrl);
   const html = clipboardContextHtml(markdown);
   if (variant === 'rich') return nativeClipboard.writeContext(markdown, html, image);
+  if (process.platform === 'darwin')
+    return nativeClipboard.writeMacFiles(filePaths, variant === 'files-rich');
   return nativeClipboard.writeWindowsFiles(
     clipboardOwnerHandle(),
     filePaths,
@@ -1009,7 +1017,7 @@ async function smokeDesktopCaptureCapability(): Promise<{
     // Source and crop buffers are intentionally neither persisted nor returned.
     decodeCrop: (png) => nativeImage.createFromBuffer(png),
   });
-  return { ...capability, windowCandidateCount: listIdentifiableCaptureWindows(displays).length };
+  return { ...capability, windowCandidateCount: (await listIdentifiableCaptureWindows(displays)).length };
 }
 
 function cancelCaptureDelay(): void {
@@ -1095,6 +1103,15 @@ function settleCaptureOverlay(selection: CaptureRectangle | null, mode: CaptureO
   closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
 }
 
+function retakeCaptureAfterDelay(delaySeconds: CaptureDelaySeconds): void {
+  const active = captureOverlay;
+  if (!active || !active.session.retake(delaySeconds)) return;
+  captureOverlay = null;
+  active.readiness.dispose();
+  active.disposeDisplayListeners();
+  closeCaptureOverlayWindows(active.overlays.map(({ window }) => window));
+}
+
 function failCaptureOverlay(reason: CaptureOverlayFailure = 'not-ready'): void {
   const active = captureOverlay;
   if (!active || !active.session.fail(reason)) return;
@@ -1120,8 +1137,22 @@ function captureOverlayGeometryIsStable(active: NonNullable<typeof captureOverla
   return captureDisplaysHaveStableGeometry(active.displays, screen.getAllDisplays());
 }
 
-function listIdentifiableCaptureWindows(displays: readonly CaptureDisplay[]): CaptureWindowCandidate[] {
+function macCaptureHelperLocation(): MacCaptureHelperLocation {
+  return {
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    sourcePath: path.join(__dirname, '../../native/macos-capture-helper.swift'),
+  };
+}
+
+async function listIdentifiableCaptureWindows(
+  displays: readonly CaptureDisplay[],
+): Promise<CaptureWindowCandidate[]> {
   if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  // macOS lists windows through a bundled read-only WindowServer helper; a failure
+  // leaves Area and Display available and Window mode explains it cannot identify windows.
+  if (process.platform === 'darwin')
+    return listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => []);
   return identifiableCaptureWindows(
     tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
     displays,
@@ -1711,6 +1742,17 @@ function registerIpc(): void {
     if (!source) throw new Error('Capture overlay is no longer available.');
     active.selection.applyLastRegion(lastCaptureRegionMemory.peek(), source.capture.display.id);
     broadcastCaptureSelection();
+  });
+  ipcMain.handle('capture-overlay:retake-delayed', (event, raw) => {
+    if (
+      !isCaptureOverlaySender(
+        captureOverlayIds(),
+        event.sender.id,
+        event.senderFrame === event.sender.mainFrame,
+      )
+    )
+      throw new Error('Untrusted capture overlay sender.');
+    retakeCaptureAfterDelay(z.union([z.literal(3), z.literal(5)]).parse(raw));
   });
   ipcMain.handle('capture-overlay:cancel', (event) => {
     if (isCaptureDelayHudSender(event)) {
