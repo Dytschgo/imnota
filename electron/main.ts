@@ -101,6 +101,11 @@ import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
 import { listMacCaptureWindows, type MacCaptureHelperLocation } from './macos-capture-windows.js';
+import {
+  captureElectronWindowPng,
+  captureMacWindowPng,
+  captureSelectedImagePng,
+} from './window-image-capture.js';
 import type {
   CaptureDelaySeconds,
   CaptureDisplay,
@@ -943,6 +948,15 @@ async function copyBundleToClipboard(
   );
 }
 
+function captureSelectedWindowPng(windowId: string, selection: CaptureRectangle): Promise<Buffer | null> {
+  if (process.platform === 'darwin') return captureMacWindowPng(windowId);
+  if (process.platform !== 'win32') return Promise.resolve(null);
+  const scaleFactor = screen.getDisplayMatching(selection).scaleFactor;
+  return captureElectronWindowPng(windowId, selection, scaleFactor, (options) =>
+    desktopCapturer.getSources(options),
+  );
+}
+
 function captureService(): CaptureService {
   return new CaptureService({
     physicalDisplaySize: (display) => {
@@ -1471,6 +1485,7 @@ function createIpcHost() {
     captureGlobalShortcut,
     captureRequests,
     captureService,
+    captureSelectedWindowPng,
     chooseCaptureRegion,
     clipboardImage,
     closeCaptureDelayHud,
@@ -1722,10 +1737,28 @@ function registerIpc(): void {
     }
     const state = active.selection.current();
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
-    const png = captureService().compose(
-      active.overlays.map((overlay) => overlay.capture),
-      state.selection,
+    const selection = state.selection;
+    const selectedWindowId = active.selection.selectedWindowId();
+    const png = await captureSelectedImagePng(selection, selectedWindowId, captureSelectedWindowPng, () =>
+      captureService().compose(
+        active.overlays.map((overlay) => overlay.capture),
+        selection,
+      ),
     );
+    const current = active.selection.current();
+    if (
+      captureOverlay !== active ||
+      !captureOverlayGeometryIsStable(active) ||
+      !current.complete ||
+      current.mode !== state.mode ||
+      active.selection.selectedWindowId() !== selectedWindowId ||
+      !current.selection ||
+      current.selection.x !== selection.x ||
+      current.selection.y !== selection.y ||
+      current.selection.width !== selection.width ||
+      current.selection.height !== selection.height
+    )
+      return { image: false };
     const image = nativeImage.createFromBuffer(png);
     await nativeClipboard.writeImage(image);
     const kept = await nativeClipboard.readImage();
