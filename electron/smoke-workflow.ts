@@ -2301,7 +2301,12 @@ async function exercisePromptWorkflow(
     }
     const variant = windowsVariants[action] ?? 'rich';
     if (process.platform === 'win32') latestWindowsVariant = variant;
-    if (process.platform === 'win32' && !(action === 0 && variant === 'files'))
+    // macOS also defaults to Copy files, so select Rich explicitly rather than relying on
+    // an earlier walkthrough step (the onboarding demo) having changed the preference.
+    if (
+      (process.platform === 'win32' && !(action === 0 && variant === 'files')) ||
+      process.platform === 'darwin'
+    )
       await choosePromptCopyFunction(driver, copiedIndex, variant);
     await nativeClipboard.writeText(`Imnota smoke: waiting for prompt copy ${action + 1}`);
     if (action > 0)
