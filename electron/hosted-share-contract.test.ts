@@ -105,7 +105,7 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
     expect(bundleMarkdown.headers.get('content-type')).toMatch(/^text\/markdown/);
     expect(await bundleMarkdown.text()).toBe('# Real contract\r\n\r\nUnicode: café\n');
     expect(await realFetch(`${localOrigin}${publicPath}`).then((response) => response.text())).toContain(
-      'Dylan shared this prompt bundle with you',
+      '<strong>Dylan</strong> shared this prompt bundle with you',
     );
 
     loseNextUploadResponse = true;
