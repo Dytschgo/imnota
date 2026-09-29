@@ -1094,9 +1094,13 @@ async function openCaptureDelayHud(displayBounds: CaptureRectangle): Promise<Bro
   }
 }
 
-function settleCaptureOverlay(selection: CaptureRectangle | null, mode: CaptureOverlayMode = 'region'): void {
+function settleCaptureOverlay(
+  selection: CaptureRectangle | null,
+  mode: CaptureOverlayMode = 'region',
+  windowId: string | null = null,
+): void {
   const active = captureOverlay;
-  if (!active || !active.session.settle(selection, mode)) return;
+  if (!active || !active.session.settle(selection, mode, windowId)) return;
   captureOverlay = null;
   active.readiness.dispose();
   active.disposeDisplayListeners();
@@ -1696,7 +1700,7 @@ function registerIpc(): void {
     if (!state.complete || !state.selection) throw new Error('Capture selection is incomplete.');
     active.overlayCommit = action;
     lastOverlayCommit = action;
-    settleCaptureOverlay(state.selection, state.mode);
+    settleCaptureOverlay(state.selection, state.mode, active.selection.selectedWindowId());
   }
   ipcMain.handle('capture-overlay:save', (event) => {
     commitCaptureOverlay(assertTrustedCaptureOverlay(event), 'save');

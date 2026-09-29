@@ -199,6 +199,25 @@ describe('capture overlay session', () => {
       windowTitle: 'Editor',
       windowMessage: null,
     });
+    // The chosen window's id stays in main for window-image capture, not in overlay state.
+    expect(coordinator.selectedWindowId()).toBe('front');
+    coordinator.setMode('region');
+    expect(coordinator.selectedWindowId()).toBeNull();
+  });
+
+  it('reports the chosen window with the selected outcome', async () => {
+    const session = new CaptureOverlaySession();
+    const selection = { x: 100, y: 80, width: 400, height: 300 };
+    session.settle(selection, 'window', 'window:42');
+    await expect(session.result).resolves.toEqual({
+      kind: 'selected',
+      selection,
+      mode: 'window',
+      windowId: 'window:42',
+    });
+    const region = new CaptureOverlaySession();
+    region.settle(selection, 'region');
+    await expect(region.result).resolves.toEqual({ kind: 'selected', selection, mode: 'region' });
   });
 
   it('keeps a chosen window complete across mousemove', () => {
