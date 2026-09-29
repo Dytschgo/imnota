@@ -22,3 +22,9 @@ These execution records are retained for provenance and review context. They are
 | [stable-nightly-release-plan.md](stable-nightly-release-plan.md)               | `docs/stable-nightly-release-plan.md`    | Stable/nightly channel design record.                        | See the file.                                                 |
 
 The living implementation document was deliberately moved to [`docs/implementation-plan.md`](../implementation-plan.md), not this folder, because it contains current release facts and open acceptance work.
+
+Additional archived records:
+
+- [Feature verification](next-features-verification.md): September feature integration and 0.2.7 checks; its capture defaults and feature limits are historical.
+- [Electron cache experiment](build-cache-experiment.md): completed PR #42 measurements and the decision to remove the experimental caches.
+- [Recovery unification plan](recovery-unification-plan.md): early proposal superseded by the [September 26 design](../recovery-unification-design.md); saves already share a journal, while delete/Undo consolidation remains a proposal.

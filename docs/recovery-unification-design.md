@@ -1,6 +1,6 @@
 # Recovery unification design
 
-Status: design for review, drafted 2026-09-26. It refines the [recovery unification plan](recovery-unification-plan.md). No code changes until this design is approved. Each implementation slice below is a separate PR that needs independent review, as required for persistence and recovery changes in [AGENTS.md](../AGENTS.md#scope-and-safety).
+Status: design for review, drafted 2026-09-26. It supersedes the [earlier recovery unification plan](history/recovery-unification-plan.md), whose save-consolidation proposal predates the shared save path described below. No code changes until this design is approved. Each implementation slice below is a separate PR that needs independent review, as required for persistence and recovery changes in [AGENTS.md](../AGENTS.md#scope-and-safety).
 
 ## What the code does today
 

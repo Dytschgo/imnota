@@ -1,5 +1,7 @@
 # Next features verification
 
+Historical evidence from September 2026, including the 0.2.7 integration. Feature availability and defaults below describe those revisions. Use [implementation status](../implementation-plan.md) and the [user guide](../user-guide.md) for current behavior; this record is unrelated to the later [next features proposal](../next-features-plan.md).
+
 This record covers workflow templates, clipboard fallbacks, content search, local history and experimental region capture. It does not authorize a release or replace the platform release checklist.
 
 ## Integration with current main
