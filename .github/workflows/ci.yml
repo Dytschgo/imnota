@@ -166,11 +166,25 @@ jobs:
       - name: Verify packaged Mac application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
         run: bash scripts/verify-mac.sh
+      # Exports every bundle through the real workspace action, copies each with Rich copy and
+      # natively pastes it, so a change to bundle export or copy cannot merge silently.
+      - name: Verify packaged Mac bundle copy and paste
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
+        run: bash scripts/verify-mac.sh
+        env:
+          IMNOTA_SMOKE_MODE: clipboard
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
       - name: Smoke packaged Windows application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: node scripts/verify-packaged.mjs windows
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-windows
+      - name: Verify packaged Windows bundle copy and paste
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
+        run: node scripts/verify-packaged.mjs windows
+        env:
+          IMNOTA_SMOKE_MODE: clipboard
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
       - name: Compare approved Windows visuals
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
@@ -185,6 +199,19 @@ jobs:
       - name: Smoke packaged Linux application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
+      - name: Verify packaged Linux bundle copy and paste
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
+        env:
+          IMNOTA_SMOKE_MODE: clipboard
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
+      - name: Retain bundle copy evidence
+        if: env.RUN_APPLICATION == 'true' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clipboard-evidence-${{ matrix.os }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
+          if-no-files-found: ignore
       - name: Retain review installers and build diagnostics
         uses: actions/upload-artifact@v7
         if: env.RUN_APPLICATION == 'true'
