@@ -14,8 +14,8 @@ import { parseProjectFile } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { BackupService, backupReservedProjectDirectory } from './backup-service.js';
 
-// Multiple durable publications can exceed five seconds on a busy Windows disk.
-const DURABLE_FILESYSTEM_TIMEOUT = 15_000;
+// Multiple durable publications can exceed fifteen seconds on a busy Windows disk.
+const DURABLE_FILESYSTEM_TIMEOUT = 30_000;
 
 let temporaryRoot = '';
 let workspace = '';

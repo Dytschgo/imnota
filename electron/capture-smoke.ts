@@ -252,6 +252,9 @@ async function startCapture(
   let overlay: BrowserWindow;
   try {
     if (trigger === 'global-shortcut') {
+      // The renderer ignores a shortcut while the previous capture is still settling, so wait for
+      // the same readiness the Add menu path waits for before pressing the keys.
+      await waitForCaptureReady(driver);
       const registered = await driver.evaluate<boolean>(`(async () => {
         const result = await window.imnota.getNativeCapabilities();
         return result.ok && result.value.globalCaptureShortcutRegistered;
