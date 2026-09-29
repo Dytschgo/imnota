@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- macOS: Imnota hides completely before an immediate capture, so it no longer appears blurred in the screenshot. Window mode in the capture toolbar now works on macOS too.
+- Choose Now, 3 s or 5 s beside **Take screenshot**, or start a 3 s or 5 s timer from the capture toolbar to retake after opening a menu.
+- macOS: **Fix permission** resets Imnota's own Screen Recording entry, asks again and opens System Settings; **Restart Imnota** applies the new permission. Ad-hoc signed updates still ask again after each update.
+- macOS: **Copy files**, now the default, places the bundle's Markdown and PNG as two files, so coding agents such as T3 Code attach both.
+- Exporting reuses a saved export only when the content is unchanged, never copies the wrong bundle, and keeps completed exports after a failure. A failed export shows one error with technical details and **Rebuild bundles**; cards show "Saved locally" and "Last copied".
+- Simplified the app: glass is a single on/off switch (off means solid surfaces), the backdrop opacity slider responds immediately and only appears when it applies, and Desktop glass was removed. Favourites and Archived are filters in the Library, the copy format is chosen only in the card's copy menu, and the rarely used annotation tools and redundant settings were removed. Existing preferences for removed options are kept and ignored.
+- Shared links are titled with the collection name, and a copy from the share page now includes the same text, HTML and image as a desktop Rich copy. The redesigned recipient page shows each bundle with its own prompt text.
+- Windows: copying no longer drops Chromium's clipboard history and cloud-clipboard markers, and browser source metadata is preserved.
+- Status messages leave on their own. CI now copies and pastes every bundle on Windows, macOS and Linux.
+- macOS downloads remain ad-hoc signed, not Apple-notarised, and require macOS 13 or later. Back up workspaces before upgrading.
+
 ## 0.3.0
 
 - Screen capture is on by default for new Windows and macOS profiles. Capture an area, a window or a whole display from a global shortcut, the tray or menu-bar icon, or the toolbar, with an optional 3- or 5-second delay. Drag directly across screens, repeat the last captured area, then save, annotate, copy or discard from the capture overlay.

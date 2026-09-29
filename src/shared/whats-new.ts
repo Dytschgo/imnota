@@ -190,6 +190,35 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
       },
     ],
   },
+  {
+    afterVersion: '0.3.0',
+    channel: 'stable',
+    title: 'Simpler, and ready on macOS',
+    summary: 'Cleaner capture on macOS, bundles that paste as files, and fewer settings to think about.',
+    preview: false,
+    features: [
+      {
+        id: 'capture-timing',
+        title: 'Capture without Imnota in the way',
+        description:
+          'Choose Now, 3 s or 5 s beside Take screenshot, or start a timer from the capture toolbar. On macOS, Imnota hides fully first and Window mode works.',
+        action: { kind: 'settings', category: 'Shortcuts' },
+      },
+      {
+        id: 'copy-files',
+        title: 'Bundles paste as files',
+        description:
+          'Copy files places the Markdown and the PNG as two files, so coding agents attach both. Pick another format from the arrow beside Copy.',
+        action: { kind: 'onboarding' },
+      },
+      {
+        id: 'simpler',
+        title: 'Fewer settings',
+        description:
+          'Glass is a single switch, Favourites and Archived live in the Library, and rarely used tools and duplicate settings are gone.',
+      },
+    ],
+  },
 ];
 
 export function findWhatsNewRelease(version: string | undefined) {
