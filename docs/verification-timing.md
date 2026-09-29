@@ -22,7 +22,7 @@ In that run, the real ZIP installation/rollback-copy case took 19.47s in the pla
 | Windows  |            36s |                   78s |
 | macOS    |            45s |                  104s |
 
-These step timings include setup and platform-specific work. They identify investigation targets, not interchangeable coverage or guaranteed release savings. The logs come from an archive-cache experiment, but that experiment did not change tests or native verification. Build-cache results are [recorded separately](build-cache-experiment.md).
+These step timings include setup and platform-specific work. They identify investigation targets, not interchangeable coverage or guaranteed release savings. The logs come from an archive-cache experiment, but that experiment did not change tests or native verification. Build-cache results are [recorded separately](history/build-cache-experiment.md).
 
 PR/main CI now sets `IMNOTA_REQUIRE_MAC_UPDATE_TEST=1` on the macOS platform-suite step. The existing test-file startup assertions require macOS, Bash, and the packaged ZIP, so the real updater case cannot silently skip because its archive is missing. The suite must succeed before the existing signature/architecture checks and native walkthrough in `verify-mac.sh` run. Linux and Windows still execute the same platform/script suites without the Mac-only requirement. No test case, native assertion, or package target is removed.
 

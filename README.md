@@ -20,7 +20,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Local content search with links to matching items
 - Separate Markdown/image copy, generated-file access and file-path fallbacks
 - Manual local snapshots, optional automatic history and validated restore with safety copies
-- Experimental, opt-in rectangular screen capture saved as a PNG screenshot
+- Area, window and display capture on Windows and macOS, saved as PNG screenshots
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
 - Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
@@ -39,7 +39,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 
 ## Supported platforms
 
-See the [feature verification record](docs/next-features-verification.md) for checks and limitations. Region capture is disabled by default; Linux capture, macOS permissions and mixed-DPI behavior need separate platform validation.
+See the [implementation status](docs/implementation-plan.md) for current behavior and open verification work, and the [capture display matrix](docs/capture-display-matrix.md) for platform evidence. Capture is available on Windows and macOS; Linux uses Import or Paste. macOS requires Screen Recording permission, and Retina/mixed-DPI setups still need platform validation. The [September feature verification record](docs/history/next-features-verification.md) preserves earlier checks and their limits.
 
 Development and packaging targets are Windows, macOS and Linux. Unsigned artifacts are suitable for local testing. Production signing and notarisation are intentionally optional.
 
