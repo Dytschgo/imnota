@@ -7,6 +7,9 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 // @ts-expect-error The separately packaged JavaScript service intentionally has no TypeScript surface.
 import { createService } from '../share-service/src/app.js';
+// @ts-expect-error The browser copy script is plain JavaScript served by the share service.
+import { clipboardContextHtml as browserClipboardHtml } from '../share-service/public/share-copy.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { HostedShareClient } from './hosted-share-client.js';
 
 const temporary: string[] = [];
@@ -145,4 +148,9 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
     );
     service.close();
   }
+});
+
+it('places the same HTML representation on the clipboard as the desktop Rich copy', () => {
+  const markdown = `# Prompt <b>&</b>\r\n\r\n"quoted" 'single' café 🙂\n`;
+  expect(browserClipboardHtml(markdown)).toBe(clipboardContextHtml(markdown));
 });
