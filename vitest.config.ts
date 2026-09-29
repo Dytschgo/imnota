@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // Real filesystem tests (durable writes, journals, locks) usually finish in about a second, but
@@ -15,9 +15,13 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     // The service uses node:test and its own Node/SQLite runtime, exercised separately in CI.
     exclude: [
-      '**/node_modules/**',
+      ...configDefaults.exclude,
       '.claude/**',
+      'dist/**',
       'dist-electron/**',
+      'release/**',
+      'out/**',
+      'coverage/**',
       'scripts/*.test.mjs',
       'share-service/**',
       'electron/hosted-share-contract.test.ts',
