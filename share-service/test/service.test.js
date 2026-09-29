@@ -270,11 +270,51 @@ test('renders no PNG copy controls for an image-free share and keeps mixed image
   });
   const mixedToken = mixed.body.url.split('/').at(-1);
   const mixedPage = await instance.api.get(`/s/${mixedToken}`).expect(200);
-  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 3);
-  assert.equal((mixedPage.text.match(/data-copy-bundle>/g) ?? []).length, 3);
+  // One copy control per image, with no duplicate page-level toolbar.
+  assert.equal((mixedPage.text.match(/data-copy-png>/g) ?? []).length, 2);
+  assert.equal((mixedPage.text.match(/data-copy-bundle>/g) ?? []).length, 2);
   for (const filename of ['prompt-001.png', 'prompt-002.png']) {
     assert.match(mixedPage.text, new RegExp(`data-asset-url="/s/${mixedToken}/assets/${filename}"`));
   }
+  assert.match(mixedPage.text, /created by an older Imnota version/);
+});
+
+test('shows each structured bundle with its own sanitized prompt text beside its copy controls', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const created = await share(instance, {
+    requestId: randomUUID(),
+    title: 'Checkout bugs',
+    markdown: '# Aggregate only',
+    images: [{ filename: 'prompt-001.png', dataBase64: onePixelPng.toString('base64') }],
+    includeArchive: true,
+    senderName: 'Åda',
+    bundles: [
+      {
+        bundleNumber: 1,
+        markdown: '# Checkout bugs\n\n### Visible text\n\nTotal $42\nPay now\n\n<script>alert(1)</script>',
+        imageFilename: 'prompt-001.png',
+      },
+      { bundleNumber: 2, markdown: 'Text only [bad](javascript:alert(2))', imageFilename: null },
+    ],
+  });
+  assert.equal(created.status, 201, created.text);
+  const publicToken = created.body.url.split('/').at(-1);
+  const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+  const cards = page.text.split('<li class="bundle-card').slice(1);
+  assert.equal(cards.length, 2);
+  assert.match(cards[0], new RegExp(`data-markdown-url="/s/${publicToken}/bundles/1/markdown"`));
+  assert.match(cards[0], /Total \$42<br \/>\s*Pay now/);
+  assert.match(cards[0], /data-copy-png/);
+  assert.match(cards[1], /^ is-text-only/);
+  assert.match(cards[1], /Text only/);
+  assert.doesNotMatch(cards[1], /data-copy-png/);
+  assert.doesNotMatch(page.text, /Aggregate only|older Imnota version|data-bundle-picker/);
+  assert.doesNotMatch(page.text, /<script>alert|href="javascript:/);
+  assert.match(page.text, /<strong>Åda<\/strong> shared these prompt bundles with you/);
+  assert.match(page.text, /<h1>Checkout bugs<\/h1>/);
+  assert.match(page.text, /Expires in 24 hours/);
+  assert.match(page.text, /Download all \(ZIP\)/);
 });
 
 test('persists bounded structured bundles without counting database Markdown as artifact bytes', async (t) => {

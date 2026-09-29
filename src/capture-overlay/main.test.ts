@@ -92,6 +92,7 @@ beforeEach(() => {
     annotate: vi.fn(async () => {}),
     copy: vi.fn(async () => ({ image: true })),
     cancel: vi.fn(async () => {}),
+    retakeAfter: vi.fn(async () => {}),
     onCountdown: vi.fn(() => () => {}),
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
@@ -182,6 +183,17 @@ it('draws only this display intersection and saves the coordinated selection onc
   button.click();
   expect(window.imnotaCapture.save).toHaveBeenCalledTimes(1);
   expect(window.imnotaCapture.save).toHaveBeenCalledWith();
+});
+
+it('asks for a fresh capture after 3 or 5 seconds from the toolbar timer', async () => {
+  await setup(2, { x: 0, y: 0, width: 800, height: 600 });
+  const timer = document.querySelector('.capture-timer')!;
+  expect(timer.getAttribute('role')).toBe('group');
+  document.querySelector<HTMLButtonElement>('[data-delay="5"]')!.click();
+  expect(window.imnotaCapture.retakeAfter).toHaveBeenLastCalledWith(5);
+  document.querySelector<HTMLButtonElement>('[data-delay="3"]')!.click();
+  expect(window.imnotaCapture.retakeAfter).toHaveBeenLastCalledWith(3);
+  expect(window.imnotaCapture.cancel).not.toHaveBeenCalled();
 });
 
 it('copies the image without saving and can annotate instead of save', async () => {

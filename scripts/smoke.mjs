@@ -1,9 +1,10 @@
-import { runNativeVerification } from './smoke-process.mjs';
+import { normalizeNativeVerificationMode, runNativeVerification } from './smoke-process.mjs';
 
 try {
+  const mode = normalizeNativeVerificationMode(process.env.IMNOTA_SMOKE_MODE);
   const report = await runNativeVerification({
     packagedExecutable: process.argv[2],
-    mode: process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke',
+    mode,
   });
   console.log(
     `Application confirmed ${report.mode} verification: Imnota ${report.version}; ${report.assertions?.length ?? 0} assertion groups.`,

@@ -354,7 +354,7 @@ async function writeArchive(directory, images) {
 }
 
 function markdownRenderer() {
-  const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false });
+  const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: true });
   const originalLinkOpen =
     renderer.renderer.rules.link_open ??
     ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));
@@ -363,6 +363,7 @@ function markdownRenderer() {
     tokens[index].attrSet('target', '_blank');
     return originalLinkOpen(tokens, index, options, environment, self);
   };
+  // Line breaks are kept so OCR text and note lines read as they appear in the copied Markdown.
   return (markdown) =>
     sanitizeHtml(renderer.render(markdown), {
       allowedTags: [
@@ -932,9 +933,13 @@ export function createService(overrides = {}) {
         .all(record.id);
       const bundles = db
         .prepare(
-          'SELECT bundle_number AS number, image_filename AS imageFilename FROM share_bundles WHERE share_id = ? ORDER BY bundle_number',
+          'SELECT bundle_number AS number, image_filename AS imageFilename, markdown FROM share_bundles WHERE share_id = ? ORDER BY bundle_number',
         )
-        .all(record.id);
+        .all(record.id)
+        .map(({ markdown: bundleMarkdown, ...bundle }) => ({
+          ...bundle,
+          markdownHtml: renderMarkdown(bundleMarkdown),
+        }));
       return response
         .type('html')
         .send(
@@ -946,6 +951,7 @@ export function createService(overrides = {}) {
               request.params.token,
               config.publicOrigin,
               bundles,
+              now(),
             ),
           ),
         );

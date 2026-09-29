@@ -48,7 +48,11 @@ export async function exerciseNextFeatures(
     text: 'Copy Markdown',
     exact: true,
   });
-  await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'Markdown copied', exact: true });
+  await driver.waitFor({
+    selector: '.prompt-bundle-state-success',
+    text: 'Last copied: Markdown',
+    exact: true,
+  });
   if (
     !(await nativeClipboard.readText()).includes('orbital lantern') ||
     !(await nativeClipboard.readImage()).isEmpty()
@@ -56,7 +60,11 @@ export async function exerciseNextFeatures(
     throw new Error('Independent Markdown copy did not use the latest edited template.');
   await driver.click({ selector: '[aria-label="Copy options"]' });
   await driver.click({ selector: '[role="menuitem"]', text: 'Copy file paths', exact: true });
-  await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'File paths copied', exact: true });
+  await driver.waitFor({
+    selector: '.prompt-bundle-state-success',
+    text: 'Last copied: File paths',
+    exact: true,
+  });
   const copiedPaths = await nativeClipboard.readText();
   if (!copiedPaths.endsWith('.md') || copiedPaths.includes('.png'))
     throw new Error('Text-only file paths must point to a real Markdown export without a fake image.');
@@ -154,7 +162,11 @@ export async function captureNextFeatureLightViews(
     text: 'Copy Markdown',
     exact: true,
   });
-  await driver.waitFor({ selector: '.prompt-bundle-state-success', text: 'Markdown copied', exact: true });
+  await driver.waitFor({
+    selector: '.prompt-bundle-state-success',
+    text: 'Last copied: Markdown',
+    exact: true,
+  });
   await capture('next-clipboard-light.png');
   await driver.click({ selector: '[data-testid="prompt-sharing-close"]' });
   return captures;

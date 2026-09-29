@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import type { PromptExportBundleContent } from '../src/shared/workflow-bridge.js';
-import { collectHostedShareArtifacts, type HostedShareBundleReader } from './hosted-share-artifacts.js';
+import {
+  collectHostedShareArtifacts,
+  hostedShareTitle,
+  type HostedShareBundleReader,
+} from './hosted-share-artifacts.js';
 
 const png = 'data:image/png;base64,c291cmNl';
 
@@ -29,6 +33,7 @@ describe('collectHostedShareArtifacts', () => {
       ['final-session', 2],
       ['final-session', 3],
     ]);
+    expect(artifacts.title).toBe('Prompt 1');
     expect(artifacts.markdown).toBe('# Prompt 1\n\n---\n\n# Prompt 2\n\n---\n\n# Prompt 3');
     expect(artifacts.images.map((image) => image.filename)).toEqual(['prompt-001.png', 'prompt-003.png']);
     expect(artifacts.images[0].dataBase64).toBe('bm9ybWFsaXplZA==');
@@ -94,5 +99,16 @@ describe('collectHostedShareArtifacts', () => {
       () => ({ width: 100, height: 100, dataBase64: 'eA==' }),
     );
     expect(result.images).toHaveLength(20);
+  });
+
+  it('titles the share with the collection heading and falls back when it is unusable', () => {
+    expect(hostedShareTitle('# Checkout bugs\n\nBundle 1 of 2\n')).toBe('Checkout bugs');
+    expect(hostedShareTitle('# Checkout bugs\r\n\r\nBundle 1 of 1')).toBe('Checkout bugs');
+    expect(hostedShareTitle('#   Tabs\tand spaces  ')).toBe('Tabs and spaces');
+    expect(hostedShareTitle(`# ${'é'.repeat(250)}`)).toBe('é'.repeat(200));
+    expect(hostedShareTitle(`# a${'🙂'.repeat(150)}`)).toBe(`a${'🙂'.repeat(99)}`);
+    expect(hostedShareTitle('Bundle 1 of 1\n\n# Later heading')).toBe('Imnota prompt');
+    expect(hostedShareTitle('#    \n')).toBe('Imnota prompt');
+    expect(hostedShareTitle('')).toBe('Imnota prompt');
   });
 });

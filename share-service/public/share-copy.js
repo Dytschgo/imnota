@@ -222,96 +222,92 @@ function messageFor(error, fallback) {
   return `Couldn’t copy. ${fallback}`;
 }
 
+const SUCCESS_TOAST_MS = 4_000;
+
 export function boot(documentObject = globalThis.document) {
   const root = documentObject?.querySelector?.('[data-share-copy-root]');
   if (!root) return;
   const status = root.querySelector('[data-copy-status]');
   const controls = root.querySelectorAll('[data-copy-markdown], [data-copy-png], [data-copy-bundle]');
   let copying = false;
-  const setStatus = (message, error = false) => {
+  let hideTimer;
+  const setStatus = (message, state) => {
     if (!status) return;
+    clearTimeout(hideTimer);
     status.textContent = message;
-    status.classList.toggle('error', error);
+    status.classList.toggle('error', state === 'error');
+    status.classList.toggle('is-visible', Boolean(message));
+    // Success fades after a moment; errors stay until the next action. The text remains for
+    // assistive technology either way.
+    if (state === 'success')
+      hideTimer = setTimeout(() => status.classList.remove('is-visible'), SUCCESS_TOAST_MS);
   };
-  const run = (button, action, success, fallback) => {
+  const markCopied = (scope, button) => {
+    scope.classList.add('is-copied');
+    scope.querySelector('[data-copied-badge]')?.removeAttribute('hidden');
+    if (!button.hasAttribute('data-copy-bundle')) return;
+    const label = button.querySelector('[data-copy-label]');
+    if (label) label.textContent = 'Copied';
+    button.classList.add('is-copied');
+    button.closest('.copy-split')?.classList.add('is-copied');
+  };
+  const run = (scope, button, action, success, fallback) => {
     button.addEventListener('click', async () => {
       if (copying) return;
       copying = true;
-      const picker = root.querySelector('[data-bundle-picker]');
-      if (picker) picker.disabled = true;
       button.closest('details')?.removeAttribute('open');
       for (const control of controls) control.disabled = true;
       setStatus('Copying…');
       try {
         // action reaches clipboard.write before this handler awaits its result.
         await action();
-        setStatus(success);
-        if (button.hasAttribute('data-copy-bundle')) {
-          button.textContent = 'Copied';
-          button.classList.add('is-copied');
-          button.closest('.copy-split')?.classList.add('is-copied');
-        }
+        setStatus(success, 'success');
+        markCopied(scope, button);
       } catch (error) {
-        root.querySelector('.markdown-preview')?.setAttribute('open', '');
-        setStatus(messageFor(error, fallback), true);
+        setStatus(messageFor(error, fallback), 'error');
+        // Open this bundle's menu so the named downloads are immediately reachable. Wait until
+        // this click finishes bubbling, or the outside-click handler would close it again.
+        setTimeout(() => scope.querySelector('details.copy-options')?.setAttribute('open', ''), 0);
       } finally {
         copying = false;
-        if (picker) picker.disabled = false;
         for (const control of controls) control.disabled = false;
       }
     });
   };
 
   for (const scope of root.querySelectorAll('[data-copy-scope]')) {
-    const paths = () => ({
-      markdownPath: scope.getAttribute('data-markdown-url'),
-      pngPath: scope.getAttribute('data-asset-url') || undefined,
-    });
+    const label = scope.getAttribute('data-copy-label') || 'bundle';
+    const name = label.charAt(0).toUpperCase() + label.slice(1);
+    const markdownPath = scope.getAttribute('data-markdown-url');
+    const pngPath = scope.getAttribute('data-asset-url') || undefined;
     const copyMarkdown = scope.querySelector('[data-copy-markdown]');
     if (copyMarkdown)
       run(
+        scope,
         copyMarkdown,
-        () => writeShareClipboard({ markdownPath: paths().markdownPath }),
-        'Markdown copied.',
-        'Use Download Markdown in the expanded prompt below.',
+        () => writeShareClipboard({ markdownPath }),
+        `${name} Markdown copied. Paste it into your coding agent.`,
+        'Use Download Markdown in the open menu instead.',
       );
     const copyPng = scope.querySelector('[data-copy-png]');
-    if (copyPng) {
+    if (copyPng)
       run(
+        scope,
         copyPng,
-        () => writeShareClipboard({ pngPath: paths().pngPath }),
-        'PNG copied.',
-        'Use Download PNG beside the image instead.',
+        () => writeShareClipboard({ pngPath }),
+        `${name} image copied.`,
+        'Use Download PNG in the open menu instead.',
       );
-    }
     const copyBundle = scope.querySelector('[data-copy-bundle]');
-    if (copyBundle) {
+    if (copyBundle)
       run(
+        scope,
         copyBundle,
-        () => writeShareClipboard(paths()),
-        'Bundle copied.',
-        'Use Download Markdown below, and Download PNG beside any image.',
+        () => writeShareClipboard({ markdownPath, pngPath }),
+        `${name} copied. Paste it into your coding agent.`,
+        `Use Download Markdown${pngPath ? ' and Download PNG' : ''} in the open menu instead.`,
       );
-    }
   }
-  const picker = root.querySelector('[data-bundle-picker]');
-  const toolbar = root.querySelector('[data-top-copy]');
-  const updateSelection = () => {
-    const selected = Array.from(root.querySelectorAll('[data-bundle-number]')).find(
-      (item) => item.getAttribute('data-bundle-number') === picker?.value,
-    );
-    if (!selected || !toolbar) return;
-    for (const attribute of ['data-markdown-url', 'data-asset-url'])
-      toolbar.setAttribute(attribute, selected.getAttribute(attribute) || '');
-    const png = toolbar.querySelector('[data-copy-png]');
-    if (png) png.hidden = !selected.getAttribute('data-asset-url');
-    const primary = toolbar.querySelector('[data-copy-bundle]');
-    primary.textContent = 'Copy Bundle';
-    primary.classList.remove('is-copied');
-    primary.closest('.copy-split')?.classList.remove('is-copied');
-  };
-  picker?.addEventListener('change', updateSelection);
-  updateSelection();
   root.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     const open = root.querySelector('details.copy-options[open]');

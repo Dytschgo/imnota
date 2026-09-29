@@ -28,6 +28,12 @@ export function isStrictChild(parent, target) {
   return difference !== '' && !difference.startsWith('..') && !isAbsolute(difference);
 }
 
+export function normalizeNativeVerificationMode(mode = 'smoke') {
+  if (!['smoke', 'stress', 'clipboard'].includes(mode))
+    throw new Error(`Unknown native verification mode: ${mode}.`);
+  return mode;
+}
+
 export function nativeVerificationEnvironment(inherited, platform = process.platform) {
   const environment = { ...inherited };
   delete environment.ELECTRON_RUN_AS_NODE;
@@ -115,7 +121,7 @@ function runChild(executable, args, env, timeoutMs) {
 }
 
 export async function runNativeVerification({ packagedExecutable, mode = 'smoke' } = {}) {
-  if (!['smoke', 'stress'].includes(mode)) throw new Error(`Unknown native verification mode: ${mode}.`);
+  mode = normalizeNativeVerificationMode(mode);
   const runDirectory = createRunDirectory();
   try {
     const reportPath = join(runDirectory, 'result.json');
@@ -135,7 +141,7 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
     // The Windows walkthrough completed its assertions in 225 seconds in run
     // 36265303628; portable extraction/startup and shutdown also share this budget.
     // Per-operation deadlines remain unchanged, and a timed-out run still fails.
-    const timeoutMs = mode === 'stress' ? 15 * 60_000 : 6 * 60_000;
+    const timeoutMs = mode === 'stress' ? 15 * 60_000 : mode === 'clipboard' ? 4 * 60_000 : 6 * 60_000;
     const result = await runChild(executable, args, env, timeoutMs);
     let report;
     try {

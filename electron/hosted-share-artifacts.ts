@@ -6,6 +6,8 @@ const MAX_BUNDLES = 20;
 const MAX_DIMENSION = 10_000;
 const MAX_PIXELS = 16_000_000;
 const MAX_BUNDLE_PIXELS = 64_000_000;
+const MAX_TITLE_CHARACTERS = 200;
+const FALLBACK_TITLE = 'Imnota prompt';
 
 export interface HostedShareBundleReader {
   read(sessionId: string, bundleNumber: number): Promise<PromptExportBundleContent>;
@@ -29,6 +31,18 @@ export function hostedPngDimensionsAreSafe(width: number, height: number): boole
     height <= MAX_DIMENSION &&
     width * height <= MAX_PIXELS
   );
+}
+
+/** Uses the collection heading every finalized bundle starts with, so recipients see its name. */
+export function hostedShareTitle(markdown: string): string {
+  const heading = /^# (.*)$/.exec(markdown.split(/\r?\n/, 1)[0])?.[1] ?? '';
+  let title = '';
+  // The service limits UTF-16 length; never split a surrogate pair at the boundary.
+  for (const character of heading.replace(/\p{Cc}/gu, ' ').trim()) {
+    if (title.length + character.length > MAX_TITLE_CHARACTERS) break;
+    title += character;
+  }
+  return title.trim() || FALLBACK_TITLE;
 }
 
 /** Collects only finalized, main-owned bundle grants and normalizes their rendered PNGs. */
@@ -92,7 +106,7 @@ export async function collectHostedShareArtifacts(
   }
 
   return {
-    title: 'Imnota prompt',
+    title: hostedShareTitle(bundles[0].markdown),
     markdown: bundles.map((bundle) => bundle.markdown).join('\n\n---\n\n'),
     images,
     bundles: structuredBundles,

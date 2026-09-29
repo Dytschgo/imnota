@@ -39,7 +39,8 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
   let exitCode = 0;
   let result: unknown;
   try {
-    const mode = process.env.IMNOTA_SMOKE_MODE === 'stress' ? 'stress' : 'smoke';
+    const requestedMode = process.env.IMNOTA_SMOKE_MODE;
+    const mode = requestedMode === 'stress' || requestedMode === 'clipboard' ? requestedMode : 'smoke';
     if (process.env.IMNOTA_SMOKE_CAPTURE_CAPABILITY === 'real-memory-only') {
       result = {
         passed: true,

@@ -12,6 +12,7 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
+import { readMacClipboardFiles } from './mac-clipboard.js';
 import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
@@ -34,7 +35,7 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard';
 
 export interface SmokeWorkflowHost {
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
@@ -331,14 +332,14 @@ async function exerciseOnboarding(
     await driver.waitFor({ selector: '.imnota-copy-format-menu' }, { absent: true });
     await driver.waitFor({ text: label, exact: true });
   };
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     await driver.waitFor({ text: 'Copy files', exact: true });
     const nativeDefault = await driver.evaluate<string>(`(async () => {
       const result = await window.imnota.getPreferenceSettings();
       if (!result.ok) throw new Error(result.error.message);
       return result.value.settings.nativeCopy.defaultFunction;
     })()`);
-    if (nativeDefault !== 'files') throw new Error('Windows native copy default was not Copy files.');
+    if (nativeDefault !== 'files') throw new Error('Native copy default was not Copy files.');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
@@ -467,6 +468,23 @@ async function exerciseOnboarding(
     )
       throw new Error('Choosing a native copy default changed onboarding Markdown or HTML.');
     await assertExactImage('Choosing a native copy default');
+  }
+
+  if (process.platform === 'darwin') {
+    // macOS Copy files: two clipboard file URLs, so composers attach both files.
+    await chooseNativeCopyFunction('files', 'Copy files');
+    await driver.click({ text: 'Copy files', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+    const macFiles = await readMacClipboardFiles();
+    if (
+      macFiles.length !== 2 ||
+      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
+      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
+    )
+      throw new Error(
+        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
+      );
+    await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
   await driver.click({ text: 'Copy Markdown only', exact: true });
@@ -1508,10 +1526,10 @@ async function exercisePreferencesAndChannel(
       await driver.waitFor({
         selector: `input[name="appearance-mode"][value="${theme}"]:checked:not(:disabled)`,
       });
-      // Light mode reveals the backdrop with automatic strong glass; dark mode uses the switch.
-      const glassOn = theme === 'dark';
+      // Choosing a backdrop turns glass on; both themes reveal it through the switch.
+      const glassOn = true;
       await setGlassSurfaces(driver, glassOn);
-      const glass = glassOn ? 'balanced' : 'off';
+      const glass = 'balanced';
       const reducedTransparency = await driver.evaluate<boolean>(
         `window.matchMedia('(prefers-reduced-transparency: reduce)').matches`,
       );
@@ -1521,12 +1539,12 @@ async function exercisePreferencesAndChannel(
           ? 'performance'
           : 'none';
       const expectedBackground = expectedFallback === 'none' ? 'active' : 'none';
-      const expectedGlass = expectedFallback !== 'none' ? 'off' : glassOn ? 'balanced' : 'strong';
+      const expectedGlass = expectedFallback !== 'none' ? 'off' : 'balanced';
       await driver.waitFor({
         selector: `:root[data-glass-requested="${glass}"][data-glass-level="${expectedGlass}"][data-glass-fallback="${expectedFallback}"][data-background="${expectedBackground}"]`,
       });
       await driver.waitFor({
-        selector: `input[name="glass-surfaces"]${glassOn ? ':checked' : ':not(:checked)'}:not(:disabled)`,
+        selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
         artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
@@ -1629,11 +1647,8 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({ selector: ':root[data-theme="light"]' });
   await driver.evaluate(`(() => {
     const root = document.documentElement;
-    const fallback = ['reduced-transparency', 'performance'].includes(root.dataset.glassFallback);
-    if (root.dataset.glassLevel !== (fallback ? 'off' : 'strong'))
-      throw new Error('Light backdrop did not apply automatic glass or its accessibility fallback.');
-    if (!fallback && root.dataset.background !== 'active')
-      throw new Error('Automatic light glass did not reveal its backdrop.');
+    if (root.dataset.glassLevel !== 'off' || root.dataset.background !== 'none')
+      throw new Error('Glass off still revealed the backdrop in light mode.');
   })()`);
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="dark"])' });
   await driver.waitFor({ selector: ':root[data-theme="dark"][data-glass-level="off"]' });
@@ -2065,6 +2080,102 @@ async function assertPromptRichClipboard(
   if (expectedImage.isEmpty() || image.isEmpty() || !image.toBitmap().equals(expectedImage.toBitmap()))
     throw new Error(`${context} changed the exact prompt PNG pixels.`);
   return { text, png: image.toPNG() };
+}
+
+/**
+ * Paste into a test-only editable control with Chromium's native Paste command and
+ * check the trusted event: exact Markdown, the HTML fragment and the decoded image size.
+ */
+async function assertPromptPasteReceiver(
+  driver: NativeUiDriver,
+  expectedText: string,
+  expectedPng: Buffer,
+): Promise<void> {
+  const expectedImage = nativeImage.createFromBuffer(expectedPng);
+  const expectedSize = expectedImage.getSize();
+  const expectedHtmlFragment = clipboardContextHtml(expectedText);
+  await driver.evaluate(`(() => {
+    document.getElementById('imnota-smoke-paste-receiver')?.remove();
+    const receiver = document.createElement('div');
+    receiver.id = 'imnota-smoke-paste-receiver';
+    receiver.contentEditable = 'true';
+    receiver.setAttribute('role', 'textbox');
+    receiver.setAttribute('aria-label', 'Clipboard verification receiver');
+    receiver.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;width:240px;height:60px;overflow:hidden;padding:8px;background:#fff;color:#111;border:2px solid #4b78ff;';
+    document.body.append(receiver);
+    window.__imnotaPasteResult = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Paste receiver did not receive the native Paste command within 5000ms.')), 5000);
+      receiver.addEventListener('paste', async event => {
+        try {
+          const data = event.clipboardData;
+          const types = [...(data?.types ?? [])].map(type => type.toLowerCase());
+          const text = data?.getData('text/plain') ?? '';
+          const html = data?.getData('text/html') ?? '';
+          const items = [...(data?.items ?? [])].map(item => ({ kind: item.kind, type: item.type.toLowerCase() }));
+          const imageItem = [...(data?.items ?? [])].find(item => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'));
+          let imageSize;
+          const file = imageItem?.getAsFile();
+          if (file) {
+            const bitmap = await createImageBitmap(file);
+            imageSize = { width: bitmap.width, height: bitmap.height };
+            bitmap.close();
+          }
+          resolve({
+            trusted: event.isTrusted,
+            types,
+            items,
+            text,
+            html,
+            imageSize,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          clearTimeout(timeout);
+        }
+      }, { once: true });
+    });
+    receiver.focus();
+    if (document.activeElement !== receiver) throw new Error('Paste receiver could not receive focus.');
+  })()`);
+  try {
+    driver.browserWindow.webContents.paste();
+    const received = await driver.evaluate<{
+      trusted: boolean;
+      types: string[];
+      items: Array<{ kind: string; type: string }>;
+      text: string;
+      html: string;
+      imageSize?: { width: number; height: number };
+    }>('window.__imnotaPasteResult');
+    if (!received.trusted) throw new Error('The paste receiver event was not a trusted native paste.');
+    for (const type of ['text/plain', 'text/html'])
+      if (!received.types.includes(type))
+        throw new Error(
+          `Paste receiver did not receive ${type}; it received ${received.types.join(', ') || 'no advertised formats'}.`,
+        );
+    if (received.text !== expectedText) throw new Error('Paste receiver changed the exact prompt Markdown.');
+    if (!received.html.includes(expectedHtmlFragment))
+      throw new Error(`Paste receiver changed the prompt HTML fragment: ${received.html.slice(0, 160)}.`);
+    const insertedText = await driver.evaluate<string>(
+      `document.getElementById('imnota-smoke-paste-receiver')?.textContent ?? ''`,
+    );
+    if (insertedText !== expectedText)
+      throw new Error('The native Paste command did not insert the prompt into the editable receiver.');
+    if (
+      received.imageSize?.width !== expectedSize.width ||
+      received.imageSize?.height !== expectedSize.height
+    )
+      throw new Error(
+        `Paste receiver did not receive the expected prompt image; items: ${JSON.stringify(received.items)}, dimensions: ${JSON.stringify(received.imageSize)}.`,
+      );
+  } finally {
+    await driver.evaluate(`(() => {
+      document.getElementById('imnota-smoke-paste-receiver')?.remove();
+      document.getElementById('imnota-smoke-paste-title')?.remove();
+      delete window.__imnotaPasteResult;
+    })()`);
+  }
 }
 
 async function waitForPromptCopyClipboard(
@@ -2632,6 +2743,143 @@ export async function runSmokeWorkflow(
   if (!updateState.currentVersion || updateState.state !== 'idle')
     throw new Error('Updater/channel bridge did not remain offline and idle during smoke.');
   assertions.push('updater bridge and offline smoke state');
+
+  if (mode === 'clipboard') {
+    // Focused check of the real export and paste path from the workspace toolbar.
+    // Preferences and project files belong to this run's disposable profile.
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({
+        onboarding: { completed: true },
+        updates: { whatsNewAcknowledgedVersion: ${JSON.stringify(options.version)} },
+      });
+      if (!result.ok) throw new Error(result.error.message);
+    })()`);
+    driver.setWindow(await host.reopenWindow());
+    await driver.waitFor({ selector: '.library' });
+    await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' }, { absent: true });
+    const projectPath = await createProjectThroughUi(driver, 'Bundle Export Verification', false);
+    await importImages(driver, projectPath, sources, 3);
+    activeWindow = await host.reopenWindow();
+    driver.setWindow(activeWindow);
+    await driver.waitFor({ selector: '.konvajs-content' });
+    await driver.click({ selector: '.shot-select', text: path.basename(sources[0].path) });
+    await driver.waitFor({ selector: 'textarea[aria-label="Description"]' });
+    await driver.resize(SMOKE_VIEWPORTS[0]);
+    await driver.evaluate(`(() => {
+      const observed = { states: [], observer: null };
+      const record = () => {
+        const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]');
+        const status = dialog?.querySelector('.prompt-sharing-progress');
+        if (!status) return;
+        const phase = [...status.classList].find(name => name.startsWith('prompt-sharing-progress-'));
+        const state = {
+          phase: phase?.replace('prompt-sharing-progress-', ''),
+          busy: dialog.getAttribute('aria-busy') === 'true',
+          message: status.textContent?.trim() ?? '',
+          value: status.querySelector('progress')?.getAttribute('value') ?? null,
+        };
+        if (JSON.stringify(observed.states.at(-1)) !== JSON.stringify(state)) observed.states.push(state);
+      };
+      observed.observer = new MutationObserver(record);
+      observed.observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+      window.__imnotaWorkspaceExportProgress = observed;
+    })()`);
+    const firstDescription = 'EXPORT CURRENT EDIT: the toolbar action must include this unsaved description.';
+    await driver.fill({ selector: 'textarea[aria-label="Description"]' }, firstDescription);
+    const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
+      artifactDirectory,
+      artifacts,
+      copyActions: 2,
+      requireSplit: true,
+      verifyWindowsCopyVariants: true,
+    });
+    const progressStates = await driver.evaluate<
+      Array<{ phase: string; busy: boolean; message: string; value: string | null }>
+    >(`(() => {
+      const observed = window.__imnotaWorkspaceExportProgress;
+      observed.observer.disconnect();
+      delete window.__imnotaWorkspaceExportProgress;
+      return observed.states;
+    })()`);
+    if (
+      ['rendering', 'writing', 'copying'].some(
+        (phase) => !progressStates.some((state) => state.phase === phase),
+      ) ||
+      progressStates.some((state) => state.busy && (state.value !== null || /\d+%/.test(state.message)))
+    )
+      throw new Error(
+        `Workspace export did not show truthful rendering, writing and copying progress: ${JSON.stringify(progressStates)}`,
+      );
+    if (artifactDirectory)
+      await fs.writeFile(
+        path.join(artifactDirectory, 'bundle-export-progress.json'),
+        JSON.stringify(progressStates, null, 2),
+        { flag: 'wx' },
+      );
+    assertions.push('rendering, writing and copying stay busy without a premature completion percentage');
+    const [firstMarkdownPath] = await promptBundlePaths(promptTiming.latestSet, 0);
+    const firstMarkdown = await fs.readFile(firstMarkdownPath, 'utf8');
+    if (!firstMarkdown.includes(firstDescription))
+      throw new Error('The toolbar export omitted the latest inspector edit.');
+    assertions.push('the toolbar export saves the current inspector edit into the exported Markdown');
+    for (let index = 0; index < promptTiming.bundleCount; index += 1) {
+      if (process.platform === 'win32' || process.platform === 'darwin')
+        await choosePromptCopyFunction(driver, index, 'rich');
+      await nativeClipboard.writeText(`Waiting for workspace Bundle ${index + 1}`);
+      await driver.clickPoint(await promptActionPoint(driver, index));
+      await waitForPromptCopyClipboard(driver, promptTiming.latestSet, index, 'rich');
+      await waitForPromptGrants(driver, promptTiming.bundleCount);
+      const copied = await assertPromptRichClipboard(
+        promptTiming.latestSet,
+        index,
+        `Workspace Bundle ${index + 1}`,
+      );
+      await assertPromptPasteReceiver(driver, copied.text, copied.png);
+    }
+    if ((await promptSets(host, projectPath)).length !== 1)
+      throw new Error('Copying each workspace bundle regenerated the export set.');
+    assertions.push(
+      'every bundle card copies and natively pastes its own Markdown, HTML fragment and image without regeneration',
+    );
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, '1280x800-bundle-export-complete.png'));
+    await closePromptDialog(driver);
+    const revisedDescription =
+      'EXPORT REVISED EDIT: this new description must replace the previous exported content.';
+    await driver.fill({ selector: 'textarea[aria-label="Description"]' }, revisedDescription);
+    const revised = await exercisePromptWorkflow(driver, host, projectPath, {
+      artifacts,
+      copyActions: 1,
+      requireSplit: true,
+    });
+    const [revisedMarkdownPath] = await promptBundlePaths(revised.latestSet, 0);
+    const revisedMarkdown = await fs.readFile(revisedMarkdownPath, 'utf8');
+    if (
+      revised.latestSet.directory === promptTiming.latestSet.directory ||
+      !revisedMarkdown.includes(revisedDescription) ||
+      revisedMarkdown.includes(firstDescription) ||
+      (await fs.readFile(firstMarkdownPath, 'utf8')) !== firstMarkdown ||
+      (await promptSets(host, projectPath)).length !== 2
+    )
+      throw new Error(
+        'Export after editing failed to publish new content while preserving the previous files.',
+      );
+    assertions.push(
+      'exporting after an edit creates a fresh set with revised content and keeps the previous files',
+    );
+    await closePromptDialog(driver);
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts,
+      timings,
+      assertions,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
 
   await exerciseOnboarding(driver, activeWindow, artifactDirectory, artifacts);
   assertions.push('onboarding copy variants and independent clipboard fallbacks');
