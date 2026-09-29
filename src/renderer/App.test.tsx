@@ -3002,14 +3002,10 @@ describe('feedback controls', () => {
     });
     fireEvent.click(await screen.findByTestId('library-full-search'));
     const searchInput = await screen.findByTestId('global-search-input');
-    vi.useFakeTimers();
-    try {
-      fireEvent.change(searchInput, { target: { value: 'button' } });
-      await act(async () => vi.advanceTimersByTime(180));
-    } finally {
-      vi.useRealTimers();
-    }
-    fireEvent.click(await screen.findByRole('option', { name: /Button label/ }));
+    // Use the real 180 ms debounce: with fake timers, a search effect re-run after the advance
+    // (for example when the project list settles) scheduled a timer that never fired.
+    fireEvent.change(searchInput, { target: { value: 'button' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Button label/ }, { timeout: 3_000 }));
 
     await waitFor(() =>
       expect(annotationCanvasSpy).toHaveBeenLastCalledWith(
