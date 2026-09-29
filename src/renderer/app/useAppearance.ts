@@ -140,10 +140,8 @@ export function resolveAppearance(
   environment: AppearanceEnvironment,
 ): EffectiveAppearance {
   const theme = preferences.mode === 'system' ? environment.systemTheme : preferences.mode;
-  const image = appearanceBackdrop(preferences).image;
-  const automaticLightGlass = theme === 'light' && Boolean(image) && isAllowedBackgroundImage(image);
-  const glassLevel =
-    automaticLightGlass && preferences.glassLevel === 'off' ? 'strong' : preferences.glassLevel;
+  // Glass off always means solid surfaces, in every theme.
+  const glassLevel = preferences.glassLevel;
   if (glassLevel === 'off') {
     return {
       theme,

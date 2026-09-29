@@ -38,30 +38,28 @@ describe('appearance resolution', () => {
     ).toMatchObject({ glassLevel: 'off', glassFallbackReason: 'performance' });
   });
 
-  it('lets accessibility and host fallbacks override automatic light image glass', () => {
-    const preferences = { ...DEFAULT_APPEARANCE, backgroundImage: 'preset:graphite' };
+  it('keeps glass off solid in every theme and lets fallbacks override glass on', () => {
+    const off = { ...DEFAULT_APPEARANCE, backgroundImage: 'preset:graphite' };
+    for (const systemTheme of ['light', 'dark'] as const)
+      expect(
+        resolveAppearance(off, { systemTheme, reducedTransparency: false, performanceConstrained: false }),
+      ).toMatchObject({ glassLevel: 'off', requestedGlassLevel: 'off' });
+    const on = { ...off, glassLevel: 'balanced' as const };
     for (const [reducedTransparency, performanceConstrained, reason] of [
       [true, false, 'reduced-transparency'],
       [false, true, 'performance'],
     ] as const) {
       expect(
-        resolveAppearance(preferences, { systemTheme: 'light', reducedTransparency, performanceConstrained }),
+        resolveAppearance(on, { systemTheme: 'light', reducedTransparency, performanceConstrained }),
       ).toMatchObject({ glassLevel: 'off', glassFallbackReason: reason });
     }
     expect(
-      resolveAppearance(preferences, {
+      resolveAppearance(on, {
         systemTheme: 'light',
         reducedTransparency: false,
         performanceConstrained: false,
       }),
-    ).toMatchObject({ glassLevel: 'strong', requestedGlassLevel: 'off' });
-    expect(
-      resolveAppearance(preferences, {
-        systemTheme: 'dark',
-        reducedTransparency: false,
-        performanceConstrained: false,
-      }),
-    ).toMatchObject({ glassLevel: 'off', requestedGlassLevel: 'off' });
+    ).toMatchObject({ glassLevel: 'balanced' });
   });
 });
 

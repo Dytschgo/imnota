@@ -177,13 +177,13 @@
       "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1440x900-settings.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-09-28",
+      "sourceRevision": "77d83530f1793883eaab3e85531812c11f74fba0",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36413152769",
+      "review": "Inspected the hosted packaged Windows capture from integration PR 162. Only the Backdrop description changed (glass off now keeps solid surfaces in every theme, PR 157). All 13 other approved captures matched. Packaged smoke passed all 27 groups. Strict tolerance unchanged."
     },
     "1440x900-workspace-dark.png": {
       "reviewedAt": "2026-09-27",

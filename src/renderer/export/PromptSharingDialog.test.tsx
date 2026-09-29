@@ -38,7 +38,9 @@ it('reports typed progress, offers cancellation, and avoids receiver-detection c
   expect(screen.getByRole('status')).toHaveTextContent('Rendering Bundle 2 of 4');
   expect(screen.queryByText('No prompt bundle to share')).not.toBeInTheDocument();
   expect(screen.getByText(/Reading the saved collection/)).toBeInTheDocument();
-  expect(screen.getByRole('progressbar')).toHaveAttribute('value', '50');
+  // Rendering is not a completed fraction: the bar is indeterminate, with no percentage.
+  expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  expect(screen.getByRole('status')).not.toHaveTextContent('%');
   fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();
   expect(screen.getByRole('dialog')).toHaveTextContent(/native copy menu changes the primary copy action/i);
@@ -188,4 +190,40 @@ it('reports a rejected default change inside the open sharing dialog and keeps t
   expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
   expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
   expect(onError).not.toHaveBeenCalled();
+});
+
+it('shows a failure once, with technical details and a Rebuild bundles action', () => {
+  const onPrepareFreshFiles = vi.fn();
+  const bundle = {
+    planId: 'plan-1',
+    artifactSessionId: 'session-1',
+    bundleNumber: 1,
+    pictureNumbers: [1],
+    screenshotCount: 1,
+    excludedCount: 0,
+    width: 800,
+    height: 600,
+    delivery: 'clipboard' as const,
+    state: 'error' as const,
+    error: 'An export file is missing. Choose Rebuild bundles to create a new copy.',
+  };
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      onPrepareFreshFiles={onPrepareFreshFiles}
+      bundles={[bundle]}
+      progress={{ phase: 'error', message: 'Export failed' }}
+      error={{ message: bundle.error, technicalDetails: 'ENOENT bundle-1.png' }}
+    />,
+  );
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByText('Technical details')).toBeInTheDocument();
+  expect(screen.getByText('ENOENT bundle-1.png')).not.toBeVisible();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Rebuild bundles' }));
+  expect(onPrepareFreshFiles).toHaveBeenCalledWith({
+    planId: 'plan-1',
+    artifactSessionId: 'session-1',
+    bundleNumber: 1,
+  });
 });
