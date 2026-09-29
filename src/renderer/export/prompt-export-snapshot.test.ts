@@ -21,7 +21,7 @@ const snapshot: PromptCollectionInput = {
 
 describe('prompt export snapshot identity', () => {
   it('uses a versioned stable fingerprint for the same saved input', async () => {
-    expect(PROMPT_EXPORT_SNAPSHOT_VERSION).toBe(2);
+    expect(PROMPT_EXPORT_SNAPSHOT_VERSION).toBe(3);
     await expect(fingerprintPromptExportSnapshot(snapshot)).resolves.toBe(
       await fingerprintPromptExportSnapshot(snapshot),
     );
@@ -72,5 +72,11 @@ describe('prompt export snapshot identity', () => {
     });
 
     expect(first).not.toBe(reordered);
+  });
+
+  it('changes when included image bytes change without a metadata revision', async () => {
+    const original = await fingerprintPromptExportSnapshot(snapshot, [['shot-a', 'original-pixels']]);
+    const changed = await fingerprintPromptExportSnapshot(snapshot, [['shot-a', 'edited-pixels']]);
+    expect(changed).not.toBe(original);
   });
 });

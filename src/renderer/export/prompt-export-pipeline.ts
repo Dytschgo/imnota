@@ -1,6 +1,7 @@
 import { planPromptBundles, type PromptBundle, type PromptBundleProgress } from '../../shared/prompt-bundles';
-import type { ImagePayload, ScreenshotRecord } from '../../shared/types';
+import type { ScreenshotRecord } from '../../shared/types';
 import type { ComposedPromptBundle, PromptBundleComposition } from '../prompt-bundle-render';
+import { fingerprintPromptExportImage } from './prompt-export-snapshot';
 import {
   PreparedPromptMetadata,
   PreparedPromptPlan,
@@ -17,12 +18,6 @@ import type {
   PromptBundleControllerRendering,
   PromptPictureResolveResult,
 } from './prompt-export-controller-core';
-
-async function imageFingerprint(image: ImagePayload): Promise<string> {
-  const bytes = new TextEncoder().encode(`${image.width}:${image.height}:${image.dataUrl}`);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
 
 export interface PromptExportPipelineOptions {
   bridge: PromptBundleControllerBridge;
@@ -100,7 +95,7 @@ export class PromptExportPipeline {
           });
           if (
             loaded.contentRevision !== picture.contentRevision ||
-            (await imageFingerprint(loaded.image)) !== fingerprints.get(picture.screenshotId)
+            (await fingerprintPromptExportImage(loaded.image)) !== fingerprints.get(picture.screenshotId)
           )
             throw failure(
               'content-changed',
@@ -238,7 +233,8 @@ export class PromptExportPipeline {
         `Picture ${picture.pictureNumber} changed after export planning. Save the latest version and export again.`,
         true,
       );
-    if (fingerprints) fingerprints.set(picture.screenshotId, await imageFingerprint(loaded.image));
+    if (fingerprints)
+      fingerprints.set(picture.screenshotId, await fingerprintPromptExportImage(loaded.image));
     throwIfAborted(signal);
     const rendered = await this.options.rendering.render(loaded.image, loaded.annotations, { signal });
     throwIfAborted(signal);
