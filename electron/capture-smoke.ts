@@ -596,6 +596,8 @@ export async function exerciseRegionCapture(
       await driver.waitFor({
         selector: `[data-testid="add-item-capture-delay-${seconds}"][aria-checked="true"]`,
       });
+      if (artifactDirectory && seconds === 3 && cancel)
+        artifacts.push(await driver.capture(artifactDirectory, 'capture-add-menu.png'));
       const started = Date.now();
       await driver.click({ selector: '[data-testid="add-item-capture"]' });
       let hud: BrowserWindow | undefined;

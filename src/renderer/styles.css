@@ -3040,19 +3040,16 @@ kbd {
 }
 
 .add-item-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: grid;
+  gap: 2px;
+  padding-bottom: 6px;
 }
 
-.add-item-row > button {
-  flex: 1;
-  min-width: 0;
-}
-
+/* Sits under the label, aligned with its text, so the title keeps the full width. */
 .add-item-delay {
   display: flex;
-  flex: none;
+  justify-self: start;
+  margin-left: 36px;
   padding: 2px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -3062,8 +3059,8 @@ kbd {
 .add-item-popover .add-item-delay button {
   width: auto;
   display: block;
-  min-width: 34px;
-  padding: 4px 6px;
+  min-width: 42px;
+  padding: 4px 8px;
   border-radius: 5px;
   font-size: 11px;
   text-align: center;
