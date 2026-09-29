@@ -1,4 +1,9 @@
-import { CAPTURE_OVERLAY_MODES, MAC_CAPTURE_PERMISSION_MESSAGE } from '../src/shared/capture.js';
+import {
+  CAPTURE_OVERLAY_MODES,
+  MAC_CAPTURE_PERMISSION_MESSAGE,
+  type CaptureRectangle,
+} from '../src/shared/capture.js';
+import { captureElectronWindowPng, captureMacWindowPng } from './window-image-capture.js';
 import { filenameSchema } from '../src/shared/schema.js';
 import { bindCaptureDelayCancel, CaptureDelaySession } from './capture-delay.js';
 import { captureAllDisplaysWithStableGeometry } from './capture-display-selection.js';
@@ -15,6 +20,14 @@ import {
 import { z } from 'zod';
 import type { IpcRouter } from './ipc-router.js';
 import type { CaptureWorkflowRegistrar, IpcHost } from './main.js';
+
+function captureSelectedWindowPng(windowId: string, selection: CaptureRectangle): Promise<Buffer | null> {
+  if (process.platform === 'darwin') return captureMacWindowPng(windowId);
+  const scaleFactor = screen.getDisplayMatching(selection).scaleFactor;
+  return captureElectronWindowPng(windowId, selection, scaleFactor, (options) =>
+    desktopCapturer.getSources(options),
+  );
+}
 
 export function registerCaptureIpc(
   router: IpcRouter,
@@ -242,9 +255,13 @@ export function registerCaptureIpc(
           true,
         );
       const selection = outcome.selection;
-      let png: Buffer;
+      // Window mode captures the window itself, so apps in front of it are not included.
+      // If the system cannot provide it, crop the still the user selected from instead.
+      let png: Buffer | null = outcome.windowId
+        ? await captureSelectedWindowPng(outcome.windowId, selection)
+        : null;
       try {
-        png = service.compose(captured, selection);
+        png ??= service.compose(captured, selection);
       } catch (error) {
         if (error instanceof CaptureServiceError)
           throw new NativeWorkflowError(

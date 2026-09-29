@@ -16,7 +16,7 @@ import { resolveLastCaptureRegion } from './last-capture-region.js';
 export type CaptureOverlayFailure = 'not-ready' | 'misplaced' | 'display-changed';
 
 export type CaptureOverlayOutcome =
-  | { kind: 'selected'; selection: CaptureRectangle; mode: CaptureOverlayMode }
+  | { kind: 'selected'; selection: CaptureRectangle; mode: CaptureOverlayMode; windowId?: string }
   | { kind: 'cancelled' }
   /** The user asked for a fresh still after a countdown, from the overlay toolbar. */
   | { kind: 'retake'; delaySeconds: CaptureDelaySeconds }
@@ -44,10 +44,18 @@ export class CaptureOverlaySession {
     });
   }
 
-  settle(selection: CaptureRectangle | null, mode: CaptureOverlayMode = 'region'): boolean {
+  settle(
+    selection: CaptureRectangle | null,
+    mode: CaptureOverlayMode = 'region',
+    windowId: string | null = null,
+  ): boolean {
     if (this.finished) return false;
     this.finished = true;
-    this.complete(selection ? { kind: 'selected', selection, mode } : { kind: 'cancelled' });
+    this.complete(
+      selection
+        ? { kind: 'selected', selection, mode, ...(windowId ? { windowId } : {}) }
+        : { kind: 'cancelled' },
+    );
     return true;
   }
 
@@ -124,11 +132,14 @@ export class CaptureSelectionCoordinator {
     complete: boolean;
     actionsDisplayId: number | null;
     windowTitle: string | null;
+    /** Kept in the main process only; the overlay renderer never receives window ids. */
+    windowId: string | null;
   } = {
     selection: null,
     complete: false,
     actionsDisplayId: null,
     windowTitle: null,
+    windowId: null,
   };
 
   constructor(
@@ -171,6 +182,7 @@ export class CaptureSelectionCoordinator {
       actionsDisplayId:
         (intersecting.find((display) => display.id === preferredDisplayId) ?? intersecting[0])?.id ?? null,
       windowTitle: null,
+      windowId: null,
     };
     return this.current();
   }
@@ -223,6 +235,7 @@ export class CaptureSelectionCoordinator {
         complete: Boolean(validSelection),
         actionsDisplayId: validSelection ? this.displayIdAt(point, displayId) : null,
         windowTitle: null,
+        windowId: null,
       };
     } else {
       this.state = {
@@ -230,6 +243,7 @@ export class CaptureSelectionCoordinator {
         complete: false,
         actionsDisplayId: null,
         windowTitle: null,
+        windowId: null,
       };
     }
     return this.current();
@@ -247,8 +261,19 @@ export class CaptureSelectionCoordinator {
     };
   }
 
+  /** The window chosen in Window mode, once the selection is complete. */
+  selectedWindowId(): string | null {
+    return this.mode === 'window' && this.state.complete ? this.state.windowId : null;
+  }
+
   private clearSelection(): void {
-    this.state = { selection: null, complete: false, actionsDisplayId: null, windowTitle: null };
+    this.state = {
+      selection: null,
+      complete: false,
+      actionsDisplayId: null,
+      windowTitle: null,
+      windowId: null,
+    };
   }
 
   private displayIdAt(point: { x: number; y: number }, fallbackId: number): number {
@@ -274,6 +299,7 @@ export class CaptureSelectionCoordinator {
       complete: true,
       actionsDisplayId: display.id,
       windowTitle: null,
+      windowId: null,
     };
   }
 
@@ -297,6 +323,7 @@ export class CaptureSelectionCoordinator {
         complete: true,
         actionsDisplayId: this.displayIdAt(point, displayId),
         windowTitle: hit!.title,
+        windowId: hit!.id,
       };
       return this.current();
     }
@@ -305,6 +332,7 @@ export class CaptureSelectionCoordinator {
       complete: false,
       actionsDisplayId: null,
       windowTitle: selection && hit ? hit.title : null,
+      windowId: null,
     };
     return this.current();
   }
