@@ -24,13 +24,13 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Improvement plan](improvement-plan.md) — completed release/process work and conditional engineering candidates; listing a task does not authorize implementation.
 - [Large-collection performance](large-collection-performance-plan.md) — measurement and scale plan; do not implement without budgets.
 - [Capture display matrix](capture-display-matrix.md) — real display-source evidence and outstanding overlay/alignment checks.
-- [Recovery unification](recovery-unification-plan.md) — recovery design plan; persistence changes require separate review.
 - [Recovery unification design](recovery-unification-design.md) — one delete and Undo engine, failure contract and review slices; awaiting approval.
 - [Windows copy comparison](windows-copy-comparison.md) — manual verification worksheet for the current clipboard/capture changes.
 
 ## Historical evidence
 
 - [History index](history/README.md) — finished execution plans, dated reviews and superseded proposals moved out of the documentation root.
+- [Early feature verification](history/next-features-verification.md), [cache experiment](history/build-cache-experiment.md) and [superseded recovery plan](history/recovery-unification-plan.md) — dated evidence and design context, not current behavior or new work orders.
 - [Engineering follow-up](history/engineering-follow-up-20260918.md), [feedback follow-up](history/follow-up-plan-20260918.md), [feedback observations](history/feedback-plan-20260918.md) and [September 21 feedback record](history/feedback-record-2026-09-21.md) — September planning snapshots.
 - [Repository review](history/repository-review-2026-09-08.md) — dated disposition of older plans and dependency work.
 - [Implementation verification](history/implementation-verification.md) — historical schema-3 benchmark and its limits.

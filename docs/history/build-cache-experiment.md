@@ -1,5 +1,7 @@
 # Electron download cache experiment
 
+Historical record of the completed PR #42 experiment. Current follow-up criteria live in the [improvement plan](../improvement-plan.md).
+
 The archive-cache pilot in [PR #42](https://github.com/Dytschgo/imnota/pull/42) did not establish worthwhile savings. The final change removes the experimental workflow additions and records the evidence. Existing dependency caches, verification, packaging, and release workflows remain unchanged.
 
 ## Method and integrity

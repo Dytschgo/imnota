@@ -1,6 +1,6 @@
 # Recovery unification plan
 
-Status: plan only. The [recovery unification design](recovery-unification-design.md) (2026-09-26) makes the recommended sequence below concrete and needs approval before implementation.
+Status: historical proposal, superseded by the [recovery unification design](../recovery-unification-design.md) (2026-09-26). The save-consolidation steps below are stale: screenshot, text and drawing saves already share the transaction journal. Preserve this record for its reliability evidence; use the newer design for remaining delete/Undo proposals, which still require approval.
 
 ## September 22 targeted reliability work
 
