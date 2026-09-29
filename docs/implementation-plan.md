@@ -4,7 +4,8 @@ Current implementation status and open acceptance work, with documentation recon
 
 ## Released baseline
 
-- Stable: [v0.3.0](https://github.com/Dytschgo/imnota/releases/tag/v0.3.0), published 2026-09-26. The nightly evidence below predates it and describes the v0.2.8 period.
+- Stable: [v0.4.0](https://github.com/Dytschgo/imnota/releases/tag/v0.4.0), published 2026-09-29 from `b0cec89daddedcdad79b44022142177b098c6a09`. The [exact-main checks](https://github.com/Dytschgo/imnota/actions/runs/36602926800) and [stable publication](https://github.com/Dytschgo/imnota/actions/runs/36604925452) passed Windows, macOS and Linux packaged walkthroughs. The published Mac download passed installation and its walkthrough before Latest promotion. See [stable release CI](stable-release-ci.md) for measured execution and verification limits.
+- v0.4.0 includes consistent Window Copy/Save fallback, export invalidation after same-size external image edits, accurate macOS **Files + text** labels and three illustrated What's New cards. The native window source remains best-effort; receiver acceptance and manual installer/Gatekeeper/Intel checks are not inferred from CI.
 - Historical verified nightly: [v0.2.9-nightly.20260921.35645731983](https://github.com/Dytschgo/imnota/releases/tag/v0.2.9-nightly.20260921.35645731983), commit `bf8d24e664778a4d643a295350af6e5561a09ace`.
 - Nightly [build and publication](https://github.com/Dytschgo/imnota/actions/runs/35645731983) passed its Windows, macOS, and Linux checks. The published manifests and assets identify that candidate, and the installed application reported the same version. Stable v0.2.8 remained Latest.
 - Hosted static sharing is deployed at `app.imnota.xyz`; see the [deployment evidence](../share-service/docs/deployment-verification.md).

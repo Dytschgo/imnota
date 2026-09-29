@@ -85,7 +85,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-Stable [v0.3.0](https://github.com/Dytschgo/imnota/releases/tag/v0.3.0) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
+Stable [v0.4.0](https://github.com/Dytschgo/imnota/releases/tag/v0.4.0) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
 
 Quality checks:
 
