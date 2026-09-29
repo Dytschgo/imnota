@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   captureElectronWindowPng,
   captureMacWindowPng,
+  captureSelectedImagePng,
   type GetWindowSources,
 } from './window-image-capture.js';
 
@@ -85,5 +86,48 @@ describe('Electron window image capture', () => {
       captureElectronWindowPng('window:1', bounds, 1, async () => Promise.reject(new Error('busy'))),
     ).resolves.toBeNull();
     await expect(captureElectronWindowPng('front', bounds, 1, async () => [])).resolves.toBeNull();
+  });
+});
+
+describe('selected capture pixels shared by Save and Copy', () => {
+  const selection = { x: 10, y: 20, width: 800, height: 600 };
+  const windowPng = Buffer.concat([png, Buffer.from('chosen window')]);
+  const frozenStillPng = Buffer.concat([png, Buffer.from('covering window')]);
+
+  it('uses the chosen window pixels even when the frozen selection contains a covering window', async () => {
+    const cropStill = vi.fn(() => frozenStillPng);
+    const captureWindow = vi.fn((id: string, bounds: typeof selection) =>
+      captureElectronWindowPng(id, bounds, 1, async () => [
+        { id: 'window:7:0', thumbnail: { isEmpty: () => false, toPNG: () => windowPng } },
+      ]),
+    );
+    await expect(captureSelectedImagePng(selection, 'window:7', captureWindow, cropStill)).resolves.toEqual(
+      windowPng,
+    );
+    expect(captureWindow).toHaveBeenCalledWith('window:7', selection);
+    expect(cropStill).not.toHaveBeenCalled();
+  });
+
+  it('uses the frozen selection for Area and when native window capture is unavailable', async () => {
+    const cropStill = vi.fn(() => frozenStillPng);
+    const captureWindow = vi.fn(async () => null);
+    await expect(captureSelectedImagePng(selection, null, captureWindow, cropStill)).resolves.toEqual(
+      frozenStillPng,
+    );
+    expect(captureWindow).not.toHaveBeenCalled();
+    await expect(captureSelectedImagePng(selection, 'window:7', captureWindow, cropStill)).resolves.toEqual(
+      frozenStillPng,
+    );
+    await expect(
+      captureSelectedImagePng(
+        selection,
+        'window:7',
+        async () => {
+          throw new Error('native capture failed');
+        },
+        cropStill,
+      ),
+    ).resolves.toEqual(frozenStillPng);
+    expect(cropStill).toHaveBeenCalledTimes(3);
   });
 });

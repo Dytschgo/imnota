@@ -262,6 +262,7 @@ function fakeBridge(options: FakeBridgeOptions = {}) {
 
 interface FakeRenderingOptions {
   preflightSize?: { width: number; height: number };
+  reflectSourceImage?: boolean;
   compose?: (
     bundleNumber: number,
     pictureIds: readonly string[],
@@ -288,7 +289,7 @@ function fakeRendering(options: FakeRenderingOptions = {}) {
       await Promise.resolve();
       activeRenders -= 1;
       return {
-        dataUrl: PNG,
+        dataUrl: options.reflectSourceImage ? image.dataUrl : PNG,
         width: options.preflightSize?.width ?? image.width,
         height: options.preflightSize?.height ?? image.height,
         bounds: { x: 0, y: 0, width: image.width, height: image.height },
@@ -298,8 +299,10 @@ function fakeRendering(options: FakeRenderingOptions = {}) {
     async compose(bundle, composeOptions) {
       composeCount += 1;
       const defaultCompose = async (): Promise<PromptBundleComposition> => {
+        let sourceImage = PNG;
         for (const picture of bundle.pictures) {
           const resolved = await composeOptions.resolvePicturePng(picture);
+          if (options.reflectSourceImage) sourceImage = resolved.dataUrl;
           expect(resolved.contentRevision).toBe(picture.contentRevision);
           expect({ width: resolved.width, height: resolved.height }).toEqual({
             width: picture.width,
@@ -309,7 +312,7 @@ function fakeRendering(options: FakeRenderingOptions = {}) {
         }
         return {
           kind: 'composed',
-          dataUrl: PNG,
+          dataUrl: sourceImage,
           width: bundle.layout.width,
           height: bundle.layout.height,
           encodedCharacters: 120,
@@ -489,7 +492,14 @@ describe('prompt export controller orchestration', () => {
   test('uses one bounded OCR wait for the whole export and still writes Markdown when OCR never returns', async () => {
     vi.useFakeTimers();
     try {
-      const recognizer = vi.fn(() => new Promise<string>(() => undefined));
+      let recognitionStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        recognitionStarted = resolve;
+      });
+      const recognizer = vi.fn(() => {
+        recognitionStarted();
+        return new Promise<string>(() => undefined);
+      });
       const native = fakeBridge({ recognizeScreenshotText: recognizer });
       const controller = engine(
         async () => savedContext([screenshot(0), screenshot(1)]),
@@ -498,6 +508,7 @@ describe('prompt export controller orchestration', () => {
       );
 
       const result = controller.prepareFreshFiles();
+      await started;
       await vi.advanceTimersByTimeAsync(10_000);
 
       expect(await result).toEqual({ ok: true, sessionId: 'session-1', bundleNumber: 1 });
@@ -1169,6 +1180,28 @@ describe('prompt export controller orchestration', () => {
     expect(native.copies.map((copy) => copy.target)).toEqual(['rich', 'rich', 'files-rich', 'rich']);
     expect(controller.getState().cards[0]).toMatchObject({ state: 'copied', outcome: 'combined' });
     expect(controller.getState().progress).toBeUndefined();
+  });
+
+  test('rebuilds copied files when external screenshot pixels change at the same dimensions', async () => {
+    const native = fakeBridge();
+    const load = native.bridge.loadScreenshotContent;
+    let pixels = PNG;
+    native.bridge.loadScreenshotContent = async (input) => {
+      const result = await load(input);
+      return { ...result, image: { ...result.image, dataUrl: pixels } };
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering({ reflectSourceImage: true }).rendering,
+    );
+
+    expect(await controller.copyFresh(1)).toMatchObject({ ok: true, sessionId: 'session-1' });
+    expect(await controller.copyFresh(1)).toMatchObject({ ok: true, sessionId: 'session-1' });
+    pixels = 'data:image/png;base64,REVG';
+    expect(await controller.copyFresh(1)).toMatchObject({ ok: true, sessionId: 'session-2' });
+    expect(native.writes.map((write) => write.pngDataUrl)).toEqual([PNG, pixels]);
+    expect(native.copies.map((copy) => copy.sessionId)).toEqual(['session-1', 'session-1', 'session-2']);
   });
 
   test('reopening unchanged sharing cards reuses the finalized files after a clipboard failure', async () => {
@@ -1932,6 +1965,36 @@ describe('prompt export controller orchestration', () => {
     expect(native.starts).toHaveLength(1);
     expect(read).toHaveBeenCalledWith({ sessionId: 'session-1', bundleNumber: 1 });
     expect(native.copies).toEqual([]);
+  });
+
+  test('rebuilds hosted files when external screenshot pixels change at the same dimensions', async () => {
+    const native = fakeBridge();
+    const load = native.bridge.loadScreenshotContent;
+    let pixels = PNG;
+    native.bridge.loadScreenshotContent = async (input) => {
+      const result = await load(input);
+      return { ...result, image: { ...result.image, dataUrl: pixels } };
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering({ reflectSourceImage: true }).rendering,
+    );
+
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-1' },
+    });
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-1' },
+    });
+    pixels = 'data:image/png;base64,REVG';
+    expect(await controller.prepareHostedShare()).toMatchObject({
+      ok: true,
+      value: { sessionId: 'session-2' },
+    });
+    expect(native.writes.map((write) => write.pngDataUrl)).toEqual([PNG, pixels]);
   });
 
   test('refreshes hosted files after source content or project changes', async () => {

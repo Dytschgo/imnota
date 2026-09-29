@@ -2333,6 +2333,7 @@ export default function App() {
         controller={promptBundles}
         onError={setError}
         fileClipboardAvailable={preferences.capabilities.fileClipboard}
+        platform={platform}
         defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
         onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
       />
@@ -2346,6 +2347,7 @@ export default function App() {
       {showOnboarding && (
         <OnboardingDemo
           fileClipboardAvailable={preferences.capabilities.fileClipboard}
+          platform={platform}
           defaultCopyVariant={preferences.settings.nativeCopy.defaultFunction}
           onDefaultCopyVariantChange={(defaultFunction) => preferences.saveNativeCopy({ defaultFunction })}
           onPrepareHandoff={({ markdown, imageDataUrl, markdownFilename, filename }) =>

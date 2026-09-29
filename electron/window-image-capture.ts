@@ -93,3 +93,21 @@ export async function captureElectronWindowPng(
     return null;
   }
 }
+
+/** Use the selected window's own pixels when available, otherwise the frozen selection. */
+export async function captureSelectedImagePng(
+  selection: CaptureRectangle,
+  windowId: string | null | undefined,
+  captureWindow: (windowId: string, selection: CaptureRectangle) => Promise<Buffer | null>,
+  cropStill: () => Buffer,
+): Promise<Buffer> {
+  if (windowId) {
+    try {
+      const windowPng = await captureWindow(windowId, selection);
+      if (windowPng) return windowPng;
+    } catch {
+      // Native capture is best-effort; keep the frozen selection as the fallback.
+    }
+  }
+  return cropStill();
+}

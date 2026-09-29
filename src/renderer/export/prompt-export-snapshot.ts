@@ -19,7 +19,7 @@ import type { SavedPromptExportContext } from './prompt-export-controller-core';
  * Versioned identity for the saved content represented by a prompt plan.
  * This is an in-memory cache key; it is not persisted or sent outside the app.
  */
-export const PROMPT_EXPORT_SNAPSHOT_VERSION = 2;
+export const PROMPT_EXPORT_SNAPSHOT_VERSION = 3;
 
 const OCR_EXPORT_BUDGET_MS = 10_000;
 
@@ -68,6 +68,7 @@ export async function capturePromptExportSnapshot(
 
   const measured: MeasuredPromptScreenshot[] = [];
   const promptItems: PromptCollectionItemInput[] = [];
+  const imageFingerprints: Array<readonly [string, string]> = [];
   const hasMixedContentItems = Boolean(
     (context.snapshot.project as ProjectData & { contentItems?: unknown[] }).contentItems?.length,
   );
@@ -136,6 +137,8 @@ export async function capturePromptExportSnapshot(
             'A drawing image is unavailable. Save the drawing and export again.',
             true,
           );
+        imageFingerprints.push([item.id, await fingerprintPromptExportImage(loaded.image)]);
+        assertActive();
         // Drawing PNGs already contain their final white crop/padding. Screenshot
         // preflight adds annotation margins that resolvePicture does not render again.
         if (!reuseCheck)
@@ -190,6 +193,8 @@ export async function capturePromptExportSnapshot(
         screenshot: cloneAndFreeze(screenshot) as ScreenshotRecord,
       });
       assertActive();
+      imageFingerprints.push([screenshot.id, await fingerprintPromptExportImage(loaded.image)]);
+      assertActive();
       const annotations = cloneAndFreeze(loaded.annotations) as readonly Annotation[];
       if (!reuseCheck) {
         const dimensions = await options.preflight(loaded.image, annotations, signal);
@@ -243,7 +248,7 @@ export async function capturePromptExportSnapshot(
     screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
     items: hasMixedContentItems ? promptItems : undefined,
   }) as Readonly<PromptCollectionInput>;
-  const snapshotFingerprint = await fingerprintPromptExportSnapshot(input);
+  const snapshotFingerprint = await fingerprintPromptExportSnapshot(input, imageFingerprints);
   throwIfAborted(signal);
   assertActive();
   if (!reuseCheck) {
@@ -260,8 +265,18 @@ export async function capturePromptExportSnapshot(
   };
 }
 
-export async function fingerprintPromptExportSnapshot(input: PromptCollectionInput): Promise<string> {
-  const serialized = JSON.stringify(input);
+/** Hash one loaded image at a time; only the digest survives snapshot capture. */
+export async function fingerprintPromptExportImage(image: ImagePayload): Promise<string> {
+  const bytes = new TextEncoder().encode(`${image.width}:${image.height}:${image.dataUrl}`);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function fingerprintPromptExportSnapshot(
+  input: PromptCollectionInput,
+  imageFingerprints: readonly (readonly [string, string])[] = [],
+): Promise<string> {
+  const serialized = JSON.stringify({ input, imageFingerprints });
   const bytes = new TextEncoder().encode(
     `imnota-prompt-export-v${PROMPT_EXPORT_SNAPSHOT_VERSION}\0${serialized}`,
   );

@@ -109,6 +109,40 @@ it('uses the saved Windows function for the primary action and keeps every varia
   expect(onCopyVariant).toHaveBeenCalledTimes(1);
 });
 
+it('labels the macOS file-and-text choice without changing its saved variant or copy action', () => {
+  const onCopyVariant = vi.fn();
+  const onSelectCopyVariant = vi.fn();
+  const props = {
+    bundle: model(),
+    platform: 'mac' as const,
+    fileClipboardAvailable: true,
+    onCopyFresh: vi.fn(),
+    onCopyVariant,
+    onSelectCopyVariant,
+    onPrepareFreshFiles: vi.fn(),
+  };
+  const { rerender } = render(<PromptBundleCard {...props} defaultCopyVariant="files" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  const option = screen.getByRole('menuitem', { name: 'Files + text' });
+  expect(option).toHaveTextContent('MD + PNG files + Markdown');
+  expect(screen.queryByRole('menuitem', { name: 'Files + rich copy' })).not.toBeInTheDocument();
+  fireEvent.click(option);
+  expect(onSelectCopyVariant).toHaveBeenCalledWith(
+    { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
+    'files-rich',
+  );
+  expect(onCopyVariant).not.toHaveBeenCalled();
+
+  rerender(<PromptBundleCard {...props} defaultCopyVariant="files-rich" />);
+  const primary = screen.getByRole('button', { name: 'Files + text' });
+  expect(primary).toHaveAttribute('title', 'MD + PNG files + Markdown');
+  fireEvent.click(primary);
+  expect(onCopyVariant).toHaveBeenCalledWith(
+    { planId: 'plan-current', artifactSessionId: 'session-current', bundleNumber: 2 },
+    'files-rich',
+  );
+});
+
 it('keeps rich copy available without showing unsupported file clipboard variants', () => {
   render(<PromptBundleCard bundle={model()} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />);
   expect(screen.getByRole('button', { name: 'Rich copy' })).toBeEnabled();

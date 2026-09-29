@@ -247,6 +247,34 @@ describe('OnboardingDemo', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Markdown + image prepared');
   });
 
+  it('uses the accurate macOS file-and-text label for the same saved copy variant', async () => {
+    const onDefaultCopyVariantChange = vi.fn(async () => {});
+    const onCopyHandoff = vi.fn(async () => ({
+      text: true,
+      html: false,
+      image: false,
+      files: true,
+    }));
+    const { props, rerender } = await reachCopyStep({
+      platform: 'mac',
+      onDefaultCopyVariantChange,
+      onCopyHandoff,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Native copy function' }));
+    const option = screen.getByRole('menuitemradio', { name: /^Files \+ text/ });
+    expect(option).toHaveTextContent('MD + PNG files + Markdown');
+    expect(screen.queryByRole('menuitemradio', { name: /^Files \+ rich copy/ })).not.toBeInTheDocument();
+    fireEvent.click(option);
+    await waitFor(() => expect(onDefaultCopyVariantChange).toHaveBeenCalledWith('files-rich'));
+    expect(onCopyHandoff).not.toHaveBeenCalled();
+
+    rerender(<OnboardingDemo {...props} defaultCopyVariant="files-rich" />);
+    const primary = screen.getByRole('button', { name: 'Files + text' });
+    expect(primary).toHaveAttribute('title', 'MD + PNG files + Markdown');
+    fireEvent.click(primary);
+    await waitFor(() => expect(onCopyHandoff).toHaveBeenCalledWith(grant, 'files-rich'));
+  });
+
   it('keeps the previous primary action when saving a dropdown choice fails', async () => {
     await reachCopyStep({
       defaultCopyVariant: 'files',

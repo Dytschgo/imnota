@@ -1,6 +1,7 @@
 import { AlertTriangle, CloudUpload, FolderOpen, Square } from 'lucide-react';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
+import type { ShortcutPlatform } from '../../shared/shortcuts';
 import { Button, Modal } from '../components/ui';
 import {
   PromptBundleCard,
@@ -12,6 +13,7 @@ import './prompt-bundles.css';
 export interface PromptSharingDialogProps {
   hidden?: boolean;
   fileClipboardAvailable?: boolean;
+  platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
@@ -60,6 +62,7 @@ export function PromptSharingDialog({
   bundles,
   hidden = false,
   fileClipboardAvailable = false,
+  platform = 'windows',
   defaultCopyVariant = 'files',
   progress,
   error,
@@ -171,6 +174,7 @@ export function PromptSharingDialog({
                 bundle={bundle}
                 disabled={busy}
                 fileClipboardAvailable={fileClipboardAvailable}
+                platform={platform}
                 defaultCopyVariant={defaultCopyVariant}
                 errorReported={Boolean(error)}
                 onCopyFresh={onCopyFresh}
