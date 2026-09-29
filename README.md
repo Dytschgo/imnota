@@ -61,7 +61,7 @@ irm https://raw.githubusercontent.com/Dytschgo/imnota/main/scripts/install.ps1 |
 
 The installer downloads the latest published desktop build. Users do not need Node.js, pnpm, Electron or any development dependencies. The Mac archive supports both Apple Silicon and Intel, verifies its checksum and ad-hoc signature, and installs in `~/Applications`. Existing apps are kept as timestamped backups; project files are not moved.
 
-This first release is **not Apple-notarised**. If macOS blocks opening Imnota, open System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper. You can also [download the Mac ZIP directly](https://github.com/Dytschgo/imnota/releases/latest/download/Imnota-mac.zip), extract it and move Imnota to Applications.
+This release is **not Apple-notarised**. If macOS blocks opening Imnota, open System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper. You can also [download the Mac ZIP directly](https://github.com/Dytschgo/imnota/releases/latest/download/Imnota-mac.zip), extract it and move Imnota to Applications.
 
 For manual installation, download a release artifact for your platform, or build from source:
 
@@ -85,7 +85,7 @@ corepack pnpm dev
 
 The development launcher removes an inherited `ELECTRON_RUN_AS_NODE` value from the Electron child only. All other environment values, including `VITE_DEV_SERVER_URL`, are preserved. See [development notes](docs/development.md).
 
-Stable [v0.3.0](https://github.com/Dytschgo/imnota/releases/tag/v0.3.0) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
+Stable [v0.4.0](https://github.com/Dytschgo/imnota/releases/tag/v0.4.0) is the default download. Nightly builds are opt-in previews of reviewed main commits; see [nightly build instructions](docs/nightly-builds.md) for the current channel and publication process. See the [dependency migration record](docs/history/dependency-migration-plan-20260916.md) for the completed migration evidence and the [current implementation status](docs/implementation-plan.md) for remaining manual QA.
 
 Quality checks:
 
