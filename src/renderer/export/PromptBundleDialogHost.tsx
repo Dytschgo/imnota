@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
+import type { ShortcutPlatform } from '../../shared/shortcuts';
 
 interface PromptActionError {
   message: string;
@@ -48,12 +49,14 @@ export function PromptBundleDialogHost({
   controller,
   onError,
   fileClipboardAvailable = false,
+  platform = 'windows',
   defaultCopyVariant = 'files',
   onDefaultCopyVariantChange,
 }: {
   controller: PromptBundleUiController;
   onError(message: string): void;
   fileClipboardAvailable?: boolean;
+  platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
   onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
 }) {
@@ -70,6 +73,7 @@ export function PromptBundleDialogHost({
         hidden={Boolean(controller.preview || hostedArtifacts)}
         bundles={controller.cards}
         fileClipboardAvailable={fileClipboardAvailable}
+        platform={platform}
         defaultCopyVariant={defaultCopyVariant}
         progress={controller.progress}
         error={controller.error}

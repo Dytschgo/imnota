@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
 import type { Annotation, AnnotationKind, ImagePayload } from '../../shared/types';
+import type { ShortcutPlatform } from '../../shared/shortcuts';
 import type {
   ClipboardFormatsReport,
   OnboardingHandoffAction,
@@ -26,6 +27,7 @@ import type {
 } from '../../shared/workflow-bridge';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
 import { describeCopyDelivery } from '../export/clipboard-delivery';
+import { copyVariantLabels } from '../export/copy-variant-labels';
 import type { PromptDeliveryOutcome } from '../export/PromptBundleCard';
 import { renderAnnotatedImage } from '../export-image';
 import { completedOnboarding, ONBOARDING_VERSION, type OnboardingPreferences } from '../settings/preferences';
@@ -48,6 +50,7 @@ export interface OnboardingBundle {
 
 export interface OnboardingDemoProps {
   fileClipboardAvailable?: boolean;
+  platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
   onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
   onMarkCompleted: (
@@ -90,6 +93,7 @@ const OPEN_STATUS_LABELS: Record<OnboardingHandoffOpenTarget, string> = {
 
 export function OnboardingDemo({
   fileClipboardAvailable = false,
+  platform = 'windows',
   defaultCopyVariant = 'files',
   onDefaultCopyVariantChange,
   onMarkCompleted,
@@ -131,11 +135,7 @@ export function OnboardingDemo({
     [annotations, explanation],
   );
   const primaryCopyVariant = fileClipboardAvailable ? defaultCopyVariant : 'rich';
-  const copyVariantLabels: Record<WindowsCopyVariantId, { label: string; detail: string }> = {
-    files: { label: 'Copy files', detail: 'MD + PNG files' },
-    'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
-    rich: { label: 'Rich copy', detail: 'Text + image' },
-  };
+  const variantLabels = copyVariantLabels(platform);
   // Fallbacks stay out of the way until a copy has actually been tried.
   const showFallbacks = Boolean(handoff && copyAttempted);
 
@@ -448,18 +448,18 @@ export function OnboardingDemo({
                   <button
                     type="button"
                     className="imnota-onboarding-primary"
-                    aria-label={copyVariantLabels[primaryCopyVariant].label}
-                    title={copyVariantLabels[primaryCopyVariant].detail}
+                    aria-label={variantLabels[primaryCopyVariant].label}
+                    title={variantLabels[primaryCopyVariant].detail}
                     onClick={() => void copyBundle(primaryCopyVariant)}
                     disabled={busy}
                   >
                     <Clipboard size={15} aria-hidden="true" />
-                    <span>{copyVariantLabels[primaryCopyVariant].label}</span>
+                    <span>{variantLabels[primaryCopyVariant].label}</span>
                   </button>
                   {fileClipboardAvailable && (
                     <CopyFormatMenu
                       value={defaultCopyVariant}
-                      labels={copyVariantLabels}
+                      labels={variantLabels}
                       disabled={busy || !onDefaultCopyVariantChange}
                       onChange={async (variant) => {
                         setError('');
@@ -473,7 +473,7 @@ export function OnboardingDemo({
                       }}
                     />
                   )}
-                  <small>{copyVariantLabels[primaryCopyVariant].detail}</small>
+                  <small>{variantLabels[primaryCopyVariant].detail}</small>
                 </div>
                 {(copyOutcome || openStatus) && (
                   <div className="imnota-copy-success" role="status">

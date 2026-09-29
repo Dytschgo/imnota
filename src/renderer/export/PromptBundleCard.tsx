@@ -3,6 +3,8 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKe
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
+import type { ShortcutPlatform } from '../../shared/shortcuts';
+import { copyVariantLabels } from './copy-variant-labels';
 import './prompt-bundles.css';
 
 export type PromptBundleCardState =
@@ -54,6 +56,7 @@ export interface PromptBundleCardProps {
   /** The dialog already shows this failure, so the card does not repeat it. */
   errorReported?: boolean;
   fileClipboardAvailable?: boolean;
+  platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
   onCopyFresh(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyVariant?(request: PromptBundleActionRequest, variant: WindowsCopyVariantId): void | Promise<void>;
@@ -94,6 +97,7 @@ export function PromptBundleCard({
   disabled = false,
   errorReported = false,
   fileClipboardAvailable = false,
+  platform = 'windows',
   defaultCopyVariant = 'files',
   onCopyFresh,
   onCopyVariant,
@@ -119,11 +123,7 @@ export function PromptBundleCard({
   const primaryVariant = supportsFileVariants ? defaultCopyVariant : 'rich';
   const primaryCopy = () =>
     primaryVariant === 'rich' ? onCopyFresh(request) : onCopyVariant?.(request, primaryVariant);
-  const variantLabels: Record<WindowsCopyVariantId, { label: string; detail: string }> = {
-    files: { label: 'Copy files', detail: 'MD + PNG files' },
-    'files-rich': { label: 'Files + rich copy', detail: 'Files, text + image' },
-    rich: { label: 'Rich copy', detail: 'Text + image' },
-  };
+  const variantLabels = copyVariantLabels(platform);
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
 

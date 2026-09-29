@@ -471,7 +471,7 @@ async function exerciseOnboarding(
   }
 
   if (process.platform === 'darwin') {
-    // macOS Copy files: two clipboard file URLs, so composers attach both files.
+    // macOS Copy files writes the exact pair; receiver acceptance is separate.
     await chooseNativeCopyFunction('files', 'Copy files');
     await driver.click({ text: 'Copy files', exact: true });
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
@@ -484,6 +484,19 @@ async function exerciseOnboarding(
       throw new Error(
         `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
       );
+    await chooseNativeCopyFunction('files-rich', 'Files + text');
+    await driver.click({ text: 'Files + text', exact: true });
+    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+    const macFilesWithText = await readMacClipboardFiles();
+    if (
+      macFilesWithText.length !== 2 ||
+      path.resolve(macFilesWithText[0]!) !== path.resolve(markdownPath) ||
+      path.resolve(macFilesWithText[1]!) !== path.resolve(pngPath) ||
+      (await nativeClipboard.readText()) !== markdown ||
+      (await nativeClipboard.readHTML()) !== '' ||
+      !(await nativeClipboard.readImage()).isEmpty()
+    )
+      throw new Error('macOS Files + text did not preserve the exact file pair and plain Markdown.');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
