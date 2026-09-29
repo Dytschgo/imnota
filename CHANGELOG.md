@@ -2,7 +2,7 @@
 
 ## 0.4.0
 
-- macOS: Imnota hides completely before an immediate capture, so it no longer appears blurred in the screenshot. Window mode in the capture toolbar now works on macOS too.
+- macOS: Imnota hides completely before an immediate capture, so it no longer appears blurred in the screenshot. Window mode in the capture toolbar now works on macOS too, and on both macOS and Windows it captures the chosen window itself, even where other apps cover it.
 - Choose Now, 3 s or 5 s beside **Take screenshot**, or start a 3 s or 5 s timer from the capture toolbar to retake after opening a menu.
 - macOS: **Fix permission** resets Imnota's own Screen Recording entry, asks again and opens System Settings; **Restart Imnota** applies the new permission. Ad-hoc signed updates still ask again after each update.
 - macOS: **Copy files**, now the default, places the bundle's Markdown and PNG as two files, so coding agents such as T3 Code attach both.
