@@ -1,3 +1,4 @@
+import { HOSTED_MARKDOWN_BYTES, HOSTED_UPLOAD_BYTES } from '../src/shared/hosted-share-limits.js';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -17,8 +18,8 @@ const SAFE_PNG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.png$/;
 const PUBLIC_PATH = /^\/s\/[A-Za-z0-9_-]{43}$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_RESPONSE_BYTES = 65_536;
-const MAX_MARKDOWN_BYTES = 1_000_000;
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_MARKDOWN_BYTES = HOSTED_MARKDOWN_BYTES;
+const MAX_UPLOAD_BYTES = HOSTED_UPLOAD_BYTES;
 const MAX_STORED_SHARE_BYTES = MAX_UPLOAD_BYTES * 2 + 1024 * 1024;
 const PENDING_RECOVERY_MS = 24 * 60 * 60 * 1000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -84,7 +85,7 @@ function safeText(value: unknown, maximum: number, allowEmpty = false): value is
 }
 
 function safeMarkdown(value: unknown, maximumBytes: number): value is string {
-  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > maximumBytes)
+  if (typeof value !== 'string' || !value.length || Buffer.byteLength(value, 'utf8') > maximumBytes)
     return false;
   return Array.from(value).every((character) => {
     const codePoint = character.codePointAt(0) ?? 0;
@@ -347,13 +348,21 @@ export class HostedShareClient {
   }
 
   async create(input: HostedShareUpload, artifacts: HostedShareArtifacts): Promise<HostedShareRecord> {
-    this.validateUpload(input, artifacts);
+    try {
+      this.validateUpload(input, artifacts);
+    } catch (error) {
+      if (error instanceof NativeWorkflowError && !(await this.pending())[input.requestId])
+        throw withCommitState(error, false);
+      throw error;
+    }
     if (this.active.has(input.requestId))
       throw new NativeWorkflowError('invalid-input', 'That upload is already running.', false);
 
     const controller = new AbortController();
     this.active.set(input.requestId, controller);
     let timedOut = false;
+    let requestMayHaveCommitted = true;
+    let wrotePending = false;
     const deadline = setTimeout(() => {
       timedOut = true;
       controller.abort();
@@ -371,8 +380,18 @@ export class HostedShareClient {
         ...(artifacts.bundles ? { bundles: artifacts.bundles } : {}),
       };
       const payloadFingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-      const pairingToken = await this.resolvePairingToken(input, payloadFingerprint, controller.signal);
+      const existing = await this.pendingFor(input, payloadFingerprint);
+      requestMayHaveCommitted = Boolean(existing);
+      const pairingToken =
+        existing?.pairingToken ?? (input.pairingToken || (await this.mintPairingToken(controller.signal)));
+      if (!existing) {
+        await this.savePending(input, payloadFingerprint, pairingToken);
+        wrotePending = true;
+      }
+      if (controller.signal.aborted)
+        throw new NativeWorkflowError('session-cancelled', 'Hosted share upload cancelled.', true);
       const target = `${originForTests()}/api/shares`;
+      requestMayHaveCommitted = true;
       const response = await this.fetchTransport(target, {
         method: 'POST',
         headers: {
@@ -416,16 +435,22 @@ export class HostedShareClient {
       await this.clearPending(input.requestId);
       return publicRecord(record);
     } catch (error) {
-      if (timedOut)
-        throw new NativeWorkflowError(
-          'network-failure',
-          'The share service did not finish this upload within 60 seconds. You can retry recovery from local share history.',
-          true,
-        );
-      if (controller.signal.aborted)
-        throw new NativeWorkflowError('session-cancelled', 'Hosted share upload cancelled.', true);
-      if (error instanceof NativeWorkflowError) throw error;
-      throw networkFailure(error);
+      const failure = timedOut
+        ? new NativeWorkflowError(
+            'network-failure',
+            'The share service did not finish this upload within 60 seconds. You can retry recovery from local share history.',
+            true,
+          )
+        : controller.signal.aborted
+          ? new NativeWorkflowError('session-cancelled', 'Hosted share upload cancelled.', true)
+          : error instanceof NativeWorkflowError
+            ? error
+            : networkFailure(error);
+      if (!requestMayHaveCommitted) {
+        if (wrotePending) await this.clearPending(input.requestId);
+        throw withCommitState(failure, false);
+      }
+      throw failure;
     } finally {
       clearTimeout(deadline);
       this.active.delete(input.requestId);
@@ -495,6 +520,7 @@ export class HostedShareClient {
   }
 
   private validateUpload(input: HostedShareUpload, artifacts: HostedShareArtifacts): void {
+    normalizedSenderName(input.senderName);
     if (input.pairingToken !== '' && !TOKEN.test(input.pairingToken))
       throw new NativeWorkflowError(
         'invalid-input',
@@ -506,7 +532,7 @@ export class HostedShareClient {
     if (!safeText(artifacts.title, 200))
       throw new NativeWorkflowError('invalid-input', 'The finalized prompt title is invalid.', false);
     const markdownBytes = Buffer.byteLength(artifacts.markdown, 'utf8');
-    if (!artifacts.markdown.trim() || markdownBytes > MAX_MARKDOWN_BYTES)
+    if (!artifacts.markdown.length || markdownBytes > MAX_MARKDOWN_BYTES)
       throw new NativeWorkflowError(
         'invalid-input',
         'The finalized prompt bundle is too large to share.',
@@ -520,11 +546,11 @@ export class HostedShareClient {
         'The finalized prompt bundle is too large to share.',
         false,
       );
+    let structuredMarkdownBytes = 0;
     if (artifacts.bundles) {
       if (artifacts.bundles.length === 0 || artifacts.bundles.length > 20)
         throw new NativeWorkflowError('invalid-input', 'The finalized prompt bundles are invalid.', false);
       const bundleNumbers = new Set<number>();
-      let structuredMarkdownBytes = 0;
       for (const bundle of artifacts.bundles) {
         if (
           !Number.isInteger(bundle.bundleNumber) ||
@@ -538,7 +564,7 @@ export class HostedShareClient {
         bundleNumbers.add(bundle.bundleNumber);
         structuredMarkdownBytes += Buffer.byteLength(bundle.markdown, 'utf8');
       }
-      if (structuredMarkdownBytes > MAX_MARKDOWN_BYTES)
+      if (markdownBytes + structuredMarkdownBytes > MAX_MARKDOWN_BYTES)
         throw new NativeWorkflowError(
           'invalid-input',
           'The finalized prompt bundle is too large to share.',
@@ -546,7 +572,7 @@ export class HostedShareClient {
         );
     }
     const names = new Set<string>();
-    let decodedBytes = markdownBytes;
+    let decodedBytes = markdownBytes + structuredMarkdownBytes;
     for (const image of artifacts.images) {
       const decoded = canonicalBase64Png(image.dataBase64);
       if (!SAFE_PNG.test(image.filename) || names.has(image.filename) || !decoded)
@@ -725,18 +751,6 @@ export class HostedShareClient {
     const uniqueWarnings = [...new Map(warnings.map((warning) => [warning.id, warning])).values()];
     this.currentRecoveryWarningIds = new Set(uniqueWarnings.map((warning) => warning.id));
     return uniqueWarnings;
-  }
-
-  private async resolvePairingToken(
-    input: HostedShareUpload,
-    payloadFingerprint: string,
-    abortSignal: AbortSignal,
-  ): Promise<string> {
-    const existing = await this.pendingFor(input, payloadFingerprint);
-    if (existing) return existing.pairingToken;
-    const pairingToken = input.pairingToken || (await this.mintPairingToken(abortSignal));
-    await this.savePending(input, payloadFingerprint, pairingToken);
-    return pairingToken;
   }
 
   private async pendingFor(

@@ -43,7 +43,14 @@ afterEach(() => {
 
 function bridge(overrides: Partial<ImnotaBridge> = {}) {
   const value = {
-    listHostedShares: vi.fn(async () => ({
+    planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+      ok: true as const,
+      value: {
+        planId: 'plan-id',
+        parts: [{ markdownBytes: 128, uploadBytes: 256, bundleNumbers: [1, 2], imageBundleNumbers: [1] }],
+      },
+    })),
+    listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
       ok: true as const,
       value: { records: [], recoveryErrors: [] },
     })),
@@ -88,6 +95,7 @@ describe('HostedShareDialog', () => {
       );
       const native = bridge({ setSettings });
       render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+      await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
       fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
       fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
@@ -113,6 +121,7 @@ describe('HostedShareDialog', () => {
   it('keeps pairing on the action row, removes owner controls, and always includes ZIP', async () => {
     const native = bridge();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     const create = screen.getByRole('button', { name: 'Create link' });
     expect(screen.queryByRole('link', { name: /Site owner/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /ZIP/ })).not.toBeInTheDocument();
@@ -135,6 +144,7 @@ describe('HostedShareDialog', () => {
   it('remembers the name after blur and reopen but never remembers sharing consent', async () => {
     const native = bridge();
     const view = render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     const input = screen.getByLabelText('Your name (optional)');
     fireEvent.change(input, { target: { value: ' Dylan ' } });
     fireEvent.blur(input);
@@ -142,6 +152,7 @@ describe('HostedShareDialog', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
     view.unmount();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     expect(screen.getByLabelText('Your name (optional)')).toHaveValue('Dylan');
     expect(screen.getByRole('switch', { name: 'I understand' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
@@ -155,6 +166,7 @@ describe('HostedShareDialog', () => {
       .mockImplementation(async (patch) => ({ ...useAppStore.getState().settings, ...patch }));
     const native = bridge({ setSettings });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
     fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
@@ -169,6 +181,7 @@ describe('HostedShareDialog', () => {
   it('creates a one-day link with the sender name without requiring a pairing code', async () => {
     const native = bridge();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     expect(screen.getByRole('radio', { name: '1 day' })).toBeChecked();
     fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Dylan' } });
     fireEvent.click(screen.getByRole('switch', { name: 'I understand' }));
@@ -195,7 +208,14 @@ describe('HostedShareDialog', () => {
     );
     const native = bridge({
       dismissHostedShareRecoveryWarning: dismiss,
-      listHostedShares: vi.fn(async () => ({
+      planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+        ok: true as const,
+        value: {
+          planId: 'plan-id',
+          parts: [{ markdownBytes: 128, uploadBytes: 256, bundleNumbers: [1, 2], imageBundleNumbers: [1] }],
+        },
+      })),
+      listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
         value: {
           records: [active],
@@ -205,6 +225,7 @@ describe('HostedShareDialog', () => {
       })),
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     await screen.findByText('Earlier upload failed.');
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(dismiss).toHaveBeenCalledWith({ id });
@@ -217,6 +238,7 @@ describe('HostedShareDialog', () => {
   it('requires explicit approval and never uploads artifacts on mount or pairing-code entry', async () => {
     const native = bridge();
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     await waitFor(() => expect(native.listHostedShares).toHaveBeenCalledOnce());
 
     const publish = screen.getByRole('button', { name: 'Create link' });
@@ -252,6 +274,7 @@ describe('HostedShareDialog', () => {
       .mockResolvedValueOnce({ ok: true, value: active });
     bridge({ createHostedShare });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     approveAndPublish();
     expect(await screen.findByRole('alert')).toHaveTextContent('The upload was too large.');
 
@@ -273,6 +296,7 @@ describe('HostedShareDialog', () => {
     const native = bridge({ createHostedShare });
     const onClose = vi.fn();
     render(<HostedShareDialog artifacts={artifacts} onClose={onClose} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     approveAndPublish();
     const cancel = await screen.findByRole('button', { name: /Cancel upload/i });
     const back = screen.getByRole('button', { name: 'Back' });
@@ -293,7 +317,14 @@ describe('HostedShareDialog', () => {
 
   it('shows every history row, expiry state, and recovery warnings without hiding intact links', async () => {
     bridge({
-      listHostedShares: vi.fn(async () => ({
+      planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+        ok: true as const,
+        value: {
+          planId: 'plan-id',
+          parts: [{ markdownBytes: 128, uploadBytes: 256, bundleNumbers: [1, 2], imageBundleNumbers: [1] }],
+        },
+      })),
+      listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
         value: {
           records: [active, expired, revoked],
@@ -302,6 +333,7 @@ describe('HostedShareDialog', () => {
       })),
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
 
     const history = await screen.findByText('Your shared links (3)');
     const details = history.closest('details');
@@ -324,6 +356,7 @@ describe('HostedShareDialog', () => {
       .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
     const native = bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     expect(await screen.findByText('A previous receipt timed out.')).toBeInTheDocument();
 
     approveAndPublish();
@@ -344,6 +377,7 @@ describe('HostedShareDialog', () => {
       .mockImplementationOnce(() => refresh);
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     await waitFor(() => expect(listHostedShares).toHaveBeenCalledOnce());
 
     approveAndPublish();
@@ -372,6 +406,7 @@ describe('HostedShareDialog', () => {
       .mockResolvedValueOnce({ ok: true, value: { records: [active], recoveryErrors: [] } });
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     approveAndPublish();
 
     await screen.findByRole('heading', { name: 'Your link is ready' });
@@ -387,12 +422,20 @@ describe('HostedShareDialog', () => {
 
   it('dismisses recovery warnings without changing history or invoking a destructive bridge action', async () => {
     const native = bridge({
-      listHostedShares: vi.fn(async () => ({
+      planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+        ok: true as const,
+        value: {
+          planId: 'plan-id',
+          parts: [{ markdownBytes: 128, uploadBytes: 256, bundleNumbers: [1, 2], imageBundleNumbers: [1] }],
+        },
+      })),
+      listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
         value: { records: [active], recoveryErrors: ['A previous receipt timed out.'] },
       })),
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     await screen.findByText('A previous receipt timed out.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
@@ -416,6 +459,7 @@ describe('HostedShareDialog', () => {
       .mockImplementationOnce(() => retry);
     bridge({ listHostedShares });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     await screen.findByText('A previous receipt timed out.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry recovery' }));
@@ -437,6 +481,7 @@ describe('HostedShareDialog', () => {
     }));
     const native = bridge({ revokeHostedShare });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     approveAndPublish();
     await screen.findByRole('heading', { name: 'Your link is ready' });
 
@@ -468,13 +513,21 @@ describe('HostedShareDialog', () => {
       },
     }));
     bridge({
-      listHostedShares: vi.fn(async () => ({
+      planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+        ok: true as const,
+        value: {
+          planId: 'plan-id',
+          parts: [{ markdownBytes: 128, uploadBytes: 256, bundleNumbers: [1, 2], imageBundleNumbers: [1] }],
+        },
+      })),
+      listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
         ok: true as const,
         value: { records: [active], recoveryErrors: [] },
       })),
       revokeHostedShare,
     });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
 
     const historySummary = await screen.findByText('Your shared links (1)');
     const history = historySummary.closest('details')!;
@@ -493,6 +546,7 @@ describe('HostedShareDialog', () => {
   ])('does not describe an unavailable successful share as ready: %s', async (record, heading, message) => {
     bridge({ createHostedShare: vi.fn(async () => ({ ok: true as const, value: record })) });
     render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByText('Checking share size…')).not.toBeInTheDocument());
     approveAndPublish();
 
     expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
@@ -500,4 +554,76 @@ describe('HostedShareDialog', () => {
     expect(screen.queryByRole('button', { name: 'Copy link' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open link' })).not.toBeInTheDocument();
   });
+});
+
+it('keeps completed parts and retries an ambiguous second upload with the exact original request', async () => {
+  const parts = [1, 2].map((number) => ({
+    markdownBytes: 800_000,
+    uploadBytes: 800_000,
+    bundleNumbers: [number],
+    imageBundleNumbers: [],
+  }));
+  const create = vi
+    .fn<ImnotaBridge['createHostedShare']>()
+    .mockResolvedValueOnce({ ok: true, value: active })
+    .mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'network-failure',
+        message: 'Response lost',
+        retryable: true,
+        details: { requestMayHaveCommitted: true },
+      },
+    })
+    .mockResolvedValueOnce({ ok: true, value: { ...active, id: 'second', url: active.url + '2' } });
+  const native = bridge({
+    planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+      ok: true,
+      value: { planId: 'split-plan', parts },
+    })),
+    createHostedShare: create,
+    listHostedShares: vi.fn<ImnotaBridge['listHostedShares']>(async () => ({
+      ok: true,
+      value: { records: create.mock.calls.length ? [active] : [], recoveryErrors: [] },
+    })),
+  });
+  render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+  await screen.findByText(/Part 1 of 2/);
+  expect(screen.getByText(/781.3 KiB/)).toBeInTheDocument();
+  approveAndPublish();
+  await screen.findByRole('heading', { name: 'Your link is ready' });
+  expect(create.mock.calls[0][0]).toMatchObject({
+    planId: 'split-plan',
+    partIndex: 0,
+    pairingToken: 'a'.repeat(43),
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare next link' }));
+  expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  expect(screen.getByLabelText('Pairing code')).toHaveValue('');
+  fireEvent.click(screen.getByRole('switch'));
+  fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+  await screen.findByText('Response lost');
+  expect(screen.getByText('Your shared links (1)')).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: '7 days' })).toBeDisabled();
+  expect(screen.getByLabelText('Pairing code')).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+  await screen.findByText(/All links created/);
+  expect(create.mock.calls[2][0]).toEqual(create.mock.calls[1][0]);
+  expect(create.mock.calls[1][0]).toMatchObject({ pairingToken: '', partIndex: 1 });
+  expect(create.mock.calls[1][0].requestId).not.toBe(create.mock.calls[0][0].requestId);
+  expect(native.planHostedShare).toHaveBeenCalledOnce();
+});
+
+it('blocks consent and upload when the local share plan fails', async () => {
+  const native = bridge({
+    planHostedShare: vi.fn<ImnotaBridge['planHostedShare']>(async () => ({
+      ok: false,
+      error: { code: 'invalid-input', message: 'PNG exceeds 10 MiB', retryable: false },
+    })),
+  });
+  render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+  await screen.findByText('PNG exceeds 10 MiB');
+  expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
+  expect(screen.getByRole('switch')).toBeDisabled();
+  expect(native.createHostedShare).not.toHaveBeenCalled();
 });

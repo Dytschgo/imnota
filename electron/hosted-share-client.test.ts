@@ -849,3 +849,35 @@ describe('HostedShareClient persistence and recovery', () => {
     await expect(revoking).resolves.toMatchObject({ message: expect.stringMatching(/30 seconds/) });
   });
 });
+
+it('rejects combined plus card Markdown over the server cap before pairing or upload', async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  const markdown = 'a'.repeat(600_000);
+  const { client } = await fixture();
+  await expect(
+    client.create(
+      { ...upload(), pairingToken: '' },
+      { ...artifacts(), markdown, bundles: [{ bundleNumber: 1, markdown, imageFilename: 'prompt-001.png' }] },
+    ),
+  ).rejects.toThrow(/too large/);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('marks invalid input and failed automatic pairing as uncommitted so a corrected code can retry', async () => {
+  const transport = vi.fn<HostedShareFetch>(async (target) =>
+    target.endsWith('/api/pairing')
+      ? json({ error: { message: 'pairing offline' } }, 503)
+      : json(receipt(), 201),
+  );
+  const { root } = await fixture();
+  const client = new HostedShareClient(root, async () => undefined, transport);
+  await expect(client.create({ ...upload(), pairingToken: 'short' }, artifacts())).rejects.toMatchObject({
+    details: { requestMayHaveCommitted: false },
+  });
+  expect(transport).not.toHaveBeenCalled();
+  await expect(client.create({ ...upload(), pairingToken: '' }, artifacts())).rejects.toMatchObject({
+    details: { requestMayHaveCommitted: false },
+  });
+  await expect(client.create(upload(), artifacts())).resolves.toMatchObject({ id: firstShare });
+});

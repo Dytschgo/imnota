@@ -1,3 +1,4 @@
+import type { HostedSharePartSummary } from './hosted-share-limits.js';
 import type { NativeCopyFunction, PreferenceSettings, PreferenceSettingsResult } from './preferences.js';
 import type { ProjectData, ProjectSnapshot } from './types.js';
 
@@ -100,7 +101,14 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
 }
 
 /** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
+export interface HostedSharePlan {
+  planId: string;
+  parts: readonly HostedSharePartSummary[];
+}
+
 export interface HostedShareUpload {
+  planId?: string;
+  partIndex?: number;
   requestId: string;
   /** Empty requests a private one-use pairing capability from the share service. */
   pairingToken: string;
@@ -273,6 +281,10 @@ export interface WorkflowBridge {
     target: PromptExportOpenTarget;
   }): Promise<WorkflowResult<void>>;
   openHostedSharePairing(): Promise<WorkflowResult<void>>;
+  planHostedShare(input: {
+    sessionId: string;
+    bundleNumbers: readonly number[];
+  }): Promise<WorkflowResult<HostedSharePlan>>;
   createHostedShare(input: HostedShareUpload): Promise<WorkflowResult<HostedShareRecord>>;
   cancelHostedShare(input: { requestId: string }): Promise<WorkflowResult<void>>;
   listHostedShares(): Promise<WorkflowResult<HostedShareList>>;

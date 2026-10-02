@@ -42,6 +42,7 @@ const bridge: ImnotaBridge = {
   copyPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:copy', input),
   openPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:open', input),
   openHostedSharePairing: () => ipcRenderer.invoke('workflow:hosted-share:pair'),
+  planHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:plan', input),
   createHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:create', input),
   cancelHostedShare: (input) => ipcRenderer.invoke('workflow:hosted-share:cancel', input),
   listHostedShares: () => ipcRenderer.invoke('workflow:hosted-share:list'),
