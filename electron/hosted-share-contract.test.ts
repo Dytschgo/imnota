@@ -11,10 +11,74 @@ import { createService } from '../share-service/src/app.js';
 import { clipboardContextHtml as browserClipboardHtml } from '../share-service/public/share-copy.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { HostedShareClient } from './hosted-share-client.js';
+import { planHostedShares } from './hosted-share-plan.js';
+import { randomUUID } from 'node:crypto';
 
 const temporary: string[] = [];
 const pngBase64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+it('publishes and downloads every byte of oversized Unicode Markdown through split links', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-split-data-'));
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-split-user-'));
+  temporary.push(dataDir, userData);
+  const service = createService({
+    dataDir,
+    publicOrigin: 'https://app.imnota.xyz',
+    receiptSecret: Buffer.alloc(32, 7).toString('base64url'),
+  });
+  const server = service.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const transport = async (target: string, init: RequestInit) => {
+      const url = new URL(target);
+      const response = await fetch(origin + url.pathname, init);
+      return new Response(response.body, { status: response.status, headers: response.headers });
+    };
+    const client = new HostedShareClient(userData, async () => undefined, transport);
+    const markdown = '# Large collection\n' + '🙂 Grüezi\n'.repeat(65_000);
+    const parts = await planHostedShares(
+      {
+        read: async () => ({
+          bundleNumber: 1,
+          markdown,
+          markdownFilename: 'p.md',
+          pngFilename: 'p.png',
+          imageDataUrl: `data:image/png;base64,${pngBase64}`,
+        }),
+      },
+      'final-session',
+      [1],
+      () => ({ width: 1, height: 1, dataBase64: pngBase64 }),
+    );
+    expect(parts.length).toBeGreaterThan(1);
+    const downloads: string[] = [];
+    for (const part of parts) {
+      const record = await client.create(
+        {
+          requestId: randomUUID(),
+          pairingToken: '',
+          sessionId: 'final-session',
+          bundleNumbers: [1],
+          includeArchive: true,
+          expiresInDays: 1,
+        },
+        part,
+      );
+      const response = await fetch(origin + new URL(record.url).pathname + '/markdown');
+      expect(response.status).toBe(200);
+      downloads.push(await response.text());
+    }
+    expect(downloads.join('')).toBe(markdown);
+    expect((await client.list()).records).toHaveLength(parts.length);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error?: Error) => (error ? reject(error) : resolve())),
+    );
+    service.close();
+  }
+});
 
 afterEach(async () => {
   vi.unstubAllGlobals();

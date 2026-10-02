@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Copy, ExternalLink, Info, Square, Trash2 } from 'lucide-react';
-import type { HostedShareRecord, HostedShareRecoveryWarning } from '../../shared/workflow-bridge';
+import type {
+  HostedShareRecord,
+  HostedShareRecoveryWarning,
+  HostedSharePlan,
+  HostedShareUpload,
+} from '../../shared/workflow-bridge';
 import type { HostedShareArtifacts } from './prompt-export-controller-core';
 import { Button, Modal, TextInput } from '../components/ui';
 import { useSharingSenderName } from '../settings/sharing-preferences';
@@ -25,11 +30,30 @@ export function HostedShareDialog({
   onClose(): void;
   onError(message: string): void;
 }) {
-  const imageCount = artifacts.imageBundleNumbers.length;
-  const quotaProblem =
-    imageCount > 20
-      ? `This export has ${imageCount} PNGs; hosted sharing accepts up to 20. Exclude or split collection content, then prepare a fresh export.`
-      : undefined;
+  const [plan, setPlan] = useState<HostedSharePlan>();
+  const [planError, setPlanError] = useState<string>();
+  const [partIndex, setPartIndex] = useState(0);
+  const pendingInput = useRef<HostedShareUpload | undefined>(undefined);
+  const part = plan?.parts[partIndex];
+  const imageNumbers = part?.imageBundleNumbers ?? artifacts.imageBundleNumbers;
+  const imageCount = imageNumbers.length;
+  const quotaProblem = planError ?? (!plan ? 'Checking share size…' : undefined);
+  useEffect(() => {
+    let active = true;
+    void window.imnota
+      .planHostedShare({ sessionId: artifacts.sessionId, bundleNumbers: artifacts.bundleNumbers })
+      .then((result) => {
+        if (!active) return;
+        if (result.ok && result.value.parts.length) setPlan(result.value);
+        else setPlanError(result.ok ? 'No shareable content was found.' : result.error.message);
+      })
+      .catch(() => {
+        if (active) setPlanError('Could not check share size. Go back and reopen Share online.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [artifacts.sessionId, artifacts.bundleNumbers]);
   const [token, setToken] = useState('');
   const [approved, setApproved] = useState(false);
   const [showPairing, setShowPairing] = useState(false);
@@ -88,6 +112,10 @@ export function HostedShareDialog({
       setError(quotaProblem);
       return;
     }
+    if (!pendingInput.current && token.trim() !== '' && !/^[A-Za-z0-9_-]{43}$/.test(token.trim())) {
+      setError('Paste the complete one-use pairing code from app.imnota.xyz.');
+      return;
+    }
     uploading.current = true;
     uploadStarted.current = false;
     cancelRequested.current = false;
@@ -99,10 +127,12 @@ export function HostedShareDialog({
         setError('Link creation cancelled.');
         return;
       }
-      const id = request ?? requestId();
+      const id = pendingInput.current?.requestId ?? requestId();
       setRequest(id);
       uploadStarted.current = true;
-      const result = await window.imnota.createHostedShare({
+      const input = pendingInput.current ?? {
+        planId: plan!.planId,
+        partIndex,
         requestId: id,
         pairingToken: token.trim(),
         sessionId: artifacts.sessionId,
@@ -110,14 +140,21 @@ export function HostedShareDialog({
         includeArchive: true,
         expiresInDays,
         senderName: senderName.normalize('NFC').trim() || undefined,
-      });
+      };
+      pendingInput.current = input;
+      const result = await window.imnota.createHostedShare(input);
       if (!mounted.current) return;
       if (!result.ok) {
         setBusy(false);
         setError(result.error.message);
-        if (result.error.details?.requestMayHaveCommitted === false) setRequest(undefined);
+        if (result.error.details?.requestMayHaveCommitted === false) {
+          setRequest(undefined);
+          pendingInput.current = undefined;
+        }
         return;
       }
+      pendingInput.current = undefined;
+      setToken('');
       setRecord(result.value);
       setHistory((items) => [result.value, ...items.filter((item) => item.id !== result.value.id)]);
       setError(undefined);
@@ -202,21 +239,35 @@ export function HostedShareDialog({
                 Markdown · {imageCount} PNG
                 {imageCount === 1 ? '' : 's'} · ZIP included
               </span>
+              {part && (
+                <span>
+                  {(part.markdownBytes / 1024).toFixed(1)} KiB / 1,024 KiB text allowance ·{' '}
+                  {(part.uploadBytes / 1024 / 1024).toFixed(2)} MiB upload
+                </span>
+              )}
+              {plan && plan.parts.length > 1 && (
+                <p>
+                  Part {partIndex + 1} of {plan.parts.length}. This export needs separate links. Create and
+                  share each link in order; completed links stay in your history. Long text continues in later
+                  parts, with its image in the first part.
+                </p>
+              )}
               <details className="hosted-share-file-details">
                 <summary>Included files</summary>
                 <ul>
                   <li>prompt.md</li>
-                  {artifacts.imageBundleNumbers.map((number) => (
+                  {imageNumbers.map((number) => (
                     <li key={number}>prompt-{String(number).padStart(3, '0')}.png</li>
                   ))}
                 </ul>
               </details>
             </div>
+            {!plan && !planError && <p role="status">Checking share size…</p>}
             <TextInput
               label="Your name (optional)"
               value={senderName}
               maxLength={80}
-              disabled={busy || savingName}
+              disabled={busy || savingName || Boolean(request)}
               onChange={(event) => setSenderName(event.target.value)}
               onBlur={() => void saveSenderName()}
               placeholder="e.g. Dylan"
@@ -226,13 +277,13 @@ export function HostedShareDialog({
                 {nameError}
               </p>
             )}
-            {quotaProblem && (
+            {planError && (
               <p className="hosted-share-error" role="alert">
                 <AlertTriangle size={15} />
-                {quotaProblem}
+                {planError}
               </p>
             )}
-            <fieldset className="hosted-share-expiry" disabled={busy}>
+            <fieldset className="hosted-share-expiry" disabled={busy || Boolean(request)}>
               <legend>Expires after</legend>
               <div className="hosted-share-expiry-choices">
                 {[1, 7, 14, 30].map((days) => (
@@ -294,13 +345,20 @@ export function HostedShareDialog({
                 </Button>
                 <TextInput
                   label="Pairing code"
-                  disabled={busy || Boolean(quotaProblem)}
+                  maxLength={512}
+                  disabled={busy || Boolean(quotaProblem) || Boolean(request)}
                   autoComplete="off"
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                   placeholder="Paste your code"
                 />
               </div>
+            )}
+            {request && error && !busy && (
+              <p>
+                Retry uses the original name, expiry and pairing code while this upload may already exist.
+                Earlier links remain in your history.
+              </p>
             )}
             {busy && (
               <p className="hosted-share-progress" role="status">
@@ -354,6 +412,12 @@ export function HostedShareDialog({
                   ? `The published link expired ${formatExpiry(record.expiresAt)} and can no longer be opened.`
                   : `Anyone with the link can open it until ${formatExpiry(record.expiresAt)}.`}
             </p>
+            {plan && plan.parts.length > 1 && (
+              <p>
+                Part {partIndex + 1} of {plan.parts.length}
+                {partIndex + 1 === plan.parts.length ? ' · All links created' : ' · More parts remain'}
+              </p>
+            )}
             <TextInput label="Share link" readOnly value={record.url} />
             <div className="hosted-share-actions">
               {!recordUnavailable && (
@@ -376,6 +440,21 @@ export function HostedShareDialog({
                 {record.revokedAt ? 'Revoked' : recordExpired ? 'Expired' : 'Revoke link'}
               </Button>
             </div>
+            {plan && partIndex + 1 < plan.parts.length && (
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={() => {
+                  setPartIndex((index) => index + 1);
+                  setRecord(undefined);
+                  setRequest(undefined);
+                  setApproved(false);
+                  setError(undefined);
+                }}
+              >
+                Prepare next link
+              </Button>
+            )}
           </div>
         )}
         {error && (

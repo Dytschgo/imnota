@@ -17,6 +17,7 @@ import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
+import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
@@ -3096,7 +3097,41 @@ export async function runSmokeWorkflow(
   assertions.push(
     'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, and one PNG/Markdown pair',
   );
+  await driver.click({ text: 'Share online', exact: true });
+  await driver.waitFor({ text: 'KiB / 1,024 KiB text allowance' });
+  const shareConsent = await driver.evaluate<boolean>(
+    `document.querySelector('.hosted-share [role="switch"]')?.getAttribute('aria-checked') === 'false'`,
+  );
+  if (!shareConsent) throw new Error('Share size preflight bypassed consent.');
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'hosted-share-size.png'));
+  await driver.click({ selector: '[data-testid="hosted-share-close"]' });
   await closePromptDialog(driver);
+  assertions.push('native hosted-share plan displays its text allowance before explicit upload consent');
+
+  // Verify the shipped planner in the packaged runtime without publishing fixture data.
+  const shareMarkdown = '# Large share\n' + '\u{1f642} Gruetzi\n'.repeat(70_000);
+  const shareParts = await planHostedShares(
+    {
+      read: async () => ({
+        bundleNumber: 1,
+        markdown: shareMarkdown,
+        markdownFilename: 'p.md',
+        pngFilename: '',
+      }),
+    },
+    'smoke-finalized',
+    [1],
+    () => undefined,
+  );
+  if (
+    shareParts.length < 2 ||
+    shareParts.map((part) => part.markdown).join('') !== shareMarkdown ||
+    shareParts.some((part) => hostedShareSummary(part).markdownBytes > 1024 * 1024)
+  )
+    throw new Error('Packaged hosted-share planner lost text or exceeded the service limit.');
+  assertions.push(
+    'oversized Unicode hosted-share text splits losslessly below the combined Markdown service limit',
+  );
 
   await exerciseWatchAndConflict(driver, host, projectPath);
   assertions.push('filesystem watcher reload, stale compare-and-swap rejection and conflict recovery');
