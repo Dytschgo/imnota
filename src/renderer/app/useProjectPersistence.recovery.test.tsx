@@ -48,7 +48,9 @@ afterEach(async () => {
   }
 });
 
-async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolean } = {}) {
+async function fixture(
+  options: { nativeWatch?: boolean; cleanupWarning?: boolean; keepMounted?: boolean } = {},
+) {
   const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-reload-')));
   temporary.push(projectPath);
   const projectFile = path.join(projectPath, 'project.json');
@@ -259,8 +261,8 @@ async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolea
     hook.result.current.persistence.queueProjectMetadata({ ...source.project, name: 'Local name' });
   });
   const { persistence, content } = hook.result.current;
-  hook.unmount();
-  expect(listeners.size).toBe(0);
+  if (!options.keepMounted) hook.unmount();
+  expect(listeners.size).toBe(options.keepMounted ? 1 : 0);
   setReloadProtection({
     allowUnload: vi.fn(),
     flush: () =>
@@ -289,6 +291,7 @@ async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolea
     contentService,
     text,
     persistence,
+    current: () => hook.result.current.persistence,
     diskRevision: async () => projectRevisionForSource(await fs.readFile(projectFile)),
     injectWatchError: () =>
       listeners.forEach((listener) =>
@@ -819,5 +822,57 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
     expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
     expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
+  },
+);
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'shows the committed metadata warning after directory sync %s and conflicting readback',
+  async (code) => {
+    const f = await fixture({ keepMounted: true });
+    const save = f.bridge.saveProjectCompareAndSwap.getMockImplementation()!;
+    const read = f.snapshot.getMockImplementation()!;
+    let assertFault!: () => void;
+    let externalBytes!: Buffer;
+    f.bridge.saveProjectCompareAndSwap.mockImplementationOnce(async (input) => {
+      assertFault = failSync(f.projectFile, 'directory', code);
+      f.snapshot.mockImplementationOnce(async () => {
+        await f.externalEdit();
+        externalBytes = await fs.readFile(f.projectFile);
+        return read();
+      });
+      return structuredClone(await save(input));
+    });
+    let saved: boolean | undefined;
+    await act(async () => {
+      saved = await f.persistence.flushProjectMetadata();
+    });
+    assertFault();
+    expect(saved).toBe(false);
+    const outcome = await f.bridge.saveProjectCompareAndSwap.mock.results[0].value;
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('Expected conflicting metadata readback');
+    expect(outcome.error.code).toBe('project-changed');
+    expect(outcome.error.message).toContain(COMMITTED_WRITE_WARNING);
+    expect(outcome.error.message).toContain('changed again');
+    expect(await f.readProject()).toMatchObject({ name: 'Local name', favourite: true });
+    expect(await fs.readFile(f.projectFile)).toEqual(externalBytes);
+    expect(f.current().projectRevision).toBeNull();
+    expect(f.current().hasPendingProjectMetadata()).toBe(true);
+    expect(f.current().externalChange?.kind).toBe('metadata-conflict');
+    expect(f.onSnapshot.mock.calls.some(([snapshot]) => snapshot.project.favourite)).toBe(false);
+    expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
+    // Another explicit save remains blocked; it cannot adopt or overwrite the later external edit.
+    await act(async () => {
+      expect(await f.current().flushProjectMetadata()).toBe(false);
+    });
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(await fs.readFile(f.projectFile)).toEqual(externalBytes);
+    expect(f.current().hasPendingProjectMetadata()).toBe(true);
+    // App's external-change banner renders this exact field, not the IPC result above.
+    expect(f.current().externalChange?.message).toContain(COMMITTED_WRITE_WARNING);
+    expect(f.current().externalChange?.message).toContain('changed again');
+    expect(f.current().externalChange?.message).toContain('Your edits remain open');
+    expect(f.current().externalChange?.message).toMatch(/reload.*compare/i);
   },
 );
