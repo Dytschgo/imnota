@@ -40,7 +40,7 @@ import type {
   WorkspaceSettings,
 } from '../src/shared/types.js';
 import type { AppearanceMode, PreferenceSettingsResult } from '../src/shared/preferences.js';
-import { preferenceSettingsEnvelope, resolvePreferenceSettings } from '../src/shared/preference-settings.js';
+import { resolvePreferenceSettings } from '../src/shared/preference-settings.js';
 import { DEFAULT_WORKSPACE_SETTINGS, resolveWorkspaceSettings } from '../src/shared/workspace-settings.js';
 import type {
   ClipboardFormatsReport,
@@ -49,7 +49,8 @@ import type {
 } from '../src/shared/workflow-bridge.js';
 import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
-import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
+import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
+import { persistSettings, writeApplicationFile } from './application-persistence.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
 import { recoverScreenshotTrashTransactions, type ScreenshotTrashOperations } from './screenshot-trash.js';
@@ -148,6 +149,8 @@ import { onSuccessfulQuit, teardownTrayAfterSuccessfulQuit } from './tray-quit-l
 import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
+import { requiresSingleInstanceLock } from './single-instance.js';
+import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
 // Smoke never reads or writes the installed application's profile or caches.
@@ -160,8 +163,18 @@ if (process.env.IMNOTA_SMOKE === '1') {
   nativeTheme.themeSource = 'light';
 }
 
+// The lock is scoped to the profile selected above. A second interactive launch hands
+// over to the running instance instead of writing to the same projects beside it.
+const singleInstanceLocked = requiresSingleInstanceLock(process.argv, process.env);
+const primaryInstance = !singleInstanceLocked || app.requestSingleInstanceLock();
+if (!primaryInstance) {
+  process.stderr.write('Imnota is already running. Switching to the open window.\n');
+  app.quit();
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let startupWindowCreated = false;
 // Main-process-only, one-use approval for the disposable native smoke fixture.
 let smokeBackupRestorePath: string | null = null;
 let smokeProjectDeletionPath: string | null = null;
@@ -297,12 +310,14 @@ function resolvedWindowBackground(
 }
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await diagnostics.filesystem('write', filePath, async () => {
-    await writeAtomically(filePath, content);
-    projectWatchManager?.recordSelfWrite(filePath, content);
+  await writeApplicationFile(filePath, content, {
+    diagnostics,
+    recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
+    invalidate: (target) => {
+      projectSearchService?.invalidateForPath(target);
+      contentSearch.invalidatePath(target);
+    },
   });
-  projectSearchService?.invalidateForPath(filePath);
-  contentSearch.invalidatePath(filePath);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
@@ -328,6 +343,15 @@ const screenshotTransactionOperations: ScreenshotTransactionOperations = {
   unlink: unlinkTracked,
   removeDirectory: (target) =>
     diagnostics.filesystem('remove-directory', target, () => fs.rm(target, { recursive: true, force: true })),
+  // Saves also sweep journals. Open normally quarantines first and shows the warning.
+  damagedJournal: async (report) => {
+    await diagnostics.record({
+      category: 'integrity',
+      action: 'save-journal-quarantined',
+      phase: 'observed',
+      target: report.quarantinedPath,
+    });
+  },
 };
 
 const screenshotTrashOperations: ScreenshotTrashOperations = {
@@ -380,20 +404,20 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
-  const persisted = preferenceSettingsEnvelope(
-    { ...retainedApplicationSettings, ...nextSettings },
-    nextPreferences,
-    preferenceSettingsResult.profile,
-  );
-  const persist = async () => {
-    await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
-    if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
-    settings = { ...nextSettings };
-    preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
-  };
-  if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
-  else await persist();
-  syncCaptureGlobalShortcut();
+  await persistSettings(nextSettings, nextPreferences, {
+    filePath: settingsFile(),
+    retained: retainedApplicationSettings,
+    profile: preferenceSettingsResult.profile,
+    write: atomicWrite,
+    publish: (next, preferences) => {
+      if (next.workspacePath !== settings.workspacePath) contentSearch.invalidate();
+      settings = next;
+      preferenceSettingsResult = { ...preferenceSettingsResult, settings: preferences };
+    },
+    savePreference: (enabled, persist) =>
+      localMcpServer ? localMcpServer.savePreference(enabled, persist) : persist(),
+    syncShortcut: syncCaptureGlobalShortcut,
+  });
 }
 
 function workspaceOrThrow(): string {
@@ -502,7 +526,18 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
   const warnings: string[] = [];
   const recoveredDeletes: Array<{ undoToken: string; screenshotId: string }> = [];
   const recoveredContentDeletes: Array<{ undoToken: string; itemId: string }> = [];
-  const transactions = await recoverScreenshotTransactions(projectPath, screenshotTransactionOperations);
+  const damagedJournal =
+    (subject: string, action: string) =>
+    async (report: DamagedJournalReport): Promise<void> => {
+      warnings.push(
+        `${subject} was damaged and could not be read. It was moved aside so this project can open; nothing was deleted. Its files are kept in ${report.relativePath} inside the project folder.`,
+      );
+      await diagnostics.record({ category: 'integrity', action, phase: 'observed', target: projectPath });
+    };
+  const transactions = await recoverScreenshotTransactions(projectPath, {
+    ...screenshotTransactionOperations,
+    damagedJournal: damagedJournal('An interrupted save journal', 'save-journal-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'save-recovery-checked',
@@ -538,7 +573,10 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
     }
   }
 
-  const trash = await recoverScreenshotTrashTransactions(projectPath, screenshotTrashOperations);
+  const trash = await recoverScreenshotTrashTransactions(projectPath, {
+    ...screenshotTrashOperations,
+    damagedJournal: damagedJournal('A screenshot Undo journal', 'screenshot-undo-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'screenshot-undo-checked',
@@ -554,7 +592,10 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
         screenshotId: transaction.screenshotId,
       });
   }
-  const contentTrash = await recoverContentTrashTransactions(projectPath, contentTrashOperations);
+  const contentTrash = await recoverContentTrashTransactions(projectPath, {
+    ...contentTrashOperations,
+    damagedJournal: damagedJournal('A content Undo journal', 'content-undo-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'content-undo-checked',
@@ -1389,7 +1430,7 @@ async function insertCapturedPng(
     () => readOptionalFile(path.join(projectPath, '.imnota-recovery.json')),
     assertAdmission,
   );
-  await commitFileTransaction(
+  const warnings = await commitFileTransaction(
     projectPath,
     'capture',
     [
@@ -1424,7 +1465,10 @@ async function insertCapturedPng(
         assertProjectRevision(projectPath, baseline.projectRevision),
       ),
   );
-  return { snapshot: await makeSnapshot(projectPath), screenshotId: screenshot.id };
+  return {
+    snapshot: withSnapshotWarnings(await makeSnapshot(projectPath), warnings),
+    screenshotId: screenshot.id,
+  };
 }
 
 async function mutateProjectMetadata(
@@ -2058,7 +2102,19 @@ async function createWindow(): Promise<BrowserWindow> {
   return createdWindow;
 }
 
+if (singleInstanceLocked && primaryInstance)
+  app.on('second-instance', () => {
+    // Startup creates the first window itself; a launch racing it must not add another.
+    if (!startupWindowCreated) return;
+    if (mainWindow && !mainWindow.isDestroyed()) raiseMainWindow();
+    else
+      void createWindow()
+        .then(() => syncCaptureGlobalShortcut())
+        .catch(console.error);
+  });
+
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
@@ -2117,11 +2173,15 @@ app.whenReady().then(async () => {
       const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
       // Fail closed for this process even if storing the disabled preference also fails.
       preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
-      await persistApplicationSettings(settings, next).catch(() => {
-        agentAccessStartupError += ' The disabled preference could not be saved.';
+      await persistApplicationSettings(settings, next).catch((error) => {
+        agentAccessStartupError +=
+          error instanceof CommittedWriteError
+            ? ` The disabled preference is active, but ${error.message}`
+            : ' The disabled preference could not be saved.';
       });
     });
   await createWindow();
+  startupWindowCreated = true;
   createAppTray();
   if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {

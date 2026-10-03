@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectWatchEvent } from '../src/shared/workflow-bridge.js';
 import { emptyProject } from '../src/shared/utils.js';
+import { CommittedWriteError } from './files.js';
 import { ignoredProjectWatchPath, ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 
 const temporary: string[] = [];
@@ -192,6 +193,54 @@ describe('project file watch and compare-and-swap', () => {
     expect(successful.projectRevision).toMatch(/^[a-f0-9]{64}$/);
     expect(successful.snapshot.projectRevision).toBe(successful.projectRevision);
   });
+
+  it.each(['untyped error', 'other file', 'missing own marker'] as const)(
+    'refuses committed CAS readback with %s',
+    async (kind) => {
+      const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-watch-')));
+      temporary.push(projectPath);
+      const projectFile = path.join(projectPath, 'project.json');
+      const project = emptyProject('Baseline', '');
+      const source = JSON.stringify(project);
+      await fs.writeFile(projectFile, source);
+      const loadSnapshot = vi.fn(async () => ({
+        projectPath,
+        project,
+        thumbnails: {},
+        recoveryFound: false,
+      }));
+      const cause = Object.assign(new Error('EIO'), { code: 'EIO' });
+      const failure =
+        kind === 'untyped error'
+          ? Object.assign(new Error('Not a committed write error'), {
+              committed: true,
+              filePath: projectFile,
+            })
+          : new CommittedWriteError(
+              kind === 'other file' ? path.join(projectPath, 'note.md') : projectFile,
+              cause,
+            );
+      const manager = new ProjectWatchManager({
+        createWatch: () => ({ close() {}, on() {} }),
+        loadSnapshot,
+        saveProject: async () => {
+          throw failure;
+        },
+        emit: vi.fn(),
+      });
+      try {
+        const grant = await manager.start(projectPath);
+        if (kind !== 'missing own marker') manager.recordSelfWrite(projectFile, source);
+        await expect(
+          manager.compareAndSwap(grant.watchId, grant.projectRevision, { ...project, name: 'Pending' }),
+        ).rejects.toBe(failure);
+        expect(loadSnapshot).not.toHaveBeenCalled();
+        expect(await fs.readFile(projectFile, 'utf8')).toBe(source);
+      } finally {
+        manager.stopAll();
+      }
+    },
+  );
 
   it('retries reload rather than pairing an older snapshot with a newer revision', async () => {
     const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-watch-race-')));

@@ -8,6 +8,7 @@ import { contentItemSchema, validateProject } from '../src/shared/schema.js';
 import { DELETED_ITEM_RETENTION_MS, deleteRetentionExpired } from '../src/shared/recently-deleted.js';
 import { nowIso } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
 import { contentItemRelativePaths } from './content-paths.js';
 
 const UNDO_ROOT = '.imnota-content-undo';
@@ -47,6 +48,8 @@ export interface ContentTrashOperations {
   write: typeof atomicWrite;
   removeDirectory: (target: string) => Promise<void>;
   unlink?: (target: string) => Promise<void>;
+  /** Told when an unreadable Undo journal was moved aside instead of blocking open. */
+  damagedJournal?: DamagedJournalReporter;
 }
 
 interface ResolvedOperations extends ContentTrashOperations {
@@ -67,6 +70,7 @@ export class ContentTrashError extends Error {
       | 'invalid-project'
       | 'invalid-token'
       | 'invalid-manifest'
+      | 'unreadable-manifest'
       | 'baseline-changed'
       | 'delete-failed'
       | 'undo-failed'
@@ -306,8 +310,39 @@ async function loadManifest(
   const directory = undoDirectory(projectPath, token);
   await assertNoLinks(directory);
   const source = await readOptional(path.join(directory, 'manifest.json'), MAX_MANIFEST_BYTES);
-  if (!source) throw new ContentTrashError('invalid-manifest', 'Content Undo manifest is missing.', token);
-  return { directory, manifest: parseManifest(JSON.parse(source.toString('utf8')), token) };
+  if (!source) throw new ContentTrashError('unreadable-manifest', 'Content Undo manifest is missing.', token);
+  let value: unknown;
+  try {
+    value = JSON.parse(source.toString('utf8'));
+  } catch (error) {
+    throw new ContentTrashError(
+      'unreadable-manifest',
+      'Content Undo manifest is damaged and cannot be read.',
+      token,
+      { cause: error },
+    );
+  }
+  return { directory, manifest: parseManifest(value, token) };
+}
+
+/**
+ * Recovery must not let one truncated manifest block project open. A manifest that is
+ * not JSON cannot describe a recoverable state, so its journal is moved aside intact and
+ * reported. Manifests that parse but fail validation, and I/O errors, still stop recovery.
+ */
+async function loadManifestOrQuarantine(
+  projectPath: string,
+  token: string,
+  operations: ResolvedOperations,
+): Promise<{ directory: string; manifest: ContentTrashManifest } | null> {
+  try {
+    return await loadManifest(projectPath, token);
+  } catch (error) {
+    if (!(error instanceof ContentTrashError) || error.code !== 'unreadable-manifest') throw error;
+    const report = await quarantineDamagedJournal(projectPath, undoDirectory(projectPath, token));
+    await operations.damagedJournal?.(report);
+    return null;
+  }
 }
 
 function normalizeWithout(project: ProjectData, item: ContentItem): ProjectData {
@@ -646,7 +681,10 @@ export async function undoContentItemDelete(
     }
   } catch (error) {
     if (await classify(metadataPath, loaded.directory, undoAfterStored))
-      return { project: restoredProject, warning: 'Content restored; Undo cleanup is pending.' };
+      return {
+        project: restoredProject,
+        warning: `Content restored; Undo cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      };
     await removeOwnContent(root, loaded.directory, manifest, operations);
     await setPhase(loaded.directory, manifest, 'deleted', operations);
     throw new ContentTrashError(
@@ -666,6 +704,7 @@ async function tokens(root: string): Promise<string[]> {
   });
   const result: string[] = [];
   for (const entry of entries) {
+    // Files such as .DS_Store or Thumbs.db, and quarantined journals, are not ours to judge.
     await assertNoLinks(path.join(root, entry.name));
     if (!TOKEN_PATTERN.test(entry.name)) continue;
     if (!entry.isDirectory())
@@ -683,7 +722,8 @@ export async function recoverContentTrashTransactions(
   const operations = operationsWithDefaults(suppliedOperations);
   const results: ContentTrashRecoveryResult[] = [];
   for (const token of await tokens(undoRoot(project))) {
-    const loaded = await loadManifest(project, token);
+    const loaded = await loadManifestOrQuarantine(project, token, operations);
+    if (!loaded) continue;
     let { manifest } = loaded;
     const metadataPath = path.join(project, 'project.json');
     const metadata = await readOptional(metadataPath, MAX_PROJECT_BYTES);

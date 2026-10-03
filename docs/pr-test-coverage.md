@@ -117,3 +117,19 @@ Each application test below was collected by Vitest, with discovery checked agai
 | Approved visual comparison               | Windows, all 14 baselines with unchanged tolerances                                     |
 
 The routing change itself did not delete test cases or assertions. `test` and `test:platform` both finish with `node --test "scripts/*.test.mjs"`, so every script test under `scripts/` runs without being listed by hand; the default `test` still runs the complete Vitest and Node suites. Every `electron/` and `src/shared/` test that never touches a DOM declares `// @vitest-environment node`, so it skips the jsdom boot the renderer tests need; `shortcuts.test.ts` is the one shared test that keeps jsdom for real `KeyboardEvent`s. Files stay in a single Vitest project on purpose: splitting them into per-environment projects makes Vitest order files by project, which packed the real-fsync persistence tests together and doubled their durations on the hosted Windows and macOS disks. Existing required job names and release gating remain unchanged. Validate artifact scope and job dependencies are documented in [CI artifacts](ci-artifacts.md) and [CI routing](ci-routing.md).
+
+## IPC boundary inventory
+
+`electron/ipc-boundary.test.ts` executes the preload with a recording Electron
+bridge, registers each real handler module with the router, and checks that
+invoked channels, registrations and explicit contracts stay consistent. It
+executes the sender predicate and capture registrar extracted from `main.ts`
+without app startup. Native dependencies are injected; this is contract and
+permission-boundary evidence, not a native capture walkthrough.
+
+The suite rejects malformed payloads before handler work and exercises workspace
+containment, traversal, Windows drive/UNC forms and real links/junctions. Delegated
+path authorization and platform capture permission gates are identified as
+separate coverage boundaries. These tests remain in default all-platform discovery.
+After integrating router scheduling changes, rerun the boundary suite together
+with `electron/ipc-router.test.ts` and the full application suite.

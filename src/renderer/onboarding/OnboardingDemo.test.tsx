@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
 import { OnboardingDemo, type OnboardingDemoProps } from './OnboardingDemo';
@@ -61,6 +62,58 @@ function chooseCopyFormat(name: RegExp): void {
 }
 
 describe('OnboardingDemo', () => {
+  it.each(['deferred', 'fast', 'failure'] as const)(
+    'correlates files-only then Files + text completion (%s)',
+    async (mode) => {
+      let finish!: (value: { files: boolean; text: boolean; html: boolean; image: boolean }) => void;
+      let fail!: (reason: Error) => void;
+      const deferred = new Promise<{ files: boolean; text: boolean; html: boolean; image: boolean }>(
+        (resolve, reject) => {
+          finish = resolve;
+          fail = reject;
+        },
+      );
+      const files = { files: true, text: false, html: false, image: false };
+      const combined = { ...files, text: true };
+      const onCopyHandoff = vi
+        .fn()
+        .mockResolvedValueOnce(files)
+        .mockImplementationOnce(() => (mode === 'fast' ? Promise.resolve(combined) : deferred));
+      const view = await reachCopyStep({
+        platform: 'mac',
+        onCopyHandoff,
+        onDefaultCopyVariantChange: vi.fn(async () => {}),
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Copy files' }));
+      expect(await screen.findByRole('status')).toHaveTextContent('Files ready');
+      const dialog = screen.getByTestId('onboarding-dialog');
+      expect(dialog).toHaveAttribute('data-copy-attempt', '1');
+      expect(dialog).toHaveAttribute('data-copy-state', 'succeeded');
+      chooseCopyFormat(/Files \+ text/);
+      expect(view.props.onDefaultCopyVariantChange).toHaveBeenCalledWith('files-rich');
+      view.rerender(<OnboardingDemo {...view.props} defaultCopyVariant="files-rich" />);
+      fireEvent.click(screen.getByRole('button', { name: 'Files + text' }));
+      expect(dialog).toHaveAttribute('data-copy-attempt', '2');
+      expect(dialog).toHaveAttribute('data-copy-action', 'files-rich');
+      expect(dialog).toHaveAttribute('data-copy-state', 'pending');
+      expect(screen.queryByText('Files ready')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('onboarding-copy-warning')).not.toBeInTheDocument();
+      if (mode !== 'fast')
+        await act(async () => {
+          if (mode === 'failure') fail(new Error('clipboard unavailable'));
+          else finish(combined);
+        });
+      await waitFor(() =>
+        expect(dialog).toHaveAttribute('data-copy-state', mode === 'failure' ? 'failed' : 'succeeded'),
+      );
+      if (mode === 'failure') {
+        expect(screen.queryByText('Files ready')).not.toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('clipboard is unavailable');
+      } else expect(screen.getByRole('status')).toHaveTextContent('Files ready');
+      expect(onCopyHandoff).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('marks a dismissal complete without touching a workspace', async () => {
     const onMarkCompleted = vi.fn(async () => {});
     const onDismiss = vi.fn();
@@ -275,15 +328,25 @@ describe('OnboardingDemo', () => {
     await waitFor(() => expect(onCopyHandoff).toHaveBeenCalledWith(grant, 'files-rich'));
   });
 
-  it('keeps the previous primary action when saving a dropdown choice fails', async () => {
-    await reachCopyStep({
-      defaultCopyVariant: 'files',
-      onDefaultCopyVariantChange: vi.fn(async () => Promise.reject(new Error('disk full'))),
-    });
-    chooseCopyFormat(/^Rich copy/);
-    expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
-    expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
-  });
+  it.each([false, true])(
+    'preserves copy preference failure and current action (committed: %s)',
+    async (committed) => {
+      const failure = committed ? COMMITTED_WRITE_WARNING : 'disk full';
+      const onChange = vi.fn(async () => {
+        throw new Error(failure);
+      });
+      const { props, rerender } = await reachCopyStep({
+        defaultCopyVariant: 'files',
+        onDefaultCopyVariantChange: onChange,
+      });
+      chooseCopyFormat(/^Rich copy/);
+      expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+      if (committed) rerender(<OnboardingDemo {...props} defaultCopyVariant="rich" />);
+      expect(screen.getByRole('button', { name: committed ? 'Rich copy' : 'Copy files' })).toBeEnabled();
+      expect(screen.getByRole('alert')).not.toHaveTextContent('previous choice');
+      expect(onChange).toHaveBeenCalledOnce();
+    },
+  );
 
   it('keeps fallbacks hidden until a copy has been tried, even when it fails', async () => {
     const onCopyHandoff = vi.fn(async () => {

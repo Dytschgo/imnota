@@ -6,7 +6,8 @@ import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
 import { screenshotSchema, validateProject } from '../src/shared/schema.js';
 import { DELETED_ITEM_RETENTION_MS, deleteRetentionExpired } from '../src/shared/recently-deleted.js';
 import { nowIso } from '../src/shared/utils.js';
-import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { assertNoLinks, atomicWrite, CommittedWriteError, isWithin } from './files.js';
+import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
 
 const UNDO_ROOT = '.imnota-undo';
 const TOKEN_PATTERN = /^delete-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -42,6 +43,8 @@ export interface ScreenshotTrashOperations {
   write: typeof atomicWrite;
   removeDirectory: (target: string) => Promise<void>;
   unlink?: (target: string) => Promise<void>;
+  /** Told when an unreadable Undo journal was moved aside instead of blocking open. */
+  damagedJournal?: DamagedJournalReporter;
 }
 
 interface ResolvedTrashOperations extends ScreenshotTrashOperations {
@@ -82,6 +85,7 @@ export class ScreenshotTrashError extends Error {
       | 'invalid-project'
       | 'invalid-token'
       | 'invalid-manifest'
+      | 'unreadable-manifest'
       | 'baseline-changed'
       | 'delete-failed'
       | 'undo-failed'
@@ -297,7 +301,38 @@ async function loadManifest(
   const directory = undoDirectory(projectPath, token);
   await assertNoLinks(directory);
   const source = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8');
-  return { directory, manifest: parseManifest(JSON.parse(source), token) };
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    throw new ScreenshotTrashError(
+      'unreadable-manifest',
+      'Undo manifest is damaged and cannot be read.',
+      token,
+      { cause: error },
+    );
+  }
+  return { directory, manifest: parseManifest(value, token) };
+}
+
+/**
+ * Recovery must not let one truncated manifest block project open. A manifest that is
+ * not JSON cannot describe a recoverable state, so its journal is moved aside intact and
+ * reported. Manifests that parse but fail validation, and I/O errors, still stop recovery.
+ */
+async function loadManifestOrQuarantine(
+  projectPath: string,
+  token: string,
+  operations: ResolvedTrashOperations,
+): Promise<{ directory: string; manifest: TrashManifest } | null> {
+  try {
+    return await loadManifest(projectPath, token);
+  } catch (error) {
+    if (!(error instanceof ScreenshotTrashError) || error.code !== 'unreadable-manifest') throw error;
+    const report = await quarantineDamagedJournal(projectPath, undoDirectory(projectPath, token));
+    await operations.damagedJournal?.(report);
+    return null;
+  }
 }
 
 async function writeManifest(
@@ -582,20 +617,27 @@ async function finishUndo(
   operations: ResolvedTrashOperations,
 ): Promise<UndoScreenshotResult> {
   let finalManifest = manifest;
+  let durabilityWarning: string | undefined;
   try {
     if (manifest.phase !== 'restored')
       finalManifest = await setPhase(directory, manifest, 'restored', operations);
-  } catch {
+  } catch (error) {
+    if (error instanceof CommittedWriteError) durabilityWarning = error.message;
     // The undoAfter metadata image is the commit point and is checked during recovery.
   }
   try {
     await cleanupUndo(directory, finalManifest, operations);
-    return { project, cleanup: 'complete' };
+    return { project, cleanup: 'complete', ...(durabilityWarning ? { warning: durabilityWarning } : {}) };
   } catch (error) {
     return {
       project,
       cleanup: 'pending',
-      warning: `Screenshot restored, but Undo journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      warning: [
+        durabilityWarning,
+        `Screenshot restored, but Undo journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 }
@@ -862,8 +904,12 @@ export async function undoScreenshotDelete(
       throw new Error('project.json did not reach its restored state.');
     return finishUndo(directory, manifest, restoredProject, operations);
   } catch (error) {
-    if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected')
-      return finishUndo(directory, manifest, restoredProject, operations);
+    if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected') {
+      const result = await finishUndo(directory, manifest, restoredProject, operations);
+      if (error instanceof CommittedWriteError)
+        result.warning = [error.message, result.warning].filter(Boolean).join(' ');
+      return result;
+    }
     try {
       await restoreDeletedState(root, directory, manifest, operations);
       await setPhase(directory, manifest, 'deleted', operations);
@@ -897,7 +943,10 @@ async function trashTokens(
   });
   const tokens: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || !TOKEN_PATTERN.test(entry.name)) continue;
+    await assertNoLinks(path.join(root, entry.name));
+    if (!TOKEN_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory())
+      throw new Error('Journal token is not a directory; recovery files were preserved.');
     const manifestPath = path.join(root, entry.name, 'manifest.json');
     await assertNoLinks(manifestPath);
     const stat = await fs.stat(manifestPath).catch((error: NodeJS.ErrnoException) => {
@@ -911,7 +960,10 @@ async function trashTokens(
         'Undo manifest path is not a regular file.',
         entry.name,
       );
-    else await cleanupIncompleteUndo(path.join(root, entry.name), operations);
+    else {
+      const report = await quarantineDamagedJournal(projectPath, path.join(root, entry.name));
+      await operations.damagedJournal?.(report);
+    }
   }
   return tokens.sort();
 }
@@ -942,7 +994,8 @@ export async function recoverScreenshotTrashTransactions(
   const metadataPath = path.join(root, 'project.json');
   const results: ScreenshotTrashRecoveryResult[] = [];
   for (const token of await trashTokens(root, operations)) {
-    const loaded = await loadManifest(root, token);
+    const loaded = await loadManifestOrQuarantine(root, token, operations);
+    if (!loaded) continue;
     let { manifest } = loaded;
     const { directory } = loaded;
     if (manifest.phase === 'deleted') {

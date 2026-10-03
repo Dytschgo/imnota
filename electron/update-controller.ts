@@ -1,3 +1,4 @@
+import { afterFileCommit } from './files.js';
 import type { UpdateChannel, UpdateStatus } from '../src/shared/types.js';
 import { compareReleaseVersions, type ReleaseCandidate } from './releases.js';
 
@@ -58,12 +59,13 @@ export class UpdateController {
       throw new Error('Finish the current update check or installation before switching channels.');
     this.switching = true;
     try {
-      await persist();
-      this.channel = channel;
-      this.candidate = null;
-      this.terminalUpdate = null;
-      this.terminalUpdateKey = null;
-      this.send({ state: 'idle' });
+      await afterFileCommit(persist, () => {
+        this.channel = channel;
+        this.candidate = null;
+        this.terminalUpdate = null;
+        this.terminalUpdateKey = null;
+        this.send({ state: 'idle' });
+      });
     } finally {
       this.switching = false;
     }

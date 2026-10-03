@@ -1,3 +1,4 @@
+import { reloadWindow, setReloadProtection } from './app/reload-guard';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
@@ -26,6 +27,7 @@ vi.mock('./components/AnnotationCanvas', () => ({
 
 afterEach(() => {
   cleanup();
+  setReloadProtection(null);
   annotationCanvasSpy.mockClear();
   useAppStore.setState({
     snapshot: null,
@@ -229,6 +231,7 @@ describe('feedback controls', () => {
       conflictCreated: false,
       contentRevision: 'b'.repeat(64),
       projectRevision: 'project-content-2',
+      projectRevisionTransition: { before: 'next', after: 'project-content-2' },
     }));
     renderApp(
       {
@@ -762,6 +765,293 @@ describe('feedback controls', () => {
     );
     expect(undoDeleteScreenshot).toHaveBeenCalledTimes(2);
     expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps an Undo offer alive while an error notice covers it', async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+    await renderEditingProject({
+      deleteScreenshot,
+      undoDeleteScreenshot,
+      pasteImage: vi.fn(async () => {
+        throw new Error('The clipboard does not contain an image.');
+      }),
+    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      pasteFromAddMenu();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('error-toast')).toHaveTextContent('The clipboard does not contain an image.');
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS * 2));
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+      expect(undo).toBeInTheDocument();
+      fireEvent.click(undo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        undoToken: 'undo',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
+  it.each(['expire', 'change-project'])('pauses hovered Undo during errors then handles %s', async (next) => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+    await renderEditingProject({
+      deleteScreenshot,
+      undoDeleteScreenshot,
+      pasteImage: vi.fn(async () => {
+        throw new Error('The clipboard does not contain an image.');
+      }),
+    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      fireEvent.mouseEnter(document.querySelector('.toast')!);
+      pasteFromAddMenu();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('error-toast')).toHaveTextContent('The clipboard does not contain an image.');
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS * 2));
+      if (next === 'change-project') {
+        act(() => useAppStore.getState().setProject({ ...snapshot, projectPath: '/workspace/other' }));
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      if (next === 'change-project') {
+        expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+        expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+        return;
+      }
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+      expect(undo).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2));
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+    }
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
+  it('lets the conflict-copy notice be dismissed', async () => {
+    const text = {
+      id: 'text',
+      kind: 'text' as const,
+      collectionId: '001-collection',
+      position: 0,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      markdownFilename: 'text.md',
+    };
+    const conflict = {
+      ...text,
+      id: 'text-conflict',
+      position: 1,
+      includeInExport: false,
+      markdownFilename: 'conflict.md',
+    };
+    let persisted: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, schemaVersion: 4, contentItems: [text] },
+    };
+    renderApp({
+      loadContentItem: async ({ itemId }) => ({
+        item: itemId === conflict.id ? conflict : text,
+        markdown: 'Original',
+        contentRevision: 'revision',
+      }),
+      saveContentItem: async () => {
+        persisted = { ...persisted, project: { ...persisted.project, contentItems: [text, conflict] } };
+        return {
+          snapshot: persisted,
+          itemId: conflict.id,
+          contentRevision: 'revision-2',
+          conflictCreated: true,
+        };
+      },
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'updated' },
+      }),
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => useAppStore.getState().setProject(persisted));
+    const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+    fireEvent.change(editor, { target: { value: 'Local edit' } });
+    const notice = await screen.findByTestId('error-toast', undefined, { timeout: 3000 });
+    expect(notice).toHaveTextContent('saved as an excluded conflict copy');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    'flushes stopped-watch drafts before reload (content fails: %s)',
+    async (failContent) => {
+      const text = {
+        id: 'text',
+        kind: 'text' as const,
+        collectionId: '001-collection',
+        position: 1,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        markdownFilename: 'text.md',
+      };
+      let persisted = snapshot;
+      const saveContentItem = vi.fn(async () => {
+        if (failContent) throw new Error('Content disk full');
+        return {
+          snapshot: persisted,
+          itemId: text.id,
+          contentRevision: 'next',
+          conflictCreated: false,
+          projectRevisionTransition: { before: 'project-1', after: 'next' },
+        };
+      });
+      const stopProjectWatch = vi.fn(async () => ({ ok: true as const, value: undefined }));
+      const startProjectWatch = vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          watchId: 'recovery-watch',
+          projectPath: snapshot.projectPath,
+          projectRevision: 'project-1',
+        },
+      }));
+      const { note, save, editingSnapshot } = await renderEditingProject({
+        startProjectWatch,
+        stopProjectWatch,
+        saveContentItem,
+        loadContentItem: async () => ({ item: text, markdown: 'Original', contentRevision: 'revision' }),
+        reloadWatchedProject: async () => ({
+          ok: true,
+          value: { snapshot: persisted, projectRevision: 'next' },
+        }),
+      });
+      persisted = {
+        ...editingSnapshot,
+        project: { ...editingSnapshot.project, schemaVersion: 4, contentItems: [text] },
+      };
+      fireEvent.change(note, { target: { value: 'Screenshot draft before crash' } });
+      act(() => useAppStore.getState().setProject(persisted, text.id));
+      const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+      fireEvent.change(editor, { target: { value: 'Text draft before crash' } });
+      cleanup(); // The same unmount cleanup that runs when the app boundary catches a render crash.
+      expect(stopProjectWatch).toHaveBeenCalled();
+      const reload = vi.fn();
+      expect(await reloadWindow({}, reload)).toBe(!failContent);
+      expect(startProjectWatch).toHaveBeenCalledTimes(2);
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshot: expect.objectContaining({ description: 'Screenshot draft before crash' }),
+        }),
+      );
+      expect(saveContentItem).toHaveBeenCalledWith(
+        expect.objectContaining({ markdown: 'Text draft before crash' }),
+      );
+      expect(reload).toHaveBeenCalledTimes(failContent ? 0 : 1);
+    },
+  );
+
+  it('offers Retry save after a screenshot save fails', async () => {
+    const { save, note } = await renderEditingProject();
+    save.mockRejectedValueOnce(new Error('Workspace unavailable'));
+    fireEvent.change(note, { target: { value: 'Unsaved note' } });
+    const retry = await screen.findByRole('button', { name: 'Retry save' }, { timeout: 3000 });
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Save failed');
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Saved'));
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]?.[0].screenshot.description).toBe('Unsaved note');
+    expect(screen.queryByRole('button', { name: 'Retry save' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the rail and inspector usable when the canvas crashes', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    annotationCanvasSpy.mockImplementation(() => {
+      throw new Error('Konva exploded');
+    });
+    try {
+      const { note } = await renderEditingProject();
+      expect(screen.getByTestId('error-fallback-panel')).toHaveTextContent('This item could not be shown');
+      expect(screen.queryByTestId('error-fallback-app')).not.toBeInTheDocument();
+      expect(note).toBeInTheDocument();
+      expect(screen.getByTestId('add-item-trigger')).toBeInTheDocument();
+      annotationCanvasSpy.mockReset();
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(screen.queryByTestId('error-fallback-panel')).not.toBeInTheDocument();
+    } finally {
+      annotationCanvasSpy.mockReset();
+      consoleError.mockRestore();
+    }
+  });
+
+  it('tells the canvas when the screenshot failed to load and retries on request', async () => {
+    const loadScreenshotContent = vi
+      .fn<ImnotaBridge['loadScreenshotContent']>()
+      .mockRejectedValueOnce(new Error('File is locked'))
+      .mockResolvedValue({
+        image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+        annotations: [],
+        description: 'Original note',
+        contentRevision: 'a'.repeat(64),
+      });
+    await renderEditingProject({ loadScreenshotContent });
+    const lastProps = () =>
+      annotationCanvasSpy.mock.lastCall?.[0] as {
+        image: unknown;
+        loadFailed?: boolean;
+        onRetryLoad?: () => void;
+      };
+    await waitFor(() => expect(lastProps().loadFailed).toBe(true));
+    expect(lastProps().image).toBeNull();
+    act(() => lastProps().onRetryLoad?.());
+    await waitFor(() => expect(lastProps().image).not.toBeNull());
+    expect(lastProps().loadFailed).toBe(false);
+    expect(loadScreenshotContent).toHaveBeenCalledTimes(2);
   });
 
   it('deletes the screenshot captured before confirmation when the selection changes', async () => {
@@ -2812,6 +3102,17 @@ describe('feedback controls', () => {
     await screen.findByRole('heading', { name: 'Projects' });
   });
 
+  it('keeps the new project confirmation after adopting its snapshot', async () => {
+    const created = { ...snapshot, projectPath: '/workspace/new-project', projectRevision: 'created' };
+    renderApp({ createProject: vi.fn(async () => created) });
+    await screen.findByTestId('library-full-search');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.side-nav-new-project')!);
+    fireEvent.change(await screen.findByTestId('project-name-input'), { target: { value: 'New project' } });
+    fireEvent.click(screen.getByTestId('create-project-submit'));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(created.projectPath));
+    expect(screen.getByText('Project created')).toBeVisible();
+  });
+
   it('does not adopt a delayed project creation after newer navigation', async () => {
     let resolveCreate!: (value: ProjectSnapshot) => void;
     const createProject = vi.fn(
@@ -3135,32 +3436,33 @@ describe('feedback controls', () => {
         favourite: true,
       },
     };
+    const searchProjects = vi.fn<ImnotaBridge['searchProjects']>(async ({ query, scope }) => ({
+      query,
+      scope: scope ?? 'active',
+      truncated: false,
+      results: [
+        {
+          id: 'annotation-result',
+          kind: 'annotation',
+          title: 'Button label',
+          excerpt: 'Change this copy',
+          projectName: 'Project',
+          collectionName: 'Workspace / Collection 01',
+          target: {
+            projectPath: snapshot.projectPath,
+            collectionId: '001-collection',
+            itemId: 'shot',
+            annotationId: 'annotation-id',
+          },
+        },
+      ],
+    }));
     renderApp({
       listProjects: async () => [
         { ...snapshot.project, projectPath: snapshot.projectPath },
         { ...secondSnapshot.project, projectPath: secondSnapshot.projectPath },
       ],
-      searchProjects: async ({ query, scope }) => ({
-        query,
-        scope: scope ?? 'active',
-        truncated: false,
-        results: [
-          {
-            id: 'annotation-result',
-            kind: 'annotation',
-            title: 'Button label',
-            excerpt: 'Change this copy',
-            projectName: 'Project',
-            collectionName: 'Workspace / Collection 01',
-            target: {
-              projectPath: snapshot.projectPath,
-              collectionId: '001-collection',
-              itemId: 'shot',
-              annotationId: 'annotation-id',
-            },
-          },
-        ],
-      }),
+      searchProjects,
       loadProject: async (projectPath) =>
         projectPath === secondSnapshot.projectPath ? secondSnapshot : editingSnapshot,
       loadScreenshotContent: async () => ({
@@ -3170,12 +3472,18 @@ describe('feedback controls', () => {
         contentRevision: 'content-1',
       }),
     });
-    fireEvent.click(await screen.findByTestId('library-full-search'));
-    const searchInput = await screen.findByTestId('global-search-input');
-    // Use the real 180 ms debounce: with fake timers, a search effect re-run after the advance
-    // (for example when the project list settles) scheduled a timer that never fired.
+    const searchButton = await screen.findByTestId('library-full-search');
+    // Opening awaits save completion. Flush that action and its effects before typing:
+    // the input can enter the DOM before the dialog's open effect resets its query.
+    await act(async () => {
+      fireEvent.click(searchButton);
+    });
+    const searchInput = screen.getByTestId('global-search-input');
     fireEvent.change(searchInput, { target: { value: 'button' } });
-    fireEvent.click(await screen.findByRole('option', { name: /Button label/ }, { timeout: 3_000 }));
+    expect(searchInput).toHaveValue('button');
+    const result = await screen.findByRole('option', { name: /Button label/ }, { timeout: 3_000 });
+    expect(searchProjects).toHaveBeenCalledExactlyOnceWith({ query: 'button', scope: 'active', limit: 50 });
+    fireEvent.click(result);
 
     await waitFor(() =>
       expect(annotationCanvasSpy).toHaveBeenLastCalledWith(

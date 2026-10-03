@@ -763,6 +763,7 @@ export class ContentPersistenceService {
       snapshot: withWarning(await this.dependencies.snapshot(input.projectPath), warning),
       itemId: savedItem.id,
       contentRevision: revision,
+      projectRevisionTransition: { before: baseline.revision, after: projectRevision(projectAfter) },
       conflictCreated: conflict,
     };
   }
