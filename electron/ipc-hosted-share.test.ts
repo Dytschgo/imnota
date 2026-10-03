@@ -96,3 +96,123 @@ it('plans granted content without uploading, then uploads only the cached select
     expect.objectContaining({ markdown: 'latest content' }),
   ]);
 });
+
+function shareHarness() {
+  const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
+  const router = new IpcRouter({
+    register: (channel, listener) => handlers.set(channel, listener),
+    trustedSender: () => true,
+    updateInstallPending: () => false,
+    contracts: { 'recovery:save': z.tuple([]), 'projects:save': z.tuple([]) },
+    defaultContract: z.tuple([]),
+    tracesChannel: () => false,
+    trace: async (_channel, run) => run(),
+  });
+  const uploads: Array<{ requestId: string; finish(): void }> = [];
+  const create = vi.fn(
+    (input: { requestId: string }) =>
+      new Promise<{ id: string }>((resolve) =>
+        uploads.push({ requestId: input.requestId, finish: () => resolve({ id: input.requestId }) }),
+      ),
+  );
+  let finishRevoke!: () => void;
+  const revoke = vi.fn(
+    (id: string) => new Promise<{ id: string }>((resolve) => (finishRevoke = () => resolve({ id }))),
+  );
+  const read = vi.fn(async () => ({
+    bundleNumber: 1,
+    markdown: 'prompt',
+    markdownFilename: 'p.md',
+    pngFilename: '',
+  }));
+  registerHostedShareIpc(router, {
+    promptBundleWorkflow: { read },
+    hostedShareClient: { create, revoke },
+  } as unknown as IpcHost);
+  const event = {} as IpcMainInvokeEvent;
+  return {
+    router,
+    read,
+    create,
+    revoke,
+    uploads,
+    finishRevoke: () => finishRevoke(),
+    call: (channel: string, ...args: unknown[]) =>
+      Promise.resolve().then(() => handlers.get(channel)!(event, ...args)),
+    request: (requestId: string) => ({
+      sessionId: '123e4567-e89b-42d3-a456-426614174001',
+      bundleNumbers: [1],
+      requestId,
+      pairingToken: '',
+      includeArchive: true,
+      expiresInDays: 1,
+    }),
+  };
+}
+
+it('does not hold project or recovery saves behind a pending upload or revocation', async () => {
+  const { router, call, create, revoke, uploads, finishRevoke, request } = shareHarness();
+  const saved: string[] = [];
+  router.handle('projects:save', () => void saved.push('project'));
+  router.handle('recovery:save', () => void saved.push('recovery'));
+
+  const upload = call('workflow:hosted-share:create', request('123e4567-e89b-42d3-a456-426614174010'));
+  await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+  await call('projects:save');
+  await call('recovery:save');
+  expect(saved).toEqual(['project', 'recovery']);
+  uploads[0].finish();
+  expect(await upload).toMatchObject({ ok: true, value: { id: '123e4567-e89b-42d3-a456-426614174010' } });
+
+  const revocation = call('workflow:hosted-share:revoke', { id: 'share' });
+  await vi.waitFor(() => expect(revoke).toHaveBeenCalledWith('share'));
+  await call('recovery:save');
+  expect(saved).toEqual(['project', 'recovery', 'recovery']);
+  finishRevoke();
+  expect(await revocation).toMatchObject({ ok: true, value: { id: 'share' } });
+});
+
+it('reads committed artifacts inside the filesystem queue before uploading', async () => {
+  const { router, call, create, read, uploads, request } = shareHarness();
+  let finishSave: (() => void) | undefined;
+  router.handle('projects:save', () => new Promise<void>((resolve) => (finishSave = resolve)));
+  const save = call('projects:save');
+  await vi.waitFor(() => expect(finishSave).toBeDefined());
+  const upload = call('workflow:hosted-share:create', request('123e4567-e89b-42d3-a456-426614174011'));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(read).not.toHaveBeenCalled();
+  finishSave!();
+  await save;
+  await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+  expect(read).toHaveBeenCalledOnce();
+  uploads[0].finish();
+  expect(await upload).toMatchObject({ ok: true });
+});
+
+it('runs a repeated upload only after the earlier attempt settles, and drains accepted share work', async () => {
+  const { router, call, create, revoke, uploads, finishRevoke, request } = shareHarness();
+  const input = request('123e4567-e89b-42d3-a456-426614174012');
+  const first = call('workflow:hosted-share:create', input);
+  const repeated = call('workflow:hosted-share:create', input);
+  const revocation = call('workflow:hosted-share:revoke', { id: 'share' });
+  await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(create).toHaveBeenCalledOnce();
+  expect(revoke).not.toHaveBeenCalled();
+
+  // An update install still waits for accepted share work, as it did inside the queue.
+  let drained = false;
+  const drain = router.drain().then(() => (drained = true));
+  uploads[0].finish();
+  expect(await first).toMatchObject({ ok: true });
+  await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  expect(drained).toBe(false);
+  uploads[1].finish();
+  expect(await repeated).toMatchObject({ ok: true });
+  await vi.waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+  expect(drained).toBe(false);
+  finishRevoke();
+  expect(await revocation).toMatchObject({ ok: true });
+  await drain;
+  expect(drained).toBe(true);
+});

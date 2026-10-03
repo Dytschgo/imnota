@@ -9,7 +9,6 @@ export function registerSettingsIpc(router: IpcRouter, host: IpcHost): void {
   const { handle } = router;
   const {
     assertProjectPath,
-    contentSearch,
     diagnostics,
     openWithRecovery,
     persistApplicationSettings,
@@ -34,9 +33,9 @@ export function registerSettingsIpc(router: IpcRouter, host: IpcHost): void {
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    contentSearch.invalidate();
-    host.settings.workspacePath = result.filePaths[0];
-    await persistApplicationSettings(host.settings);
+    // Memory follows disk: the live workspace root, and the search index built for it,
+    // change only once the new path has been written.
+    await persistApplicationSettings({ ...host.settings, workspacePath: result.filePaths[0] });
     return host.settings;
   });
   handle('settings:set', async (_event, input: Partial<WorkspaceSettings>) => {

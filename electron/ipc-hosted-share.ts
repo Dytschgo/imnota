@@ -10,6 +10,10 @@ import type { IpcHost } from './main.js';
 
 export function registerHostedShareIpc(router: IpcRouter, host: IpcHost): void {
   const { handleWorkflow } = router;
+  // Uploads and revocations wait on the share service for up to a minute. They keep their
+  // own order here instead of the filesystem queue, so project and recovery saves never
+  // wait behind a request. The client serialises its local history and receipt files.
+  const network = router.lane();
   const normalizePng = (dataBase64: string) => {
     const image = nativeImage.createFromBuffer(Buffer.from(dataBase64, 'base64'));
     if (image.isEmpty()) return undefined;
@@ -55,26 +59,27 @@ export function registerHostedShareIpc(router: IpcRouter, host: IpcHost): void {
     z.tuple([]).parse(args);
     await host.hostedShareClient!.openPairing();
   });
-  handleWorkflow(
-    'workflow:hosted-share:create',
-    async (_event, ...args) => {
-      const [input] = z
-        .tuple([
-          z
-            .object({
-              requestId: z.string().uuid(),
-              pairingToken: z.string().max(512),
-              senderName: z.string().max(256).optional(),
-              sessionId: workflowSessionId,
-              bundleNumbers: z.array(workflowBundleNumber).min(1).max(999),
-              planId: z.string().uuid().optional(),
-              partIndex: z.number().int().min(0).max(9999).optional(),
-              includeArchive: z.boolean(),
-              expiresInDays: z.number().int().min(1).max(30),
-            })
-            .strict(),
-        ])
-        .parse(args);
+  handleWorkflow('workflow:hosted-share:create', async (_event, ...args) => {
+    const [input] = z
+      .tuple([
+        z
+          .object({
+            requestId: z.string().uuid(),
+            pairingToken: z.string().max(512),
+            senderName: z.string().max(256).optional(),
+            sessionId: workflowSessionId,
+            bundleNumbers: z.array(workflowBundleNumber).min(1).max(999),
+            planId: z.string().uuid().optional(),
+            partIndex: z.number().int().min(0).max(9999).optional(),
+            includeArchive: z.boolean(),
+            expiresInDays: z.number().int().min(1).max(30),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    // One upload at a time: a repeated or retried request waits for the earlier attempt
+    // to settle instead of racing it against the same pending receipt.
+    return network(async () => {
       if (input.planId !== undefined || input.partIndex !== undefined) {
         if (
           !prepared ||
@@ -90,16 +95,18 @@ export function registerHostedShareIpc(router: IpcRouter, host: IpcHost): void {
           );
         return host.hostedShareClient!.create(input, prepared.parts[input.partIndex]);
       }
-      const artifacts = await collectHostedShareArtifacts(
-        host.promptBundleWorkflow!,
-        input.sessionId,
-        input.bundleNumbers,
-        normalizePng,
+      // Committed artifacts are read inside the filesystem queue; only the upload leaves it.
+      const artifacts = await router.enqueue(() =>
+        collectHostedShareArtifacts(
+          host.promptBundleWorkflow!,
+          input.sessionId,
+          input.bundleNumbers,
+          normalizePng,
+        ),
       );
       return host.hostedShareClient!.create(input, artifacts);
-    },
-    true,
-  );
+    });
+  });
   handleWorkflow('workflow:hosted-share:cancel', async (_event, ...args) => {
     const [input] = z.tuple([z.object({ requestId: z.string().uuid() }).strict()]).parse(args);
     await host.hostedShareClient!.cancel(input.requestId);
@@ -114,12 +121,8 @@ export function registerHostedShareIpc(router: IpcRouter, host: IpcHost): void {
       .parse(args);
     await host.hostedShareClient!.dismissRecoveryWarning(input.id);
   });
-  handleWorkflow(
-    'workflow:hosted-share:revoke',
-    async (_event, ...args) => {
-      const [input] = z.tuple([z.object({ id: z.string().min(1).max(200) }).strict()]).parse(args);
-      return host.hostedShareClient!.revoke(input.id);
-    },
-    true,
-  );
+  handleWorkflow('workflow:hosted-share:revoke', async (_event, ...args) => {
+    const [input] = z.tuple([z.object({ id: z.string().min(1).max(200) }).strict()]).parse(args);
+    return network(() => host.hostedShareClient!.revoke(input.id));
+  });
 }
