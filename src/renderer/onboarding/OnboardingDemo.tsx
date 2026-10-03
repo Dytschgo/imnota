@@ -116,6 +116,12 @@ export function OnboardingDemo({
   const [copyWarning, setCopyWarning] = useState('');
   const [openStatus, setOpenStatus] = useState('');
   const [copyAttempted, setCopyAttempted] = useState(false);
+  const copySequence = useRef(0);
+  const [copyOperation, setCopyOperation] = useState<{
+    id: number;
+    action: WindowsCopyVariantId;
+    state: 'pending' | 'succeeded' | 'failed';
+  }>();
   const [explanation, setExplanation] = useState(
     'Keep the component search visible while someone reviews several results.',
   );
@@ -230,6 +236,10 @@ export function OnboardingDemo({
 
   const copyBundle = async (variant: WindowsCopyVariantId) => {
     if (!bundle || busy) return;
+    const id = ++copySequence.current;
+    setCopyOperation({ id, action: variant, state: 'pending' });
+    setCopyOutcome(undefined);
+    setCopyWarning('');
     setBusy(true);
     setError('');
     setCopyAttempted(true);
@@ -240,7 +250,9 @@ export function OnboardingDemo({
       setCopyOutcome(delivery.outcome);
       setCopyWarning(delivery.warning ?? '');
       setOpenStatus('');
+      setCopyOperation({ id, action: variant, state: 'succeeded' });
     } catch {
+      setCopyOperation({ id, action: variant, state: 'failed' });
       setError(
         'The clipboard is unavailable right now. Try copying again, or continue to create your project.',
       );
@@ -294,6 +306,9 @@ export function OnboardingDemo({
     <div className="imnota-onboarding-backdrop">
       <section
         data-testid="onboarding-dialog"
+        data-copy-attempt={copyOperation?.id ?? 0}
+        data-copy-action={copyOperation?.action}
+        data-copy-state={copyOperation?.state ?? 'idle'}
         className="imnota-onboarding"
         role="dialog"
         aria-modal="true"
