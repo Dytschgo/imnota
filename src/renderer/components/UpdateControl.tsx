@@ -4,6 +4,7 @@ import type { UpdateChannel, UpdateStatus } from '../../shared/types';
 import { Button, Modal } from './ui';
 import { useAppStore } from '../store';
 import { saveWorkspaceSettingsPatch } from '../settings/sharing-preferences';
+import { workflowMessage } from '../app/workflow';
 
 export function UpdateControl({
   onInstall,
@@ -15,6 +16,8 @@ export function UpdateControl({
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' });
   const [busy, setBusy] = useState(false);
   const [confirmNightly, setConfirmNightly] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [channelUnconfirmed, setChannelUnconfirmed] = useState(false);
   const statusRevision = useRef(0);
   const channel = status.channel ?? useAppStore.getState().settings.updateChannel;
   const locked = busy || ['checking', 'downloading', 'downloaded'].includes(status.state);
@@ -23,7 +26,10 @@ export function UpdateControl({
     const revisionAtMount = statusRevision.current;
     const unsubscribe = window.imnota.onUpdateStatus((next) => {
       statusRevision.current++;
-      if (active) setStatus(next);
+      if (active) {
+        setStatus(next);
+        setChannelUnconfirmed(false);
+      }
     });
     void window.imnota
       .getUpdateStatus()
@@ -31,7 +37,7 @@ export function UpdateControl({
         if (active && statusRevision.current === revisionAtMount) setStatus(next);
       })
       .catch(() => {
-        if (active)
+        if (active && statusRevision.current === revisionAtMount)
           setStatus({ state: 'error', message: 'Update status is unavailable. Try checking again.' });
       });
     return () => {
@@ -40,15 +46,30 @@ export function UpdateControl({
     };
   }, []);
   async function run(action: () => Promise<void>) {
+    statusRevision.current++;
     setBusy(true);
+    setActionError('');
     try {
       await action();
-    } catch {
-      setStatus({
-        ...status,
-        state: 'error',
-        message: 'The update action failed. Check your connection and try again.',
-      });
+    } catch (error) {
+      const message = workflowMessage(
+        error,
+        'The update action did not complete. Review the current status.',
+      );
+      setActionError(message);
+      const revision = statusRevision.current;
+      try {
+        const current = await window.imnota.getUpdateStatus();
+        if (revision === statusRevision.current) {
+          setStatus(current);
+          setChannelUnconfirmed(false);
+        }
+      } catch (readError) {
+        if (revision === statusRevision.current) setChannelUnconfirmed(true);
+        setActionError(
+          `${message} Current update status could not be confirmed. ${workflowMessage(readError, 'Reopen Settings to check the current channel.')}`,
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -60,7 +81,10 @@ export function UpdateControl({
       useAppStore.getState().set({ settings });
       const revision = statusRevision.current;
       const current = await window.imnota.getUpdateStatus();
-      if (revision === statusRevision.current) setStatus(current);
+      if (revision === statusRevision.current) {
+        setStatus(current);
+        setChannelUnconfirmed(false);
+      }
     });
   }
   const message =
@@ -81,18 +105,23 @@ export function UpdateControl({
         <span className="field-label">Update channel</span>
         <select
           data-testid="update-channel"
-          value={channel}
+          value={channelUnconfirmed ? '' : channel}
           disabled={locked}
           onChange={(event) => {
             if (event.target.value === 'nightly') setConfirmNightly(true);
             else void changeChannel('stable');
           }}
         >
+          {channelUnconfirmed && (
+            <option value="" disabled>
+              Channel unconfirmed
+            </option>
+          )}
           <option value="stable">Stable (recommended)</option>
           <option value="nightly">Nightly (preview)</option>
         </select>
       </label>
-      {channel === 'nightly' && (
+      {!channelUnconfirmed && channel === 'nightly' && (
         <p className="helper">
           Nightly builds may contain unfinished changes. Keep a backup of your workspace.
         </p>
@@ -100,6 +129,7 @@ export function UpdateControl({
       <p className="update-status" role="status" aria-live="polite">
         {message}
       </p>
+      {actionError && <p role="alert">{actionError}</p>}
       <Button
         busy={busy || status.state === 'checking'}
         disabled={locked}

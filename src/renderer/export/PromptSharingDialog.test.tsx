@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleDialogHost, type PromptBundleUiController } from './PromptBundleDialogHost';
@@ -132,65 +133,85 @@ it('offers explicit retry when native export cleanup is still pending', () => {
   expect(onRetryCleanup).toHaveBeenCalledOnce();
 });
 
-it('reports a rejected default change inside the open sharing dialog and keeps the prior action', async () => {
-  const success = async () => ({ ok: true as const });
-  const controller: PromptBundleUiController = {
-    cards: [
-      {
-        planId: 'plan-current',
-        artifactSessionId: 'session-current',
-        bundleNumber: 1,
-        pictureNumbers: [1],
-        screenshotCount: 1,
-        excludedCount: 0,
-        width: 1280,
-        height: 800,
-        delivery: 'clipboard',
-        state: 'idle',
-      },
-    ],
-    isOpen: true,
-    cleanupPending: false,
-    close: vi.fn(),
-    copyFresh: vi.fn(success),
-    copyVariant: vi.fn(success),
-    prepareFreshFiles: vi.fn(success),
-    copyMarkdown: vi.fn(success),
-    copyImage: vi.fn(success),
-    openFiles: vi.fn(success),
-    copyPaths: vi.fn(success),
-    openFolder: vi.fn(success),
-    cancel: vi.fn(success),
-    loadPreview: vi.fn(success),
-    clearPreview: vi.fn(),
-    retryCleanup: vi.fn(success),
-    prepareHostedShare: vi.fn(async () => ({
-      ok: false as const,
-      error: {
-        code: 'unexpected' as const,
-        message: 'Not used',
-        retryable: false,
-        fallbackAvailable: false,
-      },
-    })),
-  };
-  const onError = vi.fn();
-  render(
-    <PromptBundleDialogHost
-      controller={controller}
-      onError={onError}
-      fileClipboardAvailable
-      defaultCopyVariant="files"
-      onDefaultCopyVariantChange={vi.fn(async () => Promise.reject(new Error('disk full')))}
-    />,
-  );
+it.each([false, true])(
+  'preserves copy preference failure and current action (committed: %s)',
+  async (committed) => {
+    const success = async () => ({ ok: true as const });
+    const controller: PromptBundleUiController = {
+      cards: [
+        {
+          planId: 'plan-current',
+          artifactSessionId: 'session-current',
+          bundleNumber: 1,
+          pictureNumbers: [1],
+          screenshotCount: 1,
+          excludedCount: 0,
+          width: 1280,
+          height: 800,
+          delivery: 'clipboard',
+          state: 'idle',
+        },
+      ],
+      isOpen: true,
+      cleanupPending: false,
+      close: vi.fn(),
+      copyFresh: vi.fn(success),
+      copyVariant: vi.fn(success),
+      prepareFreshFiles: vi.fn(success),
+      copyMarkdown: vi.fn(success),
+      copyImage: vi.fn(success),
+      openFiles: vi.fn(success),
+      copyPaths: vi.fn(success),
+      openFolder: vi.fn(success),
+      cancel: vi.fn(success),
+      loadPreview: vi.fn(success),
+      clearPreview: vi.fn(),
+      retryCleanup: vi.fn(success),
+      prepareHostedShare: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: 'unexpected' as const,
+          message: 'Not used',
+          retryable: false,
+          fallbackAvailable: false,
+        },
+      })),
+    };
+    const onError = vi.fn();
+    const failure = committed ? COMMITTED_WRITE_WARNING : 'disk full';
+    const onChange = vi.fn(async () => {
+      throw new Error(failure);
+    });
+    const { rerender } = render(
+      <PromptBundleDialogHost
+        controller={controller}
+        onError={onError}
+        fileClipboardAvailable
+        defaultCopyVariant="files"
+        onDefaultCopyVariantChange={onChange}
+      />,
+    );
 
-  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Rich copy' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
-  expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
-  expect(onError).not.toHaveBeenCalled();
-});
+    fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rich copy' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+    if (committed)
+      rerender(
+        <PromptBundleDialogHost
+          controller={controller}
+          onError={onError}
+          fileClipboardAvailable
+          defaultCopyVariant="rich"
+          onDefaultCopyVariantChange={onChange}
+        />,
+      );
+    expect(screen.getByRole('button', { name: committed ? 'Rich copy' : 'Copy files' })).toBeEnabled();
+    expect(screen.getByRole('alert')).not.toHaveTextContent('previous choice');
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(controller.copyVariant).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  },
+);
 
 it('shows a failure once, with technical details and a Rebuild bundles action', () => {
   const onPrepareFreshFiles = vi.fn();

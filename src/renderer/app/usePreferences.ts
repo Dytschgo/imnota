@@ -108,7 +108,10 @@ export function usePreferences(): PreferenceController {
         }
       }
       setError(
-        workflowMessage(reason, 'This preference could not be saved. Your previous setting is active.'),
+        workflowMessage(
+          reason,
+          'The preference save could not be confirmed. Review the current setting before trying again.',
+        ),
       );
       throw reason;
     } finally {
