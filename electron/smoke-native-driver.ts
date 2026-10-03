@@ -350,7 +350,12 @@ export class NativeUiDriver {
     await wait(40);
   }
 
-  async drag(from: SmokePoint, to: SmokePoint, steps = 8): Promise<void> {
+  async drag(
+    from: SmokePoint,
+    to: SmokePoint,
+    steps = 8,
+    modifiers: Electron.InputEvent['modifiers'] = [],
+  ): Promise<void> {
     const contents = this.window.webContents;
     await this.evaluate(`(() => {
       const target = ${JSON.stringify(to)};
@@ -373,7 +378,7 @@ export class NativeUiDriver {
     })()`);
     try {
       contents.sendInputEvent({ type: 'mouseMove', ...from });
-      contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1 });
+      contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1, modifiers });
       for (let index = 1; index <= steps; index += 1) {
         const point = {
           x: Math.round(from.x + ((to.x - from.x) * index) / steps),
@@ -384,7 +389,7 @@ export class NativeUiDriver {
           ...point,
           movementX: 1,
           movementY: 1,
-          modifiers: ['leftbuttondown'],
+          modifiers: ['leftbuttondown', ...modifiers],
         });
         await wait(16);
       }
@@ -392,7 +397,7 @@ export class NativeUiDriver {
       // commit the gesture until its endpoint has reached the renderer and painted.
       await this.evaluate('window.__imnotaSmokeDrag.ready');
     } finally {
-      contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1 });
+      contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1, modifiers });
       await this.evaluate(`(() => {
         window.__imnotaSmokeDrag?.dispose();
         delete window.__imnotaSmokeDrag;

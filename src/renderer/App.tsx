@@ -29,6 +29,7 @@ import { useProjectPersistence } from './app/useProjectPersistence';
 import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
+import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -119,6 +120,7 @@ export default function App() {
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [history, setHistory] = useState<Annotation[][]>([]);
+  const annotationUndoKey = useRef<string | null>(null);
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
@@ -447,6 +449,7 @@ export default function App() {
 
   useEffect(() => {
     setHistory([]);
+    annotationUndoKey.current = null;
     setRedo([]);
     setSelectedAnnotationId(null);
   }, [persistence.loadedScreenshotId]);
@@ -555,14 +558,17 @@ export default function App() {
   );
 
   const changeAnnotations = useCallback(
-    (next: Annotation[]) => {
-      setHistory((items) => [...items, persistence.annotations]);
+    (next: Annotation[], options?: AnnotationChangeOptions) => {
+      if (!continuesUndoStep(annotationUndoKey.current, options))
+        setHistory((items) => [...items, persistence.annotations]);
+      annotationUndoKey.current = options?.coalesce ?? null;
       setRedo([]);
       persistence.changeAnnotations(next);
     },
     [persistence],
   );
   const undoAnnotations = useCallback(() => {
+    annotationUndoKey.current = null;
     const previous = history.at(-1);
     if (!previous) return;
     setRedo((items) => [...items, persistence.annotations]);
@@ -570,6 +576,7 @@ export default function App() {
     setHistory((items) => items.slice(0, -1));
   }, [history, persistence]);
   const redoAnnotations = useCallback(() => {
+    annotationUndoKey.current = null;
     const next = redo.at(-1);
     if (!next) return;
     setHistory((items) => [...items, persistence.annotations]);
@@ -2020,6 +2027,7 @@ export default function App() {
               persistence.discardRestoredProject(result.projectPath);
               contentPersistence.reset();
               setHistory([]);
+              annotationUndoKey.current = null;
               setRedo([]);
               setDescriptionHistory({});
               setSelectedAnnotationId(null);

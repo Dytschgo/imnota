@@ -13,6 +13,7 @@ import type {
 } from '../../shared/types';
 import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
+import type { AnnotationChangeOptions } from '../canvas/undo-coalescing';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -49,7 +50,7 @@ export interface WorkspaceProps {
   shortcutLabels: Partial<Record<string, string>>;
   onTool(tool: 'select' | AnnotationKind): void;
   onColor(color: string): void;
-  onChangeAnnotations(next: Annotation[]): void;
+  onChangeAnnotations(next: Annotation[], options?: AnnotationChangeOptions): void;
   onSelectAnnotation(id: string | null): void;
   onUndo(): void;
   onRedo(): void;
@@ -290,6 +291,7 @@ export function Workspace(props: WorkspaceProps) {
           )
         ) : shot ? (
           <AnnotationCanvas
+            key={`${store.snapshot?.projectPath}:${shot.id}`}
             image={props.image}
             annotations={props.annotations}
             selectedId={props.selectedAnnotationId}

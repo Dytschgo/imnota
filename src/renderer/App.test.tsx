@@ -5,6 +5,7 @@ import type { ContentSearchResult } from '../shared/content-search';
 import type { WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
+import type { AnnotationCanvasProps } from './components/AnnotationCanvas';
 import { useAppStore } from './store';
 import App, {
   CollectionControls,
@@ -1026,6 +1027,35 @@ describe('feedback controls', () => {
     window.removeEventListener('keydown', keydowns);
     expect(commands).toEqual(['fit']);
     expect(keydowns).toHaveBeenCalledOnce();
+  });
+
+  it('undoes a nudge burst in one step, separates other edits, and resets grouping after Undo', async () => {
+    await renderEditingProject();
+    const canvas = () => annotationCanvasSpy.mock.calls.at(-1)![0] as AnnotationCanvasProps;
+    const rectangle = {
+      id: 'nudged',
+      kind: 'rectangle' as const,
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      zIndex: 0,
+    };
+    act(() => canvas().onChange([rectangle]));
+    act(() => canvas().onChange([{ ...rectangle, x: 11 }], { coalesce: 'nudge:1' }));
+    act(() => canvas().onChange([{ ...rectangle, x: 12 }], { coalesce: 'nudge:1' }));
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(canvas().annotations).toEqual([rectangle]);
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
+    expect(canvas().annotations).toEqual([{ ...rectangle, x: 12 }]);
+    // Undo/Redo ends the burst even if a later change carries the old key.
+    act(() => canvas().onChange([{ ...rectangle, x: 13 }], { coalesce: 'nudge:1' }));
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(canvas().annotations).toEqual([{ ...rectangle, x: 12 }]);
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(canvas().annotations).toEqual([rectangle]);
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(canvas().annotations).toEqual([]);
   });
 
   it('runs an available Terminal update from the app banner', async () => {
