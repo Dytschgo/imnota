@@ -109,6 +109,62 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each([false, true])(
+    'recovers metadata after unmount without accepting a changed CAS baseline (%s)',
+    async (externalEdit) => {
+      const source = snapshot();
+      const mock = bridge({
+        startProjectWatch: vi.fn(async () =>
+          ok({
+            watchId: 'watch',
+            projectPath: source.projectPath,
+            projectRevision: externalEdit ? 'external' : 'project-1',
+          }),
+        ),
+        saveProjectCompareAndSwap: vi.fn(async ({ expectedRevision, project: next }) => {
+          expect(expectedRevision).toBe(externalEdit ? 'external' : 'project-1');
+          if (externalEdit)
+            return {
+              ok: false,
+              error: { code: 'project-changed', message: 'Changed again after unmount', retryable: false },
+            };
+          return ok({ snapshot: { ...source, project: next }, projectRevision: 'saved' });
+        }),
+      });
+      window.imnota = mock.value as never;
+      const hook = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: null,
+          onProject: vi.fn(),
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      );
+      await waitFor(() => expect(hook.result.current.projectRevision).not.toBeNull());
+      act(() =>
+        hook.result.current.queueProjectMetadata({ ...source.project, description: 'Pending details' }),
+      );
+      const controller = hook.result.current;
+      hook.unmount();
+      mock.value.startProjectWatch.mockResolvedValue(
+        ok({
+          watchId: 'new-watch',
+          projectPath: source.projectPath,
+          projectRevision: 'different-grant-must-not-be-accepted',
+        }),
+      );
+      expect(await controller.withReloadWatch(controller.flushProjectMetadata)).toBe(!externalEdit);
+      expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
+        expect.objectContaining({
+          watchId: 'new-watch',
+          project: expect.objectContaining({ description: 'Pending details' }),
+        }),
+      );
+      expect(mock.value.stopProjectWatch).toHaveBeenLastCalledWith({ watchId: 'new-watch' });
+    },
+  );
+
   it.each(['before swap', 'after recovered rollback'])(
     'saves through a fresh watch when restore fails %s',
     async () => {
@@ -1130,5 +1186,60 @@ describe('useProjectPersistence', () => {
     rerender({ currentSnapshot: reloaded, active: reloaded.project.screenshots[0]! });
     await waitFor(() => expect(result.current.annotations).toEqual([changedAnnotation]));
     expect(load).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports a failed screenshot load and loads it again on retry', async () => {
+    const mock = bridge();
+    mock.value.loadScreenshotContent.mockRejectedValueOnce(new Error('File is locked'));
+    window.imnota = mock.value as never;
+    const source = snapshot();
+    const callbacks = { onProject: vi.fn(), onSnapshot: vi.fn(), onSelectScreenshot: vi.fn() };
+    const { result } = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0]!,
+        ...callbacks,
+      }),
+    );
+    expect(result.current.imageLoadFailed).toBe(false);
+    await waitFor(() => expect(result.current.imageLoadFailed).toBe(true));
+    expect(result.current.error).toBe('File is locked');
+    expect(result.current.image).toBeNull();
+    act(() => result.current.retryImageLoad());
+    expect(result.current.imageLoadFailed).toBe(false);
+    expect(result.current.error).toBe('');
+    await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+    expect(result.current.imageLoadFailed).toBe(false);
+    expect(mock.value.loadScreenshotContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a load failure for a screenshot the user already left', async () => {
+    let failFirst!: (reason: Error) => void;
+    const mock = bridge();
+    mock.value.loadScreenshotContent.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failFirst = reject;
+        }),
+    );
+    window.imnota = mock.value as never;
+    const screenshots = [shot('one'), shot('two')];
+    const source = snapshot(screenshots);
+    const callbacks = { onProject: vi.fn(), onSnapshot: vi.fn(), onSelectScreenshot: vi.fn() };
+    const { result, rerender } = renderHook(
+      ({ active }) => useProjectPersistence({ snapshot: source, activeScreenshot: active, ...callbacks }),
+      { initialProps: { active: screenshots[0]! } },
+    );
+    await waitFor(() => expect(mock.value.loadScreenshotContent).toHaveBeenCalledTimes(1));
+    rerender({ active: screenshots[1]! });
+    await waitFor(() => expect(result.current.loadedScreenshotId).toBe('two'));
+    await act(async () => {
+      failFirst(new Error('Stale failure'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.error).toBe('');
+    expect(result.current.imageLoadFailed).toBe(false);
+    expect(result.current.loadedScreenshotId).toBe('two');
   });
 });

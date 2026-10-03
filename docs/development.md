@@ -76,3 +76,38 @@ Set `IMNOTA_SMOKE_MODE=stress` for mixed-resolution 1/10/20/100-screenshot fixtu
 For the actual workspace export process, run `corepack pnpm build`, then `corepack pnpm smoke:clipboard`. The focused mode skips onboarding and release notes, creates an isolated three-screenshot project, edits its description, and opens **Copy Bundle** from the top bar. It verifies multiple exported bundles, the current edit in the Markdown, truthful progress (no percentage while rendering, writing or copying), repeat-copy reuse of one export set, and a fresh export after another edit that keeps the earlier files. Every bundle card is copied with Rich copy and pasted into a test-only editable control through Chromium's native Paste command; the check inspects the trusted paste event's Markdown, HTML fragment and decoded image dimensions. Set `IMNOTA_SMOKE_ARTIFACT_DIR` to a new absolute `imnota-verification-artifacts-*` directory to keep the report, captures and `bundle-export-progress.json`. CI runs this mode against each packaged Windows, macOS and Linux build after the standard walkthrough and keeps its evidence as `clipboard-evidence-<os>`. External editor acceptance remains a separate check.
 
 Native clipboard checks establish which formats Imnota wrote, not which formats an external editor accepts. Captured layouts still need visual inspection. Performance results apply to the tested machine and fixture, not every Windows or macOS device.
+
+## Installer verification
+
+The quick installers resolve the stable tag once and verify the asset against
+that release's `SHA256SUMS.txt` before extraction or execution. Missing, malformed,
+duplicate or mismatching metadata stops installation before changing the previous
+app. Linux stages the verified AppImage privately before replacement; temporary
+downloads and staging are cleaned on exit. Checksums do not authenticate a
+compromised release publisher. Failure inside a verified Windows installer
+retains that installer's recovery behavior.
+
+Linux replacement uses GNU `mv -fT` to replace the destination entry without
+following a file or directory symlink; a hardlink peer keeps its previous bytes.
+A directory occupying the destination causes refusal and staging cleanup. After
+replacement, a desktop-file write failure leaves the verified binary installed;
+there is no automatic Linux rollback. macOS retains its existing backup behavior
+if copying a verified bundle fails.
+
+Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
+and download failures. The suite executes the real scripts with network and app
+launch commands replaced. Git Bash on Windows exercises shell control flow; it
+does not replace native Linux or macOS installation evidence. No fixture launches
+a real installer or changes a personal installation.
+
+Checksum refusal and interrupted-download fixtures run wherever Bash is available.
+Linux replacement, symlink and hardlink fixtures run only on native Linux, where
+GNU replacement semantics apply; they are excluded on BSD macOS and Git Bash.
+Native macOS fixtures use `ditto` and `PlistBuddy` with generated bundles to check
+successful installation, extraction/executable/signature/version refusal, and
+backup preservation after copy failure. Signature results and app launches are
+stubbed; these fixtures do not prove real signing or Gatekeeper acceptance.
+PowerShell fixtures check the actual exception message separately from the
+no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
+temporary junction cleanup without traversing its target. The existing Linux,
+macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
