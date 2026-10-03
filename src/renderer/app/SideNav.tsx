@@ -24,7 +24,7 @@ export interface SideNavProps {
   navigationOpen: boolean;
   projects: ProjectListItem[];
   recentCollections: RecentCollectionHistory[];
-  navigationShortcuts?: Partial<Record<'projects' | 'recent', string>>;
+  navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'settings', string>>;
   view: AppView;
   onAbout(): void;
   onNavigate(view: AppView): void | Promise<void>;
@@ -235,6 +235,7 @@ export function SideNav({
           data-testid="settings-button"
           className={`side-nav-footer-button ${view === 'settings' ? 'active' : ''}`}
           label="Settings"
+          title={navigationShortcuts?.settings ? `Settings (${navigationShortcuts.settings})` : 'Settings'}
           aria-current={view === 'settings' ? 'page' : undefined}
           onClick={() => void onNavigate('settings')}
         >

@@ -262,6 +262,10 @@ describe('CollectionRail', () => {
       'screenshot-drawing',
       'screenshot-gamma',
     ]);
+    expect(screen.getByTestId('screenshot-text')).toHaveAttribute(
+      'title',
+      'Alt + ArrowUp / Alt + ArrowDown to reorder',
+    );
     fireEvent.keyDown(screen.getByTestId('screenshot-text'), { key: 'ArrowUp', altKey: true });
     await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
     expect(ids()[0]).toBe('screenshot-text');
@@ -273,6 +277,37 @@ describe('CollectionRail', () => {
     expect(screen.getByRole('menu', { name: 'Add item' })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: /Drawing/ })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: /Text block/ })).toBeVisible();
+  });
+
+  it('reorders with rebound keys, shows them in the tooltip, and ignores the old default', async () => {
+    const onSaveProject = vi.fn(async () => true);
+    render(
+      <CollectionRail
+        {...props({
+          onSaveProject,
+          onDeleteItem: vi.fn(),
+          deleteShortcut: 'Ctrl + Delete',
+          reorderBindings: { up: null, down: 'Ctrl+Shift+ArrowDown' },
+        })}
+      />,
+    );
+    const alpha = screen.getByTestId('screenshot-alpha');
+    expect(alpha).toHaveAttribute('title', 'Ctrl + Shift + ArrowDown to reorder');
+    // Only the current item's delete button advertises the shortcut that acts on the current item.
+    expect(screen.getByTestId('item-delete-alpha')).toHaveAttribute('title', 'Delete (Ctrl + Delete)');
+    expect(screen.getByTestId('item-delete-beta').title).toMatch(/^Delete screenshot: /);
+
+    const unhandled = fireEvent.keyDown(alpha, { key: 'ArrowDown', altKey: true });
+    expect(unhandled).toBe(true);
+    expect(onSaveProject).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(alpha, { key: 'ArrowDown', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
+    expect(
+      [...screen.getByLabelText('Content sequence').querySelectorAll('.shot-select')][1]?.getAttribute(
+        'data-testid',
+      ),
+    ).toBe('screenshot-alpha');
   });
 
   it('makes Add screenshot the primary action and can restore the combined Add item button', () => {
