@@ -19,15 +19,23 @@ import type { IpcHost } from '../../../electron/main';
 import type { IpcRouter } from '../../../electron/ipc-router';
 import { commitScreenshotFileTransaction } from '../../../electron/screenshot-transaction-adapter';
 import { atomicWrite } from '../../../electron/files';
+import { writeApplicationFile } from '../../../electron/application-persistence';
+import { PersistenceDiagnostics } from '../../../electron/persistence-diagnostics';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { workflowOutcome } from '../../../electron/workflow-errors';
 
 // No Electron process, clipboard, native image decoding or desktop access in this filesystem test.
 vi.mock('electron', () => ({ app: {}, shell: {} }));
 vi.mock('../../../electron/native-clipboard', () => ({ nativeClipboard: {} }));
 
+const platform = process.platform;
+const realOpen = fs.open.bind(fs);
+const realRename = fs.rename.bind(fs);
 const temporary: string[] = [];
 const stopWatches: Array<() => void> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
+  Object.defineProperty(process, 'platform', { value: platform });
   setReloadProtection(null);
   for (const stop of stopWatches.splice(0)) stop();
   for (const directory of temporary.splice(0)) {
@@ -72,20 +80,27 @@ async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolea
     await fs.writeFile(path.join(projectPath, relative), value);
   }
   const readProject = async (): Promise<ProjectData> => JSON.parse(await fs.readFile(projectFile, 'utf8'));
-  const snapshot = async (): Promise<ProjectSnapshot> => ({
+  const snapshot = vi.fn(async (): Promise<ProjectSnapshot> => ({
     projectPath,
     project: await readProject(),
     thumbnails: {},
     recoveryFound: false,
-  });
+  }));
   let manager: ProjectWatchManager | undefined = undefined;
   let injectCleanupWarning = false;
   const warnedJournals = new Set<string>();
+  const diagnostics = new PersistenceDiagnostics(() => path.join(projectPath, 'diagnostics'), {
+    version: 'test',
+    platform,
+  });
+  const write = (file: string, source: string | Uint8Array) =>
+    writeApplicationFile(file, source, {
+      diagnostics,
+      recordSelfWrite: (target, bytes) => manager?.recordSelfWrite(target, bytes),
+      invalidate: () => undefined,
+    });
   const transactionOperations = {
-    write: async (file: string, source: string | Uint8Array) => {
-      await atomicWrite(file, source);
-      manager?.recordSelfWrite(file, source);
-    },
+    write,
     unlink: async (file: string) => {
       await fs.unlink(file);
       manager?.recordSelfDelete(file);
@@ -167,7 +182,7 @@ async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolea
   manager = new ProjectWatchManager({
     loadSnapshot: snapshot,
     saveProject: async (_target, project) => {
-      await atomicWrite(projectFile, JSON.stringify(project, null, 2));
+      await write(projectFile, JSON.stringify(project, null, 2));
       return snapshot();
     },
     // Most cases inject delivery at exact boundaries. One case explicitly uses native fs.watch.
@@ -261,6 +276,7 @@ async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolea
   };
   return {
     bridge,
+    snapshot,
     deliveredEvents,
     onSnapshot,
     projectFile,
@@ -614,3 +630,194 @@ it('rejects a replay with the same after revision but a different before revisio
   expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
   expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
 });
+
+// Files, candidate sync and rename remain real. Windows only substitutes directory handles,
+// since Node cannot fsync directories there; POSIX uses real handles outside the injected sync.
+function failSync(target: string, stage: 'directory' | 'candidate', code: string, persistent = false) {
+  if (platform === 'win32') Object.defineProperty(process, 'platform', { value: 'linux' });
+  let renamed = false;
+  let failed = false;
+  vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+    await realRename(...args);
+    if (String(args[1]) === target) renamed = true;
+  });
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const name = String(args[0]);
+    const directory = args[1] === 'r' && (await fs.stat(name)).isDirectory();
+    const handle =
+      directory && platform === 'win32'
+        ? ({ sync: async () => undefined, close: async () => undefined } as Awaited<
+            ReturnType<typeof fs.open>
+          >)
+        : await realOpen(...args);
+    const sync = handle.sync.bind(handle);
+    handle.sync = async () => {
+      if (
+        (!failed || persistent) &&
+        ((stage === 'candidate' && name.startsWith(`${target}.tmp-`)) ||
+          (stage === 'directory' && renamed && name === path.dirname(target)))
+      ) {
+        failed = true;
+        throw Object.assign(new Error(code), { code });
+      }
+      await sync();
+    };
+    return handle;
+  });
+  return () => expect(failed).toBe(true);
+}
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'adopts the committed metadata CAS after directory sync %s without a duplicate save',
+  async (code) => {
+    const f = await fixture();
+    const save = f.bridge.saveProjectCompareAndSwap.getMockImplementation()!;
+    let assertFault!: () => void;
+    f.bridge.saveProjectCompareAndSwap.mockImplementation(async (input) => {
+      assertFault = failSync(f.projectFile, 'directory', code);
+      // The real workflow envelope crosses IPC as data, without an Error prototype.
+      return structuredClone(await save(input));
+    });
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(true);
+    assertFault();
+    expect((await f.readProject()).name).toBe('Local name');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
+    const result = await f.bridge.saveProjectCompareAndSwap.mock.results[0].value;
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.projectRevision).toBe(await f.diskRevision());
+    expect(result.value.snapshot.warnings?.join(' ')).toContain(COMMITTED_WRITE_WARNING);
+    expect(f.onSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        project: expect.objectContaining({ name: 'Local name' }),
+        warnings: result.value.snapshot.warnings,
+      }),
+    );
+    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
+  },
+);
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'keeps precommit metadata sync %s pending while independent drafts commit',
+  async (code) => {
+    const f = await fixture();
+    const save = f.bridge.saveProjectCompareAndSwap.getMockImplementation()!;
+    let assertFault!: () => void;
+    f.bridge.saveProjectCompareAndSwap.mockImplementationOnce(async (input) => {
+      assertFault = failSync(f.projectFile, 'candidate', code, true);
+      return structuredClone(await save(input));
+    });
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(false);
+    assertFault();
+    expect((await f.readProject()).name).toBe('Recovery');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    const committed = await f.diskRevision();
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', { value: platform });
+    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(f.bridge.saveProjectCompareAndSwap.mock.calls.at(-1)![0].expectedRevision).toBe(committed);
+    expect((await f.readProject()).name).toBe('Local name');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+    expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
+  },
+);
+
+it.each(['external bytes', 'unreadable snapshot'] as const)(
+  'does not adopt a committed CAS when readback encounters %s',
+  async (failure) => {
+    const f = await fixture();
+    const save = f.bridge.saveProjectCompareAndSwap.getMockImplementation()!;
+    const read = f.snapshot.getMockImplementation()!;
+    let bytes!: Buffer;
+    f.bridge.saveProjectCompareAndSwap.mockImplementationOnce(async (input) => {
+      failSync(f.projectFile, 'directory', 'EIO');
+      f.snapshot.mockImplementationOnce(async () => {
+        if (failure === 'external bytes') await f.externalEdit();
+        bytes = await fs.readFile(f.projectFile);
+        if (failure === 'unreadable snapshot') throw new Error('Readback unavailable');
+        return read();
+      });
+      return structuredClone(await save(input));
+    });
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    const result = await f.bridge.saveProjectCompareAndSwap.mock.results[0].value;
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Unexpected accepted metadata');
+    expect(result.error.message).toContain(COMMITTED_WRITE_WARNING);
+    expect(result.error.message).toContain(
+      failure === 'external bytes' ? 'changed again' : 'Readback unavailable',
+    );
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await fs.readFile(f.projectFile)).toEqual(bytes);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(reload).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'retains content and screenshot commit lineage and warnings through directory sync %s and a watch outage',
+  async (code) => {
+    const f = await fixture();
+    const saveContent = f.bridge.saveContentItem.getMockImplementation()!;
+    const saveScreenshot = f.bridge.saveScreenshotContent.getMockImplementation()!;
+    f.bridge.saveContentItem.mockImplementationOnce(async (input) => {
+      const assertFault = failSync(f.projectFile, 'directory', code);
+      const result = await saveContent(input);
+      assertFault();
+      // Restore the spies before arming the next independent transaction fault.
+      vi.restoreAllMocks();
+      Object.defineProperty(process, 'platform', { value: platform });
+      f.injectWatchError();
+      return structuredClone(result);
+    });
+    f.bridge.saveScreenshotContent.mockImplementationOnce(async (input) => {
+      const assertFault = failSync(f.projectFile, 'directory', code);
+      const result = await saveScreenshot(input);
+      assertFault();
+      return structuredClone(result);
+    });
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(false);
+    const content = await f.bridge.saveContentItem.mock.results[0].value;
+    const screenshot = await f.bridge.saveScreenshotContent.mock.results[0].value;
+    const committed = await f.diskRevision();
+    expect(content.projectRevisionTransition?.before).toBe(f.startRevision);
+    expect(screenshot.projectRevisionTransition?.before).toBe(content.projectRevisionTransition?.after);
+    expect(screenshot.projectRevisionTransition?.after).toBe(committed);
+    expect(content.snapshot.warnings?.join(' ')).toContain(COMMITTED_WRITE_WARNING);
+    expect(screenshot.warnings?.join(' ')).toContain(COMMITTED_WRITE_WARNING);
+    expect(f.onSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        warnings: content.snapshot.warnings,
+      }),
+      f.text.id,
+    );
+    expect(await fs.readFile(path.join(f.projectPath, f.shot.descriptionFile), 'utf8')).toBe(
+      'Screenshot draft',
+    );
+    expect((await f.contentService.load({ projectPath: f.projectPath, itemId: f.text.id })).markdown).toBe(
+      'Text draft',
+    );
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committed);
+    expect((await f.readProject()).name).toBe('Local name');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
+  },
+);

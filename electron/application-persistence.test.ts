@@ -255,9 +255,13 @@ it('keeps committed update-channel and MCP lifecycle state despite the rejected 
   expect(h.server.listening()).toBeNull();
 });
 
-it.each(['directory', 'candidate', 'rename'] as const)(
-  'publishes actual watch revisions only for committed writes (%s)',
-  async (stage) => {
+it.each(
+  ['EIO', 'EACCES', 'EPERM'].flatMap((code) =>
+    (['directory', 'candidate', 'rename'] as const).map((stage) => ({ code, stage })),
+  ),
+)(
+  'publishes committed watch revisions and still reports subsequent unmatched external changes ($stage, $code)',
+  async ({ stage, code }) => {
     const project = emptyProject('Watch', '');
     const file = path.join(root, 'project.json');
     const baseline = JSON.stringify(project);
@@ -304,7 +308,7 @@ it.each(['directory', 'candidate', 'rename'] as const)(
         recordSelfWrite: published,
         invalidate: invalidated,
       });
-    failWrite(file, stage);
+    failWrite(file, stage, code);
     const next = JSON.stringify({ ...project, name: 'Committed' });
     await expect(write(next)).rejects.toThrow();
     expect(published).toHaveBeenCalledTimes(stage === 'directory' ? 1 : 0);
@@ -341,9 +345,13 @@ it.each(['directory', 'candidate', 'rename'] as const)(
   },
 );
 
-it.each(['project.json', 'note.md'])(
-  'distinguishes transaction commit from an intermediate file commit (%s)',
-  async (failedPath) => {
+it.each(
+  ['EIO', 'EACCES', 'EPERM'].flatMap((code) =>
+    ['project.json', 'note.md'].map((failedPath) => ({ code, failedPath })),
+  ),
+)(
+  'distinguishes transaction commit from an intermediate file commit ($failedPath, $code)',
+  async ({ failedPath, code }) => {
     const before = Buffer.from('before');
     const after = Buffer.from('after');
     for (const name of ['project.json', 'note.md']) await fs.writeFile(path.join(root, name), before);
@@ -355,7 +363,7 @@ it.each(['project.json', 'note.md'])(
         expectedBefore: screenshotTransactionBaseline(before),
       })),
     });
-    failWrite(path.join(root, failedPath), 'directory');
+    failWrite(path.join(root, failedPath), 'directory', code);
     if (failedPath === 'project.json') {
       const result = await commitScreenshotTransaction(root, staged.token);
       expect(result).toMatchObject({ status: 'committed', warning: expect.stringContaining('durability') });
