@@ -74,3 +74,19 @@ Set `IMNOTA_SMOKE_MODE=stress` for mixed-resolution 1/10/20/100-screenshot fixtu
 For the actual workspace export process, run `corepack pnpm build`, then `corepack pnpm smoke:clipboard`. The focused mode skips onboarding and release notes, creates an isolated three-screenshot project, edits its description, and opens **Copy Bundle** from the top bar. It verifies multiple exported bundles, the current edit in the Markdown, truthful progress (no percentage while rendering, writing or copying), repeat-copy reuse of one export set, and a fresh export after another edit that keeps the earlier files. Every bundle card is copied with Rich copy and pasted into a test-only editable control through Chromium's native Paste command; the check inspects the trusted paste event's Markdown, HTML fragment and decoded image dimensions. Set `IMNOTA_SMOKE_ARTIFACT_DIR` to a new absolute `imnota-verification-artifacts-*` directory to keep the report, captures and `bundle-export-progress.json`. CI runs this mode against each packaged Windows, macOS and Linux build after the standard walkthrough and keeps its evidence as `clipboard-evidence-<os>`. External editor acceptance remains a separate check.
 
 Native clipboard checks establish which formats Imnota wrote, not which formats an external editor accepts. Captured layouts still need visual inspection. Performance results apply to the tested machine and fixture, not every Windows or macOS device.
+
+## Installer verification
+
+The quick installers resolve the stable tag once and verify the asset against
+that release's `SHA256SUMS.txt` before extraction or execution. Missing, malformed,
+duplicate or mismatching metadata stops installation before changing the previous
+app. Linux stages the verified AppImage privately before replacement; temporary
+downloads and staging are cleaned on exit. Checksums do not authenticate a
+compromised release publisher. Failure inside a verified Windows installer
+retains that installer's recovery behavior.
+
+Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
+and download failures. The suite executes the real scripts with network and app
+launch commands replaced. Git Bash on Windows exercises shell control flow; it
+does not replace native Linux or macOS installation evidence. No fixture launches
+a real installer or changes a personal installation.
