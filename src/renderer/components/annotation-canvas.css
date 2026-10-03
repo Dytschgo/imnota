@@ -53,3 +53,8 @@
     background: var(--surface);
   }
 }
+
+.annotation-canvas .canvas-load-state {
+  align-content: center;
+  gap: 12px;
+}
