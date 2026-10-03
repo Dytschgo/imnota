@@ -1,10 +1,22 @@
 # Stable release CI
 
-The stable workflow runs formatting, lint, type checks, and the complete application/script suite once in Linux `quality`. After classification succeeds, quality and all three package jobs run concurrently. Each package job retains `test:platform`, including the reviewed platform-sensitive application files and all script tests. The separate duplicate release-channel/asset-staging invocation is removed because those tests already belong to the script suite.
+The stable workflow runs the tracked-file secret scan, formatting, lint, type checks, the complete application/script suite, and the share-service gates once in Linux `quality`. After classification succeeds, quality and all three package jobs run concurrently. Each package job retains `test:platform`, including the reviewed platform-sensitive application files and all script tests. The separate duplicate release-channel/asset-staging invocation is removed because those tests already belong to the script suite.
 
 The classifier accepts a stable tag only when its peeled commit matches the checkout, belongs to main, and its package version matches the tag. It exports that immutable SHA. Quality, packaging, asset staging, and the public Mac installation verifier all check out that same SHA.
 
 Publication requires successful classification, quality, and every platform package job. The package targets, native walkthroughs, required Mac updater check, asset patterns, manifests, checksums, draft/publication sequence, and permissions retain their existing contracts. The published Mac download must still install and pass its walkthrough before promotion to Latest. A failed quality job cannot publish merely because packaging succeeded. A failed public-install job prevents Latest promotion; the already published non-Latest release remains available as in the previous workflow.
+
+## Parity with nightly gates
+
+Stable publication previously had weaker gates than a nightly prerelease. Stable `quality` now also installs the share service and runs its tests, `npm audit --omit=dev --audit-level=high`, and `pnpm test:share-contract`, as nightly `quality` does. The Windows package job compares the packaged walkthrough's screenshots with the approved `tests/visual/win32` baselines and retains them as the `windows-visual-evidence-release` artifact. That name deliberately falls outside the `release-*` pattern the publish job downloads, so evidence can never be staged as a release asset.
+
+`quality` in Validate, nightly, and stable also runs `scripts/secret-scan.mjs`, which before ran only from the local `scripts/release.mjs`. It reads the checked-out index, reports filenames only, and needs no Git history. It is a guard against known credential patterns and forbidden data paths in tracked files, not a history scan or a substitute for review.
+
+The audit gate depends on the advisory database at the time of the tag. A high-severity advisory published against a share-service production dependency after the PR merged blocks stable publication until it is fixed or patched on main and a new version is tagged. That is the intended behaviour; do not remove the gate to force a release through.
+
+Every job has a `timeout-minutes` limit: 45 minutes for package jobs, 30 for publish and the public Mac installation, 20 for quality, 10 for classification, and 5 for Latest promotion. The v0.4.0 run below measured at most 8m 13s for a package job, 2m 10s for quality, and 2m 03s for the public installation, so the limits bound a hung step without constraining a normal run. A publish job that times out during upload leaves the draft release unpublished. Runs for the same tag queue in one concurrency group with `cancel-in-progress: false`, so a re-pushed tag or a re-run cannot race an in-flight publication and never cancels it.
+
+These additions were validated with Actionlint and line-by-line review. PR CI exercises the same share-service, contract, secret-scan, and Windows visual commands in Validate, but cannot execute the tag-triggered workflow; the next stable release is their first execution here, including `actions/download-artifact` v8, which fails on a digest mismatch instead of warning.
 
 ## Evidence and limits
 

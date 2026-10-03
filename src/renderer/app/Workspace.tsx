@@ -51,6 +51,8 @@ export interface WorkspaceProps {
   canRedo: boolean;
   canUndoDescription: boolean;
   shortcutLabels: Partial<Record<string, string>>;
+  /** Live bindings for moving the focused rail item; null when the user cleared one. */
+  reorderBindings?: { up: string | null; down: string | null };
   onTool(tool: 'select' | AnnotationKind): void;
   onColor(color: string): void;
   onChangeAnnotations(next: Annotation[]): void;
@@ -223,6 +225,8 @@ export function Workspace(props: WorkspaceProps) {
         captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
         captureShortcut={props.captureShortcut}
+        deleteShortcut={props.shortcutLabels.delete}
+        reorderBindings={props.reorderBindings}
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
@@ -404,7 +408,11 @@ export function Workspace(props: WorkspaceProps) {
                     ? 'The description is copied into the prompt Markdown under this drawing.'
                     : 'Use headings, lists, and code blocks to describe the task.'}
                 </p>
-                <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>
+                <Button
+                  variant="soft"
+                  title={props.shortcutLabels.duplicate && `Duplicate (${props.shortcutLabels.duplicate})`}
+                  onClick={() => void props.onDuplicateContent?.()}
+                >
                   <Copy size={15} aria-hidden="true" />
                   Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
                 </Button>
@@ -434,6 +442,7 @@ export function Workspace(props: WorkspaceProps) {
                   props.onSelectAnnotation(null);
                 }}
                 onDuplicate={props.onDuplicate}
+                duplicateShortcut={props.shortcutLabels.duplicate}
               />
             )}
           </div>
