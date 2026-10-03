@@ -1,3 +1,4 @@
+import { useDecodedImage } from '../canvas/useDecodedImage';
 import {
   useCallback,
   useEffect,
@@ -217,7 +218,7 @@ export function AnnotationCanvas({
           normalizeAnnotationBounds(draft?.kind === 'crop' ? draft : cropBox!),
         ])
       : sourceBounds;
-  const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+  const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -390,22 +391,6 @@ export function AnnotationCanvas({
       window.removeEventListener('blur', blur);
     };
   }, [onSelect]);
-
-  useEffect(() => {
-    if (!image?.dataUrl) {
-      setImageObj(null);
-      return;
-    }
-    const next = new window.Image();
-    let cancelled = false;
-    next.onload = () => {
-      if (!cancelled) setImageObj(next);
-    };
-    next.src = image.dataUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [image?.dataUrl]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -1264,7 +1249,13 @@ export function AnnotationCanvas({
           </Layer>
         </Stage>
       ) : (
-        <CanvasLoadState failed={!image && Boolean(loadFailed)} onRetry={onRetryLoad} />
+        <CanvasLoadState
+          failed={decodeFailed || (!image && Boolean(loadFailed))}
+          onRetry={() => {
+            retryDecode();
+            onRetryLoad?.();
+          }}
+        />
       )}
       {editing && editedAnnotation && editedLayout && editorPresentation && (
         <textarea

@@ -33,6 +33,7 @@ describe('ErrorBoundary', () => {
     expect(fallback).toHaveTextContent('Imnota ran into a problem');
     expect(fallback).toHaveTextContent('saves your pending changes first');
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => expect(onReload).toHaveBeenCalledWith({ discardUnsaved: false }));
   });
@@ -48,6 +49,7 @@ describe('ErrorBoundary', () => {
     );
     expect(screen.getByText('Collection rail')).toBeInTheDocument();
     expect(screen.getByTestId('error-fallback-panel')).toHaveTextContent('This item could not be shown');
+    expect(screen.getByRole('button', { name: 'Try again' })).toHaveFocus();
     broken = false;
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(screen.getByText('Canvas ready')).toBeInTheDocument();
@@ -89,8 +91,9 @@ describe('ErrorBoundary', () => {
         <Fragile />
       </ErrorBoundary>,
     );
+    expect(screen.getByRole('button', { name: 'Reload' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    expect(await screen.findByText(/could not be saved/)).toBeInTheDocument();
+    expect(await screen.findByText(/could not be saved/)).toHaveAttribute('role', 'alert');
     expect(onReload).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Reload without saving' }));
     await waitFor(() => expect(onReload).toHaveBeenLastCalledWith({ discardUnsaved: true }));

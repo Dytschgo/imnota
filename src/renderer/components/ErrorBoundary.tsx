@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, createRef, type ErrorInfo, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { reloadWindow } from '../app/reload-guard';
 import { Button } from './ui';
@@ -34,6 +34,8 @@ const COPY = {
 
 /** Keeps a render failure from blanking the window, and reloads only through the save protection. */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  private primaryAction = createRef<HTMLButtonElement>();
+
   state: ErrorBoundaryState = { failed: false, reload: 'idle' };
 
   static getDerivedStateFromError(): Partial<ErrorBoundaryState> {
@@ -41,6 +43,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    this.primaryAction.current?.focus();
     console.error('Imnota could not render part of the window.', error, info.componentStack);
   }
 
@@ -77,17 +80,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <h2>{copy.title}</h2>
         <p>{copy.description}</p>
         {reload === 'unsaved' && (
-          <p className="error-fallback-warning">
+          <p className="error-fallback-warning" role="alert">
             Your latest changes could not be saved. Reloading now may lose them.
           </p>
         )}
         <div className="error-fallback-actions">
           {variant === 'panel' && (
-            <Button variant="primary" onClick={() => this.setState({ failed: false, reload: 'idle' })}>
+            <Button
+              ref={this.primaryAction}
+              disabled={reload === 'saving'}
+              variant="primary"
+              onClick={() => this.setState({ failed: false, reload: 'idle' })}
+            >
               Try again
             </Button>
           )}
           <Button
+            ref={variant === 'app' ? this.primaryAction : undefined}
             variant={variant === 'app' ? 'primary' : 'default'}
             busy={reload === 'saving'}
             onClick={() => void this.reload(false)}

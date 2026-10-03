@@ -132,6 +132,7 @@ export default function App() {
   const toastTimer = useRef<number | null>(null);
   const toastGeneration = useRef(0);
   const toastHold = useRef(0);
+  const toastErrorPaused = useRef(false);
   const toastLifetime = useRef<{ generation: number; durationMs: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
@@ -303,7 +304,7 @@ export default function App() {
   const releaseToast = useCallback(() => {
     toastHold.current = Math.max(0, toastHold.current - 1);
     const lifetime = toastLifetime.current;
-    if (toastHold.current > 0 || !lifetime) return;
+    if (toastHold.current > 0 || toastErrorPaused.current || !lifetime) return;
     armToastTimer(lifetime.generation, lifetime.durationMs);
   }, [armToastTimer]);
   const dismissToast = useCallback(
@@ -320,10 +321,18 @@ export default function App() {
   const errorVisible = Boolean(error || contentPersistence.error || persistence.error || preferences.error);
   const hiddenActionToast = errorVisible && toast?.action ? toast.generation : null;
   useEffect(() => {
-    if (hiddenActionToast === null) return;
-    holdToast();
-    return releaseToast;
-  }, [hiddenActionToast, holdToast, releaseToast]);
+    toastErrorPaused.current = hiddenActionToast !== null;
+    // Removing the toast does not emit mouseleave. Discard holds from its old DOM node.
+    toastHold.current = 0;
+    if (hiddenActionToast !== null) clearToastTimer();
+    else if (toastLifetime.current) {
+      const { generation, durationMs } = toastLifetime.current;
+      armToastTimer(generation, durationMs);
+    }
+  }, [hiddenActionToast, clearToastTimer, armToastTimer]);
+  useEffect(() => {
+    dismissToast();
+  }, [store.snapshot?.projectPath, dismissToast]);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -465,10 +474,20 @@ export default function App() {
       window.clearTimeout(metadataTimer.current);
       metadataTimer.current = null;
     }
-    if (!(await contentPersistence.flush())) return false;
-    if (!(await persistence.flush())) return false;
-    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
-    return true;
+    // A failed leg must not prevent independent drafts from reaching disk.
+    let saved = true;
+    for (const save of [
+      () => contentPersistence.flush(),
+      () => persistence.flushProjectDrafts(),
+      () => persistence.flushProjectMetadata(),
+    ]) {
+      try {
+        if (!(await save())) saved = false;
+      } catch {
+        saved = false;
+      }
+    }
+    return saved;
   }, [persistence, contentPersistence]);
 
   const currentLocation = useCallback((): NavigationLocation => {
@@ -528,12 +547,12 @@ export default function App() {
   // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
   useEffect(() => {
     setReloadProtection({
-      flush: flushAll,
+      flush: () => persistence.withReloadWatch(flushAll),
       allowUnload: () => {
         allowClose.current = true;
       },
     });
-  }, [flushAll]);
+  }, [flushAll, persistence]);
 
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {

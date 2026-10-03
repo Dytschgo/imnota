@@ -77,6 +77,7 @@ export interface ProjectPersistenceController {
   queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
   flushProjectDrafts(): Promise<boolean>;
+  withReloadWatch(save: () => Promise<boolean>): Promise<boolean>;
   flushProjectMetadata(): Promise<boolean>;
   saveProjectMetadata(project: ProjectData): Promise<boolean>;
   beginNativeMutation(): number;
@@ -350,6 +351,14 @@ export function useProjectPersistence({
   const loadIdentity = useRef(0);
   const watchId = useRef<string | null>(null);
   const acceptedRevision = useRef<string | null>(null);
+  const stoppedRevision = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const ownRevisionGeneration = useRef(0);
   const watchReady = useRef<Promise<boolean>>(Promise.resolve(false));
   const metadataDirty = useRef(false);
@@ -761,6 +770,7 @@ export function useProjectPersistence({
       const id = watchId.current;
       if (id) void bridge.stopProjectWatch({ watchId: id });
       watchId.current = null;
+      stoppedRevision.current = acceptedRevision.current;
       publishAcceptedRevision(null);
     };
   }, [
@@ -870,6 +880,38 @@ export function useProjectPersistence({
     metadataSave.current = operation;
     return operation;
   }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange]);
+
+  // A root error boundary unmounts the watcher before its retained save closure runs.
+  // Reconnect only for that recovery save, retaining the last accepted CAS baseline:
+  // granting a new watch must not silently accept external metadata edits.
+  const withReloadWatch = useCallback(
+    async (save: () => Promise<boolean>): Promise<boolean> => {
+      if (mounted.current || !snapshotRef.current) return save();
+      const bridge = getRendererBridge();
+      let recoveryWatch: string | null = null;
+      try {
+        const grant = workflowValue(
+          await bridge.startProjectWatch({ projectPath: snapshotRef.current.projectPath }),
+        );
+        recoveryWatch = grant.watchId;
+        watchId.current = recoveryWatch;
+        watchReady.current = Promise.resolve(true);
+        publishAcceptedRevision(stoppedRevision.current);
+      } catch {
+        // Still attempt the independent screenshot saves; metadata keeps its normal guard.
+        watchReady.current = Promise.resolve(false);
+      }
+      try {
+        return await save();
+      } finally {
+        stoppedRevision.current = acceptedRevision.current;
+        watchId.current = null;
+        watchReady.current = Promise.resolve(false);
+        if (recoveryWatch) await bridge.stopProjectWatch({ watchId: recoveryWatch });
+      }
+    },
+    [publishAcceptedRevision],
+  );
 
   const saveProjectMetadata = useCallback(
     (project: ProjectData): Promise<boolean> => {
@@ -1085,6 +1127,7 @@ export function useProjectPersistence({
     queueProjectMetadata,
     flush,
     flushProjectDrafts,
+    withReloadWatch,
     flushProjectMetadata,
     saveProjectMetadata,
     beginNativeMutation,

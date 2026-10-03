@@ -1,3 +1,4 @@
+import { reloadWindow, setReloadProtection } from './app/reload-guard';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
@@ -26,6 +27,7 @@ vi.mock('./components/AnnotationCanvas', () => ({
 
 afterEach(() => {
   cleanup();
+  setReloadProtection(null);
   annotationCanvasSpy.mockClear();
   useAppStore.setState({
     snapshot: null,
@@ -752,6 +754,62 @@ describe('feedback controls', () => {
     }));
   });
 
+  it.each(['expire', 'change-project'])('pauses hovered Undo during errors then handles %s', async (next) => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+    await renderEditingProject({
+      deleteScreenshot,
+      undoDeleteScreenshot,
+      pasteImage: vi.fn(async () => {
+        throw new Error('The clipboard does not contain an image.');
+      }),
+    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      fireEvent.mouseEnter(document.querySelector('.toast')!);
+      pasteFromAddMenu();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('error-toast')).toHaveTextContent('The clipboard does not contain an image.');
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS * 2));
+      if (next === 'change-project') {
+        act(() => useAppStore.getState().setProject({ ...snapshot, projectPath: '/workspace/other' }));
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      if (next === 'change-project') {
+        expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+        expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+        return;
+      }
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+      expect(undo).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2));
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+    }
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
   it('lets the conflict-copy notice be dismissed', async () => {
     const text = {
       id: 'text',
@@ -803,6 +861,68 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
     expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
   });
+
+  it.each([false, true])(
+    'flushes stopped-watch drafts before reload (content fails: %s)',
+    async (failContent) => {
+      const text = {
+        id: 'text',
+        kind: 'text' as const,
+        collectionId: '001-collection',
+        position: 1,
+        includeInExport: true,
+        createdAt: 'now',
+        updatedAt: 'now',
+        markdownFilename: 'text.md',
+      };
+      let persisted = snapshot;
+      const saveContentItem = vi.fn(async () => {
+        if (failContent) throw new Error('Content disk full');
+        return { snapshot: persisted, itemId: text.id, contentRevision: 'next', conflictCreated: false };
+      });
+      const stopProjectWatch = vi.fn(async () => ({ ok: true as const, value: undefined }));
+      const startProjectWatch = vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          watchId: 'recovery-watch',
+          projectPath: snapshot.projectPath,
+          projectRevision: 'project-1',
+        },
+      }));
+      const { note, save, editingSnapshot } = await renderEditingProject({
+        startProjectWatch,
+        stopProjectWatch,
+        saveContentItem,
+        loadContentItem: async () => ({ item: text, markdown: 'Original', contentRevision: 'revision' }),
+        reloadWatchedProject: async () => ({
+          ok: true,
+          value: { snapshot: persisted, projectRevision: 'next' },
+        }),
+      });
+      persisted = {
+        ...editingSnapshot,
+        project: { ...editingSnapshot.project, schemaVersion: 4, contentItems: [text] },
+      };
+      fireEvent.change(note, { target: { value: 'Screenshot draft before crash' } });
+      act(() => useAppStore.getState().setProject(persisted, text.id));
+      const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+      fireEvent.change(editor, { target: { value: 'Text draft before crash' } });
+      cleanup(); // The same unmount cleanup that runs when the app boundary catches a render crash.
+      expect(stopProjectWatch).toHaveBeenCalled();
+      const reload = vi.fn();
+      expect(await reloadWindow({}, reload)).toBe(!failContent);
+      expect(startProjectWatch).toHaveBeenCalledTimes(2);
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshot: expect.objectContaining({ description: 'Screenshot draft before crash' }),
+        }),
+      );
+      expect(saveContentItem).toHaveBeenCalledWith(
+        expect.objectContaining({ markdown: 'Text draft before crash' }),
+      );
+      expect(reload).toHaveBeenCalledTimes(failContent ? 0 : 1);
+    },
+  );
 
   it('offers Retry save after a screenshot save fails', async () => {
     const { save, note } = await renderEditingProject();
