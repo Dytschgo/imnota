@@ -51,8 +51,10 @@ describe('SettingsView category navigation', () => {
     expect(prompt).toContain('mcpServers');
     for (const tool of [
       'list_projects',
+      'list_collections',
       'list_collection_items',
       'get_latest_bundle',
+      'get_bundle',
       'get_item',
       'search_saved_text',
     ])
