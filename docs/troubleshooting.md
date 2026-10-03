@@ -49,3 +49,9 @@ Normal development and pull-request builds are unsigned. Signing and macOS notar
 ## Manual compatibility status
 
 macOS workflow verification and cross-editor combined-paste acceptance are pending manual checks. Automated Electron tests, Windows development results or clipboard-write success must not be reported as passing evidence for those environments. Use the [manual user-feedback protocol](user-feedback-protocol.md).
+
+## A render error replaces the window or editor
+
+The recovery screen focuses **Try again** for an item failure or **Reload** for a window failure. Reload attempts pending content, screenshot drafts and project details before restarting. After a window crash it reconnects safe project monitoring for that save without accepting the new watch's metadata revision. Only native saves that start from the last accepted revision can advance that baseline; a content save cannot silently accept an external project edit. Committed content and screenshot saves retain their exact revision chain even if monitoring fails. A healthy replacement watch can clear that monitoring error only after its revision and the disk revision match the retained chain; retry does not rewrite already committed drafts. An external-change notice cannot be cleared this way. External conflicts and failed writes still block reload; **Save and reload** retries, while **Reload without saving** explicitly discards remaining unsaved edits. A failed save does not prevent independent drafts from being attempted. A gesture not yet committed by the editor cannot be recovered.
+
+An unreadable or undecodable screenshot shows **Retry** instead of an indefinite loading message. Error notices temporarily pause deletion Undo offers; dismissing the notice restarts the offer, and changing projects clears it.

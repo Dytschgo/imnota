@@ -100,6 +100,10 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
         conflictCreated: true,
         contentRevision: contentRevision(conflict.description, conflictAnnotations),
         projectRevision: projectRevisionForSource(projectSource),
+        projectRevisionTransition: {
+          before: baseline.projectRevision,
+          after: projectRevisionForSource(projectSource),
+        },
         warnings: warnings.length ? warnings : undefined,
       };
     }
@@ -157,6 +161,10 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
       conflictCreated: false,
       contentRevision: contentRevision(screenshot.description, annotationsJson),
       projectRevision: projectRevisionForSource(projectSource),
+      projectRevisionTransition: {
+        before: baseline.projectRevision,
+        after: projectRevisionForSource(projectSource),
+      },
       warnings: warnings.length ? warnings : undefined,
     };
   });
