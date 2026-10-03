@@ -180,6 +180,8 @@ Onboarding appears only for a genuinely new local application profile. It uses a
 
 Keyboard shortcuts are configurable in Settings with Windows/macOS-aware defaults, conflict explanations and Reset to defaults. Mouse controls remain available for the complete workflow.
 
+Back and Forward use `Alt+Left` and `Alt+Right`. Open Settings with `Ctrl+,` (`⌘,` on macOS). More tools use `M` for Redact, `C` for Crop, `P` for Freehand and `O` for Ellipse. Canvas zoom uses `=` and `-`; the native window zoom combinations remain reserved. Duplicate the current collection item with `Ctrl+D` (`⌘D`), or delete it with `Ctrl+Delete` (`⌘Backspace`), using the same confirmation preference and Undo as its delete button. Plain Delete (Backspace on macOS) removes only the selected annotation. Focus a collection rail item and use `Alt+Up/Down` to reorder it; these bindings are also configurable. Hints show the current bindings. Typing fields, dialogs and the drawing editor keep their own keyboard handling. Existing saved bindings take precedence over new defaults; a colliding default remains unset until you choose another key.
+
 ## Updates
 
 A compact update control stays beside **About** in the workspace navigation. When navigation is hidden, it sits in the top bar beside Show navigation / Back. It is always available: refresh when you are on the latest version or have not checked yet, a disabled progress state while checking or downloading, download when an update is ready, restart/install after the file is downloaded, and retry after a failure. Hover the control for the current status and, when a release is available, its notes. Nothing downloads or installs until you choose that action.

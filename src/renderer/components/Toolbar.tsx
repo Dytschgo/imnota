@@ -248,8 +248,10 @@ function MoreToolSection({
   onFocusedIndexChange,
   onClose,
   onItemRef,
+  shortcutLabels,
 }: {
   label: string;
+  shortcutLabels: Partial<Record<ToolChoice, string>>;
   tools: ToolDefinition[];
   activeTool: ToolChoice;
   overflowTools: ToolDefinition[];
@@ -275,6 +277,7 @@ function MoreToolSection({
             data-tool-id={definition.id}
             data-testid={`tool-${definition.id}`}
             aria-label={definition.label}
+            title={shortcutLabels[definition.id] && `${definition.label} (${shortcutLabels[definition.id]})`}
             aria-checked={activeTool === definition.id}
             className={activeTool === definition.id ? 'is-active' : ''}
             tabIndex={index === focusedIndex ? 0 : -1}
@@ -323,7 +326,9 @@ export interface ToolbarProps {
   /** Enables the compact quick palette when supplied. */
   onColorSelect?: (color: string) => void;
   selectedColor?: string;
-  shortcutLabels?: Partial<Record<ToolChoice | 'undo' | 'redo' | 'fit' | 'actualSize', string>>;
+  shortcutLabels?: Partial<
+    Record<ToolChoice | 'undo' | 'redo' | 'fit' | 'actualSize' | 'zoomIn' | 'zoomOut', string>
+  >;
 }
 
 export function Toolbar({
@@ -538,6 +543,7 @@ export function Toolbar({
                       closeMoreMenu(true);
                     }}
                     focusedIndex={moreFocusedIndex}
+                    shortcutLabels={shortcutLabels}
                     onFocusedIndexChange={setMoreFocusedIndex}
                     onClose={() => closeMoreMenu(true)}
                     onItemRef={(index, element) => {
@@ -587,10 +593,16 @@ export function Toolbar({
           <Redo2 size={17} />
         </IconButton>
         <span className="toolbar-divider" />
-        <IconButton label="Zoom out" onClick={() => onZoom(-0.1)}>
+        <IconButton
+          label={`Zoom out${shortcutLabels.zoomOut ? ` (${shortcutLabels.zoomOut})` : ''}`}
+          onClick={() => onZoom(-0.1)}
+        >
           <ZoomOut size={17} />
         </IconButton>
-        <IconButton label="Zoom in" onClick={() => onZoom(0.1)}>
+        <IconButton
+          label={`Zoom in${shortcutLabels.zoomIn ? ` (${shortcutLabels.zoomIn})` : ''}`}
+          onClick={() => onZoom(0.1)}
+        >
           <ZoomIn size={17} />
         </IconButton>
         <IconButton

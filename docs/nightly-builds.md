@@ -31,7 +31,7 @@ That command **publishes a prerelease after validation succeeds**. Run it only w
 
 Versions use the next patch of the candidate's stable package version: for example, `0.2.0` produces `0.2.1-nightly.20260905.1234`. A retried run adds a numeric attempt, such as `.2`. These are examples, not available downloads. The package's embedded version is overridden for that build without committing a version bump to main.
 
-The workflow runs quality tests and builds Windows, macOS and Linux artifacts. Packaged smoke tests must confirm success from inside the application, including its expected nightly version. The collected `nightly.yml`, `nightly-linux.yml` and `nightly-mac.yml` manifests must match the version, filenames and SHA-512 hashes of staged assets. SHA-256 checksums are also generated.
+The workflow runs quality tests, including the tracked-file secret scan, and builds Windows, macOS and Linux artifacts. Every job has a time limit, recorded with the [pinned-action policy](ci-routing.md#pinned-actions-time-limits-and-least-privilege). Packaged smoke tests must confirm success from inside the application, including its expected nightly version. The collected `nightly.yml`, `nightly-linux.yml` and `nightly-mac.yml` manifests must match the version, filenames and SHA-512 hashes of staged assets. SHA-256 checksums are also generated.
 
 Publication first stages a draft, then publishes a GitHub prerelease with `make_latest: false`. Stable update metadata and the stable installer's Latest alias are untouched. Download a nightly through the app's selected-channel link or the repository's prereleases, not the stable one-command installer.
 

@@ -1797,6 +1797,8 @@ export default function App() {
     (id: ShortcutActionId) => formatShortcut(resolvedShortcuts[id], platform),
     [platform, resolvedShortcuts],
   );
+  /** Tooltip text for a binding; undefined when the action has no shortcut so the hint is omitted. */
+  const shortcutHint = (id: ShortcutActionId) => (resolvedShortcuts[id] ? shortcutLabel(id) : undefined);
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
@@ -1813,13 +1815,24 @@ export default function App() {
     setTool(next);
     if (next !== 'select') lastAnnotateTool.current = next;
   }
+  const canGoBack = navigationStack.back.length > 1;
+  const canGoForward = navigationStack.forward.length > 0;
+  const activeItem = orderedShots.find((item) => item.id === store.activeScreenshotId);
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
     'project.open': () => void openProjectDialog(),
     'project.search': () => void openProjectSearch(),
+    // Same guards as the top-bar buttons: nothing happens at either end of the history.
+    'navigation.back': () => {
+      if (canGoBack) void restoreNavigation('back');
+    },
+    'navigation.forward': () => {
+      if (canGoForward) void restoreNavigation('forward');
+    },
     'navigation.projects': () => void navigate('projects'),
     'navigation.recent': () => void navigate('recent'),
     'navigation.favourites': () => void navigate('favourites'),
+    'navigation.settings': () => void navigate('settings'),
     'edit.save': () => void flushAll(),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
@@ -1860,6 +1873,10 @@ export default function App() {
     'tool.rectangle': () => selectTool('rectangle'),
     'tool.highlight': () => selectTool('highlight'),
     'tool.step': () => selectTool('step'),
+    'tool.redact': () => selectTool('blur'),
+    'tool.crop': () => selectTool('crop'),
+    'tool.freehand': () => selectTool('pen'),
+    'tool.ellipse': () => selectTool('ellipse'),
     'screenshot.previous': () => {
       const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
       if (index > 0) void selectShot(orderedShots[index - 1]!.id);
@@ -1875,6 +1892,19 @@ export default function App() {
     'panel.toggleInspector': () => store.set({ rightPanelOpen: !store.rightPanelOpen }),
     'canvas.fit': () => dispatchCanvasCommand(stageRef.current, 'fit'),
     'canvas.actualSize': () => dispatchCanvasCommand(stageRef.current, 'actual-size'),
+    'canvas.zoomIn': () => dispatchCanvasCommand(stageRef.current, 'zoom-in'),
+    'canvas.zoomOut': () => dispatchCanvasCommand(stageRef.current, 'zoom-out'),
+    'item.duplicate': () => {
+      if (!activeItem) return;
+      void (activeItem.kind === 'screenshot' ? duplicateScreenshot() : mutateContent('duplicate'));
+    },
+    // The request functions own the confirmation preference and the Undo toast.
+    'item.delete': () => {
+      if (!activeItem) return;
+      void (activeItem.kind === 'screenshot'
+        ? requestScreenshotDeletion(activeItem.id)
+        : requestContentDeletion(activeItem.id));
+    },
     'collection.new': () =>
       document.querySelector<HTMLButtonElement>('[data-testid="new-collection"]')?.click(),
     'collection.overallContext': () => {
@@ -1940,9 +1970,12 @@ export default function App() {
           projects: shortcutLabel('navigation.projects'),
           recent: shortcutLabel('navigation.recent'),
           favourites: shortcutLabel('navigation.favourites'),
+          back: shortcutHint('navigation.back'),
+          forward: shortcutHint('navigation.forward'),
+          settings: shortcutHint('navigation.settings'),
         }}
-        canGoBack={navigationStack.back.length > 1}
-        canGoForward={navigationStack.forward.length > 0}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
         onBack={() => restoreNavigation('back')}
         onForward={() => restoreNavigation('forward')}
         onNavigate={navigate}
@@ -2180,6 +2213,18 @@ export default function App() {
               redo: shortcutLabel('edit.redo'),
               fit: shortcutLabel('canvas.fit'),
               actualSize: shortcutLabel('canvas.actualSize'),
+              blur: shortcutHint('tool.redact'),
+              crop: shortcutHint('tool.crop'),
+              pen: shortcutHint('tool.freehand'),
+              ellipse: shortcutHint('tool.ellipse'),
+              zoomIn: shortcutHint('canvas.zoomIn'),
+              zoomOut: shortcutHint('canvas.zoomOut'),
+              duplicate: shortcutHint('item.duplicate'),
+              delete: shortcutHint('item.delete'),
+            }}
+            reorderBindings={{
+              up: resolvedShortcuts['item.moveUp'],
+              down: resolvedShortcuts['item.moveDown'],
             }}
             onTool={selectTool}
             onColor={(color) => {

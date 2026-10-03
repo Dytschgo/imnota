@@ -23,7 +23,9 @@ export interface AppShellProps {
   onToggleFavourite(): void | Promise<void>;
   onAbout(): void;
   onDropFiles?(files: FileList): void | Promise<void>;
-  navigationShortcuts?: Partial<Record<'projects' | 'recent' | 'favourites', string>>;
+  navigationShortcuts?: Partial<
+    Record<'projects' | 'recent' | 'favourites' | 'back' | 'forward' | 'settings', string>
+  >;
   /** Rendered beside About while navigation is open; otherwise in the top bar. */
   renderUpdateControl?(placement: 'nav' | 'topbar'): ReactNode;
 }
@@ -121,11 +123,20 @@ export function AppShell({
           )}
           {!store.navigationOpen && renderUpdateControl?.('topbar')}
           <div className="topbar-navigation" aria-label="Navigation history">
-            <IconButton label="Back" disabled={!canGoBack} onClick={() => void onBack?.()}>
+            <IconButton
+              label="Back"
+              title={navigationShortcuts?.back ? `Back (${navigationShortcuts.back})` : 'Back'}
+              disabled={!canGoBack}
+              onClick={() => void onBack?.()}
+            >
               <ArrowLeft size={16} aria-hidden="true" />
             </IconButton>
             {canGoForward && (
-              <IconButton label="Forward" onClick={() => void onForward?.()}>
+              <IconButton
+                label="Forward"
+                title={navigationShortcuts?.forward ? `Forward (${navigationShortcuts.forward})` : 'Forward'}
+                onClick={() => void onForward?.()}
+              >
                 <ArrowRight size={16} aria-hidden="true" />
               </IconButton>
             )}
