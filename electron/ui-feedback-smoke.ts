@@ -383,6 +383,55 @@ export async function exerciseUiFeedback(
     '1080x800-feedback-normal-collection-picker.png',
     ['Active', 'Archived'],
   );
+  // Exercise trusted Chromium key input against this disposable screenshot.
+  await driver.click({ selector: `[data-testid="screenshot-${screenshot.id}"]` });
+  await driver.waitFor({ selector: '[data-testid="annotation-canvas"] canvas' });
+  const modifier = process.platform === 'darwin' ? 'meta' : 'control';
+  await driver.press(',', [modifier]);
+  await driver.waitFor({ selector: '[data-testid="settings-view"]' });
+  await driver.press('Left', ['alt']);
+  await driver.waitFor({ selector: '[data-testid="annotation-canvas"] canvas' });
+  await driver.press('Right', ['alt']);
+  await driver.waitFor({ selector: '[data-testid="settings-view"]' });
+  await driver.press('Left', ['alt']);
+  await driver.waitFor({ selector: '[data-testid="annotation-canvas"] canvas' });
+  await driver.evaluate(`document.activeElement?.blur()`);
+  for (const [key, tool] of [
+    ['M', 'blur'],
+    ['C', 'crop'],
+    ['P', 'pen'],
+    ['O', 'ellipse'],
+  ]) {
+    await driver.press(key);
+    await driver.waitFor({ selector: '.canvas-meta', text: `Tool: ${tool}` });
+  }
+  await driver.press('V');
+  await driver.waitFor({ selector: '.canvas-meta', text: 'Select and move' });
+  const scale = await driver.evaluate<number>(
+    `Number(document.querySelector('[data-testid="annotation-canvas"]').dataset.imageScale)`,
+  );
+  await driver.press('=');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const check = () => {
+      const scale = Number(document.querySelector('[data-testid="annotation-canvas"]').dataset.imageScale);
+      if (scale > ${scale}) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Canvas zoom shortcut did not increase scale.'));
+      requestAnimationFrame(check);
+    }; check();
+  })`);
+  await driver.press('-');
+  await driver.evaluate(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const check = () => {
+      const scale = Number(document.querySelector('[data-testid="annotation-canvas"]').dataset.imageScale);
+      if (Math.abs(scale - ${scale}) < 0.00001) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Canvas zoom-out shortcut did not restore scale.'));
+      requestAnimationFrame(check);
+    }; check();
+  })`);
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-keyboard-shortcuts.png'));
   const templateProjectPath = await driver.evaluate<string>(`(async () => {
     const snapshot = await window.imnota.createProject({
       name: 'Feedback Template',

@@ -165,6 +165,30 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ bindings: { 'tool.text': 'Ctrl+Shift+3' } }));
   });
 
+  it('lists the rail reorder keys and the newer actions, and flags only stored conflicts', () => {
+    const { rerender } = render(
+      <ShortcutSettings value={{ bindings: {} }} onChange={vi.fn()} platform="windows" />,
+    );
+    // The rail keys share Alt + Arrow with previous/next screenshot without being a conflict.
+    expect(screen.getByRole('button', { name: 'Shortcut for Move focused rail item up' })).toHaveTextContent(
+      'Alt + ArrowUp',
+    );
+    expect(screen.getByRole('button', { name: 'Shortcut for Go back' })).toHaveTextContent('Alt + ArrowLeft');
+    expect(screen.getByRole('button', { name: 'Shortcut for Redact' })).toHaveTextContent('M');
+    expect(screen.getByRole('button', { name: 'Shortcut for Delete current item' })).toHaveTextContent(
+      'Ctrl + Delete',
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    // A binding saved by an older version keeps its key; the new action shows as not set.
+    rerender(
+      <ShortcutSettings value={{ bindings: { 'tool.text': 'M' } }} onChange={vi.fn()} platform="windows" />,
+    );
+    expect(screen.getByRole('button', { name: 'Shortcut for Text' })).toHaveTextContent('M');
+    expect(screen.getByRole('button', { name: 'Shortcut for Redact' })).toHaveTextContent('Not set');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('offers replay without mutating completion state or workspace files', () => {
     const onReplay = vi.fn();
     render(<OnboardingSettings value={{ completed: true, completedVersion: 1 }} onReplay={onReplay} />);

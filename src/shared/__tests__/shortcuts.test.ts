@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SHORTCUT_ACTIONS,
   describeCommonShortcut,
   findShortcutConflicts,
   formatShortcut,
@@ -77,6 +78,80 @@ describe('shortcut normalization', () => {
     );
     expect(resolveShortcutBindings({ 'capture.region': null }, 'mac')['capture.region']).toBeNull();
     expect(formatShortcut(getDefaultShortcut('capture.region', 'mac')!, 'mac')).toBe('⌃⇧5');
+  });
+
+  it.each(['windows', 'mac', 'linux'] as const)('ships defaults on %s that bind every action once', (os) => {
+    const defaults = getDefaultShortcuts(os);
+    expect(findShortcutConflicts(defaults)).toEqual([]);
+    for (const action of SHORTCUT_ACTIONS) {
+      expect(defaults[action.id], action.id).toBeTruthy();
+      expect(isReservedShortcut(defaults[action.id]!, os), action.id).toBe(false);
+    }
+  });
+
+  it('gives the newer actions platform-aware defaults', () => {
+    expect(isReservedShortcut('Ctrl+=', 'windows')).toBe(true);
+    expect(isReservedShortcut('Meta+-', 'mac')).toBe(true);
+    expect(isReservedShortcut('Ctrl+0', 'linux')).toBe(true);
+    expect(getDefaultShortcuts('windows')).toMatchObject({
+      'tool.redact': 'M',
+      'tool.crop': 'C',
+      'tool.freehand': 'P',
+      'tool.ellipse': 'O',
+      'canvas.zoomIn': '=',
+      'canvas.zoomOut': '-',
+      'item.duplicate': 'Ctrl+D',
+      'item.delete': 'Ctrl+Delete',
+      'navigation.settings': 'Ctrl+,',
+    });
+    expect(getDefaultShortcuts('mac')).toMatchObject({
+      'item.duplicate': 'Meta+D',
+      'item.delete': 'Meta+Backspace',
+      'navigation.settings': 'Meta+,',
+    });
+    expect(
+      keyboardEventToShortcut(
+        { key: ',', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false },
+        'windows',
+      ),
+    ).toBe('Ctrl+,');
+  });
+
+  it('keeps stored bindings from older versions and leaves a colliding new default unbound', () => {
+    // Saved before Redact (M) and Duplicate (Ctrl+D) existed.
+    const stored = { 'tool.text': 'M', 'prompt.copy': 'Ctrl+D', 'tool.arrow': null };
+    const resolved = resolveShortcutBindings(stored, 'windows');
+    expect(resolved).toMatchObject({
+      'tool.text': 'M',
+      'tool.redact': null,
+      'prompt.copy': 'Ctrl+D',
+      'item.duplicate': null,
+      'tool.arrow': null,
+      'tool.crop': 'C',
+      'navigation.back': 'Alt+ArrowLeft',
+    });
+    expect(findShortcutConflicts(resolved)).toEqual([]);
+    // Two stored bindings that collide are still reported rather than silently resolved.
+    expect(
+      findShortcutConflicts(resolveShortcutBindings({ 'tool.text': 'M', 'tool.redact': 'M' }, 'windows')),
+    ).toEqual([{ binding: 'M', actionIds: ['tool.text', 'tool.redact'] }]);
+  });
+
+  it('lets rail reorder keys share a combination with a global action but not with each other', () => {
+    const defaults = getDefaultShortcuts('windows');
+    expect(defaults['item.moveUp']).toBe(defaults['screenshot.previous']);
+    // "Reset defaults" in an older version stored the global binding explicitly.
+    expect(resolveShortcutBindings({ 'screenshot.previous': 'Alt+ArrowUp' }, 'windows')['item.moveUp']).toBe(
+      'Alt+ArrowUp',
+    );
+    expect(validateShortcut('item.moveUp', 'Alt+ArrowUp', defaults, 'windows')).toBeNull();
+    expect(validateShortcut('item.moveUp', 'Alt+ArrowDown', defaults, 'windows')).toMatchObject({
+      kind: 'conflict',
+      conflictingActionId: 'item.moveDown',
+    });
+    expect(validateShortcut('screenshot.next', 'Alt+ArrowUp', defaults, 'windows')).toMatchObject({
+      conflictingActionId: 'screenshot.previous',
+    });
   });
 });
 
