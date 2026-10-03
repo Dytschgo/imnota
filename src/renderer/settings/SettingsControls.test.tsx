@@ -1,3 +1,5 @@
+import { usePreferences } from '../app/usePreferences';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppearanceSettings } from './AppearanceSettings';
@@ -248,3 +250,78 @@ describe('preference controls', () => {
     await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: true }));
   });
 });
+
+function PreferenceSaveHarness({ panel }: { panel: 'appearance' | 'shortcuts' }) {
+  const preferences = usePreferences();
+  if (preferences.loading) return <p>Loading preferences</p>;
+  return panel === 'appearance' ? (
+    <AppearanceSettings value={preferences.settings.appearance} onChange={preferences.saveAppearance} />
+  ) : (
+    <ShortcutSettings
+      value={preferences.settings.shortcuts}
+      onChange={preferences.saveShortcuts}
+      platform="windows"
+    />
+  );
+}
+
+for (const panel of ['appearance', 'shortcuts'] as const) {
+  it.each(['committed', 'precommit', 'readback-failed'] as const)(
+    `${panel} preserves the error and observed settings for %s`,
+    async (outcome) => {
+      let settings = structuredClone(DEFAULT_PREFERENCE_SETTINGS);
+      const failure = outcome === 'precommit' ? 'Disk full before replacement.' : COMMITTED_WRITE_WARNING;
+      const getPreferenceSettings = vi.fn(async () => ({
+        ok: true as const,
+        value: { settings, profile: { settingsFileExists: true, migratedFromLegacyProfile: false } },
+      }));
+      const setPreferenceSettings = vi.fn(async (patch: Partial<PreferenceSettings>) => {
+        if (outcome !== 'precommit') settings = { ...settings, ...patch };
+        if (outcome === 'readback-failed')
+          getPreferenceSettings.mockRejectedValueOnce(new Error('Read unavailable.'));
+        return { ok: false, error: { code: 'unexpected', message: failure, retryable: false } };
+      });
+      vi.stubGlobal('imnota', {
+        getPreferenceSettings,
+        setPreferenceSettings,
+        getNativePerformanceProfile: async () => ({
+          ok: true,
+          value: {
+            platform: 'windows',
+            performanceClass: 'standard',
+            reducedEffectsRecommended: false,
+            reasons: [],
+          },
+        }),
+        getNativeCapabilities: async () => ({
+          ok: true,
+          value: { fileClipboard: true, globalCaptureShortcutRegistered: true },
+        }),
+      });
+      try {
+        render(<PreferenceSaveHarness panel={panel} />);
+        if (panel === 'appearance') fireEvent.click(await screen.findByRole('radio', { name: 'Dark' }));
+        else {
+          const recorder = await screen.findByRole('button', { name: 'Shortcut for Text' });
+          fireEvent.click(recorder);
+          fireEvent.keyDown(recorder, { key: 'x', ctrlKey: true, shiftKey: true });
+        }
+        expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+        expect(screen.getByRole('alert')).not.toHaveTextContent(/previous .* active/);
+        if (panel === 'appearance')
+          expect(
+            screen.getByRole('radio', { name: outcome === 'committed' ? 'Dark' : 'System' }),
+          ).toBeChecked();
+        else {
+          const recorder = screen.getByRole('button', { name: 'Shortcut for Text' });
+          fireEvent.keyDown(recorder, { key: 'Escape' });
+          expect(recorder).toHaveTextContent(outcome === 'committed' ? 'Ctrl + Shift + X' : 'T');
+        }
+        expect(setPreferenceSettings).toHaveBeenCalledOnce();
+        expect(getPreferenceSettings).toHaveBeenCalledTimes(outcome === 'precommit' ? 1 : 2);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+}

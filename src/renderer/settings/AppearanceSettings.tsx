@@ -1,3 +1,4 @@
+import { workflowMessage } from '../app/workflow';
 import { Check, ImagePlus, Monitor, Moon, Sparkles, Sun, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -166,8 +167,13 @@ export function AppearanceSettings({
     setError('');
     try {
       await onChange({ ...valueRef.current, ...patch });
-    } catch {
-      setError('Appearance could not be saved. Your previous preference is still active.');
+    } catch (reason) {
+      setError(
+        workflowMessage(
+          reason,
+          'The appearance save could not be confirmed. Review the current preference before trying again.',
+        ),
+      );
     } finally {
       busyRef.current = false;
       setBusy(false);

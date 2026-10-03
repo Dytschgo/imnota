@@ -1,3 +1,5 @@
+import { isCommittedWriteWarning } from '../shared/write-outcome';
+import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { CircleAlert, Check, X } from 'lucide-react';
@@ -833,6 +835,14 @@ export default function App() {
       showToast('Workspace ready');
       return true;
     } catch (reason) {
+      if (isCommittedWriteWarning(reason)) {
+        await refreshCommittedSettings();
+        try {
+          store.set({ projects: await window.imnota.listProjects() });
+        } catch {
+          /* Keep the original durability warning if project refresh fails. */
+        }
+      }
       setError(reason instanceof Error ? reason.message : 'Workspace could not be selected.');
       return false;
     }

@@ -1,3 +1,5 @@
+import { isCommittedWriteWarning } from '../../shared/write-outcome';
+import { refreshCommittedSettings } from './sharing-preferences';
 import { ArrowLeft, Copy, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
@@ -130,8 +132,12 @@ export function SettingsView({
     setWorkspaceSettingError('');
     try {
       set({ settings: await saveWorkspaceSettingsPatch(patch) });
-    } catch {
-      setWorkspaceSettingError('This preference could not be saved. Your previous setting is still active.');
+    } catch (reason) {
+      setWorkspaceSettingError(
+        isCommittedWriteWarning(reason)
+          ? (reason as Error).message
+          : 'This preference could not be saved. Your previous setting is still active.',
+      );
     }
   };
   return (
@@ -297,9 +303,19 @@ export function SettingsView({
                       set({ settings: next });
                       await onWorkspaceChanged?.();
                     }
-                  } catch {
+                  } catch (reason) {
+                    if (isCommittedWriteWarning(reason)) {
+                      await refreshCommittedSettings();
+                      try {
+                        await onWorkspaceChanged?.();
+                      } catch {
+                        /* Preserve the original warning. */
+                      }
+                    }
                     setWorkspaceSettingError(
-                      'The workspace folder could not be changed. Your current workspace remains active.',
+                      isCommittedWriteWarning(reason)
+                        ? (reason as Error).message
+                        : 'The workspace folder could not be changed. Your current workspace remains active.',
                     );
                   }
                 }}

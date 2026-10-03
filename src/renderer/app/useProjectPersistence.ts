@@ -910,8 +910,7 @@ export function useProjectPersistence({
             publishAcceptedRevision(null);
             publishExternalChange({
               kind: 'metadata-conflict',
-              message:
-                'Project details changed on disk. Your edits remain open; reload, compare, and save again.',
+              message: `${workflowMessage(reason, 'Project details changed on disk.')} Your edits remain open; reload, compare, and save again.`,
             });
           } else setError(workflowMessage(reason, 'Project details could not be saved.'));
           return false;

@@ -1,3 +1,4 @@
+import { workflowMessage } from '../app/workflow';
 import type { PromptBundleProgress } from '../../shared/prompt-bundles';
 import { PromptBundlePreview } from './PromptBundlePreview';
 import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptBundleCard';
@@ -90,9 +91,12 @@ export function PromptBundleDialogHost({
           setPreferenceError(undefined);
           try {
             await onDefaultCopyVariantChange?.(variant);
-          } catch {
+          } catch (reason) {
             setPreferenceError(
-              'The primary copy action could not be saved. Your previous choice is still active.',
+              workflowMessage(
+                reason,
+                'The primary copy action save could not be confirmed. Review the current choice before trying again.',
+              ),
             );
           }
         }}

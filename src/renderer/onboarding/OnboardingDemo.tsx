@@ -1,3 +1,4 @@
+import { workflowMessage } from '../app/workflow';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -480,9 +481,12 @@ export function OnboardingDemo({
                         setError('');
                         try {
                           await onDefaultCopyVariantChange?.(variant);
-                        } catch {
+                        } catch (reason) {
                           setError(
-                            'The primary copy action could not be saved. Your previous choice is still active.',
+                            workflowMessage(
+                              reason,
+                              'The primary copy action save could not be confirmed. Review the current choice before trying again.',
+                            ),
                           );
                         }
                       }}

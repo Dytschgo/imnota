@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { atomicWrite } from './files.js';
+import { atomicWrite, CommittedWriteError } from './files.js';
 
 const platform = process.platform;
 const rename = fs.rename.bind(fs);
@@ -23,6 +23,86 @@ afterEach(async () => {
   vi.restoreAllMocks();
   Object.defineProperty(process, 'platform', { value: platform });
   await fs.rm(directory, { recursive: true, force: true });
+});
+
+describe('durable replacement', () => {
+  const open = fs.open.bind(fs);
+
+  function traceFlushes(events: string[], failSync?: NodeJS.ErrnoException) {
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      const label = String(args[0]).includes('.tmp-') ? 'candidate' : 'directory';
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        if (failSync && label === 'candidate') throw failSync;
+        await sync();
+        events.push(`${label}-sync`);
+      };
+      return handle;
+    });
+    return vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+      events.push('rename');
+      return rename(...args);
+    });
+  }
+
+  it('writes through newly created containing directories on the real platform', async () => {
+    const nested = path.join(directory, 'new', 'nested', 'drawing.json');
+    await atomicWrite(nested, 'durable content');
+    expect(await fs.readFile(nested, 'utf8')).toBe('durable content');
+  });
+
+  it('flushes the candidate before it replaces the destination', async () => {
+    const events: string[] = [];
+    traceFlushes(events);
+    await atomicWrite(target, 'candidate');
+    // Windows cannot flush a directory handle; POSIX also persists the rename itself.
+    expect(events).toEqual(
+      platform === 'win32' ? ['candidate-sync', 'rename'] : ['candidate-sync', 'rename', 'directory-sync'],
+    );
+    expect(await fs.readFile(target, 'utf8')).toBe('candidate');
+    expect(await fs.readdir(directory)).toEqual(['drawing.json']);
+  });
+
+  it.each(['EIO', 'EACCES', 'EPERM', 'EINVAL', 'ENOTSUP'])(
+    'handles directory sync %s after replacement',
+    async (code) => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === directory)
+          return {
+            sync: async () => {
+              throw failure(code);
+            },
+            close,
+          } as unknown as Awaited<ReturnType<typeof fs.open>>;
+        return open(...args);
+      });
+      const operation = atomicWrite(target, 'candidate');
+      if (['EINVAL', 'ENOTSUP'].includes(code)) await expect(operation).resolves.toBeUndefined();
+      else
+        await expect(operation).rejects.toMatchObject({
+          code,
+          committed: true,
+          filePath: target,
+          cause: expect.objectContaining({ code }),
+        });
+      expect(await fs.readFile(target, 'utf8')).toBe('candidate');
+      expect(close).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps the committed file and removes the candidate when the flush fails', async () => {
+    const events: string[] = [];
+    const replace = traceFlushes(events, failure('EIO'));
+    const operation = atomicWrite(target, 'candidate');
+    await expect(operation).rejects.toMatchObject({ code: 'EIO' });
+    await expect(operation).rejects.not.toBeInstanceOf(CommittedWriteError);
+    expect(replace).not.toHaveBeenCalled();
+    expect(await fs.readFile(target, 'utf8')).toBe('baseline');
+    expect(await fs.readdir(directory)).toEqual(['drawing.json']);
+  });
 });
 
 describe('atomic replacement', () => {

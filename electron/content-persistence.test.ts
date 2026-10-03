@@ -632,4 +632,64 @@ describe('native mixed content persistence', () => {
     expect(restored.project.contentItems).toHaveLength(1);
     expect(await fs.readFile(target, 'utf8')).toBe('');
   });
+
+  it('ignores operating-system files in the content Undo directory during recovery', async () => {
+    const { projectPath, service } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const deleted = await service.delete({ projectPath, itemId: created.project.contentItems![0].id });
+    const undoRoot = path.join(projectPath, '.imnota-content-undo');
+    await fs.writeFile(path.join(undoRoot, '.DS_Store'), 'finder');
+    await fs.writeFile(path.join(undoRoot, 'Thumbs.db'), 'explorer');
+    await fs.mkdir(path.join(undoRoot, 'unrelated-folder'));
+
+    expect(await recoverContentTrashTransactions(projectPath)).toMatchObject([
+      { undoToken: deleted.undoToken, status: 'deletion-committed', undoAvailable: true },
+    ]);
+    expect((await fs.readdir(undoRoot)).sort()).toEqual(
+      ['.DS_Store', 'Thumbs.db', deleted.undoToken, 'unrelated-folder'].sort(),
+    );
+    const restored = await service.undoDelete({ projectPath, undoToken: deleted.undoToken });
+    expect(restored.project.contentItems).toHaveLength(1);
+  });
+
+  it('still refuses a linked content Undo token directory', async () => {
+    const { projectPath } = await fixture();
+    const undoRoot = path.join(projectPath, '.imnota-content-undo');
+    const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-content-')));
+    temporary.push(outside);
+    await fs.mkdir(undoRoot);
+    await fs.symlink(
+      outside,
+      path.join(undoRoot, 'content-delete-00000000-0000-4000-8000-000000000001'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    await expect(recoverContentTrashTransactions(projectPath)).rejects.toThrow('Linked');
+  });
+
+  it('moves a content Undo journal with an unreadable manifest aside so the project still opens', async () => {
+    const { projectPath, service } = await fixture();
+    const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
+    const item = created.project.contentItems![0];
+    const deleted = await service.delete({ projectPath, itemId: item.id });
+    const undoRoot = path.join(projectPath, '.imnota-content-undo');
+    await fs.writeFile(path.join(undoRoot, deleted.undoToken, 'manifest.json'), '');
+    const reports: string[] = [];
+
+    expect(
+      await recoverContentTrashTransactions(projectPath, {
+        write: atomicWrite,
+        removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+        damagedJournal: (report) => void reports.push(report.relativePath),
+      }),
+    ).toEqual([]);
+
+    const [quarantined] = await fs.readdir(undoRoot);
+    expect(quarantined).toMatch(new RegExp(`^damaged-${deleted.undoToken}-`));
+    expect(reports).toEqual([`.imnota-content-undo/${quarantined}`]);
+    // The deleted content stays on disk inside the quarantined journal.
+    expect(await fs.readdir(path.join(undoRoot, quarantined))).toEqual(
+      expect.arrayContaining(['content-0000.bin', 'manifest.json', 'metadata-before.bin']),
+    );
+    expect(await recoverContentTrashTransactions(projectPath)).toEqual([]);
+  });
 });

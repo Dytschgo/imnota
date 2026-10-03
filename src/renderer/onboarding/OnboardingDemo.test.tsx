@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
@@ -327,15 +328,25 @@ describe('OnboardingDemo', () => {
     await waitFor(() => expect(onCopyHandoff).toHaveBeenCalledWith(grant, 'files-rich'));
   });
 
-  it('keeps the previous primary action when saving a dropdown choice fails', async () => {
-    await reachCopyStep({
-      defaultCopyVariant: 'files',
-      onDefaultCopyVariantChange: vi.fn(async () => Promise.reject(new Error('disk full'))),
-    });
-    chooseCopyFormat(/^Rich copy/);
-    expect(await screen.findByRole('alert')).toHaveTextContent('previous choice is still active');
-    expect(screen.getByRole('button', { name: 'Copy files' })).toBeEnabled();
-  });
+  it.each([false, true])(
+    'preserves copy preference failure and current action (committed: %s)',
+    async (committed) => {
+      const failure = committed ? COMMITTED_WRITE_WARNING : 'disk full';
+      const onChange = vi.fn(async () => {
+        throw new Error(failure);
+      });
+      const { props, rerender } = await reachCopyStep({
+        defaultCopyVariant: 'files',
+        onDefaultCopyVariantChange: onChange,
+      });
+      chooseCopyFormat(/^Rich copy/);
+      expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+      if (committed) rerender(<OnboardingDemo {...props} defaultCopyVariant="rich" />);
+      expect(screen.getByRole('button', { name: committed ? 'Rich copy' : 'Copy files' })).toBeEnabled();
+      expect(screen.getByRole('alert')).not.toHaveTextContent('previous choice');
+      expect(onChange).toHaveBeenCalledOnce();
+    },
+  );
 
   it('keeps fallbacks hidden until a copy has been tried, even when it fails', async () => {
     const onCopyHandoff = vi.fn(async () => {

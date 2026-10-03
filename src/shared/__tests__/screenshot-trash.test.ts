@@ -118,7 +118,7 @@ describe('screenshot trash and Undo transactions', () => {
     expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
   });
 
-  it('sweeps only a strictly owned incomplete Undo directory during discovery', async () => {
+  it('preserves a missing-manifest Undo directory during discovery', async () => {
     const { dir } = await fixture();
     const token = 'delete-00000000-0000-4000-8000-000000000001';
     const incomplete = path.join(dir, '.imnota-undo', token);
@@ -127,16 +127,11 @@ describe('screenshot trash and Undo transactions', () => {
 
     expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
     await expect(fs.stat(incomplete)).rejects.toMatchObject({ code: 'ENOENT' });
-
-    const unknownToken = 'delete-00000000-0000-4000-8000-000000000002';
-    const unknown = path.join(dir, '.imnota-undo', unknownToken);
-    await fs.mkdir(unknown, { recursive: true });
-    await atomicWrite(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
-    await expect(listScreenshotTrashTransactions(dir)).rejects.toMatchObject({
-      code: 'invalid-manifest',
-      undoToken: unknownToken,
-    });
-    expect(await fs.readFile(path.join(unknown, 'unowned.bin'), 'utf8')).toBe('preserve-me');
+    const [quarantined] = await fs.readdir(path.dirname(incomplete));
+    expect(quarantined).toContain('damaged-' + token);
+    expect(
+      await fs.readFile(path.join(path.dirname(incomplete), quarantined, 'image.bin'), 'utf8'),
+    ).toContain('sensitive-');
   });
 
   it.each(['image', 'annotations', 'description'] as const)(
@@ -520,5 +515,31 @@ describe('screenshot trash and Undo transactions', () => {
       await expect(undoScreenshotDelete(dir, project, token)).rejects.toMatchObject({
         code: 'invalid-token',
       });
+  });
+
+  it('moves an Undo journal with an unreadable manifest aside so the project still opens', async () => {
+    const { dir, project, targets, trashItem } = await fixture();
+    const deleted = await deleteScreenshotToTrash(dir, project, 'shot', trashItem);
+    const undoRoot = path.join(dir, '.imnota-undo');
+    await fs.writeFile(path.join(undoRoot, deleted.undoToken, 'manifest.json'), '{"version":2,"tok');
+    const reports: string[] = [];
+
+    expect(
+      await recoverScreenshotTrashTransactions(dir, {
+        write: atomicWrite,
+        removeDirectory: defaultRemove,
+        damagedJournal: (report) => void reports.push(report.relativePath),
+      }),
+    ).toEqual([]);
+
+    const [quarantined] = await fs.readdir(undoRoot);
+    expect(quarantined).toMatch(new RegExp(`^damaged-${deleted.undoToken}-`));
+    expect(reports).toEqual([`.imnota-undo/${quarantined}`]);
+    // The backups of the deleted screenshot are preserved for manual recovery.
+    expect(await fs.readFile(path.join(undoRoot, quarantined, 'image.bin'))).toEqual(Buffer.from([1, 2, 3]));
+    await expectDeleted(targets);
+    expect(await recoverScreenshotTrashTransactions(dir)).toEqual([]);
+    expect(await listScreenshotTrashTransactions(dir)).toEqual([]);
+    await expect(undoScreenshotDelete(dir, deleted.project, deleted.undoToken)).rejects.toThrow();
   });
 });
