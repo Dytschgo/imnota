@@ -2959,8 +2959,7 @@ export async function runSmokeWorkflow(
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
-  if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-collection-picker.png'));
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'collection-picker.png'));
   const focusedPickerSelection = await driver.evaluate<boolean>(`(() => {
     const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
     option?.focus();

@@ -240,7 +240,9 @@ export function AnnotationCanvas({
   const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
-  const completedPointerUp = useRef<PointerEvent | null>(null);
+  // Completion can emit both a shape/stage pointerclick and a compatibility tap.
+  // Keep them together until the next gesture starts, rather than consuming only the first click.
+  const createdInPointerGesture = useRef(false);
   const pointerPosition = useRef<{ x: number; y: number } | null>(null);
   const dragging = useRef<ActiveAnnotationDrag | null>(null);
   const edgePanFrame = useRef<number | null>(null);
@@ -616,6 +618,7 @@ export function AnnotationCanvas({
       theme,
       annotationColor,
     );
+    createdInPointerGesture.current = true;
     beginTextEditing(annotation, true);
   }
 
@@ -707,7 +710,7 @@ export function AnnotationCanvas({
   }
 
   function beginPointer(event: Konva.KonvaEventObject<PointerEvent>) {
-    completedPointerUp.current = null;
+    createdInPointerGesture.current = false;
     if (
       cropping &&
       (event.target.id() === 'crop-preview' || event.target.getParent()?.className === 'Transformer')
@@ -787,6 +790,12 @@ export function AnnotationCanvas({
   }
 
   function endPointer(event: Konva.KonvaEventObject<PointerEvent>) {
+    // Konva turns native cancellation over a listening shape into pointerup.
+    // Inspect the native event before releasing capture or committing the draft.
+    if (event.evt.type === 'pointercancel' || event.evt.type === 'touchcancel') {
+      abortPointerInteraction(event.evt);
+      return;
+    }
     const wasDragging = dragging.current !== null;
     finalizePointerInteraction(event.evt);
     if (wasDragging) return;
@@ -809,9 +818,8 @@ export function AnnotationCanvas({
       setDraft(null);
       return;
     }
-    // Konva emits pointerclick with this same native pointerup and its pre-commit hit target.
-    // A stage click from this gesture must not clear the selection before React mounts the mark.
-    completedPointerUp.current = event.evt;
+    // The completion click can hit the stage or an older shape under the new mark.
+    createdInPointerGesture.current = true;
     if (completed.kind === 'callout') beginTextEditing(completed, true);
     else {
       onChange([...annotations, completed]);
@@ -886,13 +894,19 @@ export function AnnotationCanvas({
       draggable: tool === 'select' && !spaceHeld && !editing,
       visible: editing?.id !== annotation.id,
       onPointerDblClick: () => {
+        if (createdInPointerGesture.current) return;
         if (annotation.kind === 'text' || annotation.kind === 'callout') beginTextEditing(annotation, false);
       },
       onDblTap: () => {
+        if (createdInPointerGesture.current) return;
         if (annotation.kind === 'text' || annotation.kind === 'callout') beginTextEditing(annotation, false);
       },
-      onPointerClick: () => onSelect(annotation.id),
-      onTap: () => onSelect(annotation.id),
+      onPointerClick: () => {
+        if (!createdInPointerGesture.current) onSelect(annotation.id);
+      },
+      onTap: () => {
+        if (!createdInPointerGesture.current) onSelect(annotation.id);
+      },
       onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => startAnnotationDrag(annotation, event),
       onDragMove: dragPointer,
       onDragEnd: endAnnotationDrag,
@@ -1150,11 +1164,22 @@ export function AnnotationCanvas({
           height={size.height}
           className="konva-stage"
           onPointerDown={beginPointer}
+          onTouchStart={() => {
+            // A later touch-only tap also starts a new gesture. The compatibility
+            // touchstart during our captured pointer gesture must retain its guard.
+            if (capturedPointer.current === null) createdInPointerGesture.current = false;
+          }}
           onPointerMove={movePointer}
           onPointerUp={endPointer}
           onPointerCancel={cancelPointer}
           onPointerDblClick={(event) => {
-            if (editing || tool !== 'select' || event.target !== event.target.getStage()) return;
+            if (
+              createdInPointerGesture.current ||
+              editing ||
+              tool !== 'select' ||
+              event.target !== event.target.getStage()
+            )
+              return;
             const point = imagePoint(event.evt);
             if (point) createTextAt(point);
           }}
@@ -1175,10 +1200,7 @@ export function AnnotationCanvas({
             }
           }}
           onPointerClick={(event) => {
-            if (event.evt === completedPointerUp.current) {
-              completedPointerUp.current = null;
-              return;
-            }
+            if (createdInPointerGesture.current) return;
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
