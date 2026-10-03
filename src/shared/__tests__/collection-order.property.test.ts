@@ -105,7 +105,8 @@ describe('collection order properties', () => {
   // hold two screenshots with the same position and creation time whose relative order then
   // depends on their order inside project.json rather than on the documented deterministic
   // tie-break. Schema 4 is unaffected because mixed positions must be unique.
-  it.fails('orders items with collation-equal IDs independently of storage order', () => {
+  // Assert both observed orders, so unrelated throws fail and a product fix requires inversion.
+  it('records known storage-dependent ordering for schema 3 collation-equal IDs', () => {
     const project = emptyProject('Tie', '');
     const shot = (id: string, storedFilename: string) => ({
       collectionId: '001-collection',
@@ -128,7 +129,11 @@ describe('collection order properties', () => {
     const second = shot('a\u0000', 'b.png');
     const forward = validateProject({ ...project, screenshots: [first, second] });
     const backward = validateProject({ ...project, screenshots: [second, first] });
-    expect(orderedIds(forward, '001-collection')).toEqual(orderedIds(backward, '001-collection'));
+    expect(forward.schemaVersion).toBe(3);
+    expect(backward.schemaVersion).toBe(3);
+    expect(first.id.localeCompare(second.id)).toBe(0);
+    expect(orderedIds(forward, '001-collection')).toEqual(['a', 'a\u0000']);
+    expect(orderedIds(backward, '001-collection')).toEqual(['a\u0000', 'a']);
   });
 
   it('is a fixed point once positions are renumbered from the order', () => {

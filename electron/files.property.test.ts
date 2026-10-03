@@ -127,15 +127,17 @@ describe('filename validation properties', () => {
   // write can vanish or fail. Identifiers the app generates itself never take this shape, but the
   // schema is also the IPC boundary for `collectionId`, export filenames and undo tokens, and the
   // validator for project.json content written by other tools.
-  it.fails('rejects Windows reserved device names', () => {
-    expect(accepts('NUL')).toBe(false);
+  // Assert the known bug directly: unexpected setup/validation errors must fail this test.
+  // Invert these acceptance expectations when the separately scoped product fix lands.
+  it('records known acceptance of Windows reserved device names', () => {
+    for (const value of ['NUL', 'CON.txt', 'COM1']) expect(accepts(value)).toBe(true);
   });
 
-  it.fails('rejects every Windows reserved device name, with or without an extension', () => {
+  it('records known acceptance of every Windows reserved device name, with or without an extension', () => {
     fc.assert(
       fc.property(reservedName, (value) => {
         expect(WINDOWS_RESERVED_NAME.test(value)).toBe(true);
-        expect(accepts(value)).toBe(false);
+        expect(accepts(value)).toBe(true);
       }),
       runs(50),
     );
@@ -144,9 +146,9 @@ describe('filename validation properties', () => {
   // FINDING (not fixed here): only C0 controls are rejected. DEL and the C1 range pass, as do the
   // characters Windows forbids in names (`< > " | ? *`). Windows rejects such a write with an
   // error rather than corrupting data, so this is a portability gap, not data loss.
-  it.fails('rejects DEL, C1 controls and characters Windows forbids in file names', () => {
+  it('records known acceptance of DEL, C1 controls and Windows-forbidden filename characters', () => {
     for (const value of ['a\u007fb', 'a\u0085b', 'a?b', 'a*b', 'a<b', 'a>b', 'a|b', 'a"b'])
-      expect(accepts(value)).toBe(false);
+      expect(accepts(value)).toBe(true);
   });
 
   it('applies the same rule to stored content references and IPC filename inputs', () => {
