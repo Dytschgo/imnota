@@ -147,7 +147,25 @@ import { onSuccessfulQuit, teardownTrayAfterSuccessfulQuit } from './tray-quit-l
 import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
+import { mcpVerificationProfile } from './mcp-verification-profile.js';
 import type { IpcMainInvokeEvent } from 'electron';
+
+let mcpProfile: string | undefined;
+let mcpVerificationWindows = 0;
+try {
+  mcpProfile = mcpVerificationProfile(process.env, process.argv);
+  if (mcpProfile) {
+    // Before ready, sessions, settings or diagnostics. This does not enable access or use smoke mode.
+    for (const name of ['appData', 'userData', 'sessionData', 'logs', 'crashDumps'] as const)
+      app.setPath(name, mcpProfile);
+    app.on('browser-window-created', () => {
+      mcpVerificationWindows++;
+    });
+  }
+} catch {
+  process.stderr.write('Invalid owned MCP verification profile.\n');
+  process.exit(1);
+}
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -2078,6 +2096,24 @@ app.whenReady().then(async () => {
   });
   if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
     const started = await localMcpServer.startStdio();
+    if (mcpProfile) {
+      // Observe the real route after EOF/refusal; never replace protocol responses with a test stub.
+      await fs.writeFile(
+        path.join(mcpProfile, 'mcp-lifecycle.json'),
+        JSON.stringify({
+          version: app.getVersion(),
+          packaged: app.isPackaged,
+          executable: process.execPath,
+          profile: app.getPath('userData'),
+          session: app.getPath('sessionData'),
+          windowsCreated: mcpVerificationWindows,
+          windowsRemaining: BrowserWindow.getAllWindows().length,
+          httpListener: localMcpServer.listening(),
+          started,
+        }),
+        { flag: 'wx' },
+      );
+    }
     if (!started) {
       process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
       app.exit(1);
