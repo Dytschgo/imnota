@@ -88,3 +88,38 @@ Before Electron's ready event, the hook redirects `appData`, `userData`, `sessio
 The direct postconditions are initialize/version, tool discovery, collection/bundle discovery, saved Markdown and PNG equality for explicit/latest reads, bounded missing-export/unknown-id errors, byte-identical project/export trees and settings, refusal with access off, zero observed BrowserWindows/MCP HTTP listener, strict JSON-RPC stdout, and bounded EOF exit. Each launch has a 45-second deadline, a 1 MB synthetic stdout budget and a 64 KB stderr budget; no sleeps, replay or retries establish readiness. Failure terminates only the spawned child, with a bounded escalation; an unconfirmed exit retains the fixture rather than deleting a live profile. Application lifecycle evidence records packaged identity and actual paths. This is not an OS focus or Dock-visibility claim.
 
 `release/imnota-verification-artifacts-mcp/mcp-verification.json` records responses, lifecycle, stderr, source revision, candidate/executable/asar SHA-256 and workspace hashes; CI retains it as `mcp-evidence-<platform>` outside publication asset patterns. Set `IMNOTA_MCP_ARTIFACT_DIR` to a fresh absolute `imnota-verification-artifacts-*` directory for another run. Existing nonempty evidence directories are rejected. Unit launcher fixtures test failure handling only; they do not establish packaged acceptance. Check the exact candidate report on all three supported OSes before closing that gate.
+
+## Installer verification
+
+The quick installers resolve the stable tag once and verify the asset against
+that release's `SHA256SUMS.txt` before extraction or execution. Missing, malformed,
+duplicate or mismatching metadata stops installation before changing the previous
+app. Linux stages the verified AppImage privately before replacement; temporary
+downloads and staging are cleaned on exit. Checksums do not authenticate a
+compromised release publisher. Failure inside a verified Windows installer
+retains that installer's recovery behavior.
+
+Linux replacement uses GNU `mv -fT` to replace the destination entry without
+following a file or directory symlink; a hardlink peer keeps its previous bytes.
+A directory occupying the destination causes refusal and staging cleanup. After
+replacement, a desktop-file write failure leaves the verified binary installed;
+there is no automatic Linux rollback. macOS retains its existing backup behavior
+if copying a verified bundle fails.
+
+Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
+and download failures. The suite executes the real scripts with network and app
+launch commands replaced. Git Bash on Windows exercises shell control flow; it
+does not replace native Linux or macOS installation evidence. No fixture launches
+a real installer or changes a personal installation.
+
+Checksum refusal and interrupted-download fixtures run wherever Bash is available.
+Linux replacement, symlink and hardlink fixtures run only on native Linux, where
+GNU replacement semantics apply; they are excluded on BSD macOS and Git Bash.
+Native macOS fixtures use `ditto` and `PlistBuddy` with generated bundles to check
+successful installation, extraction/executable/signature/version refusal, and
+backup preservation after copy failure. Signature results and app launches are
+stubbed; these fixtures do not prove real signing or Gatekeeper acceptance.
+PowerShell fixtures check the actual exception message separately from the
+no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
+temporary junction cleanup without traversing its target. The existing Linux,
+macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
