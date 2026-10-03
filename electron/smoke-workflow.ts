@@ -4,6 +4,7 @@ import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
 import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
+import { withRestoredCanvasSmokeState } from './canvas-basics-smoke-state.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -3338,70 +3339,75 @@ async function exerciseCanvasBasics(
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
 ): Promise<void> {
-  const command = (detail: string) =>
-    driver.evaluate(
-      `document.querySelector('.konvajs-content').parentElement.dispatchEvent(new CustomEvent('imnota:canvas-command', { detail: ${JSON.stringify(detail)} }))`,
-    );
-  await command('fit');
-  await waitForStableCanvas(driver);
-  const geometry = await canvasGeometry(driver);
-  const from = {
-    x: Math.round(geometry.image.x + geometry.image.width * 0.3),
-    y: Math.round(geometry.image.y + geometry.image.height * 0.3),
-  };
-  await selectTool(driver, 'Rectangle');
-  await driver.drag(from, { x: from.x + 70, y: from.y + 20 }, 8, ['shift']);
-  const waitForRectangle = async (condition: string) =>
-    driver.evaluate<Annotation>(`(async () => {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
-      const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: snapshot.project.screenshots[0] });
-      const rectangle = content.annotations.filter(annotation => annotation.kind === 'rectangle').at(-1);
-      if (rectangle && (${condition})) return rectangle;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    throw new Error('Canvas basics did not persist the expected rectangle state: ' + ${JSON.stringify(condition)});
-  })()`);
-  const rectangle = await waitForRectangle(
-    'rectangle.width > 4 && Math.abs(rectangle.width - rectangle.height) < 0.001',
+  await withRestoredCanvasSmokeState(
+    driver,
+    () => waitForStableCanvas(driver),
+    async () => {
+      const command = (detail: string) =>
+        driver.evaluate(
+          `document.querySelector('.konvajs-content').parentElement.dispatchEvent(new CustomEvent('imnota:canvas-command', { detail: ${JSON.stringify(detail)} }))`,
+        );
+      await command('fit');
+      await waitForStableCanvas(driver);
+      const geometry = await canvasGeometry(driver);
+      const from = {
+        x: Math.round(geometry.image.x + geometry.image.width * 0.3),
+        y: Math.round(geometry.image.y + geometry.image.height * 0.3),
+      };
+      await selectTool(driver, 'Rectangle');
+      await driver.drag(from, { x: from.x + 70, y: from.y + 20 }, 8, ['shift']);
+      const waitForRectangle = async (condition: string) =>
+        driver.evaluate<Annotation>(`(async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+        const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: snapshot.project.screenshots[0] });
+        const rectangle = content.annotations.filter(annotation => annotation.kind === 'rectangle').at(-1);
+        if (rectangle && (${condition})) return rectangle;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('Canvas basics did not persist the expected rectangle state: ' + ${JSON.stringify(condition)});
+    })()`);
+      const rectangle = await waitForRectangle(
+        'rectangle.width > 4 && Math.abs(rectangle.width - rectangle.height) < 0.001',
+      );
+      await driver.evaluate(`document.querySelector('[data-testid="annotation-canvas"]').focus()`);
+      await driver.press('Right');
+      await driver.press('Down', ['shift']);
+      await waitForRectangle(`rectangle.x === ${rectangle.x + 1} && rectangle.y === ${rectangle.y + 10}`);
+      await driver.press('Z', [process.platform === 'darwin' ? 'meta' : 'control']);
+      await waitForRectangle(`rectangle.x === ${rectangle.x} && rectangle.y === ${rectangle.y}`);
+      await driver.press('Escape');
+      await driver.press('Tab');
+      await driver.waitFor({ selector: '[data-testid="annotation-canvas-status"]', text: 'selected, 1 of' });
+      await driver.press('Tab', ['shift']);
+      if (
+        await driver.evaluate<boolean>(
+          `document.activeElement?.getAttribute('data-testid') === 'annotation-canvas'`,
+        )
+      )
+        throw new Error('Shift+Tab at the first annotation trapped focus in the canvas.');
+      await command('zoom-in');
+      await waitForStableCanvas(driver);
+      const viewport = () =>
+        driver.evaluate<{ x: number; y: number; scale: number; width: number; height: number }>(`(() => {
+      const canvas = document.querySelector('[data-testid="annotation-canvas"]');
+      return { x: Number(canvas.dataset.imageX), y: Number(canvas.dataset.imageY), scale: Number(canvas.dataset.imageScale), width: canvas.clientWidth, height: canvas.clientHeight };
+    })()`);
+      const before = await viewport();
+      await driver.resize({ width: 1440, height: 900 });
+      await waitForStableCanvas(driver);
+      const after = await viewport();
+      if (
+        before.scale !== after.scale ||
+        Math.abs((before.width / 2 - before.x) / before.scale - (after.width / 2 - after.x) / after.scale) >
+          0.01 ||
+        Math.abs((before.height / 2 - before.y) / before.scale - (after.height / 2 - after.y) / after.scale) >
+          0.01
+      )
+        throw new Error('Canvas resize lost the user zoom or centred image point.');
+      if (artifactDirectory)
+        artifacts.push(await driver.capture(artifactDirectory, 'canvas-basics-keyboard-resize.png'));
+    },
   );
-  await driver.evaluate(`document.querySelector('[data-testid="annotation-canvas"]').focus()`);
-  await driver.press('Right');
-  await driver.press('Down', ['shift']);
-  await waitForRectangle(`rectangle.x === ${rectangle.x + 1} && rectangle.y === ${rectangle.y + 10}`);
-  await driver.press('Z', [process.platform === 'darwin' ? 'meta' : 'control']);
-  await waitForRectangle(`rectangle.x === ${rectangle.x} && rectangle.y === ${rectangle.y}`);
-  await driver.press('Escape');
-  await driver.press('Tab');
-  await driver.waitFor({ selector: '[data-testid="annotation-canvas-status"]', text: 'selected, 1 of' });
-  await driver.press('Tab', ['shift']);
-  if (
-    await driver.evaluate<boolean>(
-      `document.activeElement?.getAttribute('data-testid') === 'annotation-canvas'`,
-    )
-  )
-    throw new Error('Shift+Tab at the first annotation trapped focus in the canvas.');
-  await command('zoom-in');
-  await waitForStableCanvas(driver);
-  const viewport = () =>
-    driver.evaluate<{ x: number; y: number; scale: number; width: number; height: number }>(`(() => {
-    const canvas = document.querySelector('[data-testid="annotation-canvas"]');
-    return { x: Number(canvas.dataset.imageX), y: Number(canvas.dataset.imageY), scale: Number(canvas.dataset.imageScale), width: canvas.clientWidth, height: canvas.clientHeight };
-  })()`);
-  const before = await viewport();
-  await driver.resize({ width: 1440, height: 900 });
-  await waitForStableCanvas(driver);
-  const after = await viewport();
-  if (
-    before.scale !== after.scale ||
-    Math.abs((before.width / 2 - before.x) / before.scale - (after.width / 2 - after.x) / after.scale) >
-      0.01 ||
-    Math.abs((before.height / 2 - before.y) / before.scale - (after.height / 2 - after.y) / after.scale) >
-      0.01
-  )
-    throw new Error('Canvas resize lost the user zoom or centred image point.');
-  if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, 'canvas-basics-keyboard-resize.png'));
-  await command('fit');
 }

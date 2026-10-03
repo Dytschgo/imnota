@@ -240,6 +240,7 @@ export function AnnotationCanvas({
   const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
+  const completedPointerUp = useRef<PointerEvent | null>(null);
   const pointerPosition = useRef<{ x: number; y: number } | null>(null);
   const dragging = useRef<ActiveAnnotationDrag | null>(null);
   const edgePanFrame = useRef<number | null>(null);
@@ -706,6 +707,7 @@ export function AnnotationCanvas({
   }
 
   function beginPointer(event: Konva.KonvaEventObject<PointerEvent>) {
+    completedPointerUp.current = null;
     if (
       cropping &&
       (event.target.id() === 'crop-preview' || event.target.getParent()?.className === 'Transformer')
@@ -807,6 +809,9 @@ export function AnnotationCanvas({
       setDraft(null);
       return;
     }
+    // Konva emits pointerclick with this same native pointerup and its pre-commit hit target.
+    // A stage click from this gesture must not clear the selection before React mounts the mark.
+    completedPointerUp.current = event.evt;
     if (completed.kind === 'callout') beginTextEditing(completed, true);
     else {
       onChange([...annotations, completed]);
@@ -1170,6 +1175,10 @@ export function AnnotationCanvas({
             }
           }}
           onPointerClick={(event) => {
+            if (event.evt === completedPointerUp.current) {
+              completedPointerUp.current = null;
+              return;
+            }
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
