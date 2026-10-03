@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
 import { screenshotSchema, validateProject } from '../src/shared/schema.js';
 import { nowIso } from '../src/shared/utils.js';
-import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { assertNoLinks, atomicWrite, CommittedWriteError, isWithin } from './files.js';
 import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
 
 const UNDO_ROOT = '.imnota-undo';
@@ -615,20 +615,27 @@ async function finishUndo(
   operations: ResolvedTrashOperations,
 ): Promise<UndoScreenshotResult> {
   let finalManifest = manifest;
+  let durabilityWarning: string | undefined;
   try {
     if (manifest.phase !== 'restored')
       finalManifest = await setPhase(directory, manifest, 'restored', operations);
-  } catch {
+  } catch (error) {
+    if (error instanceof CommittedWriteError) durabilityWarning = error.message;
     // The undoAfter metadata image is the commit point and is checked during recovery.
   }
   try {
     await cleanupUndo(directory, finalManifest, operations);
-    return { project, cleanup: 'complete' };
+    return { project, cleanup: 'complete', ...(durabilityWarning ? { warning: durabilityWarning } : {}) };
   } catch (error) {
     return {
       project,
       cleanup: 'pending',
-      warning: `Screenshot restored, but Undo journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      warning: [
+        durabilityWarning,
+        `Screenshot restored, but Undo journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 }
@@ -895,8 +902,12 @@ export async function undoScreenshotDelete(
       throw new Error('project.json did not reach its restored state.');
     return finishUndo(directory, manifest, restoredProject, operations);
   } catch (error) {
-    if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected')
-      return finishUndo(directory, manifest, restoredProject, operations);
+    if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected') {
+      const result = await finishUndo(directory, manifest, restoredProject, operations);
+      if (error instanceof CommittedWriteError)
+        result.warning = [error.message, result.warning].filter(Boolean).join(' ');
+      return result;
+    }
     try {
       await restoreDeletedState(root, directory, manifest, operations);
       await setPhase(directory, manifest, 'deleted', operations);

@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
@@ -94,6 +95,39 @@ export async function readStableRegularFile(
   }
 }
 
+/** Only the named file has committed; this does not commit an enclosing transaction. */
+export class CommittedWriteError extends Error {
+  readonly committed = true;
+  readonly code: string | undefined;
+  constructor(
+    readonly filePath: string,
+    cause: unknown,
+  ) {
+    super(
+      `${COMMITTED_WRITE_WARNING} The overall operation may be incomplete. Reload and review the current state before retrying.`,
+      { cause },
+    );
+    this.name = 'CommittedWriteError';
+    this.code = (cause as NodeJS.ErrnoException | undefined)?.code;
+  }
+}
+
+/** Publish state that follows this commit, then preserve the durability failure for the caller. */
+export async function afterFileCommit(
+  write: () => Promise<void>,
+  publish: () => void | Promise<void>,
+): Promise<void> {
+  let warning: CommittedWriteError | undefined;
+  try {
+    await write();
+  } catch (error) {
+    if (!(error instanceof CommittedWriteError)) throw error;
+    warning = error;
+  }
+  await publish();
+  if (warning) throw warning;
+}
+
 const writes = new Map<string, Promise<void>>();
 export async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
   const key = path.resolve(filePath);
@@ -143,14 +177,18 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
   } finally {
     await fs.unlink(temporary).catch(() => undefined);
   }
-  await syncDirectoryEntry(path.dirname(filePath));
-  // If mkdir created ancestors, also persist their names in each containing directory.
-  if (firstCreated && process.platform !== 'win32') {
-    let parent = path.dirname(filePath);
-    while (parent !== path.dirname(firstCreated) && parent !== path.dirname(parent)) {
-      parent = path.dirname(parent);
-      await syncDirectoryEntry(parent);
+  try {
+    await syncDirectoryEntry(path.dirname(filePath));
+    // If mkdir created ancestors, also persist their names in each containing directory.
+    if (firstCreated && process.platform !== 'win32') {
+      let parent = path.dirname(filePath);
+      while (parent !== path.dirname(firstCreated) && parent !== path.dirname(parent)) {
+        parent = path.dirname(parent);
+        await syncDirectoryEntry(parent);
+      }
     }
+  } catch (error) {
+    throw new CommittedWriteError(filePath, error);
   }
 }
 

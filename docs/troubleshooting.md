@@ -49,3 +49,11 @@ Normal development and pull-request builds are unsigned. Signing and macOS notar
 ## Manual compatibility status
 
 macOS workflow verification and cross-editor combined-paste acceptance are pending manual checks. Automated Electron tests, Windows development results or clipboard-write success must not be reported as passing evidence for those environments. Use the [manual user-feedback protocol](user-feedback-protocol.md).
+
+## A write completed but durability could not be confirmed
+
+A �File replacement completed� warning means that file already contains the new bytes, but a directory sync failed. It is not proof that every step of a larger operation finished. Reload and review the current project or settings before repeating an action; do not create a duplicate solely because the call reported an error. Settings retains the committed values in memory and reads them back for display. A later independent setting change preserves them. Screenshot/content transactions compare their live metadata commit point and report a committed save with a warning, or preserve recovery data when baseline repair is incomplete.
+
+Check disk health, free space and folder access. Local diagnostics record `committed-durability-unconfirmed` and the underlying I/O or permission error, separately from failures before replacement. `EIO`, `EACCES` and `EPERM` are not ignored. Windows explicitly flushes file bytes; Node does not provide the same directory-sync guarantee there, so this does not promise durability through every power loss.
+
+Local MCP tools only read workspace content. A `--mcp` process still writes its pid-scoped startup diagnostic and can prune inactive diagnostic logs. It does not open the interactive window, recover project journals, or start the loopback listener.

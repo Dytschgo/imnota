@@ -679,7 +679,10 @@ export async function undoContentItemDelete(
     }
   } catch (error) {
     if (await classify(metadataPath, loaded.directory, undoAfterStored))
-      return { project: restoredProject, warning: 'Content restored; Undo cleanup is pending.' };
+      return {
+        project: restoredProject,
+        warning: `Content restored; Undo cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      };
     await removeOwnContent(root, loaded.directory, manifest, operations);
     await setPhase(loaded.directory, manifest, 'deleted', operations);
     throw new ContentTrashError(

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { atomicWrite } from './files.js';
+import { atomicWrite, CommittedWriteError } from './files.js';
 
 const platform = process.platform;
 const rename = fs.rename.bind(fs);
@@ -81,7 +81,13 @@ describe('durable replacement', () => {
       });
       const operation = atomicWrite(target, 'candidate');
       if (['EINVAL', 'ENOTSUP'].includes(code)) await expect(operation).resolves.toBeUndefined();
-      else await expect(operation).rejects.toMatchObject({ code });
+      else
+        await expect(operation).rejects.toMatchObject({
+          code,
+          committed: true,
+          filePath: target,
+          cause: expect.objectContaining({ code }),
+        });
       expect(await fs.readFile(target, 'utf8')).toBe('candidate');
       expect(close).toHaveBeenCalledOnce();
     },
@@ -90,7 +96,9 @@ describe('durable replacement', () => {
   it('keeps the committed file and removes the candidate when the flush fails', async () => {
     const events: string[] = [];
     const replace = traceFlushes(events, failure('EIO'));
-    await expect(atomicWrite(target, 'candidate')).rejects.toMatchObject({ code: 'EIO' });
+    const operation = atomicWrite(target, 'candidate');
+    await expect(operation).rejects.toMatchObject({ code: 'EIO' });
+    await expect(operation).rejects.not.toBeInstanceOf(CommittedWriteError);
     expect(replace).not.toHaveBeenCalled();
     expect(await fs.readFile(target, 'utf8')).toBe('baseline');
     expect(await fs.readdir(directory)).toEqual(['drawing.json']);

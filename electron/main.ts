@@ -40,7 +40,7 @@ import type {
   WorkspaceSettings,
 } from '../src/shared/types.js';
 import type { AppearanceMode, PreferenceSettingsResult } from '../src/shared/preferences.js';
-import { preferenceSettingsEnvelope, resolvePreferenceSettings } from '../src/shared/preference-settings.js';
+import { resolvePreferenceSettings } from '../src/shared/preference-settings.js';
 import { DEFAULT_WORKSPACE_SETTINGS, resolveWorkspaceSettings } from '../src/shared/workspace-settings.js';
 import type {
   ClipboardFormatsReport,
@@ -49,7 +49,8 @@ import type {
 } from '../src/shared/workflow-bridge.js';
 import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
-import { assertNoLinks, atomicWrite as writeAtomically, isWithin } from './files.js';
+import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
+import { persistSettings, writeApplicationFile } from './application-persistence.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
 import { recoverScreenshotTrashTransactions, type ScreenshotTrashOperations } from './screenshot-trash.js';
@@ -308,12 +309,14 @@ function resolvedWindowBackground(
 }
 
 async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await diagnostics.filesystem('write', filePath, async () => {
-    await writeAtomically(filePath, content);
-    projectWatchManager?.recordSelfWrite(filePath, content);
+  await writeApplicationFile(filePath, content, {
+    diagnostics,
+    recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
+    invalidate: (target) => {
+      projectSearchService?.invalidateForPath(target);
+      contentSearch.invalidatePath(target);
+    },
   });
-  projectSearchService?.invalidateForPath(filePath);
-  contentSearch.invalidatePath(filePath);
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
@@ -400,20 +403,20 @@ async function persistApplicationSettings(
   nextSettings: WorkspaceSettings,
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
-  const persisted = preferenceSettingsEnvelope(
-    { ...retainedApplicationSettings, ...nextSettings },
-    nextPreferences,
-    preferenceSettingsResult.profile,
-  );
-  const persist = async () => {
-    await atomicWrite(settingsFile(), JSON.stringify(persisted, null, 2));
-    if (nextSettings.workspacePath !== settings.workspacePath) contentSearch.invalidate();
-    settings = { ...nextSettings };
-    preferenceSettingsResult = { ...preferenceSettingsResult, settings: nextPreferences };
-  };
-  if (localMcpServer) await localMcpServer.savePreference(nextPreferences.agentAccess.enabled, persist);
-  else await persist();
-  syncCaptureGlobalShortcut();
+  await persistSettings(nextSettings, nextPreferences, {
+    filePath: settingsFile(),
+    retained: retainedApplicationSettings,
+    profile: preferenceSettingsResult.profile,
+    write: atomicWrite,
+    publish: (next, preferences) => {
+      if (next.workspacePath !== settings.workspacePath) contentSearch.invalidate();
+      settings = next;
+      preferenceSettingsResult = { ...preferenceSettingsResult, settings: preferences };
+    },
+    savePreference: (enabled, persist) =>
+      localMcpServer ? localMcpServer.savePreference(enabled, persist) : persist(),
+    syncShortcut: syncCaptureGlobalShortcut,
+  });
 }
 
 function workspaceOrThrow(): string {
@@ -1407,7 +1410,7 @@ async function insertCapturedPng(
     () => readOptionalFile(path.join(projectPath, '.imnota-recovery.json')),
     assertAdmission,
   );
-  await commitFileTransaction(
+  const warnings = await commitFileTransaction(
     projectPath,
     'capture',
     [
@@ -1442,7 +1445,10 @@ async function insertCapturedPng(
         assertProjectRevision(projectPath, baseline.projectRevision),
       ),
   );
-  return { snapshot: await makeSnapshot(projectPath), screenshotId: screenshot.id };
+  return {
+    snapshot: withSnapshotWarnings(await makeSnapshot(projectPath), warnings),
+    screenshotId: screenshot.id,
+  };
 }
 
 async function mutateProjectMetadata(
@@ -2147,8 +2153,11 @@ app.whenReady().then(async () => {
       const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
       // Fail closed for this process even if storing the disabled preference also fails.
       preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };
-      await persistApplicationSettings(settings, next).catch(() => {
-        agentAccessStartupError += ' The disabled preference could not be saved.';
+      await persistApplicationSettings(settings, next).catch((error) => {
+        agentAccessStartupError +=
+          error instanceof CommittedWriteError
+            ? ` The disabled preference is active, but ${error.message}`
+            : ' The disabled preference could not be saved.';
       });
     });
   await createWindow();

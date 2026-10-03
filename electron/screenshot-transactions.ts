@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { assertNoLinks, atomicWrite, CommittedWriteError, isWithin } from './files.js';
 import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
 
 const TRANSACTION_DIRECTORY = '.imnota-transactions';
@@ -582,20 +582,31 @@ async function finishCommitted(
   operations: ScreenshotTransactionOperations,
 ): Promise<ScreenshotTransactionCommitResult> {
   let committedManifest = manifest;
+  let durabilityWarning: string | undefined;
   try {
     if (manifest.phase !== 'committed')
       committedManifest = await setPhase(directory, manifest, 'committed', operations);
-  } catch {
+  } catch (error) {
+    if (error instanceof CommittedWriteError) durabilityWarning = error.message;
     // project.json is the authoritative commit point. Recovery can infer commit from it.
   }
   try {
     await cleanupTransaction(directory, committedManifest, operations);
-    return { status: 'committed', cleanup: 'complete' };
+    return {
+      status: 'committed',
+      cleanup: 'complete',
+      ...(durabilityWarning ? { warning: durabilityWarning } : {}),
+    };
   } catch (error) {
     return {
       status: 'committed',
       cleanup: 'pending',
-      warning: `The save committed, but journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      warning: [
+        durabilityWarning,
+        `The save committed, but journal cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 }
@@ -778,8 +789,12 @@ export async function commitScreenshotTransaction(
       throw new Error('project.json did not reach its committed bytes.');
     return finishCommitted(directory, manifest, operations);
   } catch (error) {
-    if ((await classifyLive(root, directory, commit)) === 'after')
-      return finishCommitted(directory, manifest, operations);
+    if ((await classifyLive(root, directory, commit)) === 'after') {
+      const result = await finishCommitted(directory, manifest, operations);
+      if (error instanceof CommittedWriteError)
+        result.warning = [error.message, result.warning].filter(Boolean).join(' ');
+      return result;
+    }
     try {
       await rollbackToBefore(root, directory, manifest, operations);
       await setPhase(directory, manifest, 'staged', operations);
