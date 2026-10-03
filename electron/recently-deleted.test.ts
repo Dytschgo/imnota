@@ -13,8 +13,9 @@ import {
   undoContentItemDelete,
 } from './content-trash.js';
 import { atomicWrite } from './files.js';
+import { listWorkspaceProjects } from './project-list.js';
 import { copyProjectForDuplicate } from './project-duplicate.js';
-import { listRecentlyDeleted, pruneExpiredDeletes } from './recently-deleted.js';
+import { applyOpenDeleteRetention, listRecentlyDeleted, pruneExpiredDeletes } from './recently-deleted.js';
 import {
   deleteScreenshotToTrash,
   recoverScreenshotTrashTransactions,
@@ -478,7 +479,10 @@ describe('project duplication', () => {
     const target = `${projectPath}-copy`;
     temporary.push(target);
 
-    await copyProjectForDuplicate(projectPath, target);
+    await copyProjectForDuplicate(projectPath, target, {
+      ...(await readProject(projectPath)),
+      id: 'project_duplicate',
+    });
 
     expect((await fs.readdir(target)).sort()).toEqual(['collections', 'project.json']);
     expect(await exists(path.join(target, 'collections', COLLECTION, '.imnota-undo', 'keep.txt'))).toBe(true);
@@ -499,5 +503,158 @@ describe('project duplication', () => {
     expect(await recoverScreenshotTrashTransactions(target)).toEqual([]);
     expect(await recoverContentTrashTransactions(target)).toEqual([]);
     expect(await listRecentlyDeleted(target)).toEqual([]);
+  });
+});
+
+describe('open retention failure boundaries', () => {
+  it.each(['file', 'link'] as const)(
+    'keeps open available and all journals/grants when a token-shaped %s prevents listing',
+    async (kind) => {
+      const { projectPath } = await fixture();
+      const shot = await deleteScreenshot(projectPath, 'shot_a');
+      const old = await deleteText(projectPath);
+      await patchManifest(projectPath, old, { deletedAt: '2020-01-01T00:00:00.000Z' });
+      const unsafe = path.join(projectPath, '.imnota-undo', 'delete-12345678-1234-4234-8234-123456789abc');
+      const outside = path.join(projectPath, 'outside');
+      await fs.mkdir(outside);
+      await fs.writeFile(path.join(outside, 'keep'), 'linked target');
+      if (kind === 'file') await fs.writeFile(unsafe, 'unsafe token file');
+      else await fs.symlink(outside, unsafe, process.platform === 'win32' ? 'junction' : 'dir');
+      const metadata = await fs.readFile(path.join(projectPath, 'project.json'));
+      const originalJournals = await Promise.all(
+        [shot, old].map(async (token) =>
+          Promise.all(
+            (await fs.readdir(journal(projectPath, token))).map(
+              async (name) =>
+                [name, await fs.readFile(path.join(journal(projectPath, token), name))] as const,
+            ),
+          ),
+        ),
+      );
+      const recovered = await recoverScreenshotTrashTransactions(projectPath);
+      const content = await recoverContentTrashTransactions(projectPath);
+      const result = await applyOpenDeleteRetention(projectPath);
+      expect(result.warnings).toEqual([expect.stringMatching(/could not be listed.*retention was skipped/)]);
+      expect(result.retired.size).toBe(0);
+      expect(recovered.filter((item) => !result.retired.has(item.undoToken))).toMatchObject([
+        { undoToken: shot, undoAvailable: true },
+      ]);
+      expect(content.filter((item) => !result.retired.has(item.undoToken))).toMatchObject([
+        { undoToken: old, undoAvailable: true },
+      ]);
+      expect(await readProject(projectPath)).toMatchObject({
+        screenshots: [expect.objectContaining({ id: 'shot_b' })],
+      });
+      expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(metadata);
+      for (const [index, token] of [shot, old].entries())
+        for (const [name, bytes] of originalJournals[index])
+          expect(await fs.readFile(path.join(journal(projectPath, token), name))).toEqual(bytes);
+      expect(await fs.readFile(path.join(outside, 'keep'), 'utf8')).toBe('linked target');
+      expect((await fs.lstat(unsafe)).isSymbolicLink()).toBe(kind === 'link');
+    },
+  );
+
+  it('revokes only validated retired grants, including failed cleanup, keeping uncertain expired grants', async () => {
+    const { projectPath } = await fixture();
+    const shot = await deleteScreenshot(projectPath, 'shot_a');
+    const old = await deleteText(projectPath);
+    await fs.writeFile(path.join(journal(projectPath, old), 'unexpected'), 'keep');
+    const result = await applyOpenDeleteRetention(
+      projectPath,
+      {
+        screenshots: {
+          write: atomicWrite,
+          removeDirectory: async () => {
+            throw new Error('locked');
+          },
+        },
+      },
+      expired(),
+    );
+    expect([...result.retired]).toEqual([shot]);
+    expect(result.failures).toHaveLength(2);
+    expect(result.warnings).toHaveLength(1);
+    expect(await exists(journal(projectPath, old))).toBe(true);
+    expect((await fs.readdir(path.join(projectPath, '.imnota-undo')))[0]).toContain(`expired-${shot}`);
+  });
+});
+
+describe('duplicate failure boundaries', () => {
+  it.each(['link', 'copy-permission', 'publication', 'cleanup', 'swapped-target'] as const)(
+    'does not publish the source identity after %s failure or damage source/unrelated files',
+    async (failure) => {
+      const { projectPath, project } = await fixture();
+      const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-duplicate-failure-'));
+      temporary.push(workspace);
+      const target = path.join(workspace, 'duplicate');
+      const outside = path.join(workspace, 'unrelated');
+      await fs.mkdir(outside);
+      await fs.writeFile(path.join(outside, 'keep'), 'untouched');
+      const sourceBytes = await fs.readFile(path.join(projectPath, 'project.json'));
+      const imagePath = path.join(projectPath, 'collections', COLLECTION, 'screenshots', 'a.png');
+      const image = await fs.readFile(imagePath);
+      const realCopy = fs.cp.bind(fs);
+      vi.spyOn(fs, 'cp').mockImplementationOnce(async (source, destination, options) => {
+        // Force the failure after actual file copying, independent of readdir ordering.
+        await realCopy(path.join(projectPath, 'collections'), path.join(target, 'collections'), {
+          recursive: true,
+        });
+        expect(
+          await fs.readFile(path.join(target, 'collections', COLLECTION, 'screenshots', 'a.png')),
+        ).toEqual(image);
+        expect(await exists(path.join(target, 'project.json'))).toBe(false);
+        if (failure === 'link') {
+          const link = path.join(projectPath, 'collections', COLLECTION, 'linked');
+          await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+          // Exercise the real production filter on a nested junction/symlink.
+          await realCopy(link, path.join(target, 'linked'), options);
+        }
+        if (failure === 'swapped-target') {
+          await fs.rename(target, path.join(workspace, 'retained-owned'));
+          await fs.symlink(outside, target, process.platform === 'win32' ? 'junction' : 'dir');
+        }
+        if (failure !== 'publication') throw Object.assign(new Error('copy refused'), { code: 'EACCES' });
+      });
+      if (failure === 'publication') {
+        const write = fs.writeFile.bind(fs);
+        vi.spyOn(fs, 'writeFile').mockImplementation(async (file, data, options) => {
+          if (file === path.join(target, 'project.json'))
+            throw Object.assign(new Error('publication denied'), { code: 'EPERM' });
+          return write(file, data, options);
+        });
+      }
+      if (failure === 'cleanup')
+        vi.spyOn(fs, 'rmdir').mockRejectedValueOnce(Object.assign(new Error('locked'), { code: 'EACCES' }));
+      await expect(
+        copyProjectForDuplicate(projectPath, target, { ...project, id: 'project_copy' }),
+      ).rejects.toThrow(
+        failure === 'cleanup' || failure === 'swapped-target'
+          ? /retained.*manual inspection/
+          : /Linked|copy refused|publication denied/,
+      );
+      expect(await listWorkspaceProjects(workspace)).toEqual([]);
+      expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(sourceBytes);
+      expect(await fs.readFile(imagePath)).toEqual(image);
+      expect(await fs.readFile(path.join(outside, 'keep'), 'utf8')).toBe('untouched');
+      if (failure === 'link' || failure === 'copy-permission' || failure === 'publication')
+        expect(await exists(target)).toBe(false);
+      if (failure === 'swapped-target') expect((await fs.lstat(target)).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  it('preserves preexisting destinations and refuses the original identity', async () => {
+    const { projectPath, project } = await fixture();
+    const target = projectPath + '-preexisting';
+    temporary.push(target);
+    await fs.mkdir(target);
+    await fs.writeFile(path.join(target, 'keep'), 'mine');
+    await expect(
+      copyProjectForDuplicate(projectPath, target, { ...project, id: 'project_copy' }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await fs.readFile(path.join(target, 'keep'), 'utf8')).toBe('mine');
+    await expect(copyProjectForDuplicate(projectPath, projectPath + '-unused', project)).rejects.toThrow(
+      /new project identity/,
+    );
+    expect(await exists(projectPath + '-unused')).toBe(false);
   });
 });

@@ -3,6 +3,16 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { assertNoLinks } from './files.js';
 
+export class RetiredDeleteCleanupError extends Error {
+  constructor(
+    public readonly undoToken: string,
+    message: string,
+    cause: unknown,
+  ) {
+    super(message, { cause });
+  }
+}
+
 /**
  * Called only after a committed, expired journal passes restore/integrity validation.
  * The rename is the irreversible retention boundary: Undo discovery never sees an
@@ -22,9 +32,10 @@ export async function retireDeleteJournal(
   try {
     await remove(expired);
   } catch (cause) {
-    throw new Error(
+    throw new RetiredDeleteCleanupError(
+      path.basename(directory),
       `The retention period ended, but cleanup is incomplete at ${expired}. Remaining files were kept for manual inspection.`,
-      { cause },
+      cause,
     );
   }
 }

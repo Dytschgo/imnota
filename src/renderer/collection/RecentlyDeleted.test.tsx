@@ -84,7 +84,7 @@ describe('RecentlyDeleted', () => {
     expect(screen.queryByRole('button', { name: 'Restore screenshot: Payment form' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Restore text block: Context note' })).toBeEnabled();
     // The restored row is gone, so focus moves to the announcement instead of being lost.
-    expect(screen.getByRole('status')).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus());
   });
 
   it('keeps the item and shows why when Undo reports a conflict', async () => {
@@ -99,7 +99,7 @@ describe('RecentlyDeleted', () => {
     );
     const retry = screen.getByRole('button', { name: 'Restore screenshot: Payment form' });
     expect(retry).toBeEnabled();
-    expect(retry).toHaveFocus();
+    await waitFor(() => expect(retry).toHaveFocus());
   });
 
   it('blocks a second restore while one is running', async () => {

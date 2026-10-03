@@ -153,13 +153,12 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     const workspace = workspaceOrThrow();
     const source = await readProject(safePath);
     const target = await uniqueProjectFolder(workspace, `${source.name} copy`);
-    await copyProjectForDuplicate(safePath, target);
-    const copy = await readProject(target);
+    const copy = structuredClone(source);
     copy.id = `project_${crypto.randomUUID()}`;
     copy.name = `${source.name} copy`;
     copy.createdAt = nowIso();
     copy.updatedAt = nowIso();
-    await atomicWrite(path.join(target, 'project.json'), JSON.stringify(copy, null, 2));
+    await copyProjectForDuplicate(safePath, target, copy);
     return makeSnapshot(target);
   });
   handle('projects:recently-deleted', async (_event, projectPath: string) =>

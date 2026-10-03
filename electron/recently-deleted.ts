@@ -1,3 +1,4 @@
+import { RetiredDeleteCleanupError } from './delete-retention.js';
 import type { RecentlyDeletedItem } from '../src/shared/recently-deleted.js';
 import {
   listDeletedContentItems,
@@ -54,6 +55,7 @@ export async function pruneExpiredDeletes(
   projectPath: string,
   operations: { screenshots?: ScreenshotTrashOperations; content?: ContentTrashOperations } = {},
   now = Date.now(),
+  retired = new Set<string>(),
 ): Promise<DeleteRetentionResult> {
   const result: DeleteRetentionResult = { pruned: 0, failures: [] };
   for (const prune of [
@@ -62,6 +64,9 @@ export async function pruneExpiredDeletes(
   ]) {
     try {
       const outcome = await prune();
+      for (const token of outcome.pruned) retired.add(token);
+      for (const { error } of outcome.failed)
+        if (error instanceof RetiredDeleteCleanupError) retired.add(error.undoToken);
       result.pruned += outcome.pruned.length;
       result.failures.push(...outcome.failed.map((failure) => failure.error));
     } catch (error) {
@@ -69,4 +74,37 @@ export async function pruneExpiredDeletes(
     }
   }
   return result;
+}
+
+/** An uncertain preflight preserves both journal families and all recovered grants.
+ * Only a validated expiry rename revokes Undo, including cleanup failures.
+ */
+export async function applyOpenDeleteRetention(
+  projectPath: string,
+  operations: { screenshots?: ScreenshotTrashOperations; content?: ContentTrashOperations } = {},
+  now = Date.now(),
+): Promise<DeleteRetentionResult & { retired: Set<string>; warnings: string[] }> {
+  const retired = new Set<string>();
+  try {
+    await listRecentlyDeleted(projectPath, now);
+  } catch (error) {
+    return {
+      pruned: 0,
+      failures: [error],
+      retired,
+      warnings: [
+        'Deletion recovery could not be listed. Recovery files and existing Undo grants were kept; retention was skipped. See local diagnostics before manual cleanup.',
+      ],
+    };
+  }
+  const result = await pruneExpiredDeletes(projectPath, operations, now, retired);
+  return {
+    ...result,
+    retired,
+    warnings: result.failures.length
+      ? [
+          'Some expired deletion recovery files were kept because they could not be safely removed. See local diagnostics before manual cleanup.',
+        ]
+      : [],
+  };
 }

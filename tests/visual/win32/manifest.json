@@ -24,13 +24,16 @@
   "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. The Settings and two backdrop captures now record the Settings rail and the Forward history entry created when leaving Settings. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
   "captureUpdates": {
     "backdrop-collapsed.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "248f14d8ea0c8227a215ad54476ad9d62b89c1c74307dbeb84ad05058318e87e",
+      "bytes": 304731,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1280x800-workspace-dark": {
       "reviewedAt": "2026-09-22",
@@ -159,22 +162,28 @@
       "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
     },
     "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "2b7e246edb0b5c8de02b6f10d850290c9b03386671ad5c7879e447315ef39ff6",
+      "bytes": 85179,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "1a8bdb495efae7f0fdadd169724504b46778ae6d91088d84818373449106f7b9",
+      "bytes": 86379,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1440x900-settings.png": {
       "reviewedAt": "2026-09-28",
@@ -186,67 +195,88 @@
       "review": "Inspected the hosted packaged Windows capture from integration PR 162. Only the Backdrop description changed (glass off now keeps solid surfaces in every theme, PR 157). All 13 other approved captures matched. Packaged smoke passed all 27 groups. Strict tolerance unchanged."
     },
     "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "92b5fd30b5fd32c4339145c5d7a436df906fdf1130449caf15613b903d743b23",
+      "bytes": 93746,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "c4f0db5c7b88edc0e12e6d6394fa23212cc34c7403c9337b01fefb28d937bf49",
+      "bytes": 95460,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "8b02885b70ab342e589f20062357ace24ab85c284724ed43e50dfc03ab11c8a0",
+      "bytes": 106213,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "18a22917b781d764a227e4c6d5747f943f84a26ef85644966180493b0b627243",
+      "bytes": 107953,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "3440x1440-workspace-dark.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "926abb0fde7229e35c9534299dff97d000ef6d936199c7185159d8dbfde09d68",
+      "bytes": 121878,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "3440x1440-workspace-light.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "7b4576a62bfc1ce3da7572b6ed0a67cd0b6ed338fa4ada56bf465ebdddc61ddf",
+      "bytes": 125077,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "backdrop-workspace.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-03",
+      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
+      "sourceArtifactId": 11281480609,
+      "sha256": "3e41ddfbf939721dabc2d7ff0494744a4be6dc0ff46914f9255937b114ce9ab9",
+      "bytes": 365613,
+      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     }
   }
 }
