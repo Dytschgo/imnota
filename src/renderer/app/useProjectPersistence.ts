@@ -357,7 +357,9 @@ export function useProjectPersistence({
   const acceptedRevision = useRef<string | null>(null);
   const stoppedRevision = useRef<string | null>(null);
   const recovering = useRef(false);
-  const recoveredWrites = useRef(new Set<string>());
+  // Commit evidence survives watcher/adoption failures and clean-draft eviction.
+  const recoveryRevision = useRef<string | null | undefined>(undefined);
+  const recoveredWrites = useRef(new Map<string, string>());
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -391,6 +393,13 @@ export function useProjectPersistence({
   }, []);
 
   const publishExternalChange = useCallback((change: ExternalProjectChange | null) => {
+    // Losing monitoring must never downgrade an already observed external edit/conflict.
+    if (
+      change?.kind === 'watch-error' &&
+      pendingExternalChange.current &&
+      pendingExternalChange.current.kind !== 'watch-error'
+    )
+      return;
     pendingExternalChange.current = change;
     setExternalChange(change);
   }, []);
@@ -400,9 +409,10 @@ export function useProjectPersistence({
   const acceptRecoveryTransition = useCallback(
     (transition?: ProjectRevisionTransition) => {
       if (!recovering.current) return;
-      if (transition && recoveredWrites.current.has(transition.after)) return;
-      if (!pendingExternalChange.current && transition && transition.before === acceptedRevision.current) {
-        recoveredWrites.current.add(transition.after);
+      if (transition && recoveredWrites.current.get(transition.after) === transition.before) return;
+      if (transition && transition.before === recoveryRevision.current) {
+        recoveredWrites.current.set(transition.after, transition.before);
+        recoveryRevision.current = transition.after;
         publishAcceptedRevision(transition.after);
       } else {
         publishExternalChange({
@@ -883,6 +893,7 @@ export function useProjectPersistence({
           ownRevisionGeneration.current += 1;
           lastSavedSnapshot.current = saved.snapshot;
           publishAcceptedRevision(saved.projectRevision);
+          if (recovering.current) recoveryRevision.current = saved.projectRevision;
           const overlaid = overlayTrackedMetadata(saved.snapshot.project);
           metadataInFlight.current = null;
           if (overlaid.conflicts.length) {
@@ -924,7 +935,19 @@ export function useProjectPersistence({
       const bridge = getRendererBridge();
       let recoveryWatch: string | null = null;
       recovering.current = true;
-      const unsubscribe = bridge.onProjectWatchEvent(handleWatchEvent);
+      recoveryRevision.current ??= stoppedRevision.current;
+      publishAcceptedRevision(recoveryRevision.current);
+      let watchFailed = false;
+      const startupEvents: ProjectWatchEvent[] = [];
+      const receive = (event: ProjectWatchEvent) => {
+        if (event.watchId !== recoveryWatch) return;
+        if (event.kind === 'watch-error') watchFailed = true;
+        handleWatchEvent(event);
+      };
+      const unsubscribe = bridge.onProjectWatchEvent((event) => {
+        if (!recoveryWatch) startupEvents.push(event);
+        else receive(event);
+      });
       try {
         const grant = workflowValue(
           await bridge.startProjectWatch({ projectPath: snapshotRef.current.projectPath }),
@@ -932,10 +955,30 @@ export function useProjectPersistence({
         recoveryWatch = grant.watchId;
         watchId.current = recoveryWatch;
         watchReady.current = Promise.resolve(true);
-        publishAcceptedRevision(stoppedRevision.current);
-      } catch {
-        // Still attempt the independent screenshot saves; metadata keeps its normal guard.
+        for (const event of startupEvents) receive(event);
+        if (pendingExternalChange.current?.kind === 'watch-error' && !watchFailed) {
+          // Reconnection resolves monitoring uncertainty only when actual disk bytes still
+          // end the exact own-commit chain. It cannot bless a new external baseline.
+          const latest = workflowValue(await bridge.reloadWatchedProject({ watchId: recoveryWatch }));
+          if (
+            latest.projectRevision !== recoveryRevision.current ||
+            grant.projectRevision !== recoveryRevision.current
+          ) {
+            publishExternalChange({
+              kind: 'external-change',
+              message: 'The project changed during recovery. Review the workspace before reloading.',
+            });
+          } else if (!watchFailed && pendingExternalChange.current?.kind === 'watch-error') {
+            publishExternalChange(null);
+          }
+        }
+      } catch (reason) {
+        // Still attempt independent drafts; retain their commits even without a healthy watch.
         watchReady.current = Promise.resolve(false);
+        publishExternalChange({
+          kind: 'watch-error',
+          message: workflowMessage(reason, 'External project changes cannot be monitored right now.'),
+        });
       }
       try {
         const saved = await save();
@@ -943,13 +986,13 @@ export function useProjectPersistence({
       } finally {
         unsubscribe();
         recovering.current = false;
-        stoppedRevision.current = acceptedRevision.current;
+        stoppedRevision.current = recoveryRevision.current ?? null;
         watchId.current = null;
         watchReady.current = Promise.resolve(false);
         if (recoveryWatch) await bridge.stopProjectWatch({ watchId: recoveryWatch });
       }
     },
-    [handleWatchEvent, publishAcceptedRevision],
+    [handleWatchEvent, publishAcceptedRevision, publishExternalChange],
   );
 
   const saveProjectMetadata = useCallback(
@@ -1218,7 +1261,7 @@ export function useProjectPersistence({
         ownRevisionGeneration.current += 1;
         lastSavedSnapshot.current = latest.snapshot;
         if (!recovering.current) publishAcceptedRevision(latest.projectRevision);
-        else if (latest.projectRevision !== acceptedRevision.current)
+        else if (latest.projectRevision !== recoveryRevision.current)
           publishExternalChange({
             kind: 'external-change',
             message: 'The project changed during recovery. Review the workspace before reloading.',

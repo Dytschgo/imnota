@@ -26,8 +26,10 @@ vi.mock('electron', () => ({ app: {}, shell: {} }));
 vi.mock('../../../electron/native-clipboard', () => ({ nativeClipboard: {} }));
 
 const temporary: string[] = [];
+const stopWatches: Array<() => void> = [];
 afterEach(async () => {
   setReloadProtection(null);
+  for (const stop of stopWatches.splice(0)) stop();
   for (const directory of temporary.splice(0)) {
     if (
       path.dirname(directory) !== (await fs.realpath(os.tmpdir())) ||
@@ -38,7 +40,7 @@ afterEach(async () => {
   }
 });
 
-async function fixture() {
+async function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolean } = {}) {
   const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-reload-')));
   temporary.push(projectPath);
   const projectFile = path.join(projectPath, 'project.json');
@@ -76,8 +78,33 @@ async function fixture() {
     thumbnails: {},
     recoveryFound: false,
   });
-  const contentService = new ContentPersistenceService({ snapshot, trashItem: async () => undefined });
+  let manager: ProjectWatchManager | undefined = undefined;
+  let injectCleanupWarning = false;
+  const warnedJournals = new Set<string>();
+  const transactionOperations = {
+    write: async (file: string, source: string | Uint8Array) => {
+      await atomicWrite(file, source);
+      manager?.recordSelfWrite(file, source);
+    },
+    unlink: async (file: string) => {
+      await fs.unlink(file);
+      manager?.recordSelfDelete(file);
+    },
+    removeDirectory: async (directory: string) => {
+      if (injectCleanupWarning && !warnedJournals.has(directory)) {
+        warnedJournals.add(directory);
+        throw new Error('Injected journal cleanup failure');
+      }
+      await fs.rm(directory, { recursive: true, force: true });
+    },
+  };
+  const contentService = new ContentPersistenceService({
+    snapshot,
+    trashItem: async () => undefined,
+    transactionOperations,
+  });
   await contentService.create({ projectPath, collectionId: initial.collections[0].id, kind: 'text' });
+  injectCleanupWarning = options.cleanupWarning === true;
   const source = await snapshot();
   const text = source.project.contentItems![0];
   const contentRevision = (description: string, annotations: string) =>
@@ -128,11 +155,7 @@ async function fixture() {
           kind,
           writes,
           assertBaseline,
-          operations: {
-            write: atomicWrite,
-            unlink: (file) => fs.unlink(file),
-            removeDirectory: (directory) => fs.rm(directory, { recursive: true, force: true }),
-          },
+          operations: transactionOperations,
         });
         return result.warning ? [result.warning] : [];
       },
@@ -140,30 +163,42 @@ async function fixture() {
   );
   const listeners = new Set<(event: ProjectWatchEvent) => void>();
   let watchNumber = 0;
-  const manager = new ProjectWatchManager({
+  const deliveredEvents: ProjectWatchEvent[] = [];
+  manager = new ProjectWatchManager({
     loadSnapshot: snapshot,
     saveProject: async (_target, project) => {
       await atomicWrite(projectFile, JSON.stringify(project, null, 2));
       return snapshot();
     },
-    // Deterministic events; native filesystem transactions and native CAS remain real.
-    createWatch: () => ({ close() {}, on() {} }),
+    // Most cases inject delivery at exact boundaries. One case explicitly uses native fs.watch.
+    ...(options.nativeWatch ? {} : { createWatch: () => ({ close() {}, on() {} }) }),
     randomId: () => `watch-${++watchNumber}`,
-    emit: (event) => listeners.forEach((listener) => listener(event)),
+    emit: (event) => {
+      deliveredEvents.push(event);
+      listeners.forEach((listener) => listener(event));
+    },
   });
+  const watchManager = manager;
+  stopWatches.push(() => watchManager.stopAll());
   const startRevision = projectRevisionForSource(await fs.readFile(projectFile));
   const bridge = {
-    startProjectWatch: async () => workflowOutcome(() => manager.start(projectPath)),
-    stopProjectWatch: async ({ watchId }) => workflowOutcome(() => manager.stop(watchId)),
+    startProjectWatch: vi.fn<WorkflowBridge['startProjectWatch']>(async () =>
+      workflowOutcome(() => watchManager.start(projectPath)),
+    ),
+    stopProjectWatch: async ({ watchId }) => workflowOutcome(() => watchManager.stop(watchId)),
     onProjectWatchEvent: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    reloadWatchedProject: async ({ watchId }) => workflowOutcome(() => manager.reload(watchId)),
+    reloadWatchedProject: vi.fn<WorkflowBridge['reloadWatchedProject']>(async ({ watchId }) =>
+      workflowOutcome(() => watchManager.reload(watchId)),
+    ),
     saveProjectCompareAndSwap: vi.fn<WorkflowBridge['saveProjectCompareAndSwap']>(async (input) =>
-      workflowOutcome(() => manager.compareAndSwap(input.watchId, input.expectedRevision, input.project)),
+      workflowOutcome(() =>
+        watchManager.compareAndSwap(input.watchId, input.expectedRevision, input.project),
+      ),
     ),
     loadScreenshotContent: async () => ({
       image: { filename: 'one.png', dataUrl: '', width: 1, height: 1 },
@@ -178,12 +213,13 @@ async function fixture() {
     saveContentItem: vi.fn<ImnotaBridge['saveContentItem']>((input) => contentService.save(input)),
   } satisfies Partial<ImnotaBridge & WorkflowBridge>;
   window.imnota = bridge as unknown as ImnotaBridge;
+  const onSnapshot = vi.fn();
   const hook = renderHook(() => {
     const persistence = useProjectPersistence({
       snapshot: source,
       activeScreenshot: shot,
       onProject: vi.fn(),
-      onSnapshot: vi.fn(),
+      onSnapshot,
       onSelectScreenshot: vi.fn(),
     });
     const content = useContentPersistence({
@@ -225,6 +261,9 @@ async function fixture() {
   };
   return {
     bridge,
+    deliveredEvents,
+    onSnapshot,
+    projectFile,
     readProject,
     externalEdit,
     startRevision,
@@ -234,6 +273,17 @@ async function fixture() {
     contentService,
     text,
     persistence,
+    diskRevision: async () => projectRevisionForSource(await fs.readFile(projectFile)),
+    injectWatchError: () =>
+      listeners.forEach((listener) =>
+        listener({
+          watchId: `watch-${watchNumber}`,
+          projectPath,
+          kind: 'watch-error',
+          changedPaths: [],
+          message: 'Monitoring disconnected',
+        }),
+      ),
   };
 }
 
@@ -304,3 +354,263 @@ it.each(['none', 'before recovery', 'before metadata CAS', 'watch event', 'metad
     }
   },
 );
+
+it.each(['before content result', 'between content and screenshot', 'after both transitions'] as const)(
+  'retries a transient injected watch error %s without rewriting committed drafts',
+  async (timing) => {
+    const f = await fixture();
+    const realReload = f.bridge.reloadWatchedProject.getMockImplementation()!;
+    if (timing === 'before content result') {
+      const save = f.bridge.saveContentItem.getMockImplementation()!;
+      f.bridge.saveContentItem.mockImplementation(async (input) => {
+        const result = await save(input);
+        f.injectWatchError();
+        return result;
+      });
+    } else if (timing === 'between content and screenshot') {
+      const save = f.bridge.saveScreenshotContent.getMockImplementation()!;
+      f.bridge.saveScreenshotContent.mockImplementation(async (input) => {
+        f.injectWatchError();
+        return save(input);
+      });
+    } else {
+      const reload = f.bridge.reloadWatchedProject.getMockImplementation()!;
+      f.bridge.reloadWatchedProject.mockImplementation(async (input) => {
+        const result = await reload(input);
+        if (f.bridge.saveScreenshotContent.mock.calls.length) f.injectWatchError();
+        return result;
+      });
+    }
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    expect((await f.readProject()).name).toBe('Recovery');
+    expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+    const committedRevision = await f.diskRevision();
+    // The replacement watch is healthy. Do not re-save committed drafts to obtain new lineage.
+    f.bridge.reloadWatchedProject.mockImplementation(realReload);
+    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committedRevision);
+    expect((await f.readProject()).name).toBe('Local name');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
+    expect(f.listeners.size).toBe(0);
+    expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions')).catch(() => [])).toEqual([]);
+  },
+);
+
+async function commitWithWatchError(f: Awaited<ReturnType<typeof fixture>>, reload: () => void) {
+  const save = f.bridge.saveContentItem.getMockImplementation()!;
+  f.bridge.saveContentItem.mockImplementation(async (input) => {
+    const result = await save(input);
+    f.injectWatchError();
+    return result;
+  });
+  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+  return f.diskRevision();
+}
+
+it.each(['startup rejects', 'startup emits error', 'reconnect read fails', 'reconnect emits error'] as const)(
+  'retains committed lineage while replacement watch %s, then completes on a healthy attempt',
+  async (failure) => {
+    const f = await fixture();
+    const reload = vi.fn();
+    const committedRevision = await commitWithWatchError(f, reload);
+    const start = f.bridge.startProjectWatch.getMockImplementation()!;
+    const read = f.bridge.reloadWatchedProject.getMockImplementation()!;
+    if (failure === 'startup rejects') {
+      f.bridge.startProjectWatch.mockResolvedValue({
+        ok: false,
+        error: {
+          code: 'watch-failure',
+          message: 'Still disconnected',
+          retryable: true,
+        },
+      });
+    } else if (failure === 'startup emits error') {
+      f.bridge.startProjectWatch.mockImplementation(async (input) => {
+        const result = await start(input);
+        f.injectWatchError();
+        return result;
+      });
+    } else {
+      f.bridge.reloadWatchedProject.mockImplementation(async (input) => {
+        if (failure === 'reconnect read fails')
+          return {
+            ok: false,
+            error: {
+              code: 'io-failure',
+              message: 'Still disconnected',
+              retryable: true,
+            },
+          };
+        const result = await read(input);
+        f.injectWatchError();
+        return result;
+      });
+    }
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+    expect(await f.diskRevision()).toBe(committedRevision);
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+    expect(f.listeners.size).toBe(0);
+    f.bridge.startProjectWatch.mockImplementation(start);
+    f.bridge.reloadWatchedProject.mockImplementation(read);
+    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committedRevision);
+    expect((await f.readProject()).name).toBe('Local name');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
+  },
+);
+
+it.each(['before fallback', 'during outage', 'just before retry CAS'] as const)(
+  'preserves real external metadata bytes %s through watch-error recovery',
+  async (timing) => {
+    const f = await fixture();
+    const reload = vi.fn();
+    if (timing === 'before fallback') await f.externalEdit();
+    const committedRevision = await commitWithWatchError(f, reload);
+    if (timing === 'during outage') await f.externalEdit();
+    let externalBytes = await fs.readFile(f.projectFile);
+    if (timing === 'just before retry CAS') {
+      const save = f.bridge.saveProjectCompareAndSwap.getMockImplementation()!;
+      f.bridge.saveProjectCompareAndSwap.mockImplementation(async (input) => {
+        expect(input.expectedRevision).toBe(committedRevision);
+        await f.externalEdit();
+        externalBytes = await fs.readFile(f.projectFile);
+        return save(input); // Real native hash comparison rejects this stale revision.
+      });
+    }
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+    expect(await fs.readFile(f.projectFile)).toEqual(externalBytes);
+    expect((await f.readProject()).favourite).toBe(true);
+    expect((await f.readProject()).name).toBe('Recovery');
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledTimes(
+      timing === 'just before retry CAS' ? 1 : 0,
+    );
+    expect(f.listeners.size).toBe(0);
+  },
+);
+
+it('retains a true native fs.watch external event when monitoring subsequently errors', async () => {
+  const f = await fixture({ nativeWatch: true });
+  const reload = vi.fn();
+  await commitWithWatchError(f, reload);
+  const ownBytes = await fs.readFile(f.projectFile);
+  const start = f.bridge.startProjectWatch.getMockImplementation()!;
+  f.bridge.startProjectWatch.mockImplementationOnce(async (input) => {
+    const grant = await start(input);
+    if (!grant.ok) throw new Error('Expected a native watch');
+    await f.externalEdit();
+    // Await actual native filesystem delivery, not an injected external-change callback.
+    await waitFor(() =>
+      expect(
+        f.deliveredEvents.some(
+          (event) =>
+            event.watchId === grant.value.watchId &&
+            event.kind === 'external-change' &&
+            event.changedPaths.includes('project.json'),
+        ),
+      ).toBe(true),
+    );
+    f.injectWatchError();
+    return grant;
+  });
+  expect(await reloadWindow({}, reload)).toBe(false);
+  const externalBytes = await fs.readFile(f.projectFile);
+  expect((await f.readProject()).favourite).toBe(true);
+  expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  // Even restoring the old exact bytes cannot erase the observed external-change decision.
+  await fs.writeFile(f.projectFile, ownBytes);
+  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await fs.readFile(f.projectFile)).toEqual(ownBytes);
+  expect(externalBytes).not.toEqual(ownBytes);
+  expect(reload).not.toHaveBeenCalled();
+  expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+  expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+  expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+});
+
+it.each(['content', 'screenshot'] as const)(
+  'fails closed when the committed %s result lacks lineage',
+  async (kind) => {
+    const f = await fixture();
+    if (kind === 'content') {
+      const save = f.bridge.saveContentItem.getMockImplementation()!;
+      f.bridge.saveContentItem.mockImplementation(async (input) => ({
+        ...(await save(input)),
+        projectRevisionTransition: undefined,
+      }));
+    } else {
+      const save = f.bridge.saveScreenshotContent.getMockImplementation()!;
+      f.bridge.saveScreenshotContent.mockImplementation(async (input) => ({
+        ...(await save(input)),
+        projectRevisionTransition: undefined,
+      }));
+    }
+    const reload = vi.fn();
+    expect(await reloadWindow({}, reload)).toBe(false);
+    const bytes = await fs.readFile(f.projectFile);
+    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await fs.readFile(f.projectFile)).toEqual(bytes);
+    expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+    expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+    expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+  },
+);
+
+it('retains committed transaction warnings and exact lineage through a blocked adoption', async () => {
+  const f = await fixture({ cleanupWarning: true });
+  const reload = vi.fn();
+  const committedRevision = await commitWithWatchError(f, reload);
+  const content = await f.bridge.saveContentItem.mock.results[0].value;
+  const screenshot = await f.bridge.saveScreenshotContent.mock.results[0].value;
+  expect(content.snapshot.warnings?.join(' ')).toContain('Injected journal cleanup failure');
+  expect(screenshot.warnings?.join(' ')).toContain('Injected journal cleanup failure');
+  expect(content.projectRevisionTransition?.before).toBe(f.startRevision);
+  expect(screenshot.projectRevisionTransition?.before).toBe(content.projectRevisionTransition?.after);
+  expect(screenshot.projectRevisionTransition?.after).toBe(committedRevision);
+  expect(f.onSnapshot).toHaveBeenCalledWith(
+    expect.objectContaining({ warnings: content.snapshot.warnings }),
+    f.text.id,
+  );
+  expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+  expect(await reloadWindow({}, reload)).toBe(true);
+  expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+  expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+  expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committedRevision);
+  expect((await f.readProject()).name).toBe('Local name');
+});
+
+it('rejects a replay with the same after revision but a different before revision', async () => {
+  const f = await fixture();
+  const reload = vi.fn();
+  await commitWithWatchError(f, reload);
+  const committed = await f.bridge.saveContentItem.mock.results[0].value;
+  expect(committed.projectRevisionTransition).toBeDefined();
+  committed.projectRevisionTransition.before = 'unrelated-baseline';
+  const bytes = await fs.readFile(f.projectFile);
+  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await fs.readFile(f.projectFile)).toEqual(bytes);
+  expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
+  expect(reload).not.toHaveBeenCalled();
+  expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
+  expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
+});
