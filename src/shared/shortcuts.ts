@@ -9,6 +9,7 @@ export const SHORTCUT_ACTIONS = [
   { id: 'navigation.projects', group: 'Navigation', label: 'Show projects' },
   { id: 'navigation.recent', group: 'Navigation', label: 'Show recent collections' },
   { id: 'navigation.favourites', group: 'Navigation', label: 'Show favourite projects' },
+  { id: 'navigation.settings', group: 'Navigation', label: 'Open Settings' },
   { id: 'edit.save', group: 'Editing', label: 'Save current work' },
   { id: 'edit.undo', group: 'Editing', label: 'Undo' },
   { id: 'edit.redo', group: 'Editing', label: 'Redo' },
@@ -23,6 +24,10 @@ export const SHORTCUT_ACTIONS = [
   { id: 'tool.rectangle', group: 'Annotation tools', label: 'Rectangle' },
   { id: 'tool.highlight', group: 'Annotation tools', label: 'Highlight' },
   { id: 'tool.step', group: 'Annotation tools', label: 'Note / Step' },
+  { id: 'tool.redact', group: 'Annotation tools', label: 'Redact' },
+  { id: 'tool.crop', group: 'Annotation tools', label: 'Crop' },
+  { id: 'tool.freehand', group: 'Annotation tools', label: 'Freehand' },
+  { id: 'tool.ellipse', group: 'Annotation tools', label: 'Ellipse' },
   { id: 'screenshot.previous', group: 'Screenshots', label: 'Previous screenshot' },
   { id: 'screenshot.next', group: 'Screenshots', label: 'Next screenshot' },
   { id: 'screenshot.toggleExport', group: 'Screenshots', label: 'Include or exclude screenshot' },
@@ -31,13 +36,30 @@ export const SHORTCUT_ACTIONS = [
   { id: 'panel.toggleInspector', group: 'Panels and canvas', label: 'Toggle inspector' },
   { id: 'canvas.fit', group: 'Panels and canvas', label: 'Fit screenshot' },
   { id: 'canvas.actualSize', group: 'Panels and canvas', label: 'Actual size' },
+  { id: 'canvas.zoomIn', group: 'Panels and canvas', label: 'Zoom in' },
+  { id: 'canvas.zoomOut', group: 'Panels and canvas', label: 'Zoom out' },
   { id: 'collection.new', group: 'Collections', label: 'New collection' },
   { id: 'collection.overallContext', group: 'Collections', label: 'Edit overall context' },
+  { id: 'item.duplicate', group: 'Collections', label: 'Duplicate current item' },
+  { id: 'item.delete', group: 'Collections', label: 'Delete current item' },
+  { id: 'item.moveUp', group: 'Collections', label: 'Move focused rail item up', scope: 'rail' },
+  { id: 'item.moveDown', group: 'Collections', label: 'Move focused rail item down', scope: 'rail' },
 ] as const;
 
 export type ShortcutActionId = (typeof SHORTCUT_ACTIONS)[number]['id'];
 export type ShortcutBindings = Partial<Record<ShortcutActionId, string | null>>;
 export type ResolvedShortcutBindings = Record<ShortcutActionId, string | null>;
+
+/**
+ * Most actions are global. A scoped action only runs while its own control has focus and handles the key
+ * before the global listener, so it may share a combination with a global action without conflicting.
+ */
+export type ShortcutScope = 'global' | 'rail';
+
+export function shortcutScope(actionId: ShortcutActionId): ShortcutScope {
+  const action = SHORTCUT_ACTIONS.find((entry) => entry.id === actionId);
+  return action && 'scope' in action ? action.scope : 'global';
+}
 
 export interface ShortcutConflict {
   binding: string;
@@ -95,6 +117,7 @@ const DEFAULT_COMMON: ResolvedShortcutBindings = {
   'navigation.projects': 'Ctrl+1',
   'navigation.recent': 'Ctrl+2',
   'navigation.favourites': 'Ctrl+3',
+  'navigation.settings': 'Ctrl+,',
   'edit.save': 'Ctrl+S',
   'edit.undo': 'Ctrl+Z',
   'edit.redo': 'Ctrl+Shift+Z',
@@ -109,6 +132,10 @@ const DEFAULT_COMMON: ResolvedShortcutBindings = {
   'tool.rectangle': 'R',
   'tool.highlight': 'H',
   'tool.step': 'N',
+  'tool.redact': 'M',
+  'tool.crop': 'C',
+  'tool.freehand': 'P',
+  'tool.ellipse': 'O',
   'screenshot.previous': 'Alt+ArrowUp',
   'screenshot.next': 'Alt+ArrowDown',
   'screenshot.toggleExport': 'Alt+E',
@@ -117,8 +144,21 @@ const DEFAULT_COMMON: ResolvedShortcutBindings = {
   'panel.toggleInspector': 'Ctrl+Shift+2',
   'canvas.fit': '0',
   'canvas.actualSize': '1',
+  // Unmodified like Fit and Actual size; Ctrl/Cmd with these keys belongs to the window zoom menu.
+  'canvas.zoomIn': '=',
+  'canvas.zoomOut': '-',
   'collection.new': 'Ctrl+Alt+N',
   'collection.overallContext': 'Ctrl+Alt+C',
+  'item.duplicate': 'Ctrl+D',
+  'item.delete': 'Ctrl+Delete',
+  'item.moveUp': 'Alt+ArrowUp',
+  'item.moveDown': 'Alt+ArrowDown',
+};
+
+const DEFAULT_MAC: ShortcutBindings = {
+  'edit.deleteAnnotation': 'Backspace',
+  'capture.region': 'Ctrl+Shift+5',
+  'item.delete': 'Meta+Backspace',
 };
 
 const RESERVED_BY_PLATFORM: Record<ShortcutPlatform, ReadonlySet<string>> = {
@@ -231,11 +271,9 @@ export function getDefaultShortcuts(platform: ShortcutPlatform): ResolvedShortcu
   return Object.fromEntries(
     Object.entries(DEFAULT_COMMON).map(([actionId, binding]) => [
       actionId,
-      platform === 'mac' && actionId === 'edit.deleteAnnotation'
-        ? 'Backspace'
-        : platform === 'mac' && actionId === 'capture.region'
-          ? 'Ctrl+Shift+5'
-          : (binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null),
+      platform === 'mac' && DEFAULT_MAC[actionId as ShortcutActionId]
+        ? DEFAULT_MAC[actionId as ShortcutActionId]
+        : (binding?.replace(/^Ctrl(?=\+)/, modifier) ?? null),
     ]),
   ) as ResolvedShortcutBindings;
 }
@@ -245,10 +283,21 @@ export function resolveShortcutBindings(
   platform: ShortcutPlatform,
 ): ResolvedShortcutBindings {
   const resolved = getDefaultShortcuts(platform);
+  const stored = (actionId: ShortcutActionId) => Object.prototype.hasOwnProperty.call(overrides, actionId);
+  const chosen = new Set<string>();
   for (const action of SHORTCUT_ACTIONS) {
-    if (!Object.prototype.hasOwnProperty.call(overrides, action.id)) continue;
+    if (!stored(action.id)) continue;
     const override = overrides[action.id];
-    resolved[action.id] = override === null ? null : normalizeShortcut(override ?? '', platform);
+    const binding = override === null ? null : normalizeShortcut(override ?? '', platform);
+    resolved[action.id] = binding;
+    if (binding) chosen.add(`${shortcutScope(action.id)} ${binding}`);
+  }
+  // A stored binding always wins. An action the user never configured (for example one added by a later
+  // version) stays unbound rather than taking over, or disabling, a combination they already chose.
+  for (const action of SHORTCUT_ACTIONS) {
+    const binding = resolved[action.id];
+    if (!stored(action.id) && binding && chosen.has(`${shortcutScope(action.id)} ${binding}`))
+      resolved[action.id] = null;
   }
   return resolved;
 }
@@ -258,17 +307,23 @@ export function findShortcutConflicts(bindings: ResolvedShortcutBindings): Short
   for (const action of SHORTCUT_ACTIONS) {
     const binding = bindings[action.id];
     if (!binding) continue;
-    byBinding.set(binding, [...(byBinding.get(binding) ?? []), action.id]);
+    const key = `${shortcutScope(action.id)} ${binding}`;
+    byBinding.set(key, [...(byBinding.get(key) ?? []), action.id]);
   }
-  return [...byBinding.entries()]
-    .filter(([, actionIds]) => actionIds.length > 1)
-    .map(([binding, actionIds]) => ({ binding, actionIds }));
+  return [...byBinding.values()]
+    .filter((actionIds) => actionIds.length > 1)
+    .map((actionIds) => ({ binding: bindings[actionIds[0]!]!, actionIds }));
 }
 
 export function isReservedShortcut(binding: string, platform: ShortcutPlatform): boolean {
   const normalized = normalizeShortcut(binding, platform);
+  const nativeModifier = platform === 'mac' ? 'Meta' : 'Ctrl';
+  const nativeZoom = new Set(['=', 'Plus', 'Shift+=', '-', '0'].map((key) => `${nativeModifier}+${key}`));
   return (
-    normalized !== null && (RESERVED_ALL.has(normalized) || RESERVED_BY_PLATFORM[platform].has(normalized))
+    normalized !== null &&
+    (RESERVED_ALL.has(normalized) ||
+      RESERVED_BY_PLATFORM[platform].has(normalized) ||
+      nativeZoom.has(normalized))
   );
 }
 
@@ -295,7 +350,10 @@ export function validateShortcut(
       message: `${formatShortcut(normalized, platform)} is reserved by the system or app.`,
     };
   const conflict = SHORTCUT_ACTIONS.find(
-    (action) => action.id !== actionId && bindings[action.id] === normalized,
+    (action) =>
+      action.id !== actionId &&
+      bindings[action.id] === normalized &&
+      shortcutScope(action.id) === shortcutScope(actionId),
   );
   if (conflict)
     return {

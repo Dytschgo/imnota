@@ -118,6 +118,27 @@ describe('annotation toolbar', () => {
     expect(setTool).toHaveBeenCalledWith('blur');
   });
 
+  test('shows live bindings on zoom buttons and More tools, and omits unbound ones', () => {
+    render(
+      <Toolbar {...props({ shortcutLabels: { zoomIn: '=', blur: 'M', crop: 'Ctrl + K', text: 'T' } })} />,
+    );
+    expect(screen.getByRole('button', { name: 'Zoom in (=)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Text (T)' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More annotation tools' }));
+    const menu = screen.getByRole('menu', { name: 'More annotation tools' });
+    expect(within(menu).getByRole('menuitemradio', { name: 'Redact' })).toHaveAttribute(
+      'title',
+      'Redact (M)',
+    );
+    expect(within(menu).getByRole('menuitemradio', { name: 'Crop' })).toHaveAttribute(
+      'title',
+      'Crop (Ctrl + K)',
+    );
+    expect(within(menu).getByRole('menuitemradio', { name: 'Freehand' })).not.toHaveAttribute('title');
+  });
+
   test('keeps More keyboard navigable and restores focus after dismissal or selection', async () => {
     const setTool = vi.fn();
     const { container } = render(<Toolbar {...props({ setTool })} />);
