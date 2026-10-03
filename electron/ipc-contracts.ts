@@ -22,7 +22,6 @@ export const projectInput = z.object({
 });
 export const pathInput = z.string().min(1).max(2000);
 
-/** Renderer IPC argument contracts. Channels without an entry accept one project path. */
 export const screenshotInput = z.object({ projectPath: pathInput, screenshot: screenshotSchema });
 export const png = z
   .string()
@@ -77,6 +76,11 @@ export const searchInput = z
   .strict();
 export const projectRevision = z.string().regex(/^[a-f0-9]{64}$/);
 export const projectIcon = z.enum(PROJECT_ICON_KEYS);
+const singlePath = z.tuple([pathInput]);
+/**
+ * Renderer IPC argument contracts. Every queued or concurrent channel declares one, including
+ * the channels that take a single path, so a new handler cannot inherit a contract by omission.
+ */
 export const contracts: Record<string, z.ZodType<unknown[]>> = {
   'settings:get': z.tuple([]),
   'diagnostics:open-folder': z.tuple([]),
@@ -103,6 +107,10 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
   ]),
   'projects:create': z.tuple([projectInput]),
   'projects:open-dialog': z.tuple([]),
+  'projects:load': singlePath,
+  'projects:duplicate': singlePath,
+  'projects:archive': singlePath,
+  'projects:delete': singlePath,
   'projects:save': z.tuple([pathInput, projectSchema]),
   'projects:update-metadata': z.tuple([
     z
@@ -209,6 +217,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
       .strict(),
   ]),
   'system:copy-image': z.tuple([png]),
+  'system:open-path': singlePath,
   'onboarding:prepare-handoff': z.tuple([
     z
       .object({
@@ -237,6 +246,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
       annotations: z.record(z.string(), z.array(annotationSchema)),
     }),
   ]),
+  'recovery:clear': singlePath,
   'update:download': z.tuple([]),
   'update:check': z.tuple([]),
   'update:status': z.tuple([]),
