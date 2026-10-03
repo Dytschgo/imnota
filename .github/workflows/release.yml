@@ -7,14 +7,21 @@ on:
 permissions:
   contents: read
 
+# Two runs for one tag (a re-pushed tag or a re-run) would race on the same GitHub release.
+# Queue them instead; a publication already in flight is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   classify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       channel: ${{ steps.classify.outputs.channel }}
       sha: ${{ steps.classify.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: classify
@@ -35,24 +42,33 @@ jobs:
     needs: classify
     if: needs.classify.outputs.channel == 'stable'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.classify.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec install-electron
+      # Reads only the checked-out index, so the shallow candidate checkout is enough.
+      - name: Scan tracked files for credentials and forbidden data paths
+        run: node scripts/secret-scan.mjs
+      # The same share-service gates as the nightly quality job.
+      - run: npm ci --prefix share-service
+      - run: npm test --prefix share-service
+      - run: npm audit --prefix share-service --omit=dev --audit-level=high
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       # Includes the release-channel and asset-staging script tests.
       - run: pnpm test
+      - run: pnpm test:share-contract
 
   package:
     # Build alongside quality; publication requires both to pass.
@@ -72,14 +88,15 @@ jobs:
             platform: macos
             command: pnpm package:mac
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.classify.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -103,10 +120,24 @@ jobs:
       - name: Smoke packaged Windows application
         if: matrix.platform == 'windows'
         run: node scripts/verify-packaged.mjs windows
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-release-windows
+      - name: Compare approved Windows visuals
+        if: matrix.platform == 'windows'
+        run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-release-windows" "${{ runner.temp }}/imnota-visual-differences"
+      # The artifact name must stay outside the publish job's release-* download pattern.
+      - name: Retain Windows visual evidence
+        if: always() && matrix.platform == 'windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-visual-evidence-release
+          path: |
+            ${{ runner.temp }}/imnota-verification-artifacts-release-windows/
+            ${{ runner.temp }}/imnota-visual-differences/
       - name: Smoke packaged Linux application
         if: matrix.platform == 'linux'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.platform }}
           path: |
@@ -121,20 +152,21 @@ jobs:
   publish:
     needs: [classify, quality, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.classify.outputs.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: release-assets
           merge-multiple: true
       - name: Stage exact stable release assets
         run: node scripts/stage-release-assets.mjs release-assets "${GITHUB_REF_NAME#v}" latest stable
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
@@ -143,7 +175,7 @@ jobs:
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: true
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           draft: false
@@ -153,14 +185,15 @@ jobs:
   verify-public-mac-install:
     needs: [classify, publish]
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.classify.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -178,6 +211,7 @@ jobs:
   promote-latest:
     needs: verify-public-mac-install
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:

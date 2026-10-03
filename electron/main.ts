@@ -41,6 +41,7 @@ import type {
 } from '../src/shared/types.js';
 import type { AppearanceMode, PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { preferenceSettingsEnvelope, resolvePreferenceSettings } from '../src/shared/preference-settings.js';
+import { DEFAULT_WORKSPACE_SETTINGS, resolveWorkspaceSettings } from '../src/shared/workspace-settings.js';
 import type {
   ClipboardFormatsReport,
   ProjectWatchEvent,
@@ -185,14 +186,9 @@ let projectSearchService: ProjectSearchService | undefined;
 let backupService: BackupService | undefined;
 let contentPersistence: ContentPersistenceService;
 let localMcpServer: LocalMcpServer | undefined;
-let settings: WorkspaceSettings = {
-  workspacePath: null,
-  interfaceScale: 1,
-  openRecentOnLaunch: true,
-  confirmBeforeDeletion: true,
-  updateChannel: 'stable',
-  sharingSenderName: '',
-};
+let settings: WorkspaceSettings = { ...DEFAULT_WORKSPACE_SETTINGS };
+/** `settings.json` keys from other builds, written back unchanged with every save. */
+let retainedApplicationSettings: Record<string, unknown> = {};
 let preferenceSettingsResult: PreferenceSettingsResult = resolvePreferenceSettings(undefined, false);
 let captureOverlay: {
   overlays: Array<{
@@ -405,7 +401,7 @@ async function persistApplicationSettings(
   nextPreferences = preferenceSettingsResult.settings,
 ): Promise<void> {
   const persisted = preferenceSettingsEnvelope(
-    nextSettings as unknown as Record<string, unknown>,
+    { ...retainedApplicationSettings, ...nextSettings },
     nextPreferences,
     preferenceSettingsResult.profile,
   );
@@ -2096,21 +2092,24 @@ app.whenReady().then(async () => {
   await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
-  const settingsFileExists = stored !== null;
-  if (stored)
+  if (stored) {
+    let persisted: unknown = {};
     try {
-      const persisted = JSON.parse(stored) as Record<string, unknown>;
-      preferenceSettingsResult = resolvePreferenceSettings(persisted, true);
-      const applicationSettings = { ...persisted };
-      delete applicationSettings.preferences;
-      delete applicationSettings.preferenceProfile;
-      delete applicationSettings.theme;
-      settings = { ...settings, ...applicationSettings } as WorkspaceSettings;
-      settings.updateChannel = settings.updateChannel === 'nightly' ? 'nightly' : 'stable';
+      persisted = JSON.parse(stored);
     } catch {
-      preferenceSettingsResult = resolvePreferenceSettings({}, settingsFileExists);
-      /* Keep in-memory safe defaults; do not overwrite corrupt preferences before user action. */
+      /* Keep in-memory safe defaults; do not overwrite a corrupt file before user action. */
     }
+    // Application settings and preferences are validated separately, so an invalid value in
+    // one cannot discard the workspace or the valid values of the other. Neither throws here.
+    const application = resolveWorkspaceSettings(persisted, { isAbsolutePath: path.isAbsolute });
+    settings = application.settings;
+    retainedApplicationSettings = application.retained;
+    try {
+      preferenceSettingsResult = resolvePreferenceSettings(persisted, true);
+    } catch {
+      preferenceSettingsResult = resolvePreferenceSettings({}, true);
+    }
+  }
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
