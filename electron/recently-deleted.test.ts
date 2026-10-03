@@ -584,7 +584,11 @@ describe('duplicate failure boundaries', () => {
     'does not publish the source identity after %s failure or damage source/unrelated files',
     async (failure) => {
       const { projectPath, project } = await fixture();
-      const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-duplicate-failure-'));
+      // Canonicalize only our freshly created fixture root (macOS temp parents can
+      // be aliases). Deliberate links below this root must still fail closed.
+      const workspace = await fs.realpath(
+        await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-duplicate-failure-')),
+      );
       temporary.push(workspace);
       const target = path.join(workspace, 'duplicate');
       const outside = path.join(workspace, 'unrelated');
@@ -630,8 +634,15 @@ describe('duplicate failure boundaries', () => {
       ).rejects.toThrow(
         failure === 'cleanup' || failure === 'swapped-target'
           ? /retained.*manual inspection/
-          : /Linked|copy refused|publication denied/,
+          : failure === 'link'
+            ? /^Linked workspace paths are not supported\. Choose a regular folder\.$/
+            : failure === 'publication'
+              ? /^publication denied$/
+              : /^copy refused$/,
       );
+      // A linked temp ancestor must not satisfy the broad link-error assertion
+      // before the intended real copy/failure injection has even been reached.
+      expect(fs.cp).toHaveBeenCalled();
       expect(await listWorkspaceProjects(workspace)).toEqual([]);
       expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(sourceBytes);
       expect(await fs.readFile(imagePath)).toEqual(image);

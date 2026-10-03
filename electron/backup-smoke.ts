@@ -1,8 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { deepStrictEqual } from 'node:assert';
 import { nativeImage } from 'electron';
+import type { ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import { nativeClipboard } from './native-clipboard.js';
+import { contentItemRelativePaths } from './content-paths.js';
 import type { NativeUiDriver, SmokeCapture, SmokeCheckpoint } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 
@@ -25,9 +28,38 @@ export async function exerciseLocalHistory(
   await checkpoint('history: writing fixture image to clipboard');
   await nativeClipboard.writeImage(nativeImage.createFromBitmap(initialPixels, { width: 48, height: 32 }));
   await checkpoint('history: pasting fixture image');
-  await driver.evaluate(
+  const pasted = await driver.evaluate<ProjectSnapshot>(
     `window.imnota.pasteImage(${JSON.stringify(sourcePath)}, ${JSON.stringify(project.collections[0].id)})`,
   );
+  const historyShots = pasted.project.screenshots.filter(
+    (shot) => !project.screenshots.some((existing) => existing.id === shot.id),
+  );
+  if (historyShots.length !== 1) throw new Error('History paste did not create exactly one screenshot.');
+  const historyShotId = historyShots[0].id;
+  const expected = pasted.project;
+  if (
+    expected.schemaVersion !== 4 ||
+    project.screenshots.length !== 1 ||
+    expected.screenshots.length !== 2 ||
+    expected.contentItems?.filter((item) => item.kind === 'drawing').length !== 2 ||
+    expected.contentItems?.filter((item) => item.kind === 'text').length !== 1
+  )
+    throw new Error('History requires the complete Recently deleted mixed-content fixture.');
+  if (!expected.screenshots.some((shot) => shot.id === project.screenshots[0].id))
+    throw new Error('History paste lost the Recently deleted screenshot.');
+  const verifyMembership = (actual: ProjectData) => {
+    const membership = (value: ProjectData) => ({
+      schemaVersion: value.schemaVersion,
+      collections: value.collections.map((collection) => collection.id).sort(),
+      screenshots: value.screenshots.map((shot) => [shot.id, shot.collectionId]).sort(),
+      contentItems: (value.contentItems ?? []).map((item) => [item.id, item.collectionId, item.kind]).sort(),
+    });
+    deepStrictEqual(
+      membership(actual),
+      membership(expected),
+      'History changed the complete fixture membership.',
+    );
+  };
   await checkpoint('history: mixed fixture image inserted');
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Backups & history', exact: true });
@@ -73,6 +105,22 @@ export async function exerciseLocalHistory(
   const originals = new Map<string, Buffer>();
   for (const file of snapshot.files)
     originals.set(file.path, await fs.readFile(path.join(sourcePath, file.path)));
+  const fixtureFiles = expected.screenshots.flatMap((shot) => [
+    `collections/${shot.collectionId}/screenshots/${shot.storedFilename}`,
+    shot.annotationFile,
+    shot.descriptionFile,
+  ]);
+  for (const item of expected.contentItems ?? [])
+    fixtureFiles.push(...Object.values(contentItemRelativePaths(item)));
+  for (const relative of ['project.json', ...fixtureFiles])
+    if (!originals.has(relative)) throw new Error(`History snapshot omitted fixture file ${relative}.`);
+  const verifyContent = async (projectPath: string, editedDescription?: string) => {
+    for (const [relative, source] of originals) {
+      if (relative === 'project.json' || relative === editedDescription) continue;
+      if (!(await fs.readFile(path.join(projectPath, relative))).equals(source))
+        throw new Error(`History changed the restored content ${relative}.`);
+    }
+  };
   await checkpoint('history: original fixture files read');
   const backupRoot = await driver.evaluate<string>(
     'window.imnota.getBackupHistory().then(value => value.location)',
@@ -84,6 +132,10 @@ export async function exerciseLocalHistory(
     snapshot.snapshotId,
     'data',
   );
+  verifyMembership(
+    JSON.parse(await fs.readFile(path.join(snapshotDataPath, 'project.json'), 'utf8')) as ProjectData,
+  );
+  await verifyContent(snapshotDataPath);
   const rejectedBackupOpen =
     await driver.evaluate<boolean>(`window.imnota.loadProject(${JSON.stringify(snapshotDataPath)})
     .then(() => false, error => error.message.includes('Backup and recovery folders cannot be opened'))`);
@@ -124,12 +176,7 @@ export async function exerciseLocalHistory(
   })()`);
   if (restoredPath === sourcePath) throw new Error('Restore-as-new reused the source project folder.');
   const restored = await host.readProject(restoredPath);
-  if (
-    restored.schemaVersion !== 4 ||
-    restored.screenshots.length !== 1 ||
-    restored.contentItems?.length !== 3
-  )
-    throw new Error('Restored history lost a screenshot, drawing or Markdown item.');
+  verifyMembership(restored);
   for (const [relative, source] of originals) {
     if (!(await fs.readFile(path.join(sourcePath, relative))).equals(source))
       throw new Error(`Restore-as-new changed the source ${relative}.`);
@@ -143,6 +190,8 @@ export async function exerciseLocalHistory(
     text: 'Mixed Content Verification restored',
     exact: true,
   });
+  verifyMembership(await host.readProject(restoredPath));
+  await verifyContent(restoredPath);
   if (artifactDirectory) {
     driver.browserWindow.show();
     driver.browserWindow.focus();
@@ -156,7 +205,8 @@ export async function exerciseLocalHistory(
   // Exercise the same path/ID with a newer image already loaded in the editor.
   await checkpoint('history: restored copy reopened; checking in-place restore');
   // Only this isolated source fixture is modified; no real desktop or user files.
-  const shot = restored.screenshots[0]!;
+  const shot = restored.screenshots.find((item) => item.id === historyShotId);
+  if (!shot) throw new Error('The pasted history screenshot was lost on restore.');
   await driver.click({ selector: `[data-testid="screenshot-${shot.id}"]` });
   const before = '204,204,204,255';
   await waitForCanvasPixel(driver, before);
@@ -193,16 +243,27 @@ export async function exerciseLocalHistory(
     'document.querySelector("[aria-label=Description]").value',
   );
   if (description === 'Before restoring') throw new Error('In-place restore retained the old editor draft.');
+  verifyMembership(await host.readProject(sourcePath));
+  await verifyContent(sourcePath);
   await driver.fill({ selector: '[aria-label="Description"]' }, 'Edited after restoring');
   await driver.click({ selector: '.nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-list' });
   const edited = await host.readProject(sourcePath);
-  if (edited.screenshots[0]?.description !== 'Edited after restoring')
+  verifyMembership(edited);
+  if (edited.screenshots.find((item) => item.id === historyShotId)?.description !== 'Edited after restoring')
     throw new Error('Editing after restore did not persist against the restored revision.');
   driver.setWindow(await host.reopenWindow());
   await driver.waitFor({ selector: '[data-testid="workspace"]' });
   await driver.click({ selector: `[data-testid="screenshot-${shot.id}"]` });
   await waitForCanvasPixel(driver, before);
+  const reopenedProject = await host.readProject(sourcePath);
+  verifyMembership(reopenedProject);
+  if (
+    reopenedProject.screenshots.find((item) => item.id === historyShotId)?.description !==
+    'Edited after restoring'
+  )
+    throw new Error('The history screenshot edit was lost on reopen.');
+  await verifyContent(sourcePath, shot.descriptionFile);
   if (
     !(await fs.readFile(path.join(sourcePath, originalImage.path))).equals(originals.get(originalImage.path)!)
   )
