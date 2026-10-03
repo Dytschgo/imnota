@@ -55,3 +55,24 @@ it('reads only macOS format types and change count for consistency diagnostics',
     'invalid observation',
   );
 });
+
+it('allowlists and bounds native type names before any diagnostic can retain them', async () => {
+  const result = await readMacClipboardObservation(async () =>
+    JSON.stringify({
+      changeCount: 43,
+      types: [
+        'public.file-url',
+        'public.file-url',
+        'public.utf8-plain-text',
+        'dyn.secret-type-name',
+        'secret'.repeat(10000),
+      ],
+    }),
+  );
+  expect(result).toEqual({
+    changeCount: 43,
+    types: ['public.file-url', 'public.utf8-plain-text'],
+    redactedTypeCount: 2,
+  });
+  expect(JSON.stringify(result)).not.toContain('secret');
+});

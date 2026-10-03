@@ -492,7 +492,7 @@ async function exerciseOnboarding(
         const image = await nativeClipboard.readImage();
         stage = 'native metadata after read';
         const after = await readMacClipboardObservation();
-        evidence = onboardingCopyEvidence({
+        evidence = await onboardingCopyEvidence({
           attempt,
           action,
           expectedFiles: [markdownPath, pngPath],

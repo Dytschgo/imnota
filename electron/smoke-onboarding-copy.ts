@@ -1,8 +1,9 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { MacClipboardObservation } from './mac-clipboard.js';
+import { sanitizeMacClipboardObservation, type MacClipboardObservation } from './mac-clipboard.js';
 
 /** Report only the isolated handoff's paths and comparisons, never unrelated payload text. */
-export function onboardingCopyEvidence(input: {
+export async function onboardingCopyEvidence(input: {
   attempt: number;
   action: 'files' | 'files-rich';
   expectedFiles: readonly string[];
@@ -18,6 +19,23 @@ export function onboardingCopyEvidence(input: {
   const orderedPathsEqual = expectedFiles.map(
     (file, index) =>
       actualFiles[index] !== undefined && path.resolve(file) === path.resolve(actualFiles[index]),
+  );
+  const handoffDirectory = await fs.realpath(path.dirname(expectedFiles[0])).catch(() => undefined);
+  const actualFileEvidence = await Promise.all(
+    actualFiles.map(async (file) => {
+      const resolvedPath = await fs.realpath(file).catch(() => undefined);
+      const relative =
+        handoffDirectory && resolvedPath ? path.relative(handoffDirectory, resolvedPath) : undefined;
+      const withinHandoff =
+        relative !== undefined &&
+        relative !== '' &&
+        relative !== '..' &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative);
+      return withinHandoff
+        ? { name: path.basename(file), path: file, resolvedPath }
+        : { name: '[outside synthetic handoff]', path: '[redacted]' };
+    }),
   );
   const operands = {
     count: actualFiles.length === 2,
@@ -35,11 +53,7 @@ export function onboardingCopyEvidence(input: {
       expectedCount: 2,
       actualCount: actualFiles.length,
       expected: expectedFiles.map((file) => ({ name: path.basename(file), path: file })),
-      actual: actualFiles.map((file) =>
-        path.dirname(path.resolve(file)) === path.dirname(expectedFiles[0])
-          ? { name: path.basename(file), path: file }
-          : { name: '[outside synthetic handoff]', path: '[redacted]' },
-      ),
+      actual: actualFileEvidence,
       orderedPathsEqual,
     },
     text: {
@@ -51,7 +65,11 @@ export function onboardingCopyEvidence(input: {
     },
     html: { empty: operands.noHtml, length: input.html.length },
     image: input.image,
-    native: { before, after, consistent },
+    native: {
+      before: sanitizeMacClipboardObservation(before),
+      after: sanitizeMacClipboardObservation(after),
+      consistent,
+    },
     formatsValid:
       operands.count &&
       operands.orderedPaths &&
