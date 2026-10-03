@@ -118,6 +118,39 @@ describe('IpcRouter', () => {
     expect(finished).toBe(true);
   });
 
+  it('keeps a network lane ordered without holding the queue, and drains both', async () => {
+    const { router } = setup();
+    const network = router.lane();
+    const order: string[] = [];
+    let releaseRequest!: () => void;
+    const request = network(async () => {
+      order.push('request started');
+      await new Promise<void>((resolve) => (releaseRequest = resolve));
+      // File work queued by a lane operation is drained too.
+      await router.enqueue(() => void order.push('receipt saved'));
+    });
+    const next = network(() => void order.push('next request'));
+    await router.enqueue(() => void order.push('save'));
+    expect(order).toEqual(['request started', 'save']);
+    let drained = false;
+    const drain = router.drain().then(() => (drained = true));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(drained).toBe(false);
+    releaseRequest();
+    await drain;
+    expect(order).toEqual(['request started', 'save', 'receipt saved', 'next request']);
+    await Promise.all([request, next]);
+  });
+
+  it('keeps a network lane going after a failed request', async () => {
+    const { router } = setup();
+    const network = router.lane();
+    const failed = network(() => Promise.reject(new Error('offline')));
+    await expect(network(() => 'next')).resolves.toBe('next');
+    await expect(failed).rejects.toThrow('offline');
+    await expect(router.drain()).resolves.toBeUndefined();
+  });
+
   it('wraps workflow results and queues them only when asked', async () => {
     const { router, call } = setup();
     let releaseSlow!: () => void;
