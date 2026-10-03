@@ -20,6 +20,7 @@ import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/ca
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
 import { collectionDisplayName } from './collection-display-name';
 import { orderedCollectionItems } from '../../shared/content-items';
+import { detectShortcutPlatform, formatShortcut, shortcutMatchesEvent } from '../../shared/shortcuts';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
 import { useAppStore } from '../store';
@@ -44,7 +45,13 @@ export interface CollectionRailProps {
   captureInProgress?: boolean;
   captureDisabledLabel?: string;
   captureShortcut?: string;
+  /** Formatted binding for deleting the current item, shown on that item's delete button. */
+  deleteShortcut?: string;
+  /** Bindings that move the focused item; null when cleared. Defaults match the shortcut defaults. */
+  reorderBindings?: { up: string | null; down: string | null };
 }
+
+const DEFAULT_REORDER_BINDINGS = { up: 'Alt+ArrowUp', down: 'Alt+ArrowDown' };
 
 export function CollectionControls({
   onFlush,
@@ -424,8 +431,15 @@ export function CollectionRail({
   captureInProgress = false,
   captureDisabledLabel,
   captureShortcut,
+  deleteShortcut,
+  reorderBindings = DEFAULT_REORDER_BINDINGS,
 }: CollectionRailProps) {
   const store = useAppStore();
+  const shortcutPlatform = detectShortcutPlatform();
+  const reorderKeys = [reorderBindings.up, reorderBindings.down]
+    .filter(Boolean)
+    .map((binding) => formatShortcut(binding, shortcutPlatform));
+  const reorderHint = reorderKeys.length ? `${reorderKeys.join(' / ')} to reorder` : undefined;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuFocusedIndex, setAddMenuFocusedIndex] = useState(0);
@@ -638,13 +652,16 @@ export function CollectionRail({
                   onClick={() => void onSelectScreenshot(item.id)}
                   data-testid={`screenshot-${item.id}`}
                   onKeyDown={(event) => {
-                    if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
-                      event.preventDefault();
-                      const next = index + (event.key === 'ArrowUp' ? -1 : 1);
-                      if (next >= 0 && next < shots.length) void reorderScreenshot(next, index);
-                    }
+                    const matches = (binding: string | null) =>
+                      shortcutMatchesEvent(event.nativeEvent, binding, shortcutPlatform);
+                    const step = matches(reorderBindings.up) ? -1 : matches(reorderBindings.down) ? 1 : 0;
+                    if (!step) return;
+                    // Handled here so the same keys keep their global meaning everywhere else.
+                    event.preventDefault();
+                    const next = index + step;
+                    if (next >= 0 && next < shots.length) void reorderScreenshot(next, index);
                   }}
-                  title="Alt + Up/Down to reorder"
+                  title={reorderHint}
                 >
                   <span className="shot-index">{String(index + 1).padStart(2, '0')}</span>
                   <div className="thumb">
@@ -705,6 +722,9 @@ export function CollectionRail({
                       className="shot-delete"
                       data-testid={`item-delete-${item.id}`}
                       label={`Delete ${item.kind === 'text' ? 'text block' : item.kind}: ${item.kind === 'text' ? item.preview || 'Text block' : item.title}`}
+                      {...(deleteShortcut && item.id === store.activeScreenshotId
+                        ? { title: `Delete (${deleteShortcut})` }
+                        : {})}
                       onPointerDown={(event) => event.stopPropagation()}
                       onDragStart={(event) => {
                         event.preventDefault();
