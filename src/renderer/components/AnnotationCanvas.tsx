@@ -1,3 +1,4 @@
+import { useDecodedImage } from '../canvas/useDecodedImage';
 import {
   useCallback,
   useEffect,
@@ -67,6 +68,7 @@ import {
 import { pixelatedRegion } from '../pixelate';
 import { viewportForLayoutChange, zoomAt, type ViewportSize } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
+import { CanvasLoadState } from '../canvas/CanvasLoadState';
 import type { ToolChoice } from './Toolbar';
 import './annotation-canvas.css';
 import './canvas-surface.css';
@@ -83,6 +85,9 @@ interface EditingText {
 
 export interface AnnotationCanvasProps {
   image: ImagePayload | null;
+  /** The screenshot could not be loaded. Without an image, the canvas otherwise reports loading. */
+  loadFailed?: boolean;
+  onRetryLoad?: () => void;
   annotations: Annotation[];
   selectedId: string | null;
   revealAnnotationId?: string | null;
@@ -196,6 +201,8 @@ function annotationsStepNumber(count: number): number {
 
 export function AnnotationCanvas({
   image,
+  loadFailed,
+  onRetryLoad,
   annotations,
   selectedId,
   revealAnnotationId,
@@ -228,7 +235,7 @@ export function AnnotationCanvas({
           normalizeAnnotationBounds(draft?.kind === 'crop' ? draft : cropBox!),
         ])
       : sourceBounds;
-  const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+  const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
   /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
@@ -410,22 +417,6 @@ export function AnnotationCanvas({
       window.removeEventListener('blur', blur);
     };
   }, [onSelect]);
-
-  useEffect(() => {
-    if (!image?.dataUrl) {
-      setImageObj(null);
-      return;
-    }
-    const next = new window.Image();
-    let cancelled = false;
-    next.onload = () => {
-      if (!cancelled) setImageObj(next);
-    };
-    next.src = image.dataUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [image?.dataUrl]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -1152,7 +1143,9 @@ export function AnnotationCanvas({
       data-source-height={sourceBounds.height}
     >
       <div className="canvas-meta">
-        <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
+        <span>
+          {image ? `${image.width} × ${image.height}` : loadFailed ? 'Screenshot unavailable' : 'Loading…'}
+        </span>
         <span>
           {Math.round(viewport.scale * 100)}% · {tool === 'select' ? 'Select and move' : `Tool: ${tool}`}
         </span>
@@ -1361,9 +1354,13 @@ export function AnnotationCanvas({
           </Layer>
         </Stage>
       ) : (
-        <div className="canvas-empty">
-          <span>Import a screenshot to begin marking context.</span>
-        </div>
+        <CanvasLoadState
+          failed={decodeFailed || (!image && Boolean(loadFailed))}
+          onRetry={() => {
+            retryDecode();
+            onRetryLoad?.();
+          }}
+        />
       )}
       {editing && editedAnnotation && editedLayout && editorPresentation && (
         <textarea

@@ -186,6 +186,12 @@ export interface ExportRequest {
   includeAnnotations: boolean;
 }
 
+/** Exact project.json bytes checked and committed by one native transaction. */
+export interface ProjectRevisionTransition {
+  before: string;
+  after: string;
+}
+
 export interface SaveScreenshotResult {
   project: ProjectData;
   savedScreenshotId: string;
@@ -193,6 +199,7 @@ export interface SaveScreenshotResult {
   contentRevision: string;
   /** Fresh project.json revision after this native mutation. */
   projectRevision?: string;
+  projectRevisionTransition?: ProjectRevisionTransition;
   warnings?: string[];
 }
 

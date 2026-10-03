@@ -193,3 +193,36 @@ it('retains newer edits through a yielded conflict selection handoff', async () 
   expect(hook.result.current.content?.markdown).toBe('Newer typing');
   hook.unmount();
 });
+
+it('dismisses the conflict-copy notice without touching the saved content', async () => {
+  const save = vi
+    .fn<ImnotaBridge['saveContentItem']>()
+    .mockResolvedValue({ snapshot, itemId: item.id, contentRevision: 'r2', conflictCreated: true });
+  const hook = setup(save);
+  await waitFor(() => expect(hook.result.current.content).not.toBeNull());
+  act(() => hook.result.current.change({ markdown: 'Local edit' }));
+  await act(async () => {
+    expect(await hook.result.current.flush()).toBe(true);
+  });
+  expect(hook.result.current.error).toMatch(/conflict copy/);
+  act(() => hook.result.current.clearError());
+  expect(hook.result.current.error).toBe('');
+  expect(hook.result.current.saveState).toBe('saved');
+  expect(hook.result.current.content?.markdown).toBe('Local edit');
+  hook.unmount();
+});
+
+it('keeps a failed save retryable after its notice is dismissed', async () => {
+  const save = vi.fn<ImnotaBridge['saveContentItem']>().mockRejectedValue(new Error('Disk full'));
+  const hook = setup(save);
+  await waitFor(() => expect(hook.result.current.content).not.toBeNull());
+  act(() => hook.result.current.change({ markdown: 'Keep me' }));
+  await act(async () => {
+    expect(await hook.result.current.flush()).toBe(false);
+  });
+  act(() => hook.result.current.clearError());
+  expect(hook.result.current.error).toBe('');
+  expect(hook.result.current.saveState).toBe('error');
+  expect(hook.result.current.hasUnsavedChanges).toBe(true);
+  hook.unmount();
+});
