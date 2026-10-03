@@ -1,9 +1,11 @@
+import { retireDeleteJournal } from './delete-retention.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ContentItem } from '../src/shared/content-items.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { contentItemSchema, validateProject } from '../src/shared/schema.js';
+import { DELETED_ITEM_RETENTION_MS, deleteRetentionExpired } from '../src/shared/recently-deleted.js';
 import { nowIso } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import { contentItemRelativePaths } from './content-paths.js';
@@ -664,9 +666,10 @@ async function tokens(root: string): Promise<string[]> {
   });
   const result: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || !TOKEN_PATTERN.test(entry.name))
-      throw new ContentTrashError('invalid-manifest', 'Content Undo directory contains an unknown path.');
     await assertNoLinks(path.join(root, entry.name));
+    if (!TOKEN_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory())
+      throw new ContentTrashError('invalid-manifest', 'Content Undo token is not a directory.');
     result.push(entry.name);
   }
   return result.sort();
@@ -744,4 +747,156 @@ export async function recoverContentTrashTransactions(
     });
   }
   return results;
+}
+
+export interface DeletedContentSummary {
+  undoToken: string;
+  item: ContentItem;
+  deletedAt: string;
+}
+
+export interface ContentTrashPruneResult {
+  pruned: string[];
+  failed: Array<{ undoToken?: string; error: unknown }>;
+}
+
+/** Well-formed journal directories only. Read-only: anything else is left for recovery to judge. */
+async function journalDirectories(projectPath: string): Promise<string[]> {
+  const root = undoRoot(projectPath);
+  await assertNoLinks(root);
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const result: string[] = [];
+  for (const entry of entries) {
+    await assertNoLinks(path.join(root, entry.name));
+    if (!TOKEN_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory()) throw new Error('Unsafe journal token path; recovery data was preserved.');
+    result.push(entry.name);
+  }
+  return result.sort();
+}
+
+/**
+ * Committed content deletes that can still be restored. Pending and expired journals are omitted;
+ * malformed journals and unsafe paths surface an error. Listing never changes files.
+ */
+export async function listDeletedContentItems(
+  projectPath: string,
+  now = Date.now(),
+  retentionMs = DELETED_ITEM_RETENTION_MS,
+): Promise<DeletedContentSummary[]> {
+  const root = await projectRoot(projectPath);
+  const summaries: DeletedContentSummary[] = [];
+  for (const token of await journalDirectories(root)) {
+    const loaded = await loadManifest(root, token);
+    if (loaded.manifest.phase !== 'deleted') continue;
+    if (deleteRetentionExpired(loaded.manifest.deletedAt, now, retentionMs)) continue;
+    summaries.push({ undoToken: token, item: loaded.manifest.item, deletedAt: loaded.manifest.deletedAt });
+  }
+  return summaries;
+}
+
+async function assertRestorableDelete(
+  root: string,
+  directory: string,
+  manifest: ContentTrashManifest,
+): Promise<Buffer> {
+  const current = await readOptional(path.join(root, 'project.json'), MAX_PROJECT_BYTES);
+  if (!current) throw new Error('Project metadata is missing; retention preserved the journal.');
+  const project = validateProject(JSON.parse(current.toString('utf8')));
+  const before = await backupBytes(directory, manifest.metadataBefore);
+  if (!before) throw new Error('Recovery metadata is missing; retention preserved the journal.');
+  const original = validateProject(JSON.parse(before.toString('utf8')));
+  if (project.id !== original.id) throw new Error('Recovery belongs to another project; journal preserved.');
+  normalizeWith(project, manifest.item, manifest.token);
+  for (const bytes of [manifest.metadataDeleted, manifest.undoBefore, manifest.undoAfter])
+    if (bytes) await backupBytes(directory, bytes);
+  for (const entry of manifest.content) {
+    if (!entry.bytes.present)
+      throw new Error('A content backup is missing; retention preserved the journal.');
+    const backup = await backupBytes(directory, entry.bytes);
+    const live = await readOptional(resolveRelative(root, entry.relativePath));
+    if (live !== null && !equalBytes(live, backup))
+      throw new Error('A restore path is occupied; retention preserved the journal.');
+  }
+  if (!(await backupBytes(directory, manifest.content[0].bytes)))
+    throw new Error('The source backup is missing; retention preserved the journal.');
+  return current;
+}
+
+async function removeExpiredJournal(
+  directory: string,
+  manifest: ContentTrashManifest,
+  operations: ResolvedOperations,
+  assertCurrent: () => Promise<void>,
+): Promise<void> {
+  await assertNoLinks(directory);
+  const expected = new Set([
+    'manifest.json',
+    ...[
+      ...manifest.content.map((entry) => entry.bytes),
+      manifest.metadataBefore,
+      manifest.metadataDeleted,
+      manifest.undoBefore,
+      manifest.undoAfter,
+    ].flatMap((bytes) => (bytes?.blob ? [bytes.blob] : [])),
+  ]);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !expected.has(entry.name))
+      throw new ContentTrashError('invalid-manifest', 'Content Undo journal contains an unknown path.');
+    await assertNoLinks(path.join(directory, entry.name));
+  }
+  await retireDeleteJournal(directory, operations.removeDirectory, assertCurrent);
+}
+
+/**
+ * Removes committed content-delete journals older than the retention window. Only the `deleted`
+ * phase is eligible: in-flight, interrupted, unreadable or unexpectedly shaped journals are never
+ * touched. Validation failures keep the original journal. After the expiry rename, cleanup failures keep
+ * the remaining expired files for manual inspection. All failures are reported to the caller.
+ */
+export async function pruneExpiredContentDeletes(
+  projectPath: string,
+  now = Date.now(),
+  suppliedOperations?: ContentTrashOperations,
+  retentionMs = DELETED_ITEM_RETENTION_MS,
+): Promise<ContentTrashPruneResult> {
+  const result: ContentTrashPruneResult = { pruned: [], failed: [] };
+  const operations = operationsWithDefaults(suppliedOperations);
+  let root: string;
+  let journals: string[];
+  try {
+    root = await projectRoot(projectPath);
+    journals = await journalDirectories(root);
+  } catch (error) {
+    result.failed.push({ error });
+    return result;
+  }
+  for (const token of journals) {
+    try {
+      const manifestPath = path.join(undoDirectory(root, token), 'manifest.json');
+      await assertNoLinks(manifestPath);
+      const manifestBytes = await fs.readFile(manifestPath);
+      const loaded = await loadManifest(root, token);
+      if (loaded.manifest.phase !== 'deleted') continue;
+      if (!deleteRetentionExpired(loaded.manifest.deletedAt, now, retentionMs)) continue;
+      const projectBytes = await assertRestorableDelete(root, loaded.directory, loaded.manifest);
+      await removeExpiredJournal(loaded.directory, loaded.manifest, operations, async () => {
+        await assertNoLinks(manifestPath);
+        await assertNoLinks(path.join(root, 'project.json'));
+        if (
+          !(await fs.readFile(manifestPath)).equals(manifestBytes) ||
+          !(await fs.readFile(path.join(root, 'project.json'))).equals(projectBytes)
+        )
+          throw new Error('The project or recovery journal changed during retention; files were preserved.');
+      });
+      result.pruned.push(token);
+    } catch (error) {
+      result.failed.push({ undoToken: token, error });
+    }
+  }
+  return result;
 }

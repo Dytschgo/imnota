@@ -92,6 +92,7 @@ const bridge: ImnotaBridge = {
   duplicateContentItem: (input) => ipcRenderer.invoke('content:duplicate', input),
   deleteContentItem: (input) => ipcRenderer.invoke('content:delete', input),
   undoDeleteContentItem: (input) => ipcRenderer.invoke('content:undo-delete', input),
+  listRecentlyDeleted: (projectPath) => ipcRenderer.invoke('projects:recently-deleted', projectPath),
   duplicateProject: (projectPath) => ipcRenderer.invoke('projects:duplicate', projectPath),
   archiveProject: (projectPath) => ipcRenderer.invoke('projects:archive', projectPath),
   updateProjectMetadata: (input) => ipcRenderer.invoke('projects:update-metadata', input),

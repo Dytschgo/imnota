@@ -6,7 +6,9 @@ import { emptyProject, nowIso } from '../src/shared/utils.js';
 import { addEmptyCollection, ensureCollection } from './collections.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { projectInput } from './ipc-contracts.js';
+import { copyProjectForDuplicate } from './project-duplicate.js';
 import { listWorkspaceProjects } from './project-list.js';
+import { listRecentlyDeleted } from './recently-deleted.js';
 import { createTemplateProject } from './template-project.js';
 import { app, dialog, shell } from 'electron';
 import fs from 'node:fs/promises';
@@ -151,7 +153,7 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     const workspace = workspaceOrThrow();
     const source = await readProject(safePath);
     const target = await uniqueProjectFolder(workspace, `${source.name} copy`);
-    await fs.cp(safePath, target, { recursive: true });
+    await copyProjectForDuplicate(safePath, target);
     const copy = await readProject(target);
     copy.id = `project_${crypto.randomUUID()}`;
     copy.name = `${source.name} copy`;
@@ -160,6 +162,9 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     await atomicWrite(path.join(target, 'project.json'), JSON.stringify(copy, null, 2));
     return makeSnapshot(target);
   });
+  handle('projects:recently-deleted', async (_event, projectPath: string) =>
+    listRecentlyDeleted(await assertProjectPath(projectPath)),
+  );
   handle('projects:archive', async (_event, projectPath: string) => {
     const safePath = await assertProjectPath(projectPath);
     const baseline = await readProjectMutationBaseline(safePath);

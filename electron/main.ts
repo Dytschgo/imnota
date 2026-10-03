@@ -97,6 +97,7 @@ import { LocalMcpServer } from './mcp-server.js';
 import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
+import { listRecentlyDeleted, pruneExpiredDeletes } from './recently-deleted.js';
 import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
@@ -573,7 +574,31 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
         itemId: transaction.itemId,
       });
   }
-  return { warnings, recoveredDeletes, recoveredContentDeletes };
+  // Retention runs after recovery so only journals already settled as committed deletes are
+  // eligible. Validation failures preserve the journal; cleanup failures retain expired remnants for inspection.
+  const retention = await pruneExpiredDeletes(projectPath, {
+    screenshots: screenshotTrashOperations,
+    content: contentTrashOperations,
+  });
+  await diagnostics.record({
+    category: 'integrity',
+    action: 'delete-retention-applied',
+    phase: retention.failures.length ? 'failed' : 'observed',
+    target: projectPath,
+    count: retention.pruned,
+    ...(retention.failures.length ? { error: retention.failures[0] } : {}),
+  });
+  // Never publish Undo grants that retention just retired (or that are past its window).
+  const available = new Set((await listRecentlyDeleted(projectPath)).map((item) => item.undoToken));
+  if (retention.failures.length)
+    warnings.push(
+      'Some expired deletion recovery files were kept because they could not be safely removed. See local diagnostics before manual cleanup.',
+    );
+  return {
+    warnings,
+    recoveredDeletes: recoveredDeletes.filter((item) => available.has(item.undoToken)),
+    recoveredContentDeletes: recoveredContentDeletes.filter((item) => available.has(item.undoToken)),
+  };
 }
 
 function imageType(filename: string): string {
