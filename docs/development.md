@@ -85,8 +85,27 @@ downloads and staging are cleaned on exit. Checksums do not authenticate a
 compromised release publisher. Failure inside a verified Windows installer
 retains that installer's recovery behavior.
 
+Linux replacement uses GNU `mv -fT` to replace the destination entry without
+following a file or directory symlink; a hardlink peer keeps its previous bytes.
+A directory occupying the destination causes refusal and staging cleanup. After
+replacement, a desktop-file write failure leaves the verified binary installed;
+there is no automatic Linux rollback. macOS retains its existing backup behavior
+if copying a verified bundle fails.
+
 Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
 and download failures. The suite executes the real scripts with network and app
 launch commands replaced. Git Bash on Windows exercises shell control flow; it
 does not replace native Linux or macOS installation evidence. No fixture launches
 a real installer or changes a personal installation.
+
+Checksum refusal and interrupted-download fixtures run wherever Bash is available.
+Linux replacement, symlink and hardlink fixtures run only on native Linux, where
+GNU replacement semantics apply; they are excluded on BSD macOS and Git Bash.
+Native macOS fixtures use `ditto` and `PlistBuddy` with generated bundles to check
+successful installation, extraction/executable/signature/version refusal, and
+backup preservation after copy failure. Signature results and app launches are
+stubbed; these fixtures do not prove real signing or Gatekeeper acceptance.
+PowerShell fixtures check the actual exception message separately from the
+no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
+temporary junction cleanup without traversing its target. The existing Linux,
+macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
