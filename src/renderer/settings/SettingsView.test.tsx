@@ -1,3 +1,4 @@
+import { localAgentAccessStdioSnippet } from '../../shared/preferences';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsView } from './SettingsView';
@@ -48,11 +49,15 @@ describe('SettingsView category navigation', () => {
     const prompt = screen.getByTestId('agent-access-prompt').textContent ?? '';
     expect(prompt).toContain('http://127.0.0.1:17384/mcp');
     expect(prompt).toContain('--mcp');
+    expect(prompt).toContain('Windows stdio: install Node.js 24+');
+    expect(prompt).toContain('resources/imnota-mcp.mjs');
     expect(prompt).toContain('mcpServers');
     for (const tool of [
       'list_projects',
+      'list_collections',
       'list_collection_items',
       'get_latest_bundle',
+      'get_bundle',
       'get_item',
       'search_saved_text',
     ])
@@ -77,4 +82,12 @@ describe('SettingsView category navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Replay what’s new' }));
     expect(onReplayWhatsNew).toHaveBeenCalledOnce();
   });
+});
+
+it('copies the Windows relay command while keeping other-platform executable snippets', () => {
+  const windows = JSON.parse(localAgentAccessStdioSnippet(undefined, 'Win32')).mcpServers.imnota;
+  expect(windows).toEqual({ command: 'node', args: ['<Imnota-install-directory>/resources/imnota-mcp.mjs'] });
+  expect(
+    JSON.parse(localAgentAccessStdioSnippet('/Applications/Imnota', 'MacIntel')).mcpServers.imnota,
+  ).toEqual({ command: '/Applications/Imnota', args: ['--mcp'] });
 });

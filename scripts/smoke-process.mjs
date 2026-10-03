@@ -68,7 +68,7 @@ export function prepareArtifactDirectory(requestedPath) {
   return real;
 }
 
-function createRunDirectory() {
+export function createRunDirectory() {
   const created = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
   if (!RESULT_NAME.test(basename(created))) throw new Error('Unexpected smoke result directory name.');
   writeFileSync(join(created, '.imnota-smoke-owned'), 'disposable native verification fixture\n', {

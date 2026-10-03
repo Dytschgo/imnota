@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -17,7 +19,11 @@ import {
   WorkspaceContentSearch,
 } from './content-search.js';
 import { assertNoLinks, isWithin } from './files.js';
-import { MAX_PROMPT_BUNDLE_MARKDOWN_BYTES } from './prompt-bundle-store.js';
+import {
+  formatPromptTimestamp,
+  MAX_PROMPT_BUNDLE_MARKDOWN_BYTES,
+  validatePromptBundlePng,
+} from './prompt-bundle-store.js';
 import { listWorkspaceProjects } from './project-list.js';
 import { assertProjectPath } from './project-path.js';
 
@@ -26,10 +32,36 @@ export const LOCAL_MCP_PATH = '/mcp';
 const PROTOCOL_VERSIONS = new Set(['2024-11-05', '2025-03-26', '2025-06-18']);
 const DEFAULT_PROTOCOL_VERSION = '2024-11-05';
 const MAX_JSON_RPC_BYTES = 1_000_000;
+export const MAX_MCP_TEXT_RESPONSE_BYTES = 5_000_000;
 const SECRET_KEY = /^(pairingToken|managementToken|pairing_token|management_token)$/i;
-const EXPORT_TIMESTAMP = /(\d{6}-\d{6})$/;
-const BUNDLE_MARKDOWN = / - (\d{2,3})\.md$/i;
-const BUNDLE_PNG = / - (\d{2,3})\.png$/i;
+export const BUNDLE_NOT_FOUND = 'bundle not found';
+/** Published export folders are named `<collection> - YYMMDD-HHMMSS` by the prompt bundle store. */
+const EXPORT_SET_NAME = /^.+ - (\d{2})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/su;
+const BUNDLE_FILE_SUFFIX = /^(\d{2,3})\.(md|png)$/;
+const BUNDLE_ID = /^b_[0-9a-f]{32}$/;
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+/**
+ * Export names carry local wall-clock time. Zones span UTC-12 to UTC+14, so a genuine export can
+ * read up to 26 hours ahead of this machine's clock after travel; anything later is not trusted.
+ */
+const EXPORT_TIMESTAMP_SKEW_MS = 26 * 60 * 60 * 1000;
+const MAX_EXPORT_DIRECTORY_ENTRIES = 5_000;
+const MAX_LISTED_BUNDLES_PER_COLLECTION = 10;
+
+/** Per-call response bounds for bundle tools. Bytes are raw file bytes before base64. */
+export interface McpBundleLimits {
+  maxImages: number;
+  maxImageBytes: number;
+  maxTotalImageBytes: number;
+  maxMarkdownBytes: number;
+}
+
+export const MCP_BUNDLE_LIMITS: Readonly<McpBundleLimits> = {
+  maxImages: 10,
+  maxImageBytes: 5_000_000,
+  maxTotalImageBytes: 20_000_000,
+  maxMarkdownBytes: 4_000_000,
+};
 const BLOCKED_PATH_FRAGMENT =
   /(?:^|[\\/])(?:\.imnota-(?:backups|transactions|undo|content-undo|recovery(?:-backup)?\.json|restore-|template-|prompt-export)|hosted-shares(?:-pending|-recovery-dismissals)?\.json)(?:$|[\\/])/i;
 
@@ -38,6 +70,8 @@ export interface LocalMcpContext {
   workspacePath(): string | null;
   appVersion(): string;
   search?(input: ContentSearchRequest): Promise<ContentSearchResponse>;
+  /** Clock used to reject export names dated in the future. Defaults to the system clock. */
+  now?(): number;
 }
 
 export interface LocalMcpListenOptions {
@@ -74,9 +108,13 @@ const listProjectsInput = z.object({}).strict();
 const listCollectionItemsInput = z
   .object({ projectPath: projectPathSchema, collectionId: collectionIdSchema })
   .strict();
+const listCollectionsInput = z.object({ projectPath: projectPathSchema }).strict();
 const getLatestBundleInput = z
-  .object({ projectPath: projectPathSchema, collectionId: collectionIdSchema })
+  .object({ projectPath: projectPathSchema.optional(), collectionId: collectionIdSchema.optional() })
   .strict();
+/** Opaque identifier: a fixed-shape digest that cannot carry separators, dots or drive letters. */
+const bundleIdSchema = z.string().regex(BUNDLE_ID);
+const getBundleInput = z.object({ id: bundleIdSchema }).strict();
 const getItemInput = z.object({ projectPath: projectPathSchema, itemId: itemIdSchema }).strict();
 const searchSavedTextInput = z
   .object({
@@ -136,13 +174,44 @@ async function readProjectDocument(projectPath: string): Promise<ProjectData> {
   return project;
 }
 
+interface McpImageContent {
+  type: 'image';
+  data: string;
+  mimeType: 'image/png';
+}
+
+/** Image blocks travel beside the JSON result so tool data stays plain and secret-filtered. */
+const attachedImages = new WeakMap<object, McpImageContent[]>();
+
 function toolContent(data: unknown, isError = false) {
+  const images = data && typeof data === 'object' ? (attachedImages.get(data) ?? []) : [];
+  const text = typeof data === 'string' ? data : JSON.stringify(omitSecretFields(data));
+  if (Buffer.byteLength(text, 'utf8') > MAX_MCP_TEXT_RESPONSE_BYTES)
+    throw new Error('The tool response exceeds the read limit. Narrow the request or read an item instead.');
   return {
-    content: [
-      { type: 'text', text: typeof data === 'string' ? data : JSON.stringify(omitSecretFields(data)) },
-    ],
+    content: [{ type: 'text', text }, ...images],
     isError,
   };
+}
+
+/**
+ * Tool errors are shown to the agent. Node system errors embed the absolute path that failed, and
+ * schema errors can echo input, so both are replaced with fixed text.
+ */
+export function agentErrorMessage(error: unknown): string {
+  if (error instanceof SyntaxError) return 'The saved document is not valid JSON.';
+  if (error instanceof z.ZodError) {
+    const fields = [...new Set(error.issues.map((issue) => String(issue.path[0] ?? '')))];
+    const known = fields.filter((field) => /^[A-Za-z]{1,40}$/.test(field));
+    return known.length ? `Invalid tool arguments: ${known.join(', ')}.` : 'Invalid tool arguments.';
+  }
+  if (error instanceof Error) {
+    const system = error as NodeJS.ErrnoException;
+    if (typeof system.code === 'string' && (system.syscall !== undefined || system.errno !== undefined))
+      return `The requested content could not be read (${system.code.replace(/[^A-Z0-9_]/gi, '')}).`;
+    return error.message;
+  }
+  return 'The request failed.';
 }
 
 function jsonRpcResult(id: JsonRpcId, result: unknown) {
@@ -153,75 +222,347 @@ function jsonRpcError(id: JsonRpcId, code: number, message: string) {
   return { jsonrpc: '2.0' as const, id, error: { code, message } };
 }
 
-async function latestPreparedBundle(projectPath: string, collectionId: string) {
+interface PreparedSet {
+  id: string;
+  projectPath: string;
+  collectionId: string;
+  setName: string;
+  /** Validated `YYMMDD-HHMMSS`; fixed width, so code-unit order is chronological. */
+  timestamp: string;
+  preparedAt: string;
+  folder: string;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Newest first. Ties resolve by project, collection and name in locale-independent order. */
+function compareLatest(left: PreparedSet, right: PreparedSet): number {
+  return (
+    compareCodeUnits(right.timestamp, left.timestamp) ||
+    compareCodeUnits(left.projectPath, right.projectPath) ||
+    compareCodeUnits(left.collectionId, right.collectionId) ||
+    compareCodeUnits(left.setName, right.setName)
+  );
+}
+
+/**
+ * Accept only a timestamp the bundle store could have written: a real local date and time that is
+ * not ahead of the clock. A crafted folder name such as `x - 999999-999999` is ignored, so it
+ * cannot pin itself as the latest bundle.
+ */
+function preparedTimestamp(setName: string, latestAllowed: number) {
+  if (!filenameSchema.safeParse(setName).success) return null;
+  const match = EXPORT_SET_NAME.exec(setName);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1);
+  const timestamp = `${year}${month}${day}-${hour}${minute}${second}`;
+  const date = new Date(
+    2000 + Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+  if (Number.isNaN(date.getTime()) || formatPromptTimestamp(date) !== timestamp) return null;
+  if (date.getTime() > latestAllowed) return null;
+  return { timestamp, preparedAt: `20${year}-${month}-${day}T${hour}:${minute}:${second}` };
+}
+
+function bundleId(projectKey: string, collectionId: string, setName: string): string {
+  const digest = createHash('sha256').update([projectKey, collectionId, setName].join('\0')).digest('hex');
+  return `b_${digest.slice(0, 32)}`;
+}
+
+/** A published set must contain a canonical regular Markdown file; staging or empty folders are not ready. */
+async function hasPreparedMarkdown(projectPath: string, folder: string, setName: string): Promise<boolean> {
+  await assertContainedFile(projectPath, folder);
+  const directory = await fs.opendir(folder);
+  let entries = 0;
+  for await (const entry of directory) {
+    if (++entries > MAX_EXPORT_DIRECTORY_ENTRIES) return false;
+    if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.startsWith(`${setName} - `)) continue;
+    const match = BUNDLE_FILE_SUFFIX.exec(entry.name.slice(setName.length + 3));
+    if (match?.[2] === 'md' && Number(match[1]) > 0 && String(Number(match[1])).padStart(2, '0') === match[1])
+      return true;
+  }
+  return false;
+}
+
+/** Published export folders of one collection. Staging, reservations and links are not listed. */
+async function preparedSets(
+  projectPath: string,
+  projectKey: string,
+  collectionId: string,
+  latestAllowed: number,
+): Promise<PreparedSet[]> {
   const exportsDirectory = path.join(projectPath, 'collections', collectionId, 'exports');
   await assertContainedFile(projectPath, exportsDirectory);
   const stat = await fs.lstat(exportsDirectory).catch(() => null);
-  if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error(BUNDLE_NOT_PREPARED);
-  const candidates: Array<{ name: string; timestamp: string; folder: string }> = [];
+  if (!stat?.isDirectory() || stat.isSymbolicLink()) return [];
+  const sets: PreparedSet[] = [];
   const directory = await fs.opendir(exportsDirectory);
+  let entries = 0;
   for await (const entry of directory) {
+    if (++entries > MAX_EXPORT_DIRECTORY_ENTRIES)
+      throw new Error('This collection has too many exports to read safely.');
     if (entry.isSymbolicLink() || !entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const timestamp = entry.name.match(EXPORT_TIMESTAMP)?.[1];
-    if (!timestamp) continue;
+    const prepared = preparedTimestamp(entry.name, latestAllowed);
+    if (!prepared) continue;
     const folder = path.join(exportsDirectory, entry.name);
-    if (blockedAgentPath(folder)) continue;
-    candidates.push({ name: entry.name, timestamp, folder });
+    if (blockedAgentPath(folder) || !isWithin(exportsDirectory, folder)) continue;
+    if (!(await hasPreparedMarkdown(projectPath, folder, entry.name).catch(() => false))) continue;
+    sets.push({
+      id: bundleId(projectKey, collectionId, entry.name),
+      projectPath,
+      collectionId,
+      setName: entry.name,
+      ...prepared,
+      folder,
+    });
   }
-  candidates.sort(
-    (left, right) => right.timestamp.localeCompare(left.timestamp) || right.name.localeCompare(left.name),
-  );
-  for (const candidate of candidates) {
-    await assertNoLinks(candidate.folder);
-    if (!isWithin(exportsDirectory, candidate.folder)) continue;
-    const bundle = await readPublishedBundle(candidate.folder, candidate.name);
-    if (bundle) return bundle;
-  }
-  throw new Error(BUNDLE_NOT_PREPARED);
+  return sets;
 }
 
-async function readPublishedBundle(folder: string, setName: string) {
-  const entries = await fs.readdir(folder, { withFileTypes: true });
+/** Bounded read of a regular, unlinked file. Returns null when it is larger than the allowance. */
+async function readBoundedImage(target: string, maximumBytes: number): Promise<Buffer | null> {
+  await assertNoLinks(target);
+  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+  const handle = await fs.open(target, fsConstants.O_RDONLY | noFollow);
+  try {
+    await assertNoLinks(target);
+    const stat = await handle.stat();
+    const pathStat = await fs.lstat(target);
+    if (pathStat.isSymbolicLink() || !stat.isFile() || stat.dev !== pathStat.dev || stat.ino !== pathStat.ino)
+      throw new Error('A bundle image changed while it was opened.');
+    if (stat.size > maximumBytes) return null;
+    const buffer = Buffer.alloc(stat.size + 1);
+    let bytes = 0;
+    while (bytes < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, bytes, buffer.length - bytes, bytes);
+      if (!bytesRead) break;
+      bytes += bytesRead;
+    }
+    if (bytes !== stat.size) throw new Error('A bundle image changed while it was read.');
+    await assertNoLinks(target);
+    const finalPath = await fs.lstat(target);
+    const finalHandle = await handle.stat();
+    if (
+      finalPath.isSymbolicLink() ||
+      finalPath.dev !== stat.dev ||
+      finalPath.ino !== stat.ino ||
+      finalHandle.size !== stat.size ||
+      finalHandle.mtimeMs !== stat.mtimeMs ||
+      finalHandle.ctimeMs !== stat.ctimeMs
+    )
+      throw new Error('A bundle image changed while it was read.');
+    return buffer.subarray(0, bytes);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Signature, chunk integrity and dimension limits, using the checks applied when bundles are stored. */
+function isValidPng(png: Buffer): boolean {
+  if (png.length < 24 || PNG_SIGNATURE.some((byte, index) => png[index] !== byte)) return false;
+  try {
+    validatePromptBundlePng(png, { width: png.readUInt32BE(16), height: png.readUInt32BE(20) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type BundleImageStatus = 'included' | 'omitted-too-large' | 'invalid' | 'none';
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * Read one published export folder. Only regular files named exactly `<set> - NN.md|png` directly
+ * inside the folder are considered; nothing in the folder can redirect a read elsewhere.
+ */
+async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+  await assertContainedFile(set.projectPath, set.folder);
+  const prefix = `${set.setName} - `;
   const markdownFiles = new Map<number, string>();
   const pngFiles = new Map<number, string>();
-  for (const entry of entries) {
-    if (entry.isSymbolicLink() || !entry.isFile() || entry.name.startsWith('.')) continue;
-    const markdownNumber = entry.name.match(BUNDLE_MARKDOWN)?.[1];
-    const pngNumber = entry.name.match(BUNDLE_PNG)?.[1];
-    const target = path.join(folder, entry.name);
-    if (blockedAgentPath(target)) continue;
-    if (markdownNumber) markdownFiles.set(Number(markdownNumber), entry.name);
-    else if (pngNumber) pngFiles.set(Number(pngNumber), entry.name);
+  const directory = await fs.opendir(set.folder);
+  let entries = 0;
+  for await (const entry of directory) {
+    if (++entries > MAX_EXPORT_DIRECTORY_ENTRIES)
+      throw new Error('This export has too many files to read safely.');
+    if (entry.isSymbolicLink() || !entry.isFile() || !entry.name.startsWith(prefix)) continue;
+    const match = BUNDLE_FILE_SUFFIX.exec(entry.name.slice(prefix.length));
+    if (!match) continue;
+    const bundleNumber = Number(match[1]);
+    // Only the canonical spelling the store writes, so `01` and `001` cannot both claim a bundle.
+    if (bundleNumber < 1 || String(bundleNumber).padStart(2, '0') !== match[1]) continue;
+    if (blockedAgentPath(path.join(set.folder, entry.name))) continue;
+    (match[2] === 'md' ? markdownFiles : pngFiles).set(bundleNumber, entry.name);
   }
   if (!markdownFiles.size) return null;
+
+  const images: McpImageContent[] = [];
   const bundles = [];
+  let markdownBytes = 0;
+  let imageBytes = 0;
+  let imagesOmitted = 0;
+  let imagesInvalid = 0;
+  let markdownOmitted = 0;
   for (const bundleNumber of [...markdownFiles.keys()].sort((left, right) => left - right)) {
     const markdownName = markdownFiles.get(bundleNumber);
     if (!markdownName) continue;
-    const markdownPath = await assertContainedFile(folder, path.join(folder, markdownName));
-    const markdown = await readSearchText(folder, markdownName, MAX_PROMPT_BUNDLE_MARKDOWN_BYTES);
+    // The markdown read below re-checks links, so the path is validated before either read.
+    const markdownPath = await assertContainedFile(set.folder, path.join(set.folder, markdownName));
+    const markdownAllowance = Math.min(
+      MAX_PROMPT_BUNDLE_MARKDOWN_BYTES,
+      limits.maxMarkdownBytes - markdownBytes,
+    );
+    let markdown: string | null = null;
+    if (markdownAllowance > 0)
+      markdown = await readSearchText(set.folder, markdownName, markdownAllowance).catch((error) => {
+        if (error instanceof Error && /exceeds the read limit/.test(error.message)) return null;
+        throw error;
+      });
+    if (markdown === null) markdownOmitted += 1;
+    else markdownBytes += Buffer.byteLength(markdown, 'utf8');
+
     const pngName = pngFiles.get(bundleNumber);
-    const pngPath = pngName ? await assertContainedFile(folder, path.join(folder, pngName)) : undefined;
+    let pngPath: string | undefined;
+    let image: BundleImageStatus = 'none';
+    if (pngName) {
+      pngPath = await assertContainedFile(set.folder, path.join(set.folder, pngName));
+      const allowance = Math.min(limits.maxImageBytes, limits.maxTotalImageBytes - imageBytes);
+      const png = images.length < limits.maxImages ? await readBoundedImage(pngPath, allowance) : null;
+      if (!png) {
+        image = 'omitted-too-large';
+        imagesOmitted += 1;
+      } else if (!isValidPng(png)) {
+        image = 'invalid';
+        imagesInvalid += 1;
+      } else {
+        image = 'included';
+        imageBytes += png.length;
+        images.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+      }
+    }
     bundles.push({
       bundleNumber,
       markdownPath,
       ...(pngPath ? { pngPath } : {}),
-      markdown,
+      markdown: markdown ?? '',
+      ...(markdown === null ? { markdownOmitted: true } : {}),
+      image,
     });
   }
-  if (!bundles.length) return null;
-  return { setName, folderPath: folder, bundles };
+  const notes: string[] = [];
+  if (imagesOmitted)
+    notes.push(
+      `too large — ${plural(imagesOmitted, 'image', 'images')} omitted (limits per call: ${limits.maxImages} images, ${limits.maxImageBytes} bytes each, ${limits.maxTotalImageBytes} bytes in total). Their pngPath values are listed.`,
+    );
+  if (imagesInvalid) notes.push(`${plural(imagesInvalid, 'image', 'images')} not returned: not a valid PNG.`);
+  if (markdownOmitted)
+    notes.push(
+      `too large — Markdown of ${plural(markdownOmitted, 'prompt', 'prompts')} omitted (limit per call: ${limits.maxMarkdownBytes} bytes). Their markdownPath values are listed.`,
+    );
+  const result = {
+    id: set.id,
+    setName: set.setName,
+    projectPath: set.projectPath,
+    collectionId: set.collectionId,
+    preparedAt: set.preparedAt,
+    folderPath: set.folder,
+    bundles,
+    imagesIncluded: images.length,
+    imagesOmitted,
+    imagesInvalid,
+    markdownOmitted,
+    notes,
+  };
+  attachedImages.set(result, images);
+  return result;
 }
 
-export function createMcpTools(context: LocalMcpContext): McpTool[] {
+export function createMcpTools(
+  context: LocalMcpContext,
+  limitOverrides: Partial<McpBundleLimits> = {},
+): McpTool[] {
+  const limits: McpBundleLimits = { ...MCP_BUNDLE_LIMITS, ...limitOverrides };
   const searchIndex = new WorkspaceContentSearch();
   const search = context.search ?? ((input: ContentSearchRequest) => searchIndex.search(input));
   const workspaceOrThrow = () => {
+    if (!context.enabled()) throw new Error('Local agent access is off.');
     const workspace = context.workspacePath();
     if (!workspace) throw new Error('Choose a workspace folder before opening a project.');
     return workspace;
   };
-  const authorize = (projectPath: string) => assertProjectPath(workspaceOrThrow(), projectPath);
+  const authorize = async (projectPath: string) => {
+    const workspace = workspaceOrThrow();
+    // Refuse before any filesystem call, so a foreign or network path is never probed.
+    if (!isWithin(workspace, projectPath)) throw new Error('Project path is outside the selected workspace.');
+    return assertProjectPath(workspace, projectPath);
+  };
+  const latestAllowed = () => (context.now?.() ?? Date.now()) + EXPORT_TIMESTAMP_SKEW_MS;
+  /** Workspace-relative project folder, used only to derive bundle ids. */
+  const projectKey = async (projectPath: string) => {
+    const [workspace, project] = await Promise.all([
+      fs.realpath(workspaceOrThrow()),
+      fs.realpath(projectPath),
+    ]);
+    return path.relative(workspace, project).split(path.sep).join('/');
+  };
+  const projectSets = async (
+    projectPath: string,
+    project: ProjectData,
+    select: (collection: ProjectData['collections'][number]) => boolean,
+  ) => {
+    const key = await projectKey(projectPath);
+    const sets: PreparedSet[] = [];
+    for (const collection of project.collections) {
+      if (!select(collection)) continue;
+      sets.push(...(await preparedSets(projectPath, key, collection.id, latestAllowed())));
+    }
+    return sets;
+  };
+  /** Prepared exports of every readable project, in a stable order. Unreadable projects are skipped. */
+  const workspaceSets = async (activeOnly: boolean) => {
+    const workspace = workspaceOrThrow();
+    await assertNoLinks(workspace);
+    const projects = (
+      await listWorkspaceProjects(workspace, undefined, {
+        maxEntries: MAX_EXPORT_DIRECTORY_ENTRIES,
+        maxResponseBytes: MAX_MCP_TEXT_RESPONSE_BYTES,
+      })
+    )
+      .filter((project) => !activeOnly || project.status === 'active')
+      .sort((left, right) => compareCodeUnits(left.projectPath, right.projectPath));
+    const sets: PreparedSet[] = [];
+    for (const listed of projects) {
+      try {
+        const projectPath = await authorize(listed.projectPath);
+        const project = await readProjectDocument(projectPath);
+        sets.push(
+          ...(await projectSets(projectPath, project, (collection) => !activeOnly || !collection.archived)),
+        );
+      } catch {
+        // A damaged, linked or legacy project must not hide prepared bundles in its siblings.
+      }
+    }
+    return sets;
+  };
+  const firstReadable = async (sets: PreparedSet[]) => {
+    for (const set of sets.sort(compareLatest)) {
+      try {
+        const bundle = await readPreparedBundle(set, limits);
+        if (bundle) return bundle;
+      } catch {
+        // A removed, linked or unreadable set must not hide a valid saved sibling.
+      }
+    }
+    return null;
+  };
 
   return [
     {
@@ -232,7 +573,10 @@ export function createMcpTools(context: LocalMcpContext): McpTool[] {
         listProjectsInput.parse(args);
         const workspace = workspaceOrThrow();
         await assertNoLinks(workspace);
-        const projects = await listWorkspaceProjects(workspace);
+        const projects = await listWorkspaceProjects(workspace, undefined, {
+          maxEntries: MAX_EXPORT_DIRECTORY_ENTRIES,
+          maxResponseBytes: MAX_MCP_TEXT_RESPONSE_BYTES,
+        });
         return {
           projects: projects
             .filter((project) => project.status === 'active')
@@ -243,6 +587,38 @@ export function createMcpTools(context: LocalMcpContext): McpTool[] {
               status: project.status,
             })),
         };
+      },
+    },
+    {
+      name: 'list_collections',
+      description:
+        'List the collections of a project with the ids of their most recent already-prepared bundles.',
+      inputSchema: {
+        type: 'object',
+        properties: { projectPath: { type: 'string', minLength: 1, maxLength: 2000 } },
+        required: ['projectPath'],
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = listCollectionsInput.parse(args);
+        const projectPath = await authorize(input.projectPath);
+        const project = await readProjectDocument(projectPath);
+        const collections = [];
+        for (const collection of project.collections) {
+          const sets = await projectSets(projectPath, project, (candidate) => candidate === collection);
+          collections.push({
+            id: collection.id,
+            name: collection.name,
+            archived: collection.archived,
+            updatedAt: collection.updatedAt,
+            itemCount: orderedCollectionItems(project, collection.id).length,
+            preparedBundles: sets
+              .sort(compareLatest)
+              .slice(0, MAX_LISTED_BUNDLES_PER_COLLECTION)
+              .map((set) => ({ id: set.id, setName: set.setName, preparedAt: set.preparedAt })),
+          });
+        }
+        return { projectPath, projectName: project.name, collections };
       },
     },
     {
@@ -279,23 +655,52 @@ export function createMcpTools(context: LocalMcpContext): McpTool[] {
     {
       name: 'get_latest_bundle',
       description:
-        'Read the latest already-exported Markdown+PNG prompt bundle for a collection. Does not generate an export.',
+        'Read the most recently prepared Markdown+PNG prompt bundle: for one collection, for a project (projectPath only), or for the whole workspace (no arguments). Returns Markdown as text and PNGs as images. Does not generate an export.',
       inputSchema: {
         type: 'object',
         properties: {
           projectPath: { type: 'string', minLength: 1, maxLength: 2000 },
           collectionId: { type: 'string', minLength: 1, maxLength: 255 },
         },
-        required: ['projectPath', 'collectionId'],
         additionalProperties: false,
       },
       async handle(args) {
         const input = getLatestBundleInput.parse(args);
-        const projectPath = await authorize(input.projectPath);
-        const project = await readProjectDocument(projectPath);
-        if (!project.collections.some((collection) => collection.id === input.collectionId))
-          throw new Error('Collection does not belong to this project.');
-        return latestPreparedBundle(projectPath, input.collectionId);
+        if (input.collectionId && !input.projectPath)
+          throw new Error('collectionId needs the projectPath it belongs to.');
+        let sets: PreparedSet[];
+        if (input.projectPath) {
+          const projectPath = await authorize(input.projectPath);
+          const project = await readProjectDocument(projectPath);
+          const { collectionId } = input;
+          if (collectionId && !project.collections.some((collection) => collection.id === collectionId))
+            throw new Error('Collection does not belong to this project.');
+          sets = await projectSets(projectPath, project, (collection) =>
+            collectionId ? collection.id === collectionId : !collection.archived,
+          );
+        } else sets = await workspaceSets(true);
+        const bundle = await firstReadable(sets);
+        if (!bundle) throw new Error(BUNDLE_NOT_PREPARED);
+        return bundle;
+      },
+    },
+    {
+      name: 'get_bundle',
+      description:
+        'Read one already-prepared prompt bundle by the id returned from list_collections or get_latest_bundle. Returns Markdown as text and PNGs as images. Does not generate an export.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', pattern: '^b_[0-9a-f]{32}$' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = getBundleInput.parse(args);
+        // The id is only ever compared with ids derived from validated folders; it is never a path.
+        const matches = (await workspaceSets(false)).filter((set) => set.id === input.id);
+        const bundle = await firstReadable(matches);
+        if (!bundle) throw new Error(BUNDLE_NOT_FOUND);
+        return bundle;
       },
     },
     {
@@ -391,19 +796,29 @@ export function createMcpTools(context: LocalMcpContext): McpTool[] {
 }
 
 export function handleMcpJsonRpc(
-  message: JsonRpcRequest,
+  message: unknown,
   tools: readonly McpTool[],
   appVersion: string,
 ): Promise<unknown> | unknown {
-  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string')
-    return jsonRpcError(idOf(message.id), -32600, 'Invalid JSON-RPC request.');
-  const id = idOf(message.id);
-  if (message.id === undefined) return null;
-  switch (message.method) {
+  if (!message || typeof message !== 'object' || Array.isArray(message))
+    return jsonRpcError(null, -32600, 'Invalid JSON-RPC request.');
+  const request = message as JsonRpcRequest;
+  if (
+    request.jsonrpc !== '2.0' ||
+    typeof request.method !== 'string' ||
+    (request.id !== undefined &&
+      request.id !== null &&
+      typeof request.id !== 'string' &&
+      (typeof request.id !== 'number' || !Number.isFinite(request.id)))
+  )
+    return jsonRpcError(idOf(request.id), -32600, 'Invalid JSON-RPC request.');
+  const id = idOf(request.id);
+  if (request.id === undefined) return null;
+  switch (request.method) {
     case 'initialize': {
       const requested =
-        message.params && typeof message.params === 'object' && !Array.isArray(message.params)
-          ? (message.params as { protocolVersion?: unknown }).protocolVersion
+        request.params && typeof request.params === 'object' && !Array.isArray(request.params)
+          ? (request.params as { protocolVersion?: unknown }).protocolVersion
           : undefined;
       const protocolVersion =
         typeof requested === 'string' && PROTOCOL_VERSIONS.has(requested)
@@ -414,7 +829,7 @@ export function handleMcpJsonRpc(
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'imnota', version: appVersion },
         instructions:
-          'Read-only access to the selected Imnota workspace. Use get_latest_bundle for prepared exports; do not guess from chat images.',
+          'Read-only access to the selected Imnota workspace. Use get_latest_bundle (or get_bundle with an id) for prepared exports, returned as Markdown text plus PNG images; do not guess from chat images.',
       });
     }
     case 'ping':
@@ -428,13 +843,13 @@ export function handleMcpJsonRpc(
         })),
       });
     case 'tools/call':
-      return callTool(id, message.params, tools);
+      return callTool(id, request.params, tools);
     case 'resources/list':
       return jsonRpcResult(id, { resources: [] });
     case 'prompts/list':
       return jsonRpcResult(id, { prompts: [] });
     default:
-      return jsonRpcError(id, -32601, `Unknown method: ${message.method}`);
+      return jsonRpcError(id, -32601, 'Unknown method.');
   }
 }
 
@@ -457,8 +872,7 @@ async function callTool(id: JsonRpcId, params: unknown, tools: readonly McpTool[
     const data = await tool.handle(parsed.data.arguments ?? {});
     return jsonRpcResult(id, toolContent(data));
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return jsonRpcResult(id, toolContent(message, true));
+    return jsonRpcResult(id, toolContent(agentErrorMessage(error), true));
   }
 }
 
@@ -555,6 +969,16 @@ export class LocalMcpServer {
     for await (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      if (!this.context.enabled()) {
+        output.write(`${JSON.stringify(jsonRpcError(null, -32000, 'Local agent access is off.'))}\n`);
+        continue;
+      }
+      if (Buffer.byteLength(line, 'utf8') > MAX_JSON_RPC_BYTES) {
+        output.write(
+          `${JSON.stringify(jsonRpcError(null, -32600, 'JSON-RPC request exceeds the read limit.'))}\n`,
+        );
+        continue;
+      }
       let message: JsonRpcRequest;
       try {
         message = JSON.parse(trimmed) as JsonRpcRequest;
@@ -599,7 +1023,7 @@ export class LocalMcpServer {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(payload ? JSON.stringify(payload) : '');
     } catch (error) {
-      fail(400, error instanceof Error ? error.message : 'Invalid JSON-RPC request.');
+      fail(400, error instanceof SyntaxError ? 'Invalid JSON-RPC JSON.' : agentErrorMessage(error));
     }
   }
 }
