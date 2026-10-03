@@ -15,6 +15,7 @@ export interface ScreenshotInspectorProps {
   onChangeAnnotation(patch: Partial<Annotation>): void;
   onDeleteAnnotation(): void;
   onDuplicate(): void | Promise<void>;
+  duplicateShortcut?: string;
 }
 
 export function ScreenshotInspector({
@@ -28,6 +29,7 @@ export function ScreenshotInspector({
   onChangeAnnotation,
   onDeleteAnnotation,
   onDuplicate,
+  duplicateShortcut,
 }: ScreenshotInspectorProps) {
   if (!shot)
     return (
@@ -284,7 +286,11 @@ export function ScreenshotInspector({
           <span className="section-label" id="export-heading">
             Export
           </span>
-          <Button variant="ghost" onClick={() => void onDuplicate()}>
+          <Button
+            variant="ghost"
+            title={duplicateShortcut && `Duplicate (${duplicateShortcut})`}
+            onClick={() => void onDuplicate()}
+          >
             <Copy size={15} aria-hidden="true" />
             Duplicate screenshot
           </Button>

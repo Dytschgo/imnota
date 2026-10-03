@@ -63,9 +63,22 @@ describe('useKeyboardShortcuts', () => {
 
   it('does not run either side of a shortcut conflict', () => {
     const onText = vi.fn();
-    render(<Harness bindings={{ 'tool.text': 'A' }} onText={onText} />);
+    render(<Harness bindings={{ 'tool.text': 'A', 'tool.arrow': 'A' }} onText={onText} />);
     fireEvent.keyDown(window, { key: 'a' });
     expect(onText).not.toHaveBeenCalled();
+  });
+
+  it('keeps editor keys local and runs saved overrides outside the editor', () => {
+    const onText = vi.fn();
+    const { container } = render(<Harness bindings={{ 'tool.text': 'M' }} onText={onText} />);
+    const editor = document.createElement('div');
+    editor.dataset.contentEditor = 'drawing';
+    container.append(editor);
+    fireEvent.keyDown(editor, { key: 'm' });
+    fireEvent.keyDown(window, { key: 't' });
+    expect(onText).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'm' });
+    expect(onText).toHaveBeenCalledOnce();
   });
 
   it('matches a shifted top-row digit through the runtime hook', () => {
