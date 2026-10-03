@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
 
 const TRANSACTION_DIRECTORY = '.imnota-transactions';
 const MAX_TRANSACTION_WRITES = 256;
@@ -61,6 +62,8 @@ export interface ScreenshotTransactionOperations {
   write: typeof atomicWrite;
   unlink: (target: string) => Promise<void>;
   removeDirectory: (target: string) => Promise<void>;
+  /** Told when an unreadable journal was moved aside instead of blocking open or save. */
+  damagedJournal?: DamagedJournalReporter;
 }
 
 const defaultOperations: ScreenshotTransactionOperations = {
@@ -74,6 +77,7 @@ type ErrorCode =
   | 'invalid-path'
   | 'invalid-token'
   | 'invalid-journal'
+  | 'unreadable-journal'
   | 'baseline-changed'
   | 'commit-failed'
   | 'rollback-failed'
@@ -325,7 +329,40 @@ async function loadManifest(
   const directory = transactionDirectory(root, token);
   await assertNoLinks(directory);
   const source = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8');
-  return { directory, manifest: parseManifest(JSON.parse(source), token) };
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    throw new ScreenshotTransactionError(
+      'unreadable-journal',
+      'Transaction manifest is damaged and cannot be read.',
+      token,
+      false,
+      { cause: error },
+    );
+  }
+  return { directory, manifest: parseManifest(value, token) };
+}
+
+/**
+ * Discovery must not let one truncated manifest block every later open and save. A
+ * manifest that is not JSON cannot describe a recoverable state, so its journal is
+ * moved aside intact and reported. Manifests that parse but fail validation, and I/O
+ * errors, still stop the operation.
+ */
+async function loadManifestOrQuarantine(
+  root: string,
+  token: string,
+  operations: ScreenshotTransactionOperations,
+): Promise<{ directory: string; manifest: TransactionManifest } | null> {
+  try {
+    return await loadManifest(root, token);
+  } catch (error) {
+    if (!(error instanceof ScreenshotTransactionError) || error.code !== 'unreadable-journal') throw error;
+    const report = await quarantineDamagedJournal(root, transactionDirectory(root, token));
+    await operations.damagedJournal?.(report);
+    return null;
+  }
 }
 
 async function imageBytes(directory: string, image: StoredImage): Promise<Buffer | null> {
@@ -515,7 +552,9 @@ async function cleanupCommittedBeforeStage(
   operations: ScreenshotTransactionOperations,
 ): Promise<void> {
   for (const token of await transactionTokens(root, operations)) {
-    const { directory, manifest } = await loadManifest(root, token);
+    const loaded = await loadManifestOrQuarantine(root, token, operations);
+    if (!loaded) continue;
+    const { directory, manifest } = loaded;
     try {
       if (manifest.phase === 'committed') {
         await cleanupTransaction(directory, manifest, operations);
@@ -778,7 +817,10 @@ async function transactionTokens(
     });
   const tokens: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || !TOKEN_PATTERN.test(entry.name)) continue;
+    await assertNoLinks(path.join(directory, entry.name));
+    if (!TOKEN_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory())
+      throw new Error('Journal token is not a directory; recovery files were preserved.');
     const manifestPath = path.join(directory, entry.name, 'manifest.json');
     await assertNoLinks(manifestPath);
     const stat = await fs.stat(manifestPath).catch((error: NodeJS.ErrnoException) => {
@@ -793,7 +835,10 @@ async function transactionTokens(
         entry.name,
         true,
       );
-    else await cleanupIncompleteTransaction(path.join(directory, entry.name), operations);
+    else {
+      const report = await quarantineDamagedJournal(root, path.join(directory, entry.name));
+      await operations.damagedJournal?.(report);
+    }
   }
   return tokens.sort();
 }
@@ -823,7 +868,9 @@ export async function recoverScreenshotTransactions(
   const root = await projectRoot(projectPath);
   const results: ScreenshotTransactionRecoveryResult[] = [];
   for (const token of await transactionTokens(root, operations)) {
-    const { directory, manifest } = await loadManifest(root, token);
+    const loaded = await loadManifestOrQuarantine(root, token, operations);
+    if (!loaded) continue;
+    const { directory, manifest } = loaded;
     const commit = manifest.entries.find((entry) => entry.relativePath.toLowerCase() === 'project.json')!;
     if (manifest.phase === 'committed') {
       const result = await finishCommitted(directory, manifest, operations);

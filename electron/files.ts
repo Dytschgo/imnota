@@ -110,10 +110,18 @@ export async function atomicWrite(filePath: string, content: string | Uint8Array
 
 async function writeFileAtomically(filePath: string, content: string | Uint8Array): Promise<void> {
   await assertNoLinks(filePath);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
   try {
-    await fs.writeFile(temporary, content, { flag: 'wx' });
+    // Flush the candidate before it replaces the destination. Without this a power loss
+    // shortly after the rename can leave an empty or truncated file under the final name.
+    const handle = await fs.open(temporary, 'wx');
+    try {
+      await handle.writeFile(content);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     for (let attempt = 0; ; attempt++) {
       try {
         await fs.rename(temporary, filePath);
@@ -134,5 +142,39 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
     }
   } finally {
     await fs.unlink(temporary).catch(() => undefined);
+  }
+  await syncDirectoryEntry(path.dirname(filePath));
+  // If mkdir created ancestors, also persist their names in each containing directory.
+  if (firstCreated && process.platform !== 'win32') {
+    let parent = path.dirname(filePath);
+    while (parent !== path.dirname(firstCreated) && parent !== path.dirname(parent)) {
+      parent = path.dirname(parent);
+      await syncDirectoryEntry(parent);
+    }
+  }
+}
+
+/**
+ * Persist the rename where Node supports directory fsync. On Windows only file bytes
+ * are explicitly flushed; rename durability across power loss is not guaranteed.
+ * Unsupported POSIX directory sync is best-effort. Permission and I/O errors propagate
+ * even though replacement has already happened, so recovery must inspect live bytes.
+ */
+async function syncDirectoryEntry(directory: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(directory, 'r');
+  } catch (error) {
+    if (['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+    throw error;
+  }
+  try {
+    await handle.sync();
+  } catch (error) {
+    if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? ''))
+      throw error;
+  } finally {
+    await handle.close();
   }
 }

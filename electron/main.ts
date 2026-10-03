@@ -146,6 +146,8 @@ import { onSuccessfulQuit, teardownTrayAfterSuccessfulQuit } from './tray-quit-l
 import { CaptureRequestQueue, type CaptureRequest } from './capture-request-queue.js';
 import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './capture-commit-guard.js';
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
+import { requiresSingleInstanceLock } from './single-instance.js';
+import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
 // Smoke never reads or writes the installed application's profile or caches.
@@ -158,8 +160,18 @@ if (process.env.IMNOTA_SMOKE === '1') {
   nativeTheme.themeSource = 'light';
 }
 
+// The lock is scoped to the profile selected above. A second interactive launch hands
+// over to the running instance instead of writing to the same projects beside it.
+const singleInstanceLocked = requiresSingleInstanceLock(process.argv, process.env);
+const primaryInstance = !singleInstanceLocked || app.requestSingleInstanceLock();
+if (!primaryInstance) {
+  process.stderr.write('Imnota is already running. Switching to the open window.\n');
+  app.quit();
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let startupWindowCreated = false;
 // Main-process-only, one-use approval for the disposable native smoke fixture.
 let smokeBackupRestorePath: string | null = null;
 let smokeProjectDeletionPath: string | null = null;
@@ -331,6 +343,15 @@ const screenshotTransactionOperations: ScreenshotTransactionOperations = {
   unlink: unlinkTracked,
   removeDirectory: (target) =>
     diagnostics.filesystem('remove-directory', target, () => fs.rm(target, { recursive: true, force: true })),
+  // Saves also sweep journals. Open normally quarantines first and shows the warning.
+  damagedJournal: async (report) => {
+    await diagnostics.record({
+      category: 'integrity',
+      action: 'save-journal-quarantined',
+      phase: 'observed',
+      target: report.quarantinedPath,
+    });
+  },
 };
 
 const screenshotTrashOperations: ScreenshotTrashOperations = {
@@ -505,7 +526,18 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
   const warnings: string[] = [];
   const recoveredDeletes: Array<{ undoToken: string; screenshotId: string }> = [];
   const recoveredContentDeletes: Array<{ undoToken: string; itemId: string }> = [];
-  const transactions = await recoverScreenshotTransactions(projectPath, screenshotTransactionOperations);
+  const damagedJournal =
+    (subject: string, action: string) =>
+    async (report: DamagedJournalReport): Promise<void> => {
+      warnings.push(
+        `${subject} was damaged and could not be read. It was moved aside so this project can open; nothing was deleted. Its files are kept in ${report.relativePath} inside the project folder.`,
+      );
+      await diagnostics.record({ category: 'integrity', action, phase: 'observed', target: projectPath });
+    };
+  const transactions = await recoverScreenshotTransactions(projectPath, {
+    ...screenshotTransactionOperations,
+    damagedJournal: damagedJournal('An interrupted save journal', 'save-journal-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'save-recovery-checked',
@@ -541,7 +573,10 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
     }
   }
 
-  const trash = await recoverScreenshotTrashTransactions(projectPath, screenshotTrashOperations);
+  const trash = await recoverScreenshotTrashTransactions(projectPath, {
+    ...screenshotTrashOperations,
+    damagedJournal: damagedJournal('A screenshot Undo journal', 'screenshot-undo-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'screenshot-undo-checked',
@@ -557,7 +592,10 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
         screenshotId: transaction.screenshotId,
       });
   }
-  const contentTrash = await recoverContentTrashTransactions(projectPath, contentTrashOperations);
+  const contentTrash = await recoverContentTrashTransactions(projectPath, {
+    ...contentTrashOperations,
+    damagedJournal: damagedJournal('A content Undo journal', 'content-undo-quarantined'),
+  });
   await diagnostics.record({
     category: 'integrity',
     action: 'content-undo-checked',
@@ -2042,7 +2080,19 @@ async function createWindow(): Promise<BrowserWindow> {
   return createdWindow;
 }
 
+if (singleInstanceLocked && primaryInstance)
+  app.on('second-instance', () => {
+    // Startup creates the first window itself; a launch racing it must not add another.
+    if (!startupWindowCreated) return;
+    if (mainWindow && !mainWindow.isDestroyed()) raiseMainWindow();
+    else
+      void createWindow()
+        .then(() => syncCaptureGlobalShortcut())
+        .catch(console.error);
+  });
+
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   await diagnostics.record({ category: 'lifecycle', action: 'startup', phase: 'observed' });
   const stored =
     process.env.IMNOTA_SMOKE === '1' ? null : await fs.readFile(settingsFile(), 'utf8').catch(() => null);
@@ -2103,6 +2153,7 @@ app.whenReady().then(async () => {
       });
     });
   await createWindow();
+  startupWindowCreated = true;
   createAppTray();
   if (agentAccessStartupError) dialog.showErrorBox('Local agent access is off', agentAccessStartupError);
   if (process.env.IMNOTA_SMOKE === '1') {
