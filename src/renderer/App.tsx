@@ -92,6 +92,7 @@ type ToastNotification = {
   action?: { label: string; run(): void };
   durationMs: number;
   generation: number;
+  projectPath: string | null;
 };
 
 export function userFacingErrorMessage(message: string): string {
@@ -195,12 +196,10 @@ export default function App() {
   const contentPersistence = useContentPersistence({
     snapshot: store.snapshot,
     itemId: store.activeScreenshotId,
-    beforeSave: async () => {
-      if (!(await persistence.flush())) return false;
-      return !persistence.hasPendingProjectMetadata() || persistence.flushProjectMetadata();
-    },
+    beforeSave: persistence.prepareContentSave,
     beginMutation: persistence.beginNativeMutation,
-    acceptSnapshot: (snapshot, id, token) => persistence.acceptMutationSnapshot(snapshot, id, token),
+    acceptSnapshot: (snapshot, id, token, transition) =>
+      persistence.acceptMutationSnapshot(snapshot, id, token, transition),
     cancelMutation: persistence.cancelNativeMutation,
   });
   useEffect(() => {
@@ -292,7 +291,13 @@ export default function App() {
       const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
       toastHold.current = 0;
       toastLifetime.current = { generation, durationMs };
-      setToast({ message, action, durationMs, generation });
+      setToast({
+        message,
+        action,
+        durationMs,
+        generation,
+        projectPath: useAppStore.getState().snapshot?.projectPath ?? null,
+      });
       armToastTimer(generation, durationMs);
     },
     [armToastTimer],
@@ -331,8 +336,9 @@ export default function App() {
     }
   }, [hiddenActionToast, clearToastTimer, armToastTimer]);
   useEffect(() => {
-    dismissToast();
-  }, [store.snapshot?.projectPath, dismissToast]);
+    if (toast?.action && toast.projectPath !== (store.snapshot?.projectPath ?? null))
+      dismissToast(toast.generation);
+  }, [store.snapshot?.projectPath, toast, dismissToast]);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ProjectWatchEvent } from '../../shared/workflow-bridge';
 import type {
   Annotation,
   ImagePayload,
   ProjectData,
+  ProjectRevisionTransition,
   ProjectSnapshot,
   ScreenshotRecord,
 } from '../../shared/types';
@@ -77,6 +79,7 @@ export interface ProjectPersistenceController {
   queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
   flushProjectDrafts(): Promise<boolean>;
+  prepareContentSave(): Promise<boolean>;
   withReloadWatch(save: () => Promise<boolean>): Promise<boolean>;
   flushProjectMetadata(): Promise<boolean>;
   saveProjectMetadata(project: ProjectData): Promise<boolean>;
@@ -86,6 +89,7 @@ export interface ProjectPersistenceController {
     snapshot: ProjectSnapshot,
     selectScreenshotId?: string,
     nativeMutationToken?: number,
+    transition?: ProjectRevisionTransition,
   ): Promise<boolean>;
   adoptAuthoritativeSnapshot(
     snapshot: ProjectSnapshot,
@@ -352,6 +356,8 @@ export function useProjectPersistence({
   const watchId = useRef<string | null>(null);
   const acceptedRevision = useRef<string | null>(null);
   const stoppedRevision = useRef<string | null>(null);
+  const recovering = useRef(false);
+  const recoveredWrites = useRef(new Set<string>());
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -388,6 +394,26 @@ export function useProjectPersistence({
     pendingExternalChange.current = change;
     setExternalChange(change);
   }, []);
+
+  // A native save may have read an external project.json before merging its own content.
+  // Only an unbroken transaction chain can advance the pre-crash metadata CAS baseline.
+  const acceptRecoveryTransition = useCallback(
+    (transition?: ProjectRevisionTransition) => {
+      if (!recovering.current) return;
+      if (transition && recoveredWrites.current.has(transition.after)) return;
+      if (!pendingExternalChange.current && transition && transition.before === acceptedRevision.current) {
+        recoveredWrites.current.add(transition.after);
+        publishAcceptedRevision(transition.after);
+      } else {
+        publishExternalChange({
+          kind: 'external-change',
+          message:
+            'Project details changed during recovery. Your drafts were preserved; review the workspace before reloading.',
+        });
+      }
+    },
+    [publishAcceptedRevision, publishExternalChange],
+  );
 
   const surfaceMetadataConflict = useCallback(
     (conflicts: string[]) => {
@@ -611,7 +637,9 @@ export function useProjectPersistence({
               key = conflictKey;
               continue;
             }
-            if (!pendingExternalChange.current && resultRevision) publishAcceptedRevision(resultRevision);
+            if (recovering.current) acceptRecoveryTransition(result.projectRevisionTransition);
+            else if (!pendingExternalChange.current && resultRevision)
+              publishAcceptedRevision(resultRevision);
             else if (!resultRevision) publishAcceptedRevision(null);
             const serverShot = result.project.screenshots.find((item) => item.id === source.screenshot.id);
             const hasNewerEdits = current.editRevision > saveRevision;
@@ -663,6 +691,7 @@ export function useProjectPersistence({
       return operation;
     },
     [
+      acceptRecoveryTransition,
       evictCleanDrafts,
       overlayTrackedMetadata,
       publishAcceptedRevision,
@@ -699,6 +728,29 @@ export function useProjectPersistence({
     const timer = window.setTimeout(() => void saveKey(draft.key), 650);
     return () => window.clearTimeout(timer);
   }, [draft, saveKey]);
+
+  const handleWatchEvent = useCallback(
+    (event: ProjectWatchEvent) => {
+      if (event.watchId !== watchId.current) return;
+      if (event.kind === 'watch-error') {
+        publishExternalChange({
+          kind: 'watch-error',
+          message: event.message ?? 'Project monitoring stopped.',
+        });
+        return;
+      }
+      if (event.projectRevision && event.projectRevision === acceptedRevision.current) return;
+      // A watch event is never an accepted CAS baseline, including during recovery.
+      publishExternalChange({
+        kind: 'external-change',
+        message:
+          metadataDirty.current || hasDirtyDrafts()
+            ? 'This project changed outside Imnota. Your unsaved work is preserved; save or resolve it before reloading.'
+            : 'This project changed outside Imnota. Reload to review the latest files.',
+      });
+    },
+    [hasDirtyDrafts, publishExternalChange],
+  );
 
   useEffect(() => {
     const bridge = getRendererBridge();
@@ -744,25 +796,7 @@ export function useProjectPersistence({
           message: workflowMessage(reason, 'External project changes cannot be monitored right now.'),
         });
       });
-    const unsubscribe = bridge.onProjectWatchEvent((event) => {
-      if (event.watchId !== watchId.current) return;
-      if (event.kind === 'watch-error') {
-        publishExternalChange({
-          kind: 'watch-error',
-          message: event.message ?? 'Project monitoring stopped.',
-        });
-        return;
-      }
-      if (event.projectRevision && event.projectRevision === acceptedRevision.current) return;
-      // event.projectRevision is deliberately pending-only. It is not an accepted CAS baseline until reload.
-      publishExternalChange({
-        kind: 'external-change',
-        message:
-          metadataDirty.current || hasDirtyDrafts()
-            ? 'This project changed outside Imnota. Your unsaved work is preserved; save or resolve it before reloading.'
-            : 'This project changed outside Imnota. Reload to review the latest files.',
-      });
-    });
+    const unsubscribe = bridge.onProjectWatchEvent(handleWatchEvent);
     return () => {
       cancelled = true;
       resolveReady(false);
@@ -774,7 +808,7 @@ export function useProjectPersistence({
       publishAcceptedRevision(null);
     };
   }, [
-    hasDirtyDrafts,
+    handleWatchEvent,
     publishAcceptedRevision,
     publishExternalChange,
     sessionGeneration,
@@ -889,6 +923,8 @@ export function useProjectPersistence({
       if (mounted.current || !snapshotRef.current) return save();
       const bridge = getRendererBridge();
       let recoveryWatch: string | null = null;
+      recovering.current = true;
+      const unsubscribe = bridge.onProjectWatchEvent(handleWatchEvent);
       try {
         const grant = workflowValue(
           await bridge.startProjectWatch({ projectPath: snapshotRef.current.projectPath }),
@@ -902,15 +938,18 @@ export function useProjectPersistence({
         watchReady.current = Promise.resolve(false);
       }
       try {
-        return await save();
+        const saved = await save();
+        return saved && !pendingExternalChange.current;
       } finally {
+        unsubscribe();
+        recovering.current = false;
         stoppedRevision.current = acceptedRevision.current;
         watchId.current = null;
         watchReady.current = Promise.resolve(false);
         if (recoveryWatch) await bridge.stopProjectWatch({ watchId: recoveryWatch });
       }
     },
-    [publishAcceptedRevision],
+    [handleWatchEvent, publishAcceptedRevision],
   );
 
   const saveProjectMetadata = useCallback(
@@ -1127,12 +1166,19 @@ export function useProjectPersistence({
     queueProjectMetadata,
     flush,
     flushProjectDrafts,
+    async prepareContentSave() {
+      // Recovery attempts independent content even if metadata or a screenshot cannot save.
+      // Its native transaction protects those files; revision adoption cannot bless metadata.
+      if (recovering.current) return true;
+      if (!(await flush())) return false;
+      return !metadataDirty.current || flushProjectMetadata();
+    },
     withReloadWatch,
     flushProjectMetadata,
     saveProjectMetadata,
     beginNativeMutation,
     cancelNativeMutation,
-    async acceptMutationSnapshot(mutationSnapshot, selectScreenshotId, nativeMutationToken) {
+    async acceptMutationSnapshot(mutationSnapshot, selectScreenshotId, nativeMutationToken, transition) {
       const mutatesCurrentProject = snapshotRef.current?.projectPath === mutationSnapshot.projectPath;
       if (!mutatesCurrentProject) {
         await finishNativeMutation(nativeMutationToken, false);
@@ -1148,6 +1194,7 @@ export function useProjectPersistence({
           callbacks.current.onSelectScreenshot(selectScreenshotId);
         return true;
       }
+      if (recovering.current) acceptRecoveryTransition(transition);
       if (!(await flush())) {
         await finishNativeMutation(nativeMutationToken, false);
         return false;
@@ -1170,7 +1217,12 @@ export function useProjectPersistence({
         const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
         ownRevisionGeneration.current += 1;
         lastSavedSnapshot.current = latest.snapshot;
-        publishAcceptedRevision(latest.projectRevision);
+        if (!recovering.current) publishAcceptedRevision(latest.projectRevision);
+        else if (latest.projectRevision !== acceptedRevision.current)
+          publishExternalChange({
+            kind: 'external-change',
+            message: 'The project changed during recovery. Review the workspace before reloading.',
+          });
         const overlaid = overlayTrackedMetadata(latest.snapshot.project);
         const acceptedSnapshot = {
           ...latest.snapshot,
@@ -1189,7 +1241,10 @@ export function useProjectPersistence({
           await finishNativeMutation(nativeMutationToken, false);
           return false;
         }
-        if (!pendingExternalChange.current || pendingExternalChange.current.kind === 'metadata-conflict')
+        if (
+          !pendingExternalChange.current ||
+          (!recovering.current && pendingExternalChange.current.kind === 'metadata-conflict')
+        )
           publishExternalChange(null);
         if (!(await finishNativeMutation(nativeMutationToken, true))) return false;
         if (

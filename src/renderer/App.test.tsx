@@ -231,6 +231,7 @@ describe('feedback controls', () => {
       conflictCreated: false,
       contentRevision: 'b'.repeat(64),
       projectRevision: 'project-content-2',
+      projectRevisionTransition: { before: 'next', after: 'project-content-2' },
     }));
     renderApp(
       {
@@ -878,7 +879,13 @@ describe('feedback controls', () => {
       let persisted = snapshot;
       const saveContentItem = vi.fn(async () => {
         if (failContent) throw new Error('Content disk full');
-        return { snapshot: persisted, itemId: text.id, contentRevision: 'next', conflictCreated: false };
+        return {
+          snapshot: persisted,
+          itemId: text.id,
+          contentRevision: 'next',
+          conflictCreated: false,
+          projectRevisionTransition: { before: 'project-1', after: 'next' },
+        };
       });
       const stopProjectWatch = vi.fn(async () => ({ ok: true as const, value: undefined }));
       const startProjectWatch = vi.fn(async () => ({
@@ -2923,6 +2930,17 @@ describe('feedback controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
     await screen.findByRole('heading', { name: 'Projects' });
+  });
+
+  it('keeps the new project confirmation after adopting its snapshot', async () => {
+    const created = { ...snapshot, projectPath: '/workspace/new-project', projectRevision: 'created' };
+    renderApp({ createProject: vi.fn(async () => created) });
+    await screen.findByTestId('library-full-search');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.side-nav-new-project')!);
+    fireEvent.change(await screen.findByTestId('project-name-input'), { target: { value: 'New project' } });
+    fireEvent.click(screen.getByTestId('create-project-submit'));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.projectPath).toBe(created.projectPath));
+    expect(screen.getByText('Project created')).toBeVisible();
   });
 
   it('does not adopt a delayed project creation after newer navigation', async () => {
