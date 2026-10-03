@@ -52,6 +52,7 @@ import { CANVAS_COMMAND_EVENT, canvasCommandFromEvent, viewportForCanvasCommand 
 import { pixelatedRegion } from '../pixelate';
 import { zoomAt } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
+import { CanvasLoadState } from '../canvas/CanvasLoadState';
 import type { ToolChoice } from './Toolbar';
 import './annotation-canvas.css';
 import './canvas-surface.css';
@@ -66,6 +67,9 @@ interface EditingText {
 
 export interface AnnotationCanvasProps {
   image: ImagePayload | null;
+  /** The screenshot could not be loaded. Without an image, the canvas otherwise reports loading. */
+  loadFailed?: boolean;
+  onRetryLoad?: () => void;
   annotations: Annotation[];
   selectedId: string | null;
   revealAnnotationId?: string | null;
@@ -179,6 +183,8 @@ function annotationsStepNumber(count: number): number {
 
 export function AnnotationCanvas({
   image,
+  loadFailed,
+  onRetryLoad,
   annotations,
   selectedId,
   revealAnnotationId,
@@ -1062,7 +1068,9 @@ export function AnnotationCanvas({
       data-source-height={sourceBounds.height}
     >
       <div className="canvas-meta">
-        <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
+        <span>
+          {image ? `${image.width} × ${image.height}` : loadFailed ? 'Screenshot unavailable' : 'Loading…'}
+        </span>
         <span>
           {Math.round(viewport.scale * 100)}% · {tool === 'select' ? 'Select and move' : `Tool: ${tool}`}
         </span>
@@ -1256,9 +1264,7 @@ export function AnnotationCanvas({
           </Layer>
         </Stage>
       ) : (
-        <div className="canvas-empty">
-          <span>Import a screenshot to begin marking context.</span>
-        </div>
+        <CanvasLoadState failed={!image && Boolean(loadFailed)} onRetry={onRetryLoad} />
       )}
       {editing && editedAnnotation && editedLayout && editorPresentation && (
         <textarea

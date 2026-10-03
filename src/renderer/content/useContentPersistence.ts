@@ -195,6 +195,8 @@ export function useContentPersistence(options: Options) {
     error,
     change,
     flush,
+    /** Dismiss the notice only; a failed save keeps its error state and Retry. */
+    clearError: () => setError(''),
     hasUnsavedChanges: Boolean(
       draft.current &&
       (draft.current.pendingAdoption || draft.current.version !== draft.current.savedVersion),

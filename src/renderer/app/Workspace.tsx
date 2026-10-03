@@ -13,6 +13,7 @@ import type {
 } from '../../shared/types';
 import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -34,6 +35,9 @@ export interface WorkspaceProps {
   onDrawingTitle?(title: string): void;
   onDrawingDescription?(description: string): void;
   image: ImagePayload | null;
+  /** The active screenshot failed to load; without it, a missing image means it is still loading. */
+  imageLoadFailed?: boolean;
+  onRetryImageLoad?(): void;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   revealAnnotationId?: string | null;
@@ -267,20 +271,22 @@ export function Workspace(props: WorkspaceProps) {
               </div>
             )
           ) : item.kind === 'drawing' ? (
-            <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
-              <DrawingEditor
-                key={item.id}
-                source={props.content.source ?? ''}
-                theme={props.resolvedTheme}
-                title={item.title}
-                showInspector={!store.rightPanelOpen}
-                onShowInspector={(trigger) => {
-                  inspectorTriggerRef.current = trigger;
-                  store.set({ rightPanelOpen: true });
-                }}
-                onChange={(source) => props.onContentChange?.({ source })}
-              />
-            </Suspense>
+            <ErrorBoundary variant="panel" resetKey={item.id}>
+              <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
+                <DrawingEditor
+                  key={item.id}
+                  source={props.content.source ?? ''}
+                  theme={props.resolvedTheme}
+                  title={item.title}
+                  showInspector={!store.rightPanelOpen}
+                  onShowInspector={(trigger) => {
+                    inspectorTriggerRef.current = trigger;
+                    store.set({ rightPanelOpen: true });
+                  }}
+                  onChange={(source) => props.onContentChange?.({ source })}
+                />
+              </Suspense>
+            </ErrorBoundary>
           ) : (
             <TextBlockEditor
               key={item.id}
@@ -289,20 +295,24 @@ export function Workspace(props: WorkspaceProps) {
             />
           )
         ) : shot ? (
-          <AnnotationCanvas
-            image={props.image}
-            annotations={props.annotations}
-            selectedId={props.selectedAnnotationId}
-            revealAnnotationId={props.revealAnnotationId}
-            tool={props.tool}
-            onChange={props.onChangeAnnotations}
-            onSelect={props.onSelectAnnotation}
-            onMessage={props.onMessage}
-            stageRef={props.stageRef}
-            onTool={props.onTool}
-            theme={props.resolvedTheme}
-            annotationColor={props.annotationColor}
-          />
+          <ErrorBoundary variant="panel" resetKey={shot.id}>
+            <AnnotationCanvas
+              image={props.image}
+              loadFailed={props.imageLoadFailed}
+              onRetryLoad={props.onRetryImageLoad}
+              annotations={props.annotations}
+              selectedId={props.selectedAnnotationId}
+              revealAnnotationId={props.revealAnnotationId}
+              tool={props.tool}
+              onChange={props.onChangeAnnotations}
+              onSelect={props.onSelectAnnotation}
+              onMessage={props.onMessage}
+              stageRef={props.stageRef}
+              onTool={props.onTool}
+              theme={props.resolvedTheme}
+              annotationColor={props.annotationColor}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="workspace-empty-state">
             <EmptyState

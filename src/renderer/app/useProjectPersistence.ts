@@ -62,6 +62,9 @@ export interface ProjectPersistenceController {
   image: ImagePayload | null;
   annotations: Annotation[];
   loadedScreenshotId: string | null;
+  /** The active screenshot failed to load and is waiting for a retry. */
+  imageLoadFailed: boolean;
+  retryImageLoad(): void;
   saveState: SaveState;
   error: string;
   warning: string;
@@ -364,6 +367,8 @@ export function useProjectPersistence({
   const [warning, setWarning] = useState('');
   const [externalChange, setExternalChange] = useState<ExternalProjectChange | null>(null);
   const [projectRevision, setProjectRevision] = useState<string | null>(null);
+  const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   const publishAcceptedRevision = useCallback((revision: string | null) => {
     acceptedRevision.current = revision;
@@ -493,6 +498,7 @@ export function useProjectPersistence({
           lastAccess: ++accessCounter.current,
         };
         setCurrentDraft(next);
+        setFailedLoadKey(null);
         setSaveState('saved');
         if (content.description !== activeScreenshot.description)
           callbacks.current.onProject({
@@ -502,8 +508,13 @@ export function useProjectPersistence({
             ),
           });
       })
-      .catch((reason) => setError(workflowMessage(reason, 'The screenshot could not be loaded.')));
-  }, [activeKey, activeScreenshot, evictCleanDrafts, setCurrentDraft, snapshot]);
+      .catch((reason) => {
+        // A failure for a screenshot the user already left must not surface on the current one.
+        if (identity !== loadIdentity.current || activeKeyRef.current !== activeKey) return;
+        setFailedLoadKey(activeKey);
+        setError(workflowMessage(reason, 'The screenshot could not be loaded.'));
+      });
+  }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, snapshot]);
 
   const saveKey = useCallback(
     (key: string): Promise<boolean> => {
@@ -1048,6 +1059,12 @@ export function useProjectPersistence({
     image: draft?.image ?? null,
     annotations: draft?.annotations ?? [],
     loadedScreenshotId: draft?.screenshot.id ?? null,
+    imageLoadFailed: activeKey !== null && failedLoadKey === activeKey && !draft,
+    retryImageLoad() {
+      setFailedLoadKey(null);
+      setError('');
+      setLoadAttempt((attempt) => attempt + 1);
+    },
     saveState,
     error,
     warning,

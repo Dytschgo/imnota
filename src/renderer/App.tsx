@@ -46,6 +46,7 @@ import {
 } from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { setReloadProtection } from './app/reload-guard';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -315,6 +316,14 @@ export default function App() {
     },
     [clearToastTimer],
   );
+  // An error notice covers the toast. Keep an Undo offer alive until it can be seen again.
+  const errorVisible = Boolean(error || contentPersistence.error || persistence.error || preferences.error);
+  const hiddenActionToast = errorVisible && toast?.action ? toast.generation : null;
+  useEffect(() => {
+    if (hiddenActionToast === null) return;
+    holdToast();
+    return releaseToast;
+  }, [hiddenActionToast, holdToast, releaseToast]);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -514,6 +523,17 @@ export default function App() {
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [flushAll, persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
+
+  // Error fallbacks reload through the same save protection as closing the window. There is no
+  // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
+  useEffect(() => {
+    setReloadProtection({
+      flush: flushAll,
+      allowUnload: () => {
+        allowClose.current = true;
+      },
+    });
+  }, [flushAll]);
 
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {
@@ -1886,7 +1906,13 @@ export default function App() {
               ? 'saving'
               : 'saved'
         }
-        onRetrySave={contentPersistence.saveState === 'error' ? contentPersistence.retry : undefined}
+        onRetrySave={
+          contentPersistence.saveState === 'error'
+            ? contentPersistence.retry
+            : persistence.saveState === 'error'
+              ? () => void flushAll()
+              : undefined
+        }
         searchShortcut={shortcutLabel('project.search')}
         navigationShortcuts={{
           projects: shortcutLabel('navigation.projects'),
@@ -2109,6 +2135,8 @@ export default function App() {
               });
             }}
             image={persistence.image}
+            imageLoadFailed={persistence.imageLoadFailed}
+            onRetryImageLoad={persistence.retryImageLoad}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
             revealAnnotationId={pendingSearchAnnotationId}
@@ -2266,6 +2294,7 @@ export default function App() {
             onClick={() => {
               setPermissionHelp(null);
               setError('');
+              contentPersistence.clearError();
               persistence.clearError();
               preferences.clearError();
             }}

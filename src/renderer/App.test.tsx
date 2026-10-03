@@ -699,6 +699,169 @@ describe('feedback controls', () => {
     }));
   });
 
+  it('keeps an Undo offer alive while an error notice covers it', async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: false },
+    }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+    await renderEditingProject({
+      deleteScreenshot,
+      undoDeleteScreenshot,
+      pasteImage: vi.fn(async () => {
+        throw new Error('The clipboard does not contain an image.');
+      }),
+    });
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      pasteFromAddMenu();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('error-toast')).toHaveTextContent('The clipboard does not contain an image.');
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS * 2));
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      const undo = screen.getByRole('button', { name: 'Undo' });
+      act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+      expect(undo).toBeInTheDocument();
+      fireEvent.click(undo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        undoToken: 'undo',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, confirmBeforeDeletion: true },
+    }));
+  });
+
+  it('lets the conflict-copy notice be dismissed', async () => {
+    const text = {
+      id: 'text',
+      kind: 'text' as const,
+      collectionId: '001-collection',
+      position: 0,
+      includeInExport: true,
+      createdAt: 'now',
+      updatedAt: 'now',
+      markdownFilename: 'text.md',
+    };
+    const conflict = {
+      ...text,
+      id: 'text-conflict',
+      position: 1,
+      includeInExport: false,
+      markdownFilename: 'conflict.md',
+    };
+    let persisted: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, schemaVersion: 4, contentItems: [text] },
+    };
+    renderApp({
+      loadContentItem: async ({ itemId }) => ({
+        item: itemId === conflict.id ? conflict : text,
+        markdown: 'Original',
+        contentRevision: 'revision',
+      }),
+      saveContentItem: async () => {
+        persisted = { ...persisted, project: { ...persisted.project, contentItems: [text, conflict] } };
+        return {
+          snapshot: persisted,
+          itemId: conflict.id,
+          contentRevision: 'revision-2',
+          conflictCreated: true,
+        };
+      },
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'updated' },
+      }),
+    });
+    await screen.findByTestId('library-full-search');
+    act(() => useAppStore.getState().setProject(persisted));
+    const editor = await screen.findByRole('textbox', { name: 'Markdown' });
+    fireEvent.change(editor, { target: { value: 'Local edit' } });
+    const notice = await screen.findByTestId('error-toast', undefined, { timeout: 3000 });
+    expect(notice).toHaveTextContent('saved as an excluded conflict copy');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+  });
+
+  it('offers Retry save after a screenshot save fails', async () => {
+    const { save, note } = await renderEditingProject();
+    save.mockRejectedValueOnce(new Error('Workspace unavailable'));
+    fireEvent.change(note, { target: { value: 'Unsaved note' } });
+    const retry = await screen.findByRole('button', { name: 'Retry save' }, { timeout: 3000 });
+    expect(screen.getByTestId('save-state')).toHaveTextContent('Save failed');
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Saved'));
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]?.[0].screenshot.description).toBe('Unsaved note');
+    expect(screen.queryByRole('button', { name: 'Retry save' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the rail and inspector usable when the canvas crashes', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    annotationCanvasSpy.mockImplementation(() => {
+      throw new Error('Konva exploded');
+    });
+    try {
+      const { note } = await renderEditingProject();
+      expect(screen.getByTestId('error-fallback-panel')).toHaveTextContent('This item could not be shown');
+      expect(screen.queryByTestId('error-fallback-app')).not.toBeInTheDocument();
+      expect(note).toBeInTheDocument();
+      expect(screen.getByTestId('add-item-trigger')).toBeInTheDocument();
+      annotationCanvasSpy.mockReset();
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(screen.queryByTestId('error-fallback-panel')).not.toBeInTheDocument();
+    } finally {
+      annotationCanvasSpy.mockReset();
+      consoleError.mockRestore();
+    }
+  });
+
+  it('tells the canvas when the screenshot failed to load and retries on request', async () => {
+    const loadScreenshotContent = vi
+      .fn<ImnotaBridge['loadScreenshotContent']>()
+      .mockRejectedValueOnce(new Error('File is locked'))
+      .mockResolvedValue({
+        image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+        annotations: [],
+        description: 'Original note',
+        contentRevision: 'a'.repeat(64),
+      });
+    await renderEditingProject({ loadScreenshotContent });
+    const lastProps = () =>
+      annotationCanvasSpy.mock.lastCall?.[0] as {
+        image: unknown;
+        loadFailed?: boolean;
+        onRetryLoad?: () => void;
+      };
+    await waitFor(() => expect(lastProps().loadFailed).toBe(true));
+    expect(lastProps().image).toBeNull();
+    act(() => lastProps().onRetryLoad?.());
+    await waitFor(() => expect(lastProps().image).not.toBeNull());
+    expect(lastProps().loadFailed).toBe(false);
+    expect(loadScreenshotContent).toHaveBeenCalledTimes(2);
+  });
+
   it('deletes the screenshot captured before confirmation when the selection changes', async () => {
     const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
       snapshot,
