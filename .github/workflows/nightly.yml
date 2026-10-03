@@ -16,12 +16,13 @@ jobs:
     # workflow_dispatch can be launched from another ref; nightly candidates may only originate on main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
       version: ${{ steps.candidate.outputs.version }}
       tag: ${{ steps.candidate.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: candidate
@@ -45,19 +46,23 @@ jobs:
   quality:
     needs: guard
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.guard.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec install-electron
+      # Reads only the checked-out index, so the shallow candidate checkout is enough.
+      - name: Scan tracked files for credentials and forbidden data paths
+        run: node scripts/secret-scan.mjs
       - run: npm ci --prefix share-service
       - run: npm test --prefix share-service
       - run: npm audit --prefix share-service --omit=dev --audit-level=high
@@ -87,14 +92,15 @@ jobs:
             platform: macos
             command: pnpm exec electron-builder --mac --universal --publish never --config.extraMetadata.version=${{ needs.guard.outputs.version }} --config.publish.channel=nightly --config.publish.releaseType=prerelease
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.guard.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -120,7 +126,7 @@ jobs:
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-nightly-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
         if: always() && matrix.platform == 'windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-visual-evidence-nightly
           path: |
@@ -131,7 +137,7 @@ jobs:
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
         env:
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-${{ matrix.platform }}
           path: |
@@ -147,13 +153,14 @@ jobs:
   publish:
     needs: [guard, quality, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.guard.outputs.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: nightly-*
           path: release-assets
@@ -161,7 +168,7 @@ jobs:
       - name: Validate nightly manifests and assets
         run: node scripts/stage-release-assets.mjs release-assets '${{ needs.guard.outputs.version }}' nightly nightly
       - name: Create draft prerelease with verified assets
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.guard.outputs.tag }}
           target_commitish: ${{ needs.guard.outputs.sha }}
@@ -172,7 +179,7 @@ jobs:
           files: release-assets/*
           fail_on_unmatched_files: true
       - name: Publish the verified prerelease
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.guard.outputs.tag }}
           target_commitish: ${{ needs.guard.outputs.sha }}
