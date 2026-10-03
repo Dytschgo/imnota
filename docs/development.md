@@ -75,6 +75,8 @@ For the actual workspace export process, run `corepack pnpm build`, then `corepa
 
 Native clipboard checks establish which formats Imnota wrote, not which formats an external editor accepts. Captured layouts still need visual inspection. Performance results apply to the tested machine and fixture, not every Windows or macOS device.
 
+The standard macOS packaged onboarding walkthrough correlates its single native copy click with a new attempt ID and terminal result, rather than accepting the preceding success label. A pending attempt clears the previous copy status and warning. For **Copy files** and **Files + text**, `onboarding-copy-<attempt>-<action>.json` records exact ordered path comparisons, counts, Markdown equality/length, HTML/image state, and read-only pasteboard types/change counts before and after the read. Unrelated clipboard text is never retained; paths whose realpaths are outside the synthetic handoff are redacted. Paths through aliases into the handoff retain both the observed and resolved path for diagnosis, without relaxing the exact-path assertion. Pasteboard type names use a fixed native-format allowlist; unknown type names are replaced by a count. A change count difference fails the read-consistency check without recopying or waiting for matching content. CI, nightly and stable package jobs retain the standard Mac report and captures on failure as `mac-walkthrough-evidence-*`, outside publication asset patterns. Windows unit checks cannot replace the corrected candidate's packaged Mac walkthrough and focused bundle copy/paste gate.
+
 ## Installer verification
 
 The quick installers resolve the stable tag once and verify the asset against
