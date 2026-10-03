@@ -17,13 +17,14 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           package-manager-cache: false
@@ -45,6 +46,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: share-service
@@ -54,9 +56,9 @@ jobs:
         working-directory: .
         shell: bash
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN_APPLICATION == 'true'
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 24
@@ -75,28 +77,33 @@ jobs:
     env:
       RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Documentation-only PR
         if: env.RUN_APPLICATION != 'true'
         working-directory: .
         shell: bash
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec install-electron
         if: env.RUN_APPLICATION == 'true'
+      # Reads only the checked-out index (git ls-files, git show :path), so the default shallow
+      # checkout is enough. Runs for documentation-only PRs too: prose can carry a pasted credential.
+      - name: Scan tracked files for credentials and forbidden data paths
+        run: node scripts/secret-scan.mjs
       - run: pnpm format:check
       - name: Lint workflow files
         if: env.RUN_APPLICATION == 'true'
         # The container bundles shellcheck; style-level hints stay advisory, warnings and errors fail.
-        run: docker run --rm --volume "${PWD}:/repo" --workdir /repo --env SHELLCHECK_OPTS=--severity=warning rhysd/actionlint:1.7.12 -color
+        run: docker run --rm --volume "${PWD}:/repo" --workdir /repo --env SHELLCHECK_OPTS=--severity=warning rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
       - run: pnpm lint
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm typecheck
@@ -145,19 +152,21 @@ jobs:
           - os: macos-latest
             command: pnpm package:mac
     runs-on: ${{ matrix.os }}
+    # Covers two packaged walkthroughs per OS, each with its own six-minute launcher deadline.
+    timeout-minutes: 45
     steps:
       - name: Documentation-only PR
         if: env.RUN_APPLICATION != 'true'
         working-directory: .
         shell: bash
         run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN_APPLICATION == 'true'
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         if: env.RUN_APPLICATION == 'true'
         with:
           version: 11.25.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.RUN_APPLICATION == 'true'
         with:
           node-version: 22
@@ -205,7 +214,7 @@ jobs:
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
         if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'windows-latest')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-visual-evidence
           path: |
@@ -222,13 +231,13 @@ jobs:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
       - name: Retain bundle copy evidence
         if: env.RUN_APPLICATION == 'true' && always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: clipboard-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
           if-no-files-found: ignore
       - name: Retain review installers and build diagnostics
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: env.RUN_APPLICATION == 'true'
         with:
           name: imnota-${{ matrix.os }}
@@ -248,9 +257,11 @@ jobs:
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The action reads the dependency diff and writes a job summary. It posts no PR comment
+    # (comment-summary-in-pr is unset), so it needs no pull-requests permission.
     permissions:
       contents: read
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

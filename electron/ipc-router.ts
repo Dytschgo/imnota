@@ -28,6 +28,7 @@ const UPDATE_PENDING = 'Imnota is restarting to install an update.';
  */
 export class IpcRouter {
   private pending: Promise<unknown> = Promise.resolve();
+  private readonly lanes: Array<() => Promise<unknown>> = [];
 
   constructor(private readonly options: IpcRouterOptions) {}
 
@@ -38,9 +39,30 @@ export class IpcRouter {
     return result;
   }
 
-  /** Settle once every operation queued so far has finished. */
+  /**
+   * A separate serial queue for long network work. Its operations stay ordered among
+   * themselves without holding the filesystem queue, so saves never wait on a request.
+   * Local file work inside such an operation must still go through `enqueue`.
+   */
+  lane(): <T>(run: () => T | Promise<T>) => Promise<T> {
+    let pending: Promise<unknown> = Promise.resolve();
+    this.lanes.push(() => pending);
+    return (run) => {
+      const result = pending.then(run);
+      pending = result.catch(() => undefined);
+      return result;
+    };
+  }
+
+  /** Settle once every operation queued so far, in the queue or a lane, has finished. */
   async drain(): Promise<void> {
-    await this.pending;
+    // A lane operation may queue file work and the reverse, so wait until both are quiet.
+    for (;;) {
+      const waiting = [this.pending, ...this.lanes.map((current) => current())];
+      await Promise.all(waiting);
+      const latest = [this.pending, ...this.lanes.map((current) => current())];
+      if (latest.every((current, index) => current === waiting[index])) return;
+    }
   }
 
   private assertTrusted(event: IpcMainInvokeEvent): void {
