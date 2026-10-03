@@ -100,3 +100,67 @@ export async function readMacClipboardFiles(run: RunOsascript = nativeOsascript)
     throw new Error('The macOS clipboard returned an unexpected file list.');
   return kept;
 }
+
+export interface MacClipboardObservation {
+  changeCount: number;
+  types: string[];
+  redactedTypeCount?: number;
+}
+
+const EVIDENCE_PASTEBOARD_TYPES = new Set([
+  'public.file-url',
+  'public.url',
+  'public.utf8-plain-text',
+  'public.plain-text',
+  'public.html',
+  'public.png',
+  'public.tiff',
+  'NSStringPboardType',
+  'NSFilenamesPboardType',
+  'NSHTMLPboardType',
+  'NSTIFFPboardType',
+  'Apple URL pasteboard type',
+  'CorePasteboardFlavorType 0x6675726C',
+]);
+
+/** Only fixed native format identifiers may enter smoke logs or artifacts. */
+export function sanitizeMacClipboardObservation(
+  observation: MacClipboardObservation,
+): MacClipboardObservation {
+  const types = [...new Set(observation.types.filter((type) => EVIDENCE_PASTEBOARD_TYPES.has(type)))];
+  const redactedTypeCount =
+    (observation.redactedTypeCount ?? 0) +
+    observation.types.filter((type) => !EVIDENCE_PASTEBOARD_TYPES.has(type)).length;
+  return { changeCount: observation.changeCount, types, ...(redactedTypeCount ? { redactedTypeCount } : {}) };
+}
+
+/** Read-only native metadata; never reads or returns clipboard payloads. */
+export async function readMacClipboardObservation(
+  run: RunOsascript = nativeOsascript,
+): Promise<MacClipboardObservation> {
+  const value: unknown = JSON.parse(
+    await run([
+      '-l',
+      'JavaScript',
+      '-e',
+      `
+    ObjC.import('AppKit');
+    function run() {
+      const board = $.NSPasteboard.generalPasteboard;
+      return JSON.stringify({ changeCount: Number(board.changeCount), types: ObjC.deepUnwrap(board.types) || [] });
+    }
+  `,
+    ]),
+  );
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('changeCount' in value) ||
+    !Number.isSafeInteger(value.changeCount) ||
+    !('types' in value) ||
+    !Array.isArray(value.types) ||
+    !value.types.every((type) => typeof type === 'string')
+  )
+    throw new Error('The macOS clipboard returned invalid observation metadata.');
+  return sanitizeMacClipboardObservation({ changeCount: value.changeCount as number, types: value.types });
+}

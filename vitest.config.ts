@@ -13,6 +13,15 @@ export default defineConfig({
     hookTimeout: windows ? 30_000 : 10_000,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/renderer/**/*.{ts,tsx}', 'src/shared/**/*.ts', 'electron/**/*.{ts,cts}'],
+      exclude: ['**/*.test.{ts,tsx,cts}', '**/__tests__/**', 'src/test/**', '**/*.d.ts'],
+      reporter: ['text', 'html', 'json-summary'],
+      reportsDirectory: 'coverage',
+      reportOnFailure: true,
+      // Diagnostic only: no percentage thresholds or automatic baseline changes.
+    },
     // The service uses node:test and its own Node/SQLite runtime, exercised separately in CI.
     exclude: [
       ...configDefaults.exclude,

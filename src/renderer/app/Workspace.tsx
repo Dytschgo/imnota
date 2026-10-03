@@ -13,6 +13,7 @@ import type {
 } from '../../shared/types';
 import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -34,6 +35,9 @@ export interface WorkspaceProps {
   onDrawingTitle?(title: string): void;
   onDrawingDescription?(description: string): void;
   image: ImagePayload | null;
+  /** The active screenshot failed to load; without it, a missing image means it is still loading. */
+  imageLoadFailed?: boolean;
+  onRetryImageLoad?(): void;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   revealAnnotationId?: string | null;
@@ -47,6 +51,8 @@ export interface WorkspaceProps {
   canRedo: boolean;
   canUndoDescription: boolean;
   shortcutLabels: Partial<Record<string, string>>;
+  /** Live bindings for moving the focused rail item; null when the user cleared one. */
+  reorderBindings?: { up: string | null; down: string | null };
   onTool(tool: 'select' | AnnotationKind): void;
   onColor(color: string): void;
   onChangeAnnotations(next: Annotation[]): void;
@@ -219,6 +225,8 @@ export function Workspace(props: WorkspaceProps) {
         captureInProgress={props.captureInProgress}
         captureDisabledLabel={props.captureDisabledLabel}
         captureShortcut={props.captureShortcut}
+        deleteShortcut={props.shortcutLabels.delete}
+        reorderBindings={props.reorderBindings}
         onDeleteItem={props.onDeleteItem}
       />
       <div className="canvas-column">
@@ -267,20 +275,22 @@ export function Workspace(props: WorkspaceProps) {
               </div>
             )
           ) : item.kind === 'drawing' ? (
-            <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
-              <DrawingEditor
-                key={item.id}
-                source={props.content.source ?? ''}
-                theme={props.resolvedTheme}
-                title={item.title}
-                showInspector={!store.rightPanelOpen}
-                onShowInspector={(trigger) => {
-                  inspectorTriggerRef.current = trigger;
-                  store.set({ rightPanelOpen: true });
-                }}
-                onChange={(source) => props.onContentChange?.({ source })}
-              />
-            </Suspense>
+            <ErrorBoundary variant="panel" resetKey={item.id}>
+              <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
+                <DrawingEditor
+                  key={item.id}
+                  source={props.content.source ?? ''}
+                  theme={props.resolvedTheme}
+                  title={item.title}
+                  showInspector={!store.rightPanelOpen}
+                  onShowInspector={(trigger) => {
+                    inspectorTriggerRef.current = trigger;
+                    store.set({ rightPanelOpen: true });
+                  }}
+                  onChange={(source) => props.onContentChange?.({ source })}
+                />
+              </Suspense>
+            </ErrorBoundary>
           ) : (
             <TextBlockEditor
               key={item.id}
@@ -289,20 +299,24 @@ export function Workspace(props: WorkspaceProps) {
             />
           )
         ) : shot ? (
-          <AnnotationCanvas
-            image={props.image}
-            annotations={props.annotations}
-            selectedId={props.selectedAnnotationId}
-            revealAnnotationId={props.revealAnnotationId}
-            tool={props.tool}
-            onChange={props.onChangeAnnotations}
-            onSelect={props.onSelectAnnotation}
-            onMessage={props.onMessage}
-            stageRef={props.stageRef}
-            onTool={props.onTool}
-            theme={props.resolvedTheme}
-            annotationColor={props.annotationColor}
-          />
+          <ErrorBoundary variant="panel" resetKey={shot.id}>
+            <AnnotationCanvas
+              image={props.image}
+              loadFailed={props.imageLoadFailed}
+              onRetryLoad={props.onRetryImageLoad}
+              annotations={props.annotations}
+              selectedId={props.selectedAnnotationId}
+              revealAnnotationId={props.revealAnnotationId}
+              tool={props.tool}
+              onChange={props.onChangeAnnotations}
+              onSelect={props.onSelectAnnotation}
+              onMessage={props.onMessage}
+              stageRef={props.stageRef}
+              onTool={props.onTool}
+              theme={props.resolvedTheme}
+              annotationColor={props.annotationColor}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="workspace-empty-state">
             <EmptyState
@@ -394,7 +408,11 @@ export function Workspace(props: WorkspaceProps) {
                     ? 'The description is copied into the prompt Markdown under this drawing.'
                     : 'Use headings, lists, and code blocks to describe the task.'}
                 </p>
-                <Button variant="soft" onClick={() => void props.onDuplicateContent?.()}>
+                <Button
+                  variant="soft"
+                  title={props.shortcutLabels.duplicate && `Duplicate (${props.shortcutLabels.duplicate})`}
+                  onClick={() => void props.onDuplicateContent?.()}
+                >
                   <Copy size={15} aria-hidden="true" />
                   Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
                 </Button>
@@ -424,6 +442,7 @@ export function Workspace(props: WorkspaceProps) {
                   props.onSelectAnnotation(null);
                 }}
                 onDuplicate={props.onDuplicate}
+                duplicateShortcut={props.shortcutLabels.duplicate}
               />
             )}
           </div>

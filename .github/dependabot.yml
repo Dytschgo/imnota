@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+  # The share service has its own npm lockfile. Security updates reach it without this entry;
+  # version updates do not.
+  - package-ecosystem: npm
+    directory: /share-service
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+  # Keeps the commit-SHA pins and their trailing version comments in the workflows current.
   - package-ecosystem: github-actions
     directory: /
     schedule:

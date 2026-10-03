@@ -46,6 +46,7 @@ import {
 } from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { setReloadProtection } from './app/reload-guard';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -91,6 +92,7 @@ type ToastNotification = {
   action?: { label: string; run(): void };
   durationMs: number;
   generation: number;
+  projectPath: string | null;
 };
 
 export function userFacingErrorMessage(message: string): string {
@@ -131,6 +133,7 @@ export default function App() {
   const toastTimer = useRef<number | null>(null);
   const toastGeneration = useRef(0);
   const toastHold = useRef(0);
+  const toastErrorPaused = useRef(false);
   const toastLifetime = useRef<{ generation: number; durationMs: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
@@ -193,12 +196,10 @@ export default function App() {
   const contentPersistence = useContentPersistence({
     snapshot: store.snapshot,
     itemId: store.activeScreenshotId,
-    beforeSave: async () => {
-      if (!(await persistence.flush())) return false;
-      return !persistence.hasPendingProjectMetadata() || persistence.flushProjectMetadata();
-    },
+    beforeSave: persistence.prepareContentSave,
     beginMutation: persistence.beginNativeMutation,
-    acceptSnapshot: (snapshot, id, token) => persistence.acceptMutationSnapshot(snapshot, id, token),
+    acceptSnapshot: (snapshot, id, token, transition) =>
+      persistence.acceptMutationSnapshot(snapshot, id, token, transition),
     cancelMutation: persistence.cancelNativeMutation,
   });
   useEffect(() => {
@@ -290,7 +291,13 @@ export default function App() {
       const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
       toastHold.current = 0;
       toastLifetime.current = { generation, durationMs };
-      setToast({ message, action, durationMs, generation });
+      setToast({
+        message,
+        action,
+        durationMs,
+        generation,
+        projectPath: useAppStore.getState().snapshot?.projectPath ?? null,
+      });
       armToastTimer(generation, durationMs);
     },
     [armToastTimer],
@@ -302,7 +309,7 @@ export default function App() {
   const releaseToast = useCallback(() => {
     toastHold.current = Math.max(0, toastHold.current - 1);
     const lifetime = toastLifetime.current;
-    if (toastHold.current > 0 || !lifetime) return;
+    if (toastHold.current > 0 || toastErrorPaused.current || !lifetime) return;
     armToastTimer(lifetime.generation, lifetime.durationMs);
   }, [armToastTimer]);
   const dismissToast = useCallback(
@@ -315,6 +322,23 @@ export default function App() {
     },
     [clearToastTimer],
   );
+  // An error notice covers the toast. Keep an Undo offer alive until it can be seen again.
+  const errorVisible = Boolean(error || contentPersistence.error || persistence.error || preferences.error);
+  const hiddenActionToast = errorVisible && toast?.action ? toast.generation : null;
+  useEffect(() => {
+    toastErrorPaused.current = hiddenActionToast !== null;
+    // Removing the toast does not emit mouseleave. Discard holds from its old DOM node.
+    toastHold.current = 0;
+    if (hiddenActionToast !== null) clearToastTimer();
+    else if (toastLifetime.current) {
+      const { generation, durationMs } = toastLifetime.current;
+      armToastTimer(generation, durationMs);
+    }
+  }, [hiddenActionToast, clearToastTimer, armToastTimer]);
+  useEffect(() => {
+    if (toast?.action && toast.projectPath !== (store.snapshot?.projectPath ?? null))
+      dismissToast(toast.generation);
+  }, [store.snapshot?.projectPath, toast, dismissToast]);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -456,10 +480,20 @@ export default function App() {
       window.clearTimeout(metadataTimer.current);
       metadataTimer.current = null;
     }
-    if (!(await contentPersistence.flush())) return false;
-    if (!(await persistence.flush())) return false;
-    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
-    return true;
+    // A failed leg must not prevent independent drafts from reaching disk.
+    let saved = true;
+    for (const save of [
+      () => contentPersistence.flush(),
+      () => persistence.flushProjectDrafts(),
+      () => persistence.flushProjectMetadata(),
+    ]) {
+      try {
+        if (!(await save())) saved = false;
+      } catch {
+        saved = false;
+      }
+    }
+    return saved;
   }, [persistence, contentPersistence]);
 
   const currentLocation = useCallback((): NavigationLocation => {
@@ -514,6 +548,17 @@ export default function App() {
     window.addEventListener('beforeunload', beforeUnload);
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [flushAll, persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
+
+  // Error fallbacks reload through the same save protection as closing the window. There is no
+  // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
+  useEffect(() => {
+    setReloadProtection({
+      flush: () => persistence.withReloadWatch(flushAll),
+      allowUnload: () => {
+        allowClose.current = true;
+      },
+    });
+  }, [flushAll, persistence]);
 
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {
@@ -1749,6 +1794,8 @@ export default function App() {
     (id: ShortcutActionId) => formatShortcut(resolvedShortcuts[id], platform),
     [platform, resolvedShortcuts],
   );
+  /** Tooltip text for a binding; undefined when the action has no shortcut so the hint is omitted. */
+  const shortcutHint = (id: ShortcutActionId) => (resolvedShortcuts[id] ? shortcutLabel(id) : undefined);
   const activeCaptureCollection = store.snapshot?.project.collections.find(
     (item) => item.id === store.activeCollectionId,
   );
@@ -1765,13 +1812,24 @@ export default function App() {
     setTool(next);
     if (next !== 'select') lastAnnotateTool.current = next;
   }
+  const canGoBack = navigationStack.back.length > 1;
+  const canGoForward = navigationStack.forward.length > 0;
+  const activeItem = orderedShots.find((item) => item.id === store.activeScreenshotId);
   const handlers: Partial<Record<ShortcutActionId, (event: KeyboardEvent) => void>> = {
     'project.new': () => setDialog('new-project'),
     'project.open': () => void openProjectDialog(),
     'project.search': () => void openProjectSearch(),
+    // Same guards as the top-bar buttons: nothing happens at either end of the history.
+    'navigation.back': () => {
+      if (canGoBack) void restoreNavigation('back');
+    },
+    'navigation.forward': () => {
+      if (canGoForward) void restoreNavigation('forward');
+    },
     'navigation.projects': () => void navigate('projects'),
     'navigation.recent': () => void navigate('recent'),
     'navigation.favourites': () => void navigate('favourites'),
+    'navigation.settings': () => void navigate('settings'),
     'edit.save': () => void flushAll(),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
@@ -1812,6 +1870,10 @@ export default function App() {
     'tool.rectangle': () => selectTool('rectangle'),
     'tool.highlight': () => selectTool('highlight'),
     'tool.step': () => selectTool('step'),
+    'tool.redact': () => selectTool('blur'),
+    'tool.crop': () => selectTool('crop'),
+    'tool.freehand': () => selectTool('pen'),
+    'tool.ellipse': () => selectTool('ellipse'),
     'screenshot.previous': () => {
       const index = orderedShots.findIndex((item) => item.id === store.activeScreenshotId);
       if (index > 0) void selectShot(orderedShots[index - 1]!.id);
@@ -1827,6 +1889,19 @@ export default function App() {
     'panel.toggleInspector': () => store.set({ rightPanelOpen: !store.rightPanelOpen }),
     'canvas.fit': () => dispatchCanvasCommand(stageRef.current, 'fit'),
     'canvas.actualSize': () => dispatchCanvasCommand(stageRef.current, 'actual-size'),
+    'canvas.zoomIn': () => dispatchCanvasCommand(stageRef.current, 'zoom-in'),
+    'canvas.zoomOut': () => dispatchCanvasCommand(stageRef.current, 'zoom-out'),
+    'item.duplicate': () => {
+      if (!activeItem) return;
+      void (activeItem.kind === 'screenshot' ? duplicateScreenshot() : mutateContent('duplicate'));
+    },
+    // The request functions own the confirmation preference and the Undo toast.
+    'item.delete': () => {
+      if (!activeItem) return;
+      void (activeItem.kind === 'screenshot'
+        ? requestScreenshotDeletion(activeItem.id)
+        : requestContentDeletion(activeItem.id));
+    },
     'collection.new': () =>
       document.querySelector<HTMLButtonElement>('[data-testid="new-collection"]')?.click(),
     'collection.overallContext': () => {
@@ -1886,15 +1961,24 @@ export default function App() {
               ? 'saving'
               : 'saved'
         }
-        onRetrySave={contentPersistence.saveState === 'error' ? contentPersistence.retry : undefined}
+        onRetrySave={
+          contentPersistence.saveState === 'error'
+            ? contentPersistence.retry
+            : persistence.saveState === 'error'
+              ? () => void flushAll()
+              : undefined
+        }
         searchShortcut={shortcutLabel('project.search')}
         navigationShortcuts={{
           projects: shortcutLabel('navigation.projects'),
           recent: shortcutLabel('navigation.recent'),
           favourites: shortcutLabel('navigation.favourites'),
+          back: shortcutHint('navigation.back'),
+          forward: shortcutHint('navigation.forward'),
+          settings: shortcutHint('navigation.settings'),
         }}
-        canGoBack={navigationStack.back.length > 1}
-        canGoForward={navigationStack.forward.length > 0}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
         onBack={() => restoreNavigation('back')}
         onForward={() => restoreNavigation('forward')}
         onNavigate={navigate}
@@ -2109,6 +2193,8 @@ export default function App() {
               });
             }}
             image={persistence.image}
+            imageLoadFailed={persistence.imageLoadFailed}
+            onRetryImageLoad={persistence.retryImageLoad}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
             revealAnnotationId={pendingSearchAnnotationId}
@@ -2132,6 +2218,18 @@ export default function App() {
               redo: shortcutLabel('edit.redo'),
               fit: shortcutLabel('canvas.fit'),
               actualSize: shortcutLabel('canvas.actualSize'),
+              blur: shortcutHint('tool.redact'),
+              crop: shortcutHint('tool.crop'),
+              pen: shortcutHint('tool.freehand'),
+              ellipse: shortcutHint('tool.ellipse'),
+              zoomIn: shortcutHint('canvas.zoomIn'),
+              zoomOut: shortcutHint('canvas.zoomOut'),
+              duplicate: shortcutHint('item.duplicate'),
+              delete: shortcutHint('item.delete'),
+            }}
+            reorderBindings={{
+              up: resolvedShortcuts['item.moveUp'],
+              down: resolvedShortcuts['item.moveDown'],
             }}
             onTool={selectTool}
             onColor={(color) => {
@@ -2266,6 +2364,7 @@ export default function App() {
             onClick={() => {
               setPermissionHelp(null);
               setError('');
+              contentPersistence.clearError();
               persistence.clearError();
               preferences.clearError();
             }}
