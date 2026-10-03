@@ -1058,6 +1058,111 @@ describe('feedback controls', () => {
     expect(canvas().annotations).toEqual([]);
   });
 
+  it('moves through the navigation history with the Back and Forward shortcuts', async () => {
+    renderApp();
+    await screen.findByTestId('library-full-search');
+    // Nothing to go back to yet: the shortcut is as inert as the disabled button.
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    expect(useAppStore.getState().view).toBe('projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByTestId('settings-view');
+    expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('title', 'Back (Alt + ArrowLeft)');
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(screen.getByRole('button', { name: 'Forward' })).toHaveAttribute(
+      'title',
+      'Forward (Alt + ArrowRight)',
+    );
+    fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
+    await screen.findByTestId('settings-view');
+
+    fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useAppStore.getState().view).toBe('settings');
+  });
+
+  it('runs the More tools, zoom, duplicate and Settings shortcuts', async () => {
+    const duplicateScreenshot = vi.fn<ImnotaBridge['duplicateScreenshot']>(async () => snapshot);
+    await renderEditingProject({ duplicateScreenshot });
+    for (const [key, tool] of [
+      ['m', 'blur'],
+      ['c', 'crop'],
+      ['p', 'pen'],
+      ['o', 'ellipse'],
+    ] as const) {
+      fireEvent.keyDown(window, { key });
+      await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool }));
+    }
+
+    const canvasProps = annotationCanvasSpy.mock.calls.at(-1)?.[0] as {
+      stageRef: { current: { container(): HTMLElement } | null };
+    };
+    const container = document.createElement('div');
+    canvasProps.stageRef.current = { container: () => container };
+    const commands: CanvasCommand[] = [];
+    container.addEventListener(CANVAS_COMMAND_EVENT, (event) => {
+      commands.push((event as CustomEvent<CanvasCommand>).detail);
+    });
+    fireEvent.keyDown(window, { key: '=' });
+    fireEvent.keyDown(window, { key: '-' });
+    expect(commands).toEqual(['zoom-in', 'zoom-out']);
+    expect(screen.getByRole('button', { name: 'Zoom in (=)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom out (-)' })).toBeInTheDocument();
+
+    // Typing in a field never triggers the single-key tools or item actions.
+    const note = screen.getByRole('textbox', { name: /description/i });
+    fireEvent.keyDown(note, { key: 'd', ctrlKey: true });
+    expect(duplicateScreenshot).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(duplicateScreenshot).toHaveBeenCalledOnce());
+
+    fireEvent.keyDown(window, { key: ',', ctrlKey: true });
+    await screen.findByTestId('settings-view');
+  });
+
+  it('deletes the current screenshot from its shortcut through the confirmation dialog', async () => {
+    useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot,
+      undoToken: 'undo',
+    }));
+    await renderEditingProject({ deleteScreenshot });
+    expect(screen.getByTestId('item-delete-shot')).toHaveAttribute('title', 'Delete (Ctrl + Delete)');
+
+    fireEvent.keyDown(window, { key: 'Delete', ctrlKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Delete this screenshot?' })).toBeInTheDocument();
+    expect(deleteScreenshot).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Move to trash' }));
+    await waitFor(() =>
+      expect(deleteScreenshot).toHaveBeenCalledWith({
+        projectPath: '/workspace/project',
+        screenshotId: 'shot',
+      }),
+    );
+  });
+
+  it('keeps a stored custom binding when a newer default uses the same key', async () => {
+    await renderEditingProject({
+      getPreferenceSettings: async () => ({
+        ok: true,
+        value: {
+          settings: {
+            ...DEFAULT_PREFERENCE_SETTINGS,
+            // Saved before Redact claimed M by default.
+            shortcuts: { bindings: { 'tool.text': 'M' } },
+          },
+          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
+        },
+      }),
+    });
+    fireEvent.keyDown(window, { key: 'm' });
+    await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'text' }));
+  });
+
   it('runs an available Terminal update from the app banner', async () => {
     const downloadUpdate = vi.fn(async () => {});
     renderApp({
