@@ -105,7 +105,12 @@ export function localAgentAccessHttpSnippet(url = localAgentAccessUrl()): string
   return `${JSON.stringify({ mcpServers: { imnota: { type: 'http', url } } }, null, 2)}\n`;
 }
 
-export function localAgentAccessStdioSnippet(command = AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER): string {
+export function localAgentAccessStdioSnippet(
+  command = AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER,
+  platformValue = typeof navigator === 'undefined' ? '' : navigator.platform,
+): string {
+  if (platformValue.toLowerCase().startsWith('win'))
+    return `${JSON.stringify({ mcpServers: { imnota: { command: 'node', args: ['<Imnota-install-directory>/resources/imnota-mcp.mjs'] } } }, null, 2)}\n`;
   return `${JSON.stringify({ mcpServers: { imnota: { command, args: ['--mcp'] } } }, null, 2)}\n`;
 }
 
@@ -119,11 +124,13 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     '',
     'Server name: imnota',
     `Transport (preferred): Streamable HTTP at ${url}. Loopback only, no authentication, no CORS.`,
-    `Transport (alternative, if you cannot use HTTP): stdio. Run the Imnota executable with the argument --mcp (for example "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}" --mcp).`,
+    `Transport (alternative on macOS/Linux, if you cannot use HTTP): stdio. Run the Imnota executable with the argument --mcp (for example "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}" --mcp).`,
+    'Windows stdio: install Node.js 24+ and run node with <Imnota-install-directory>/resources/imnota-mcp.mjs as its only argument. Use the installed app, not the portable launcher. The relay launches the actual Imnota --mcp server; bare Imnota.exe --mcp is not a strict stdio command.',
     '',
     'Do the setup yourself using the config file and format this agent normally uses. If your format is a JSON "mcpServers" map, the entries are:',
     `  HTTP:  { "imnota": { "type": "http", "url": "${url}" } }`,
-    `  stdio: { "imnota": { "command": "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}", "args": ["--mcp"] } }`,
+    `  macOS/Linux stdio: { "imnota": { "command": "${AGENT_ACCESS_STDIO_COMMAND_PLACEHOLDER}", "args": ["--mcp"] } }`,
+    '  Windows stdio: { "imnota": { "command": "node", "args": ["<Imnota-install-directory>/resources/imnota-mcp.mjs"] } }',
     'Tell me which file you changed. Do not ask me to paste configuration.',
     '',
     'Requirements: Imnota must be running with "Allow local agent access" enabled in Settings → Features; otherwise the connection is refused. Nothing is uploaded and no hosted model is called.',

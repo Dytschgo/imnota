@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
+import { StringDecoder } from 'node:string_decoder';
 import { spawn, spawnSync } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, lstat, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   createRunDirectory,
   removeRunDirectory,
@@ -14,11 +15,17 @@ import {
 } from './smoke-process.mjs';
 
 // A real packaged process, one request at a time, no retry or replay. Bounds apply before parsing.
-export async function runMcpProcess(executable, args, env, exercise, { timeoutMs = 45_000 } = {}) {
-  const child = spawn(executable, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+export async function runMcpProcess(executable, args, env, exercise, { timeoutMs = 45_000, launch } = {}) {
+  const launched = launch?.(executable, env, args);
+  const child =
+    launched?.child ?? spawn(executable, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const protocolStdout = launched?.stdout ?? child.stdout;
   let pending;
   let buffer = '';
   let stdoutBytes = 0;
+  let stdoutPrefix = Buffer.alloc(0);
+  let rawStdoutBytes = 0;
+  const decoder = new StringDecoder('utf8');
   let stderr = '';
   let failure;
   let closed = false;
@@ -39,6 +46,7 @@ export async function runMcpProcess(executable, args, env, exercise, { timeoutMs
       if (closed) return;
       failure.processStillRunning = true;
       child.stdin.destroy();
+      protocolStdout.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
       child.unref();
@@ -56,6 +64,7 @@ export async function runMcpProcess(executable, args, env, exercise, { timeoutMs
       globalThis.clearTimeout(timeout);
       globalThis.clearTimeout(forceKill);
       if (pending) fail(new Error('MCP exited before answering the outstanding request.'));
+      buffer += decoder.end();
       if (buffer) failure ??= new Error('MCP stdout ended with an incomplete JSON-RPC line.');
       globalThis.clearTimeout(forceKill);
       globalThis.clearTimeout(abandon);
@@ -63,11 +72,18 @@ export async function runMcpProcess(executable, args, env, exercise, { timeoutMs
     });
   });
   child.stdin.on('error', fail);
-  child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk) => {
-    stdoutBytes += Buffer.byteLength(chunk);
+    rawStdoutBytes += chunk.length;
+    // Retain literal bytes before decoding/parsing, including rejected startup output.
+    stdoutPrefix = Buffer.concat([stdoutPrefix, chunk.subarray(0, 65_536 - stdoutPrefix.length)]);
+    if (rawStdoutBytes > 1_000_000 + (launched ? 2 : 0))
+      fail(new Error('Synthetic MCP raw stdout exceeded 1 MB plus its exact bootstrap prefix.'));
+  });
+  protocolStdout.on('error', fail);
+  protocolStdout.on('data', (chunk) => {
+    stdoutBytes += chunk.length;
     if (stdoutBytes > 1_000_000) return fail(new Error('Synthetic MCP responses exceeded 1 MB.'));
-    buffer += chunk;
+    buffer += decoder.write(chunk);
     let end;
     while ((end = buffer.indexOf('\n')) >= 0) {
       const line = buffer.slice(0, end);
@@ -108,7 +124,16 @@ export async function runMcpProcess(executable, args, env, exercise, { timeoutMs
   }
   const exit = await completion;
   globalThis.clearTimeout(timeout);
-  const evidence = { ...exit, pid: child.pid, stderr, stdoutBytes, responses };
+  const evidence = {
+    ...exit,
+    pid: child.pid,
+    stderr,
+    stdoutBytes,
+    responses,
+    stdoutPrefixHex: stdoutPrefix.toString('hex'),
+    stdoutPrefixTruncated: rawStdoutBytes > stdoutPrefix.length,
+    rawStdoutBytes,
+  };
   if (failure) {
     failure.mcpProcess = evidence;
     throw failure;
@@ -150,6 +175,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
   const owner = randomBytes(32).toString('hex');
   const report = { passed: false, platform: process.platform, version, executable, root, launches: [] };
   let safeToRemove = true;
+  let activeProfile;
   try {
     report.revision = spawnSync('git', ['rev-parse', 'HEAD'], {
       encoding: 'utf8',
@@ -165,6 +191,14 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
       'app.asar',
     );
     report.asarSha256 = await sha256(asar);
+    let launch;
+    if (process.platform === 'win32') {
+      const relay = resolve(executable, '..', 'resources', 'imnota-mcp.mjs');
+      report.relay = relay;
+      report.relaySha256 = await sha256(relay);
+      ({ launchWindowsMcp: launch } = await import(pathToFileURL(relay).href));
+      report.transport = 'bundled-windows-relay';
+    } else report.transport = 'direct';
     await writeFile(join(root, '.imnota-mcp-owned'), owner, { flag: 'wx' });
     const workspace = join(root, 'workspace');
     const projectPath = join(workspace, 'synthetic-project');
@@ -189,6 +223,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
     const before = await snapshot(workspace);
     for (const enabled of [false, true]) {
       const profile = join(root, enabled ? 'mcp-enabled' : 'mcp-disabled');
+      activeProfile = profile;
       await mkdir(profile);
       const settings = JSON.stringify({
         workspacePath: workspace,
@@ -203,56 +238,64 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
       for (const key of Object.keys(env)) if (key.startsWith('IMNOTA_SMOKE')) delete env[key];
       delete env.ELECTRON_ENABLE_LOGGING;
       delete env.NODE_OPTIONS;
-      const result = await runMcpProcess(executable, ['--mcp'], env, async (request) => {
-        if (!enabled) return;
-        const init = await request('initialize', {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'imnota-packaged-verifier', version: '1' },
-        });
-        assert.equal(init.result.serverInfo.version, version);
-        assert.equal(init.result.serverInfo.name, 'imnota');
-        const tools = await request('tools/list', {});
-        for (const name of ['list_projects', 'list_collections', 'get_bundle', 'get_latest_bundle'])
-          assert.ok(
-            tools.result.tools.some((tool) => tool.name === name),
-            `Missing ${name}`,
-          );
-        const call = async (name, args) => {
-          const response = await request('tools/call', { name, arguments: args });
-          assert.equal(response.error, undefined);
-          return response.result;
-        };
-        const listed = await call('list_collections', { projectPath });
-        assert.equal(listed.isError, false);
-        const collections = JSON.parse(listed.content[0].text).collections;
-        assert.equal(collections.length, 2);
-        const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
-        assert.match(id, /^b_[a-f0-9]{32}$/);
-        for (const [name, args] of [
-          ['get_bundle', { id }],
-          ['get_latest_bundle', {}],
-        ]) {
-          const bundle = await call(name, args);
-          assert.equal(bundle.isError, false);
-          assert.equal(JSON.parse(bundle.content[0].text).bundles[0].markdown, markdown);
-          assert.deepEqual(bundle.content[1], {
-            type: 'image',
-            mimeType: 'image/png',
-            data: png.toString('base64'),
+      const result = await runMcpProcess(
+        executable,
+        ['--mcp'],
+        env,
+        async (request) => {
+          if (!enabled) return;
+          const init = await request('initialize', {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'imnota-packaged-verifier', version: '1' },
           });
-        }
-        for (const [name, args, error] of [
-          ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
-          ['get_latest_bundle', { projectPath, collectionId: '002-empty' }, 'bundle not prepared'],
-        ]) {
-          const result = await call(name, args);
-          assert.equal(result.isError, true);
-          assert.equal(result.content[0].text, error);
-          assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024);
-        }
-      });
+          assert.equal(init.result.serverInfo.version, version);
+          assert.equal(init.result.serverInfo.name, 'imnota');
+          const tools = await request('tools/list', {});
+          for (const name of ['list_projects', 'list_collections', 'get_bundle', 'get_latest_bundle'])
+            assert.ok(
+              tools.result.tools.some((tool) => tool.name === name),
+              `Missing ${name}`,
+            );
+          const call = async (name, args) => {
+            const response = await request('tools/call', { name, arguments: args });
+            assert.equal(response.error, undefined);
+            return response.result;
+          };
+          const listed = await call('list_collections', { projectPath });
+          assert.equal(listed.isError, false);
+          const collections = JSON.parse(listed.content[0].text).collections;
+          assert.equal(collections.length, 2);
+          const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
+          assert.match(id, /^b_[a-f0-9]{32}$/);
+          for (const [name, args] of [
+            ['get_bundle', { id }],
+            ['get_latest_bundle', {}],
+          ]) {
+            const bundle = await call(name, args);
+            assert.equal(bundle.isError, false);
+            assert.equal(JSON.parse(bundle.content[0].text).bundles[0].markdown, markdown);
+            assert.deepEqual(bundle.content[1], {
+              type: 'image',
+              mimeType: 'image/png',
+              data: png.toString('base64'),
+            });
+          }
+          for (const [name, args, error] of [
+            ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
+            ['get_latest_bundle', { projectPath, collectionId: '002-empty' }, 'bundle not prepared'],
+          ]) {
+            const result = await call(name, args);
+            assert.equal(result.isError, true);
+            assert.equal(result.content[0].text, error);
+            assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024);
+          }
+        },
+        { launch },
+      );
       report.launches.push({ enabled, ...result });
+      assert.equal(result.rawStdoutBytes, result.stdoutBytes + (launch ? 2 : 0));
+      if (launch) assert.ok(result.stdoutPrefixHex.startsWith('0d0a'));
       assert.equal(result.signal, null);
       assert.equal(result.code, enabled ? 0 : 1);
       if (!enabled) {
@@ -280,8 +323,21 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
   } catch (error) {
     report.error = error instanceof Error ? error.stack : String(error);
     report.failedProcess = error.mcpProcess;
-    safeToRemove = !error.processStillRunning;
-    report.fixtureRetained = !safeToRemove;
+    // A confirmed exit does not mean diagnostics are disposable. Preserve failed fixtures.
+    safeToRemove = false;
+    report.fixtureRetained = true;
+    report.processStillRunning = Boolean(error.processStillRunning);
+    report.failedProfile = activeProfile;
+    if (activeProfile) {
+      try {
+        const file = join(activeProfile, 'mcp-lifecycle.json');
+        const stat = await lstat(file);
+        assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size <= 65_536);
+        report.failedLifecycle = JSON.parse(await readFile(file, 'utf8'));
+      } catch (captureError) {
+        report.lifecycleCaptureError = captureError.message;
+      }
+    }
     throw error;
   } finally {
     // Preserve evidence before removing only the marked fixture; never an installed profile.

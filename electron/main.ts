@@ -95,6 +95,7 @@ import { ContentPersistenceService } from './content-persistence.js';
 import { contentItemRelativePaths } from './content-paths.js';
 import { WorkspaceContentSearch } from './content-search.js';
 import { LocalMcpServer } from './mcp-server.js';
+import { runMcpStdio } from './mcp-stdio.js';
 import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
@@ -2095,7 +2096,16 @@ app.whenReady().then(async () => {
     search: (input) => contentSearch.search(input),
   });
   if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
-    const started = await localMcpServer.startStdio();
+    let started: boolean;
+    try {
+      started = await runMcpStdio(localMcpServer, preferenceSettingsResult.settings.agentAccess.enabled);
+    } catch {
+      process.stderr.write(
+        'MCP stdio pipe failed. On Windows, use the installed resources/imnota-mcp.mjs with Node.js 24+.\n',
+      );
+      app.exit(1);
+      return;
+    }
     if (mcpProfile) {
       // Observe the real route after EOF/refusal; never replace protocol responses with a test stub.
       await fs.writeFile(

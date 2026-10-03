@@ -46,7 +46,7 @@ Imnota never writes agent or editor configuration. The setup prompt already tell
 - [Claude Code skill](claude-code-imnota-skill.md)
 - [Cursor rule](cursor-imnota-rule.md)
 
-Stdio config, if you spawn Imnota instead of using the loopback URL:
+Stdio config for macOS and Linux, if you spawn Imnota instead of using the loopback URL:
 
 ```json
 {
@@ -58,3 +58,28 @@ Stdio config, if you spawn Imnota instead of using the loopback URL:
   }
 }
 ```
+
+## Windows stdio launch contract
+
+Bare `Imnota.exe --mcp` is not a strict MCP stdio command. Electron 44.2.0 [writes a startup newline before application JavaScript](https://github.com/electron/electron/blob/v44.2.0/shell/app/electron_main_delegate.cc#L185-L191) and [replaces Windows `process.stdin` with an EOF-only stream](https://github.com/electron/electron/blob/v44.2.0/lib/common/init.ts#L56-L67). Two packaged diagnostics observed the literal stdout bytes `0d0a` with access off; `ELECTRON_NO_ATTACH_CONSOLE=1` did not remove them.
+
+Use **Node.js 24 or later** and the relay shipped with the installed Windows application. After running the installer, locate `resources/imnota-mcp.mjs` beside the installation's `Imnota.exe`. The usual per-user location is `%LOCALAPPDATA%/Programs/imnota/resources/imnota-mcp.mjs`; resolve the full path in your client configuration. For example:
+
+```json
+{
+  "mcpServers": {
+    "imnota": {
+      "command": "node",
+      "args": ["C:/Users/YOUR_NAME/AppData/Local/Programs/imnota/resources/imnota-mcp.mjs"]
+    }
+  }
+}
+```
+
+Use an absolute path to `node.exe` if your client cannot find Node on PATH. The relay takes no extra arguments and locates the sibling installed executable itself. The portable download's self-extracting launcher is not this command; install Imnota to obtain a stable relay path. No separate downloaded relay asset is required. macOS and Linux continue using the executable directly.
+
+The relay launches the real packaged `Imnota.exe --mcp` with inherited pipes, normal saved settings and the existing local-access opt-in. The server binds an owned read stream to descriptor 0 on Windows without changing `process.stdin`. The relay removes exactly one initial CR LF required by Electron 44.2.0, validates complete JSON-RPC response lines, and forwards their original bytes. Missing, changed or repeated prefixes, invalid UTF-8, blank/non-response output and incomplete lines fail closed. It never fabricates RPC responses or regenerates an export. A response line is bounded at 40 MB, accommodating the existing tool payload limits; normal pipe backpressure applies.
+
+Client EOF closes the server input. The relay waits up to ten seconds for shutdown and terminates only its own child on failure, with bounded escalation. Pipe errors produce a short stderr message and failure exit; normal access-off refusal remains stderr with exit 1 and no client-visible stdout. Inherited Node injection, development-server and smoke variables are removed from the server environment. No `ELECTRON_RUN_AS_NODE` mode or console-attachment flag is required.
+
+This launch contract needs fresh packaged Windows acceptance after independent review. A source or Node pipe test does not establish that result. Until that gate passes, the existing opt-in loopback endpoint remains the verified Windows option. The local opt-in, selected-workspace boundary and HTTP Host/Origin checks are unchanged.
