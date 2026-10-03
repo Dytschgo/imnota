@@ -460,6 +460,18 @@ describe('project duplication', () => {
     await fs.writeFile(path.join(projectPath, '.imnota-transactions', 'txn-1', 'manifest.json'), '{}');
     await fs.writeFile(path.join(projectPath, '.imnota-recovery.json'), '{}');
     await fs.writeFile(path.join(projectPath, '.imnota-recovery-backup.json'), '{}');
+    // Quarantined and in-flight records belong to the source even when unreadable.
+    const privateRecords = [
+      ['.imnota-undo', 'damaged-screenshot', 'image.bin'],
+      ['.imnota-content-undo', 'damaged-content', 'source.bin'],
+      ['.imnota-transactions', 'damaged-transaction', 'before.bin'],
+      ['.imnota-transactions', 'pending-transaction', 'manifest.json'],
+    ];
+    for (const segments of privateRecords) {
+      const record = path.join(projectPath, ...segments);
+      await fs.mkdir(path.dirname(record), { recursive: true });
+      await fs.writeFile(record, `source recovery: ${segments.join('/')}`);
+    }
     // Same names deeper in the tree are ordinary project content and must still be copied.
     await fs.mkdir(path.join(projectPath, 'collections', COLLECTION, '.imnota-undo'));
     await fs.writeFile(path.join(projectPath, 'collections', COLLECTION, '.imnota-undo', 'keep.txt'), 'x');
@@ -471,8 +483,14 @@ describe('project duplication', () => {
     expect((await fs.readdir(target)).sort()).toEqual(['collections', 'project.json']);
     expect(await exists(path.join(target, 'collections', COLLECTION, '.imnota-undo', 'keep.txt'))).toBe(true);
     expect(await exists(path.join(target, 'collections', COLLECTION, 'screenshots', 'b.png'))).toBe(true);
-    // The source keeps its own recovery state.
+    // The source keeps its own recovery state byte-for-byte, including damaged/pending data.
     expect(await listRecentlyDeleted(projectPath)).toHaveLength(2);
+    for (const segments of privateRecords) {
+      expect(await fs.readFile(path.join(projectPath, ...segments), 'utf8')).toBe(
+        `source recovery: ${segments.join('/')}`,
+      );
+      expect(await exists(path.join(target, ...segments))).toBe(false);
+    }
 
     // The duplicate gets a new identity; with the source's journals it would refuse to open.
     const copy = await readProject(target);
