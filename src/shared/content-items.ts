@@ -1,4 +1,10 @@
-import type { ImagePayload, ProjectData, ProjectSnapshot, ScreenshotRecord } from './types.js';
+import type {
+  ImagePayload,
+  ProjectData,
+  ProjectRevisionTransition,
+  ProjectSnapshot,
+  ScreenshotRecord,
+} from './types.js';
 
 export type ContentItemKind = 'drawing' | 'text';
 
@@ -61,6 +67,7 @@ export interface ContentItemContent {
 }
 
 export interface SaveContentItemResult {
+  projectRevisionTransition?: ProjectRevisionTransition;
   snapshot: ProjectSnapshot;
   itemId: string;
   contentRevision: string;
