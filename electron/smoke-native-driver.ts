@@ -213,6 +213,30 @@ function isTransientLocatorExecutionError(error: unknown): boolean {
   );
 }
 
+/** Arm before input; persistent attempt IDs also cover completion within a single React render. */
+export function onboardingCopyObservationScript(action: string): string {
+  return `(() => {
+    const dialog = document.querySelector('[data-testid="onboarding-dialog"]');
+    if (!dialog || dialog.dataset.copyState === 'pending') throw new Error('Onboarding copy is not idle.');
+    const expected = Number(dialog.dataset.copyAttempt) + 1;
+    let finish;
+    const ready = new Promise(resolve => { finish = resolve; });
+    const observer = new MutationObserver(check);
+    function complete(result) { observer.disconnect(); finish(result); }
+    function check() {
+      const attempt = Number(dialog.dataset.copyAttempt);
+      if (attempt < expected) return;
+      if (attempt !== expected || dialog.dataset.copyAction !== ${JSON.stringify(action)})
+        return complete({ error: 'Unexpected onboarding copy attempt or action.' });
+      if (dialog.dataset.copyState === 'failed')
+        return complete({ error: 'The new onboarding copy attempt failed.' });
+      if (dialog.dataset.copyState === 'succeeded') return complete({ attempt });
+    }
+    observer.observe(dialog, { attributes: true, attributeFilter: ['data-copy-attempt', 'data-copy-action', 'data-copy-state'] });
+    window.__imnotaSmokeCopy = { ready, dispose() { complete({ error: 'Copy observation disposed.' }); } };
+  })()`;
+}
+
 export class NativeUiDriver {
   constructor(
     private window: BrowserWindow,
@@ -297,6 +321,24 @@ export class NativeUiDriver {
     };
     await this.clickPoint(point, clickCount);
     return point;
+  }
+
+  async clickOnboardingCopy(locator: SmokeLocator, action: string): Promise<number> {
+    await this.evaluate(onboardingCopyObservationScript(action));
+    try {
+      await this.click(locator);
+      const result = await this.evaluate<{ attempt?: number; error?: string }>(
+        'window.__imnotaSmokeCopy.ready',
+      );
+      if (result.error || result.attempt === undefined)
+        throw new Error(result.error ?? 'Onboarding copy completion was not observed.');
+      return result.attempt;
+    } finally {
+      await this.evaluate(`(() => {
+        window.__imnotaSmokeCopy?.dispose();
+        delete window.__imnotaSmokeCopy;
+      })()`);
+    }
   }
 
   async clickAny(locators: readonly SmokeLocator[]): Promise<SmokePoint> {

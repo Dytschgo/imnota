@@ -1,3 +1,4 @@
+import { workflowMessage } from '../app/workflow';
 import { RotateCcw, Search, X } from 'lucide-react';
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
@@ -66,8 +67,13 @@ export function ShortcutSettings({
     try {
       await onChange(next);
       return true;
-    } catch {
-      setSaveError('Shortcuts could not be saved. Your previous bindings are still active.');
+    } catch (reason) {
+      setSaveError(
+        workflowMessage(
+          reason,
+          'The shortcut save could not be confirmed. Review the current bindings before trying again.',
+        ),
+      );
       return false;
     } finally {
       setBusy(false);

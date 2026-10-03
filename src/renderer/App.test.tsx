@@ -3401,32 +3401,33 @@ describe('feedback controls', () => {
         favourite: true,
       },
     };
+    const searchProjects = vi.fn<ImnotaBridge['searchProjects']>(async ({ query, scope }) => ({
+      query,
+      scope: scope ?? 'active',
+      truncated: false,
+      results: [
+        {
+          id: 'annotation-result',
+          kind: 'annotation',
+          title: 'Button label',
+          excerpt: 'Change this copy',
+          projectName: 'Project',
+          collectionName: 'Workspace / Collection 01',
+          target: {
+            projectPath: snapshot.projectPath,
+            collectionId: '001-collection',
+            itemId: 'shot',
+            annotationId: 'annotation-id',
+          },
+        },
+      ],
+    }));
     renderApp({
       listProjects: async () => [
         { ...snapshot.project, projectPath: snapshot.projectPath },
         { ...secondSnapshot.project, projectPath: secondSnapshot.projectPath },
       ],
-      searchProjects: async ({ query, scope }) => ({
-        query,
-        scope: scope ?? 'active',
-        truncated: false,
-        results: [
-          {
-            id: 'annotation-result',
-            kind: 'annotation',
-            title: 'Button label',
-            excerpt: 'Change this copy',
-            projectName: 'Project',
-            collectionName: 'Workspace / Collection 01',
-            target: {
-              projectPath: snapshot.projectPath,
-              collectionId: '001-collection',
-              itemId: 'shot',
-              annotationId: 'annotation-id',
-            },
-          },
-        ],
-      }),
+      searchProjects,
       loadProject: async (projectPath) =>
         projectPath === secondSnapshot.projectPath ? secondSnapshot : editingSnapshot,
       loadScreenshotContent: async () => ({
@@ -3436,12 +3437,18 @@ describe('feedback controls', () => {
         contentRevision: 'content-1',
       }),
     });
-    fireEvent.click(await screen.findByTestId('library-full-search'));
-    const searchInput = await screen.findByTestId('global-search-input');
-    // Use the real 180 ms debounce: with fake timers, a search effect re-run after the advance
-    // (for example when the project list settles) scheduled a timer that never fired.
+    const searchButton = await screen.findByTestId('library-full-search');
+    // Opening awaits save completion. Flush that action and its effects before typing:
+    // the input can enter the DOM before the dialog's open effect resets its query.
+    await act(async () => {
+      fireEvent.click(searchButton);
+    });
+    const searchInput = screen.getByTestId('global-search-input');
     fireEvent.change(searchInput, { target: { value: 'button' } });
-    fireEvent.click(await screen.findByRole('option', { name: /Button label/ }, { timeout: 3_000 }));
+    expect(searchInput).toHaveValue('button');
+    const result = await screen.findByRole('option', { name: /Button label/ }, { timeout: 3_000 });
+    expect(searchProjects).toHaveBeenCalledExactlyOnceWith({ query: 'button', scope: 'active', limit: 50 });
+    fireEvent.click(result);
 
     await waitFor(() =>
       expect(annotationCanvasSpy).toHaveBeenLastCalledWith(

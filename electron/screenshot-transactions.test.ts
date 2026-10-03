@@ -143,7 +143,7 @@ describe('screenshot multi-file transactions', () => {
     expect(await listScreenshotTransactions(directory)).toEqual([]);
   });
 
-  it('sweeps only a strictly owned incomplete transaction directory on startup discovery', async () => {
+  it('preserves a missing-manifest transaction directory on startup discovery', async () => {
     const directory = await temporaryProject();
     const token = 'txn-00000000-0000-4000-8000-000000000001';
     const incomplete = path.join(directory, '.imnota-transactions', token);
@@ -152,16 +152,11 @@ describe('screenshot multi-file transactions', () => {
 
     expect(await listScreenshotTransactions(directory)).toEqual([]);
     await expect(fs.stat(incomplete)).rejects.toMatchObject({ code: 'ENOENT' });
-
-    const unknownToken = 'txn-00000000-0000-4000-8000-000000000002';
-    const unknown = path.join(directory, '.imnota-transactions', unknownToken);
-    await fs.mkdir(unknown, { recursive: true });
-    await atomicWrite(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
-    await expect(listScreenshotTransactions(directory)).rejects.toMatchObject({
-      code: 'invalid-journal',
-      token: unknownToken,
-    });
-    await expectBytes(path.join(unknown, 'unowned.bin'), Buffer.from('preserve-me'));
+    const [quarantined] = await fs.readdir(path.dirname(incomplete));
+    expect(quarantined).toContain('damaged-' + token);
+    expect(
+      await fs.readFile(path.join(path.dirname(incomplete), quarantined, 'before-0000.bin'), 'utf8'),
+    ).toContain('sensitive-');
   });
 
   it('rejects caller-observed digest drift before creating a journal', async () => {
@@ -712,5 +707,82 @@ describe('screenshot multi-file transactions', () => {
       }),
     ).rejects.toMatchObject({ code: 'invalid-journal' });
     expect(await listScreenshotTransactions(directory)).toEqual([]);
+  });
+
+  it.each(['', '{"version":1,"token":"txn-', '\0\0\0\0'])(
+    'moves a journal with an unreadable manifest aside so open and save continue (%j)',
+    async (damaged) => {
+      const { directory, staged, before, after, annotationPath, metadataPath } = await normalFixture();
+      const journalRoot = path.join(directory, '.imnota-transactions');
+      await fs.writeFile(path.join(journalRoot, staged.token, 'manifest.json'), damaged);
+      const reports: Array<{ token: string; relativePath: string }> = [];
+      const operations: ScreenshotTransactionOperations = {
+        write: atomicWrite,
+        unlink: defaultUnlink,
+        removeDirectory: defaultRemoveDirectory,
+        damagedJournal: (report) => void reports.push(report),
+      };
+
+      expect(await recoverScreenshotTransactions(directory, operations)).toEqual([]);
+
+      expect(reports).toHaveLength(1);
+      expect(reports[0].token).toBe(staged.token);
+      const [quarantined] = await fs.readdir(journalRoot);
+      expect(quarantined).toMatch(new RegExp(`^damaged-${staged.token}-\\d{8}T\\d{6}Z-[0-9a-f]{8}$`));
+      expect(reports[0].relativePath).toBe(`.imnota-transactions/${quarantined}`);
+      // Nothing is deleted: the damaged manifest and every candidate blob stay recoverable.
+      const preserved = await fs.readdir(path.join(journalRoot, quarantined));
+      expect(preserved).toContain('manifest.json');
+      expect(preserved.filter((name) => name.startsWith('after-'))).toHaveLength(3);
+      await expectBytes(annotationPath, before.annotation);
+      await expectBytes(metadataPath, before.metadata);
+
+      // The quarantined journal no longer blocks recovery, listing, or the next save.
+      expect(await recoverScreenshotTransactions(directory, operations)).toEqual([]);
+      expect(await listScreenshotTransactions(directory)).toEqual([]);
+      const next = await stageScreenshotTransaction(directory, {
+        kind: 'save',
+        writes: [
+          transactionWrite('collections/001/annotations/screen.json', after.annotation, before.annotation),
+          transactionWrite('project.json', after.metadata, before.metadata),
+        ],
+      });
+      await expect(commitScreenshotTransaction(directory, next.token)).resolves.toMatchObject({
+        status: 'committed',
+      });
+      await expectBytes(metadataPath, after.metadata);
+      expect(await fs.readdir(journalRoot)).toEqual([quarantined]);
+      expect(reports).toHaveLength(1);
+    },
+  );
+
+  it('quarantines an unreadable journal found before staging instead of failing the save', async () => {
+    const { directory, staged, before, after, metadataPath } = await normalFixture();
+    const journalRoot = path.join(directory, '.imnota-transactions');
+    await fs.writeFile(path.join(journalRoot, staged.token, 'manifest.json'), '{');
+    const next = await stageScreenshotTransaction(directory, {
+      kind: 'save',
+      writes: [
+        transactionWrite('collections/001/annotations/screen.json', after.annotation, before.annotation),
+        transactionWrite('project.json', after.metadata, before.metadata),
+      ],
+    });
+    await commitScreenshotTransaction(directory, next.token);
+    await expectBytes(metadataPath, after.metadata);
+    expect(await fs.readdir(journalRoot)).toEqual([expect.stringMatching(`^damaged-${staged.token}-`)]);
+  });
+
+  it('still fails closed for a readable manifest that fails validation and for direct use', async () => {
+    const { directory, staged } = await normalFixture();
+    const manifestPath = path.join(directory, '.imnota-transactions', staged.token, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, version: 2 }));
+    await expect(recoverScreenshotTransactions(directory)).rejects.toMatchObject({ code: 'invalid-journal' });
+    await fs.writeFile(manifestPath, '{');
+    await expect(commitScreenshotTransaction(directory, staged.token)).rejects.toMatchObject({
+      code: 'unreadable-journal',
+      token: staged.token,
+    });
+    expect(await fs.readdir(path.join(directory, '.imnota-transactions'))).toEqual([staged.token]);
   });
 });

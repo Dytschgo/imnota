@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { assertNoLinks } from './files.js';
+import { assertNoLinks, CommittedWriteError } from './files.js';
 import {
   processTerminationObservation,
   type TerminationDetails,
@@ -28,7 +28,7 @@ export function diagnosticErrorCode(error: unknown): string {
   return typeof code === 'string' && ERROR_CODES.has(code) ? code : 'operation-failed';
 }
 
-type Phase = 'begin' | 'complete' | 'failed' | 'observed';
+type Phase = 'begin' | 'complete' | 'failed' | 'observed' | 'committed-durability-unconfirmed';
 type StorageStage =
   | 'idle'
   | 'queued'
@@ -276,7 +276,12 @@ export class PersistenceDiagnostics {
         await this.record({ category: 'operation', action, phase: failure ? 'failed' : 'complete' });
         return result;
       } catch (error) {
-        const recorded = await this.record({ category: 'operation', action, phase: 'failed', error });
+        const recorded = await this.record({
+          category: 'operation',
+          action,
+          phase: error instanceof CommittedWriteError ? 'committed-durability-unconfirmed' : 'failed',
+          error,
+        });
         if (recorded && error instanceof Error) {
           try {
             error.message += ` [Diagnostic reference: ${this.context.getStore()}]`;
@@ -300,7 +305,13 @@ export class PersistenceDiagnostics {
       await this.record({ category: 'filesystem', action, phase: 'complete', target });
       return result;
     } catch (error) {
-      await this.record({ category: 'filesystem', action, phase: 'failed', target, error });
+      await this.record({
+        category: 'filesystem',
+        action,
+        phase: error instanceof CommittedWriteError ? 'committed-durability-unconfirmed' : 'failed',
+        target,
+        error,
+      });
       throw error;
     }
   }

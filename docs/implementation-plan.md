@@ -51,6 +51,8 @@ The [product roadmap](product-roadmap.md) consolidates still-relevant proposals:
 
 ## Maintenance and review
 
+Atomic replacement now distinguishes a failure before replacement from a committed file whose directory durability could not be confirmed. Settings and project watch publication follow committed bytes; transaction commit points remain separate from intermediate file writes. Platform-specific fault injection and review evidence are required before release.
+
 The implementation includes save-before-close protection after failed updates and guards against duplicate collection actions during pending saves. The repository review records their regression coverage and any subsequent fixes.
 
 Use [the September 8 repository review](history/repository-review-2026-09-08.md) for the historical disposition of older plans and dependency work. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.

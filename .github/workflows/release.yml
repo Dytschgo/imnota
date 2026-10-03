@@ -113,10 +113,19 @@ jobs:
         if: matrix.platform == 'macos'
         shell: bash
         env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
           IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
         run: |
           node --test scripts/update-macos.test.mjs
           bash scripts/verify-mac.sh
+      - name: Retain Mac walkthrough evidence
+        if: always() && matrix.platform == 'macos'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mac-walkthrough-evidence-release
+          path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: ignore
+
       - name: Smoke packaged Windows application
         if: matrix.platform == 'windows'
         run: node scripts/verify-packaged.mjs windows
