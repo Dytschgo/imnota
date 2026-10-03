@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { macFilePair, writeMacClipboardFiles, type RunOsascript } from './mac-clipboard.js';
+import {
+  macFilePair,
+  writeMacClipboardFiles,
+  readMacClipboardObservation,
+  type RunOsascript,
+} from './mac-clipboard.js';
 
 const pair = ['/Users/me/Imnota/p/exports/bundle-1.md', '/Users/me/Imnota/p/exports/bundle-1.png'];
 
@@ -36,4 +41,17 @@ describe('macOS file clipboard', () => {
       'unexpected file list',
     );
   });
+});
+
+it('reads only macOS format types and change count for consistency diagnostics', async () => {
+  const observation = { changeCount: 42, types: ['public.file-url', 'public.utf8-plain-text'] };
+  const run = vi.fn<RunOsascript>(async () => JSON.stringify(observation));
+  await expect(readMacClipboardObservation(run)).resolves.toEqual(observation);
+  const script = run.mock.calls[0]![0][3];
+  expect(script).toContain('board.changeCount');
+  expect(script).toContain('board.types');
+  expect(script).not.toMatch(/clearContents|writeObjects|stringForType|readObjects/);
+  await expect(readMacClipboardObservation(async () => '{"changeCount":0}')).rejects.toThrow(
+    'invalid observation',
+  );
 });

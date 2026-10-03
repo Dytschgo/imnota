@@ -100,3 +100,39 @@ export async function readMacClipboardFiles(run: RunOsascript = nativeOsascript)
     throw new Error('The macOS clipboard returned an unexpected file list.');
   return kept;
 }
+
+export interface MacClipboardObservation {
+  changeCount: number;
+  types: string[];
+}
+
+/** Read-only native metadata; never reads or returns clipboard payloads. */
+export async function readMacClipboardObservation(
+  run: RunOsascript = nativeOsascript,
+): Promise<MacClipboardObservation> {
+  const value: unknown = JSON.parse(
+    await run([
+      '-l',
+      'JavaScript',
+      '-e',
+      `
+    ObjC.import('AppKit');
+    function run() {
+      const board = $.NSPasteboard.generalPasteboard;
+      return JSON.stringify({ changeCount: Number(board.changeCount), types: ObjC.deepUnwrap(board.types) || [] });
+    }
+  `,
+    ]),
+  );
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('changeCount' in value) ||
+    !Number.isSafeInteger(value.changeCount) ||
+    !('types' in value) ||
+    !Array.isArray(value.types) ||
+    !value.types.every((type) => typeof type === 'string')
+  )
+    throw new Error('The macOS clipboard returned invalid observation metadata.');
+  return value as MacClipboardObservation;
+}

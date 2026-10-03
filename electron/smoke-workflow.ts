@@ -12,7 +12,8 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
-import { readMacClipboardFiles } from './mac-clipboard.js';
+import { readMacClipboardFiles, readMacClipboardObservation } from './mac-clipboard.js';
+import { onboardingCopyEvidence } from './smoke-onboarding-copy.js';
 import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
@@ -346,7 +347,7 @@ async function exerciseOnboarding(
   await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
-  await driver.click({ text: 'Rich copy', exact: true });
+  await driver.clickOnboardingCopy({ text: 'Rich copy', exact: true }, 'rich');
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown + image prepared', exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
@@ -405,7 +406,7 @@ async function exerciseOnboarding(
 
   if (process.platform === 'win32') {
     await chooseNativeCopyFunction('files', 'Copy files');
-    await driver.click({ text: 'Copy files', exact: true });
+    await driver.clickOnboardingCopy({ text: 'Copy files', exact: true }, 'files');
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
       selector: '[data-testid="onboarding-copy-warning"]',
@@ -423,7 +424,7 @@ async function exerciseOnboarding(
     )
       throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
     await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
-    await driver.click({ text: 'Files + rich copy', exact: true });
+    await driver.clickOnboardingCopy({ text: 'Files + rich copy', exact: true }, 'files-rich');
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
       selector: '[data-testid="onboarding-copy-warning"]',
@@ -472,32 +473,67 @@ async function exerciseOnboarding(
   }
 
   if (process.platform === 'darwin') {
-    // macOS Copy files writes the exact pair; receiver acceptance is separate.
-    await chooseNativeCopyFunction('files', 'Copy files');
-    await driver.click({ text: 'Copy files', exact: true });
-    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    const macFiles = await readMacClipboardFiles();
-    if (
-      macFiles.length !== 2 ||
-      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
-      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
-    )
-      throw new Error(
-        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
-      );
-    await chooseNativeCopyFunction('files-rich', 'Files + text');
-    await driver.click({ text: 'Files + text', exact: true });
-    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    const macFilesWithText = await readMacClipboardFiles();
-    if (
-      macFilesWithText.length !== 2 ||
-      path.resolve(macFilesWithText[0]!) !== path.resolve(markdownPath) ||
-      path.resolve(macFilesWithText[1]!) !== path.resolve(pngPath) ||
-      (await nativeClipboard.readText()) !== markdown ||
-      (await nativeClipboard.readHTML()) !== '' ||
-      !(await nativeClipboard.readImage()).isEmpty()
-    )
-      throw new Error('macOS Files + text did not preserve the exact file pair and plain Markdown.');
+    const verifyMacCopy = async (action: 'files' | 'files-rich', label: string) => {
+      await chooseNativeCopyFunction(action, label);
+      const attempt = await driver.clickOnboardingCopy({ text: label, exact: true }, action);
+      await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+      let before;
+      let stage = 'native metadata before read';
+      let evidence;
+      try {
+        before = await readMacClipboardObservation();
+        stage = 'file URL read';
+        const actualFiles = await readMacClipboardFiles();
+        stage = 'text read';
+        const actualText = await nativeClipboard.readText();
+        stage = 'HTML read';
+        const html = await nativeClipboard.readHTML();
+        stage = 'image read';
+        const image = await nativeClipboard.readImage();
+        stage = 'native metadata after read';
+        const after = await readMacClipboardObservation();
+        evidence = onboardingCopyEvidence({
+          attempt,
+          action,
+          expectedFiles: [markdownPath, pngPath],
+          actualFiles,
+          expectedText: markdown,
+          actualText,
+          html,
+          image: { empty: image.isEmpty(), ...image.getSize() },
+          before,
+          after,
+        });
+      } catch (error) {
+        // Retain the read stage without including an exception's possible clipboard payload.
+        const failure = { attempt, action, before, stage, readFailed: true };
+        console.info(`Onboarding ${label} read failed: ${JSON.stringify(failure)}`);
+        if (artifactDirectory)
+          await fs.writeFile(
+            path.join(artifactDirectory, `onboarding-copy-${attempt}-${action}.json`),
+            JSON.stringify(failure, null, 2),
+            { flag: 'wx' },
+          );
+        throw error;
+      }
+      if (artifactDirectory)
+        await fs.writeFile(
+          path.join(artifactDirectory, `onboarding-copy-${attempt}-${action}.json`),
+          JSON.stringify(evidence, null, 2),
+          { flag: 'wx' },
+        );
+      console.info(`Onboarding ${label} readback: ${JSON.stringify(evidence)}`);
+      if (!evidence.native.consistent)
+        throw new Error(
+          `macOS ${label} pasteboard changed during the completed-attempt read; no recopy or content retry was attempted.`,
+        );
+      if (!evidence.formatsValid)
+        throw new Error(
+          `macOS ${label} exact clipboard operands failed: ${JSON.stringify(evidence.operands)}`,
+        );
+    };
+    await verifyMacCopy('files', 'Copy files');
+    await verifyMacCopy('files-rich', 'Files + text');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
