@@ -222,7 +222,8 @@ describe('ProjectSearchService', () => {
   });
 });
 
-// Real rename/open/read flow with only one identity field projected. No native collision is assumed.
+// Real rename/open/read flow: vary one identity field and hold its counterpart equal.
+// Only identity fields are projected; no native filesystem collision is assumed.
 it.each(
   (['ino', 'dev'] as const).flatMap((field) => [100n, 9851624189743415n].map((own) => ({ field, own }))),
 )('rejects opened replacement with exact $field identity $own', async ({ field, own }) => {
