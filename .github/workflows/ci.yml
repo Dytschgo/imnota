@@ -110,6 +110,21 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm test
         if: env.RUN_APPLICATION == 'true'
+      - name: Report application coverage (diagnostic)
+        id: coverage
+        if: env.RUN_APPLICATION == 'true'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: pnpm test:coverage
+      - name: Retain application coverage report
+        if: ${{ always() && !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: application-coverage
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 14
       - run: npm ci --prefix share-service
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm typecheck:share-service
@@ -175,6 +190,17 @@ jobs:
       - name: Verify packaged Mac application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
         run: bash scripts/verify-mac.sh
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Retain Mac walkthrough evidence
+        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'macos-latest')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mac-walkthrough-evidence-ci
+          path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: ignore
+
       # Exports every bundle through the real workspace action, copies each with Rich copy and
       # natively pastes it, so a change to bundle export or copy cannot merge silently.
       - name: Verify packaged Mac bundle copy and paste

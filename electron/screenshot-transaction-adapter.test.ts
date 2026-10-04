@@ -201,22 +201,35 @@ describe('screenshot transaction baseline adapter', () => {
     );
   });
 
-  it('commits a bounded 100-screenshot recovery containing 203 writes', async () => {
-    const fixture = await recoveryFixture(100, true);
-    const prepared = await prepareRecoveryRestoreTransaction(fixture.projectPath, fixture);
-    expect(prepared.writes).toHaveLength(203);
-    await commitScreenshotFileTransaction(fixture.projectPath, {
-      kind: 'recovery-restore',
-      writes: prepared.writes,
-      assertBaseline: prepared.assertBaseline,
-      operations,
-    });
-    expect(
-      await fs.readFile(
-        path.join(fixture.projectPath, fixture.recoveredProject.screenshots[99].descriptionFile),
-        'utf8',
-      ),
-    ).toBe('recovered description 100');
-    expect(await listScreenshotTransactions(fixture.projectPath)).toEqual([]);
-  }, 30_000);
+  // This is a correctness test with 509 flushed journal/live-file replacements, not a
+  // save-latency budget. Hosted Windows exceeded 30 s after file fsync was introduced;
+  // retain the complete real-filesystem workload with a finite platform-specific limit.
+  it(
+    'commits a bounded 100-screenshot recovery containing 203 writes',
+    async () => {
+      const fixture = await recoveryFixture(100, true);
+      const prepared = await prepareRecoveryRestoreTransaction(fixture.projectPath, fixture);
+      expect(prepared.writes).toHaveLength(203);
+      const committed = await commitScreenshotFileTransaction(fixture.projectPath, {
+        kind: 'recovery-restore',
+        writes: prepared.writes,
+        assertBaseline: prepared.assertBaseline,
+        operations,
+      });
+      expect(committed).toMatchObject({ status: 'committed', cleanup: 'complete' });
+      for (const write of prepared.writes) {
+        const target = path.join(fixture.projectPath, write.relativePath);
+        if (write.after === null) await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+        else expect(await fs.readFile(target)).toEqual(Buffer.from(write.after));
+      }
+      expect(
+        await fs.readFile(
+          path.join(fixture.projectPath, fixture.recoveredProject.screenshots[99].descriptionFile),
+          'utf8',
+        ),
+      ).toBe('recovered description 100');
+      expect(await listScreenshotTransactions(fixture.projectPath)).toEqual([]);
+    },
+    process.platform === 'win32' ? 120_000 : 30_000,
+  );
 });

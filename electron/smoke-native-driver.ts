@@ -213,6 +213,30 @@ function isTransientLocatorExecutionError(error: unknown): boolean {
   );
 }
 
+/** Arm before input; persistent attempt IDs also cover completion within a single React render. */
+export function onboardingCopyObservationScript(action: string): string {
+  return `(() => {
+    const dialog = document.querySelector('[data-testid="onboarding-dialog"]');
+    if (!dialog || dialog.dataset.copyState === 'pending') throw new Error('Onboarding copy is not idle.');
+    const expected = Number(dialog.dataset.copyAttempt) + 1;
+    let finish;
+    const ready = new Promise(resolve => { finish = resolve; });
+    const observer = new MutationObserver(check);
+    function complete(result) { observer.disconnect(); finish(result); }
+    function check() {
+      const attempt = Number(dialog.dataset.copyAttempt);
+      if (attempt < expected) return;
+      if (attempt !== expected || dialog.dataset.copyAction !== ${JSON.stringify(action)})
+        return complete({ error: 'Unexpected onboarding copy attempt or action.' });
+      if (dialog.dataset.copyState === 'failed')
+        return complete({ error: 'The new onboarding copy attempt failed.' });
+      if (dialog.dataset.copyState === 'succeeded') return complete({ attempt });
+    }
+    observer.observe(dialog, { attributes: true, attributeFilter: ['data-copy-attempt', 'data-copy-action', 'data-copy-state'] });
+    window.__imnotaSmokeCopy = { ready, dispose() { complete({ error: 'Copy observation disposed.' }); } };
+  })()`;
+}
+
 export class NativeUiDriver {
   constructor(
     private window: BrowserWindow,
@@ -299,6 +323,24 @@ export class NativeUiDriver {
     return point;
   }
 
+  async clickOnboardingCopy(locator: SmokeLocator, action: string): Promise<number> {
+    await this.evaluate(onboardingCopyObservationScript(action));
+    try {
+      await this.click(locator);
+      const result = await this.evaluate<{ attempt?: number; error?: string }>(
+        'window.__imnotaSmokeCopy.ready',
+      );
+      if (result.error || result.attempt === undefined)
+        throw new Error(result.error ?? 'Onboarding copy completion was not observed.');
+      return result.attempt;
+    } finally {
+      await this.evaluate(`(() => {
+        window.__imnotaSmokeCopy?.dispose();
+        delete window.__imnotaSmokeCopy;
+      })()`);
+    }
+  }
+
   async clickAny(locators: readonly SmokeLocator[]): Promise<SmokePoint> {
     const started = Date.now();
     do {
@@ -350,7 +392,12 @@ export class NativeUiDriver {
     await wait(40);
   }
 
-  async drag(from: SmokePoint, to: SmokePoint, steps = 8): Promise<void> {
+  async drag(
+    from: SmokePoint,
+    to: SmokePoint,
+    steps = 8,
+    modifiers: Electron.InputEvent['modifiers'] = [],
+  ): Promise<void> {
     const contents = this.window.webContents;
     await this.evaluate(`(() => {
       const target = ${JSON.stringify(to)};
@@ -373,7 +420,7 @@ export class NativeUiDriver {
     })()`);
     try {
       contents.sendInputEvent({ type: 'mouseMove', ...from });
-      contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1 });
+      contents.sendInputEvent({ type: 'mouseDown', ...from, button: 'left', clickCount: 1, modifiers });
       for (let index = 1; index <= steps; index += 1) {
         const point = {
           x: Math.round(from.x + ((to.x - from.x) * index) / steps),
@@ -384,7 +431,7 @@ export class NativeUiDriver {
           ...point,
           movementX: 1,
           movementY: 1,
-          modifiers: ['leftbuttondown'],
+          modifiers: ['leftbuttondown', ...modifiers],
         });
         await wait(16);
       }
@@ -392,7 +439,7 @@ export class NativeUiDriver {
       // commit the gesture until its endpoint has reached the renderer and painted.
       await this.evaluate('window.__imnotaSmokeDrag.ready');
     } finally {
-      contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1 });
+      contents.sendInputEvent({ type: 'mouseUp', ...to, button: 'left', clickCount: 1, modifiers });
       await this.evaluate(`(() => {
         window.__imnotaSmokeDrag?.dispose();
         delete window.__imnotaSmokeDrag;

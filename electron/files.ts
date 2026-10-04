@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
@@ -48,6 +49,10 @@ export async function readStableRegularFile(
   maximumBytes: number,
   hooks: StableReadHooks = {},
 ): Promise<{ text: string; bytes: number } | null> {
+  // Leave room for the growth sentinel and reject unsafe caller bounds before I/O.
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || maximumBytes >= Number.MAX_SAFE_INTEGER)
+    throw new FileReadLimitError('The read limit must be a nonnegative safe byte count.');
+  const maximum = BigInt(maximumBytes);
   await assertNoLinks(target);
   await hooks.beforeOpen?.(target);
   const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
@@ -61,37 +66,71 @@ export async function readStableRegularFile(
   try {
     await hooks.afterOpen?.(target);
     await assertNoLinks(target);
-    const stat = await handle.stat();
-    const pathStat = await fs.lstat(target);
+    const stat = await handle.stat({ bigint: true });
+    const pathStat = await fs.lstat(target, { bigint: true });
     if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino)
       throw new Error('A file path changed while it was opened.');
-    if (!stat.isFile() || stat.size > maximumBytes)
+    if (!stat.isFile() || stat.size < 0n || stat.size > maximum)
       throw new FileReadLimitError('The file exceeds the read limit.');
-    const buffer = new Uint8Array(stat.size + 1);
+    // Convert only after the exact size is within the validated, safely representable bound.
+    const size = Number(stat.size);
+    const buffer = new Uint8Array(size + 1);
     let bytes = 0;
     while (bytes < buffer.length) {
       const { bytesRead } = await handle.read(buffer, bytes, buffer.length - bytes, bytes);
       if (!bytesRead) break;
       bytes += bytesRead;
     }
-    if (bytes > stat.size)
-      throw new FileReadLimitError('The file grew beyond its read limit while it was read.');
-    const finalPath = await fs.lstat(target);
-    const finalHandle = await handle.stat();
+    if (bytes > size) throw new FileReadLimitError('The file grew beyond its read limit while it was read.');
+    const finalPath = await fs.lstat(target, { bigint: true });
+    const finalHandle = await handle.stat({ bigint: true });
     if (
-      bytes !== stat.size ||
+      bytes !== size ||
       finalPath.isSymbolicLink() ||
       stat.dev !== finalPath.dev ||
       stat.ino !== finalPath.ino ||
       stat.size !== finalHandle.size ||
-      stat.mtimeMs !== finalHandle.mtimeMs ||
-      stat.ctimeMs !== finalHandle.ctimeMs
+      stat.mtimeNs !== finalHandle.mtimeNs ||
+      stat.ctimeNs !== finalHandle.ctimeNs
     )
       throw new Error('A file changed while it was read.');
     return { text: utf8.decode(buffer.subarray(0, bytes)), bytes };
   } finally {
     await handle.close();
   }
+}
+
+/** Only the named file has committed; this does not commit an enclosing transaction. */
+export class CommittedWriteError extends Error {
+  readonly committed = true;
+  readonly code: string | undefined;
+  constructor(
+    readonly filePath: string,
+    cause: unknown,
+  ) {
+    super(
+      `${COMMITTED_WRITE_WARNING} The overall operation may be incomplete. Reload and review the current state before retrying.`,
+      { cause },
+    );
+    this.name = 'CommittedWriteError';
+    this.code = (cause as NodeJS.ErrnoException | undefined)?.code;
+  }
+}
+
+/** Publish state that follows this commit, then preserve the durability failure for the caller. */
+export async function afterFileCommit(
+  write: () => Promise<void>,
+  publish: () => void | Promise<void>,
+): Promise<void> {
+  let warning: CommittedWriteError | undefined;
+  try {
+    await write();
+  } catch (error) {
+    if (!(error instanceof CommittedWriteError)) throw error;
+    warning = error;
+  }
+  await publish();
+  if (warning) throw warning;
 }
 
 const writes = new Map<string, Promise<void>>();
@@ -110,10 +149,18 @@ export async function atomicWrite(filePath: string, content: string | Uint8Array
 
 async function writeFileAtomically(filePath: string, content: string | Uint8Array): Promise<void> {
   await assertNoLinks(filePath);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
   try {
-    await fs.writeFile(temporary, content, { flag: 'wx' });
+    // Flush the candidate before it replaces the destination. Without this a power loss
+    // shortly after the rename can leave an empty or truncated file under the final name.
+    const handle = await fs.open(temporary, 'wx');
+    try {
+      await handle.writeFile(content);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     for (let attempt = 0; ; attempt++) {
       try {
         await fs.rename(temporary, filePath);
@@ -134,5 +181,43 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
     }
   } finally {
     await fs.unlink(temporary).catch(() => undefined);
+  }
+  try {
+    await syncDirectoryEntry(path.dirname(filePath));
+    // If mkdir created ancestors, also persist their names in each containing directory.
+    if (firstCreated && process.platform !== 'win32') {
+      let parent = path.dirname(filePath);
+      while (parent !== path.dirname(firstCreated) && parent !== path.dirname(parent)) {
+        parent = path.dirname(parent);
+        await syncDirectoryEntry(parent);
+      }
+    }
+  } catch (error) {
+    throw new CommittedWriteError(filePath, error);
+  }
+}
+
+/**
+ * Persist the rename where Node supports directory fsync. On Windows only file bytes
+ * are explicitly flushed; rename durability across power loss is not guaranteed.
+ * Unsupported POSIX directory sync is best-effort. Permission and I/O errors propagate
+ * even though replacement has already happened, so recovery must inspect live bytes.
+ */
+async function syncDirectoryEntry(directory: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(directory, 'r');
+  } catch (error) {
+    if (['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+    throw error;
+  }
+  try {
+    await handle.sync();
+  } catch (error) {
+    if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? ''))
+      throw error;
+  } finally {
+    await handle.close();
   }
 }

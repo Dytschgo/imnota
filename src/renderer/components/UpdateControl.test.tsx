@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { UpdateControl } from './UpdateControl';
@@ -21,7 +22,7 @@ function setup() {
       listener = fn;
       return () => {};
     },
-    getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.0' }),
+    getUpdateStatus: async () => ({ state: 'idle', currentVersion: '0.2.0', channel: 'stable' }),
     checkForUpdates: check,
     setSettings,
     downloadUpdate: vi.fn(async () => {}),
@@ -125,9 +126,9 @@ it('shows actionable failure and allows retry', async () => {
   api.check.mockRejectedValueOnce(new Error('offline'));
   render(<UpdateControl />);
   fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
-  expect(await screen.findByText(/The update action failed/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('offline');
+  expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
   await waitFor(() => expect(api.check).toHaveBeenCalledTimes(2));
   expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
   expect(window.imnota.installUpdate).not.toHaveBeenCalled();
@@ -178,4 +179,72 @@ it('uses the guarded download callback for a Terminal update from Settings', asy
   fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
   await waitFor(() => expect(onDownload).toHaveBeenCalledOnce());
   expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
+});
+
+for (const outcome of ['committed', 'precommit', 'unavailable'] as const) {
+  it(`shows authoritative channel and original rejection for ${outcome}`, async () => {
+    const api = setup();
+    const failure =
+      outcome === 'precommit' ? 'Permission denied before file replacement.' : COMMITTED_WRITE_WARNING;
+    let persisted = { ...useAppStore.getState().settings };
+    const getStatus = vi.fn(async (): Promise<UpdateStatus> => ({
+      state: 'idle',
+      channel: persisted.updateChannel,
+    }));
+    window.imnota.getUpdateStatus = getStatus;
+    window.imnota.getSettings = vi.fn(async () => {
+      if (outcome === 'unavailable') throw new Error('Settings read unavailable.');
+      return persisted;
+    });
+    api.setSettings.mockImplementation(async () => {
+      if (outcome !== 'precommit') {
+        persisted = { ...persisted, updateChannel: 'nightly' };
+        api.emit({ state: 'idle', channel: 'nightly' });
+      }
+      if (outcome === 'unavailable') getStatus.mockRejectedValueOnce(new Error('Status read unavailable.'));
+      throw new Error(failure);
+    });
+    render(<UpdateControl />);
+    await waitFor(() => expect(getStatus).toHaveBeenCalledOnce());
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'nightly' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use Nightly' }));
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    expect(screen.getByRole('combobox')).toHaveValue(
+      outcome === 'unavailable' ? '' : persisted.updateChannel,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(failure);
+    expect(screen.queryByText(/Check your connection/)).not.toBeInTheDocument();
+    expect(api.setSettings).toHaveBeenCalledOnce();
+    expect(api.check).not.toHaveBeenCalled();
+    if (outcome === 'unavailable') {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Current update status could not be confirmed. Status read unavailable.',
+      );
+      expect(screen.getByRole('option', { name: 'Channel unconfirmed' })).toHaveProperty('selected', true);
+      act(() => api.emit({ state: 'idle', channel: 'nightly' }));
+      expect(screen.getByRole('combobox')).toHaveValue('nightly');
+      expect(screen.getByRole('alert')).toHaveTextContent(failure);
+    }
+  });
+}
+
+it('does not replace a newer status event with a delayed rejection readback', async () => {
+  const api = setup();
+  render(<UpdateControl />);
+  await screen.findByText(/v0.2.0/);
+  let finishRead!: (status: UpdateStatus) => void;
+  window.imnota.getUpdateStatus = vi.fn(
+    () =>
+      new Promise<UpdateStatus>((resolve) => {
+        finishRead = resolve;
+      }),
+  );
+  api.check.mockRejectedValueOnce(new Error('Check failed.'));
+  fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+  await waitFor(() => expect(window.imnota.getUpdateStatus).toHaveBeenCalledOnce());
+  act(() => api.emit({ state: 'downloading', channel: 'nightly', percent: 42 }));
+  await act(async () => finishRead({ state: 'idle', channel: 'stable' }));
+  expect(screen.getByRole('combobox')).toHaveValue('nightly');
+  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
+  expect(screen.getByRole('alert')).toHaveTextContent('Check failed.');
 });

@@ -24,6 +24,77 @@ afterEach(async () => {
 });
 
 describe('native smoke driver', () => {
+  it.each(['deferred', 'fast', 'failure', 'missing', 'wrong-action'] as const)(
+    'observes only the new onboarding copy attempt (%s)',
+    async (mode) => {
+      const dataset = { copyAttempt: '1', copyAction: 'files', copyState: 'succeeded' };
+      let observe!: () => void;
+      const disconnect = vi.fn();
+      const renderer: Record<string, unknown> = {};
+      const executeJavaScript = vi.fn(async (source: string) =>
+        runInNewContext(source, {
+          window: renderer,
+          document: { querySelector: () => ({ dataset }) },
+          MutationObserver: class {
+            constructor(callback: () => void) {
+              observe = callback;
+            }
+            observe() {}
+            disconnect = disconnect;
+          },
+        }),
+      );
+      const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+      const driver = new NativeUiDriver(window, mode === 'missing' ? 30 : 2000);
+      const complete = () => {
+        dataset.copyAttempt = '2';
+        dataset.copyAction = mode === 'wrong-action' ? 'rich' : 'files-rich';
+        dataset.copyState = mode === 'failure' ? 'failed' : 'succeeded';
+        observe();
+      };
+      const click = vi.spyOn(driver, 'click').mockImplementation(async () => {
+        expect(renderer).toHaveProperty('__imnotaSmokeCopy');
+        observe(); // The old enabled/successful state must not resolve the observation.
+        if (mode !== 'missing') {
+          dataset.copyAttempt = '2';
+          dataset.copyAction = 'files-rich';
+          dataset.copyState = 'pending';
+          observe();
+          if (mode !== 'deferred') complete();
+        }
+        return { x: 1, y: 2 };
+      });
+      let settled = false;
+      const action = driver.clickOnboardingCopy({ text: 'Files + text', exact: true }, 'files-rich');
+      void action.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      const result = ['failure', 'missing', 'wrong-action'].includes(mode)
+        ? expect(action).rejects.toThrow(
+            mode === 'failure'
+              ? 'new onboarding copy attempt failed'
+              : mode === 'missing'
+                ? 'Renderer evaluation timed out'
+                : 'Unexpected onboarding copy attempt',
+          )
+        : expect(action).resolves.toBe(2);
+      await vi.waitFor(() => expect(click).toHaveBeenCalledOnce());
+      if (mode === 'deferred') {
+        expect(settled).toBe(false);
+        complete();
+      }
+      await result;
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(disconnect).toHaveBeenCalled();
+      expect(renderer).not.toHaveProperty('__imnotaSmokeCopy');
+    },
+  );
+
   it('maps native source pixels through expanded bounds and prompt offsets', () => {
     expect(mapSourcePointToPromptPixel({ x: 1200, y: 400 }, { x: 160, y: 76 }, { x: 32, y: 80 })).toEqual({
       x: 1072,

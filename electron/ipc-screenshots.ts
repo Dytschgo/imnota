@@ -1,3 +1,4 @@
+import { restoreConfirmation } from './restore-confirmation.js';
 import { annotationSchema, validateProject } from '../src/shared/schema.js';
 import type { ScreenshotRecord } from '../src/shared/types.js';
 import { nowIso } from '../src/shared/utils.js';
@@ -100,6 +101,10 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
         conflictCreated: true,
         contentRevision: contentRevision(conflict.description, conflictAnnotations),
         projectRevision: projectRevisionForSource(projectSource),
+        projectRevisionTransition: {
+          before: baseline.projectRevision,
+          after: projectRevisionForSource(projectSource),
+        },
         warnings: warnings.length ? warnings : undefined,
       };
     }
@@ -157,6 +162,10 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
       conflictCreated: false,
       contentRevision: contentRevision(screenshot.description, annotationsJson),
       projectRevision: projectRevisionForSource(projectSource),
+      projectRevisionTransition: {
+        before: baseline.projectRevision,
+        after: projectRevisionForSource(projectSource),
+      },
       warnings: warnings.length ? warnings : undefined,
     };
   });
@@ -266,19 +275,21 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
   handle('screenshots:undo-delete', async (_event, input) => {
     const safePath = await assertProjectPath(input.projectPath);
     const before = await readProject(safePath);
-    const undo = await undoScreenshotDelete(safePath, before, input.undoToken, screenshotTrashOperations);
-    const restored = undo.project.screenshots.find(
-      (candidate) => !before.screenshots.some((existing) => existing.id === candidate.id),
+    const confirmation = restoreConfirmation(
+      safePath,
+      screenshotTrashOperations.write,
+      makeSnapshot,
+      host.projectWatchManager
+        ? (projectPath, revision) => host.projectWatchManager!.hasSelfProjectRevision(projectPath, revision)
+        : undefined,
     );
-    if (restored)
-      for (const target of [
-        screenshotPath(safePath, restored),
-        path.join(safePath, restored.annotationFile),
-        path.join(safePath, restored.descriptionFile),
-      ])
-        host.projectWatchManager?.recordSelfWrite(target, await fs.readFile(target));
-    const projectFile = path.join(safePath, 'project.json');
-    host.projectWatchManager?.recordSelfWrite(projectFile, await fs.readFile(projectFile));
-    return withSnapshotWarnings(await makeSnapshot(safePath), undo.warning ? [undo.warning] : []);
+    const undo = await undoScreenshotDelete(
+      safePath,
+      before,
+      input.undoToken,
+      { ...screenshotTrashOperations, write: confirmation.write },
+      confirmation.confirm,
+    );
+    return confirmation.snapshot(undo.warning);
   });
 }

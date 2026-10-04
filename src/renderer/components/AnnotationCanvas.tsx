@@ -1,9 +1,12 @@
+import { useDecodedImage } from '../canvas/useDecodedImage';
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -49,9 +52,23 @@ import {
   type ActiveAnnotationDrag,
 } from '../canvas/pointer-interaction';
 import { CANVAS_COMMAND_EVENT, canvasCommandFromEvent, viewportForCanvasCommand } from '../canvas/commands';
+import { constrainDraftDelta } from '../canvas/constrain';
+import {
+  describeSelectedAnnotation,
+  nextKeyboardSelection,
+  nudgeAnnotation,
+  nudgeDeltaForKey,
+} from '../canvas/keyboard';
+import {
+  nextNudgeBurst,
+  nudgeBurstKey,
+  type AnnotationChangeOptions,
+  type NudgeBurst,
+} from '../canvas/undo-coalescing';
 import { pixelatedRegion } from '../pixelate';
-import { zoomAt } from '../viewport';
+import { viewportForLayoutChange, zoomAt, type ViewportSize } from '../viewport';
 import { viewportToReveal } from '../canvas/reveal';
+import { CanvasLoadState } from '../canvas/CanvasLoadState';
 import type { ToolChoice } from './Toolbar';
 import './annotation-canvas.css';
 import './canvas-surface.css';
@@ -62,15 +79,20 @@ interface EditingText {
   id: string;
   text: string;
   isNew: boolean;
+  /** A new note stays out of the document until its text is committed, so creating it is one undo step. */
+  pending?: Annotation;
 }
 
 export interface AnnotationCanvasProps {
   image: ImagePayload | null;
+  /** The screenshot could not be loaded. Without an image, the canvas otherwise reports loading. */
+  loadFailed?: boolean;
+  onRetryLoad?: () => void;
   annotations: Annotation[];
   selectedId: string | null;
   revealAnnotationId?: string | null;
   tool: ToolChoice;
-  onChange: (annotations: Annotation[]) => void;
+  onChange: (annotations: Annotation[], options?: AnnotationChangeOptions) => void;
   onSelect: (id: string | null) => void;
   onMessage?: (message: string) => void;
   stageRef: MutableRefObject<Konva.Stage | null>;
@@ -179,6 +201,8 @@ function annotationsStepNumber(count: number): number {
 
 export function AnnotationCanvas({
   image,
+  loadFailed,
+  onRetryLoad,
   annotations,
   selectedId,
   revealAnnotationId,
@@ -211,13 +235,21 @@ export function AnnotationCanvas({
           normalizeAnnotationBounds(draft?.kind === 'crop' ? draft : cropBox!),
         ])
       : sourceBounds;
-  const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
+  const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
+  /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
+  const userAdjustedViewport = useRef(false);
+  const viewportLayout = useRef<{ filename: string; dataUrl: string; size: ViewportSize } | null>(null);
+  const nudgeBurst = useRef<NudgeBurst | null>(null);
+  const keyboardHelpId = useId();
   const [spaceHeld, setSpaceHeld] = useState(false);
   const pan = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
   const [editing, setEditing] = useState<EditingText | null>(null);
   const capturedPointer = useRef<number | null>(null);
+  // Completion can emit both a shape/stage pointerclick and a compatibility tap.
+  // Keep them together until the next gesture starts, rather than consuming only the first click.
+  const createdInPointerGesture = useRef(false);
   const pointerPosition = useRef<{ x: number; y: number } | null>(null);
   const dragging = useRef<ActiveAnnotationDrag | null>(null);
   const edgePanFrame = useRef<number | null>(null);
@@ -307,6 +339,7 @@ export function AnnotationCanvas({
       const shiftX = velocity.x * frameScale;
       const shiftY = velocity.y * frameScale;
       if (shiftX || shiftY) {
+        userAdjustedViewport.current = true;
         const scale = viewportRef.current.scale;
         const next = {
           ...viewportRef.current,
@@ -386,22 +419,6 @@ export function AnnotationCanvas({
   }, [onSelect]);
 
   useEffect(() => {
-    if (!image?.dataUrl) {
-      setImageObj(null);
-      return;
-    }
-    const next = new window.Image();
-    let cancelled = false;
-    next.onload = () => {
-      if (!cancelled) setImageObj(next);
-    };
-    next.src = image.dataUrl;
-    return () => {
-      cancelled = true;
-    };
-  }, [image?.dataUrl]);
-
-  useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
       if (wrapRef.current) {
         const next = { width: wrapRef.current.clientWidth, height: wrapRef.current.clientHeight };
@@ -415,16 +432,23 @@ export function AnnotationCanvas({
   }, []);
 
   useEffect(() => {
-    if (!image) return;
-    const fit = Math.max(
-      0.02,
-      Math.min((size.width - 64) / sourceBounds.width, (size.height - 96) / sourceBounds.height, 1),
+    if (!image) {
+      viewportLayout.current = null;
+      userAdjustedViewport.current = false;
+      return;
+    }
+    const previous = viewportLayout.current;
+    const sameImage = previous?.filename === image.filename && previous.dataUrl === image.dataUrl;
+    if (!sameImage) userAdjustedViewport.current = false;
+    // Refit for a new screenshot or an untouched view; otherwise keep the user's zoom and centre.
+    const next = viewportForLayoutChange(
+      viewportRef.current,
+      previous?.size ?? null,
+      size,
+      { x: sourceBounds.x, y: sourceBounds.y, width: sourceBounds.width, height: sourceBounds.height },
+      sameImage && userAdjustedViewport.current,
     );
-    const next = {
-      x: (size.width - sourceBounds.width * fit) / 2 - sourceBounds.x * fit,
-      y: (size.height - sourceBounds.height * fit) / 2 - sourceBounds.y * fit,
-      scale: fit,
-    };
+    viewportLayout.current = { filename: image.filename, dataUrl: image.dataUrl, size };
     viewportRef.current = next;
     setViewport(next);
   }, [image, size, sourceBounds.x, sourceBounds.y, sourceBounds.width, sourceBounds.height]);
@@ -435,6 +459,7 @@ export function AnnotationCanvas({
     const handleCommand = (event: Event) => {
       const command = canvasCommandFromEvent(event);
       if (!command) return;
+      userAdjustedViewport.current = command !== 'fit';
       setViewport((current) => {
         const next = viewportForCanvasCommand(current, command, size, {
           width: sourceBounds.width,
@@ -568,6 +593,7 @@ export function AnnotationCanvas({
       id: annotation.id,
       text: annotation.text ?? '',
       isNew,
+      pending: isNew ? annotation : undefined,
     });
   }
 
@@ -583,7 +609,7 @@ export function AnnotationCanvas({
       theme,
       annotationColor,
     );
-    onChange([...annotations, annotation]);
+    createdInPointerGesture.current = true;
     beginTextEditing(annotation, true);
   }
 
@@ -611,7 +637,7 @@ export function AnnotationCanvas({
   function finishEditing(commit: boolean) {
     if (!editing) return;
     editorResizeListenerCleanup.current?.();
-    const annotation = annotations.find((item) => item.id === editing.id);
+    const annotation = editing.pending ?? annotations.find((item) => item.id === editing.id);
     if (!annotation) {
       explicitEditorResize.current = null;
       setEditing(null);
@@ -619,10 +645,7 @@ export function AnnotationCanvas({
       return;
     }
     if (!commit) {
-      if (editing.isNew) {
-        onChange(annotations.filter((item) => item.id !== editing.id));
-        onSelect(null);
-      }
+      if (editing.isNew) onSelect(null);
       explicitEditorResize.current = null;
       setEditing(null);
       onTool?.('select');
@@ -630,17 +653,14 @@ export function AnnotationCanvas({
     }
     const nextText = editing.text;
     if (editing.isNew && !nextText.trim()) {
-      onChange(annotations.filter((item) => item.id !== editing.id));
       onSelect(null);
     } else {
       const resized =
         explicitEditorResize.current?.id === annotation.id ? explicitEditorResize.current.size : undefined;
       const committedSize = committedTextAnnotationSize(annotation, nextText, measureText, resized);
-      update(annotation.id, {
-        text: nextText,
-        width: committedSize.width,
-        height: committedSize.height,
-      });
+      const committed = { text: nextText, width: committedSize.width, height: committedSize.height };
+      if (editing.pending) onChange([...annotations, { ...editing.pending, ...committed }]);
+      else update(annotation.id, committed);
       onMessage?.(editing.isNew ? 'Text note added' : 'Text note updated');
     }
     explicitEditorResize.current = null;
@@ -681,6 +701,7 @@ export function AnnotationCanvas({
   }
 
   function beginPointer(event: Konva.KonvaEventObject<PointerEvent>) {
+    createdInPointerGesture.current = false;
     if (
       cropping &&
       (event.target.id() === 'crop-preview' || event.target.getParent()?.className === 'Transformer')
@@ -728,6 +749,7 @@ export function AnnotationCanvas({
         x: pan.current.originX + pointer.x - pan.current.x,
         y: pan.current.originY + pointer.y - pan.current.y,
       };
+      userAdjustedViewport.current = true;
       viewportRef.current = next;
       setViewport(next);
       return;
@@ -735,24 +757,36 @@ export function AnnotationCanvas({
     if (!draft || ['callout', 'step'].includes(draft.kind)) return;
     const point = imagePoint(event.evt);
     if (!point) return;
+    // Shift snaps lines and arrows to 45° steps and makes boxes square; without it the delta is untouched.
+    const delta = constrainDraftDelta(
+      draft.kind,
+      { x: point.x - draft.x, y: point.y - draft.y },
+      event.evt.shiftKey,
+    );
     if (draft.kind === 'pen')
       setDraft({
         ...draft,
-        points: [...(draft.points ?? [0, 0]), point.x - draft.x, point.y - draft.y],
-        width: Math.max(4, Math.abs(point.x - draft.x)),
-        height: Math.max(4, Math.abs(point.y - draft.y)),
+        points: [...(draft.points ?? [0, 0]), delta.x, delta.y],
+        width: Math.max(4, Math.abs(delta.x)),
+        height: Math.max(4, Math.abs(delta.y)),
       });
     else if (draft.kind === 'arrow' || draft.kind === 'line')
       setDraft({
         ...draft,
-        points: [0, 0, point.x - draft.x, point.y - draft.y],
-        width: Math.abs(point.x - draft.x),
-        height: Math.abs(point.y - draft.y),
+        points: [0, 0, delta.x, delta.y],
+        width: Math.abs(delta.x),
+        height: Math.abs(delta.y),
       });
-    else setDraft({ ...draft, width: point.x - draft.x, height: point.y - draft.y });
+    else setDraft({ ...draft, width: delta.x, height: delta.y });
   }
 
   function endPointer(event: Konva.KonvaEventObject<PointerEvent>) {
+    // Konva turns native cancellation over a listening shape into pointerup.
+    // Inspect the native event before releasing capture or committing the draft.
+    if (event.evt.type === 'pointercancel' || event.evt.type === 'touchcancel') {
+      abortPointerInteraction(event.evt);
+      return;
+    }
     const wasDragging = dragging.current !== null;
     finalizePointerInteraction(event.evt);
     if (wasDragging) return;
@@ -775,12 +809,44 @@ export function AnnotationCanvas({
       setDraft(null);
       return;
     }
-    onChange([...annotations, completed]);
-    onSelect(completed.id);
+    // The completion click can hit the stage or an older shape under the new mark.
+    createdInPointerGesture.current = true;
     if (completed.kind === 'callout') beginTextEditing(completed, true);
-    else onTool?.('select');
+    else {
+      onChange([...annotations, completed]);
+      onSelect(completed.id);
+      onTool?.('select');
+    }
     setDraft(null);
   }
+
+  function handleCanvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    // Only keys pressed on the focused canvas itself: the text editor and crop buttons keep their own keys.
+    if (event.target !== event.currentTarget || event.defaultPrevented || event.nativeEvent.isComposing)
+      return;
+    if (!image || !imageObj || editing || cropping || draft || event.altKey || event.ctrlKey || event.metaKey)
+      return;
+    if (event.key === 'Tab') {
+      const next = nextKeyboardSelection(annotations, selectedId, event.shiftKey ? -1 : 1);
+      if (next === null && selectedId === null) return;
+      onSelect(next);
+      // Past either end the selection clears and Tab moves focus on, so the canvas never traps focus.
+      if (next !== null) event.preventDefault();
+      return;
+    }
+    const delta = nudgeDeltaForKey(event.key, event.shiftKey);
+    if (!delta || !selectedId) return;
+    const next = nudgeAnnotation(annotations, selectedId, delta);
+    if (next === annotations) return;
+    event.preventDefault();
+    event.stopPropagation();
+    nudgeBurst.current = nextNudgeBurst(nudgeBurst.current, selectedId, Date.now());
+    onChange(next, { coalesce: nudgeBurstKey(nudgeBurst.current) });
+  }
+
+  useEffect(() => {
+    nudgeBurst.current = null;
+  }, [selectedId, tool, image?.filename, image?.dataUrl]);
 
   function cancelPointer(event: Konva.KonvaEventObject<PointerEvent>) {
     abortPointerInteraction(event.evt);
@@ -819,13 +885,19 @@ export function AnnotationCanvas({
       draggable: tool === 'select' && !spaceHeld && !editing,
       visible: editing?.id !== annotation.id,
       onPointerDblClick: () => {
+        if (createdInPointerGesture.current) return;
         if (annotation.kind === 'text' || annotation.kind === 'callout') beginTextEditing(annotation, false);
       },
       onDblTap: () => {
+        if (createdInPointerGesture.current) return;
         if (annotation.kind === 'text' || annotation.kind === 'callout') beginTextEditing(annotation, false);
       },
-      onPointerClick: () => onSelect(annotation.id),
-      onTap: () => onSelect(annotation.id),
+      onPointerClick: () => {
+        if (!createdInPointerGesture.current) onSelect(annotation.id);
+      },
+      onTap: () => {
+        if (!createdInPointerGesture.current) onSelect(annotation.id);
+      },
       onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => startAnnotationDrag(annotation, event),
       onDragMove: dragPointer,
       onDragEnd: endAnnotationDrag,
@@ -1040,7 +1112,9 @@ export function AnnotationCanvas({
     return () => content.removeEventListener('lostpointercapture', lostPointerCapture);
   }, [imageObj, stageRef]);
 
-  const editedAnnotation = editing ? annotations.find((annotation) => annotation.id === editing.id) : null;
+  const editedAnnotation = editing
+    ? (editing.pending ?? annotations.find((annotation) => annotation.id === editing.id))
+    : null;
   const editedLayout = editedAnnotation
     ? textAnnotationLayout({ ...editedAnnotation, text: editing?.text ?? editedAnnotation.text }, measureText)
     : null;
@@ -1049,7 +1123,14 @@ export function AnnotationCanvas({
   return (
     <div
       className="canvas-wrap annotation-canvas canvas-workspace-surface"
-      tabIndex={-1}
+      tabIndex={0}
+      role="application"
+      aria-label="Annotation canvas"
+      aria-describedby={keyboardHelpId}
+      onKeyDown={handleCanvasKeyDown}
+      onBlur={() => {
+        nudgeBurst.current = null;
+      }}
       data-testid="annotation-canvas"
       style={{ cursor: spaceHeld || pan.current ? 'grabbing' : tool === 'select' ? 'default' : 'crosshair' }}
       ref={wrapRef}
@@ -1062,7 +1143,9 @@ export function AnnotationCanvas({
       data-source-height={sourceBounds.height}
     >
       <div className="canvas-meta">
-        <span>{image ? `${image.width} × ${image.height}` : 'No screenshot selected'}</span>
+        <span>
+          {image ? `${image.width} × ${image.height}` : loadFailed ? 'Screenshot unavailable' : 'Loading…'}
+        </span>
         <span>
           {Math.round(viewport.scale * 100)}% · {tool === 'select' ? 'Select and move' : `Tool: ${tool}`}
         </span>
@@ -1074,11 +1157,22 @@ export function AnnotationCanvas({
           height={size.height}
           className="konva-stage"
           onPointerDown={beginPointer}
+          onTouchStart={() => {
+            // A later touch-only tap also starts a new gesture. The compatibility
+            // touchstart during our captured pointer gesture must retain its guard.
+            if (capturedPointer.current === null) createdInPointerGesture.current = false;
+          }}
           onPointerMove={movePointer}
           onPointerUp={endPointer}
           onPointerCancel={cancelPointer}
           onPointerDblClick={(event) => {
-            if (editing || tool !== 'select' || event.target !== event.target.getStage()) return;
+            if (
+              createdInPointerGesture.current ||
+              editing ||
+              tool !== 'select' ||
+              event.target !== event.target.getStage()
+            )
+              return;
             const point = imagePoint(event.evt);
             if (point) createTextAt(point);
           }}
@@ -1087,15 +1181,19 @@ export function AnnotationCanvas({
             if (event.evt.ctrlKey || event.evt.metaKey) {
               const pointer = event.target.getStage()?.getPointerPosition();
               if (!pointer) return;
+              userAdjustedViewport.current = true;
               setViewport((current) => zoomAt(current, pointer, Math.exp(-event.evt.deltaY * 0.01)));
-            } else
+            } else {
+              userAdjustedViewport.current = true;
               setViewport((current) => ({
                 ...current,
                 x: current.x - event.evt.deltaX,
                 y: current.y - event.evt.deltaY,
               }));
+            }
           }}
           onPointerClick={(event) => {
+            if (createdInPointerGesture.current) return;
             if (event.target === event.target.getStage()) onSelect(null);
           }}
         >
@@ -1256,9 +1354,13 @@ export function AnnotationCanvas({
           </Layer>
         </Stage>
       ) : (
-        <div className="canvas-empty">
-          <span>Import a screenshot to begin marking context.</span>
-        </div>
+        <CanvasLoadState
+          failed={decodeFailed || (!image && Boolean(loadFailed))}
+          onRetry={() => {
+            retryDecode();
+            onRetryLoad?.();
+          }}
+        />
       )}
       {editing && editedAnnotation && editedLayout && editorPresentation && (
         <textarea
@@ -1334,6 +1436,13 @@ export function AnnotationCanvas({
           </button>
         </div>
       )}
+      <span id={keyboardHelpId} className="canvas-assistive-text">
+        Tab selects the next annotation and Shift+Tab the previous one. Arrow keys move the selected
+        annotation by 1 pixel, or 10 with Shift. Escape clears the selection.
+      </span>
+      <div className="canvas-assistive-text" aria-live="polite" data-testid="annotation-canvas-status">
+        {describeSelectedAnnotation(annotations, selectedId)}
+      </div>
       <div className="canvas-hint" hidden={cropping}>
         Drag empty space to pan · Double-click screenshot for text · Shift+Enter for a new line · 0 fit · 1
         actual size

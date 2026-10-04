@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
+import { afterFileCommit, CommittedWriteError } from './files.js';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -930,12 +931,13 @@ export class LocalMcpServer {
       }
     }
     try {
-      await persist();
+      await afterFileCommit(persist, async () => {
+        if (!enabled) await this.stop();
+      });
     } catch (error) {
-      if (starting) await this.stop();
+      if (starting && !(error instanceof CommittedWriteError)) await this.stop();
       throw error;
     }
-    if (!enabled) await this.stop();
   }
 
   private async listen(port: number): Promise<LocalMcpAddress> {

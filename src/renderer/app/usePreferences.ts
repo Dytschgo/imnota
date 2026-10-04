@@ -1,3 +1,4 @@
+import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { useCallback, useEffect, useState } from 'react';
 import {
   DEFAULT_PREFERENCE_SETTINGS,
@@ -98,8 +99,19 @@ export function usePreferences(): PreferenceController {
       }
       return next;
     } catch (reason) {
+      if (isCommittedWriteWarning(reason)) {
+        try {
+          setResult(workflowValue(await getRendererBridge().getPreferenceSettings()));
+          setCapabilities(workflowValue(await getRendererBridge().getNativeCapabilities()));
+        } catch {
+          /* Preserve the durability warning when readback is unavailable. */
+        }
+      }
       setError(
-        workflowMessage(reason, 'This preference could not be saved. Your previous setting is active.'),
+        workflowMessage(
+          reason,
+          'The preference save could not be confirmed. Review the current setting before trying again.',
+        ),
       );
       throw reason;
     } finally {

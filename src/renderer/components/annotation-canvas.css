@@ -7,6 +7,22 @@
   touch-action: none;
 }
 
+.annotation-canvas:focus-visible {
+  outline: 2px solid var(--imnota-accent-hover);
+  outline-offset: -2px;
+}
+
+.canvas-assistive-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .annotation-canvas .annotation-text-editor {
   box-sizing: border-box;
   margin: 0;
@@ -52,4 +68,9 @@
   .annotation-canvas .canvas-hint {
     background: var(--surface);
   }
+}
+
+.annotation-canvas .canvas-load-state {
+  align-content: center;
+  gap: 12px;
 }

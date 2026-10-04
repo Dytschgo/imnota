@@ -1,3 +1,5 @@
+import { isCommittedWriteWarning, isUnconfirmedRestore } from '../shared/write-outcome';
+import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { CircleAlert, Check, X } from 'lucide-react';
@@ -18,6 +20,7 @@ import type {
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
 import type { CaptureDelaySeconds } from '../shared/capture';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../shared/recently-deleted';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -29,6 +32,7 @@ import { useProjectPersistence } from './app/useProjectPersistence';
 import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
+import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -46,6 +50,7 @@ import {
 } from './navigation-history';
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
+import { setReloadProtection } from './app/reload-guard';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -91,6 +96,7 @@ type ToastNotification = {
   action?: { label: string; run(): void };
   durationMs: number;
   generation: number;
+  projectPath: string | null;
 };
 
 export function userFacingErrorMessage(message: string): string {
@@ -119,6 +125,7 @@ export default function App() {
   const [toolColors, setToolColors] = useState<Partial<Record<ToolChoice, string>>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [history, setHistory] = useState<Annotation[][]>([]);
+  const annotationUndoKey = useRef<string | null>(null);
   const [redo, setRedo] = useState<Annotation[][]>([]);
   const [descriptionHistory, setDescriptionHistory] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
@@ -131,6 +138,7 @@ export default function App() {
   const toastTimer = useRef<number | null>(null);
   const toastGeneration = useRef(0);
   const toastHold = useRef(0);
+  const toastErrorPaused = useRef(false);
   const toastLifetime = useRef<{ generation: number; durationMs: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
@@ -193,12 +201,10 @@ export default function App() {
   const contentPersistence = useContentPersistence({
     snapshot: store.snapshot,
     itemId: store.activeScreenshotId,
-    beforeSave: async () => {
-      if (!(await persistence.flush())) return false;
-      return !persistence.hasPendingProjectMetadata() || persistence.flushProjectMetadata();
-    },
+    beforeSave: persistence.prepareContentSave,
     beginMutation: persistence.beginNativeMutation,
-    acceptSnapshot: (snapshot, id, token) => persistence.acceptMutationSnapshot(snapshot, id, token),
+    acceptSnapshot: (snapshot, id, token, transition) =>
+      persistence.acceptMutationSnapshot(snapshot, id, token, transition),
     cancelMutation: persistence.cancelNativeMutation,
   });
   useEffect(() => {
@@ -290,7 +296,13 @@ export default function App() {
       const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
       toastHold.current = 0;
       toastLifetime.current = { generation, durationMs };
-      setToast({ message, action, durationMs, generation });
+      setToast({
+        message,
+        action,
+        durationMs,
+        generation,
+        projectPath: useAppStore.getState().snapshot?.projectPath ?? null,
+      });
       armToastTimer(generation, durationMs);
     },
     [armToastTimer],
@@ -302,7 +314,7 @@ export default function App() {
   const releaseToast = useCallback(() => {
     toastHold.current = Math.max(0, toastHold.current - 1);
     const lifetime = toastLifetime.current;
-    if (toastHold.current > 0 || !lifetime) return;
+    if (toastHold.current > 0 || toastErrorPaused.current || !lifetime) return;
     armToastTimer(lifetime.generation, lifetime.durationMs);
   }, [armToastTimer]);
   const dismissToast = useCallback(
@@ -315,6 +327,23 @@ export default function App() {
     },
     [clearToastTimer],
   );
+  // An error notice covers the toast. Keep an Undo offer alive until it can be seen again.
+  const errorVisible = Boolean(error || contentPersistence.error || persistence.error || preferences.error);
+  const hiddenActionToast = errorVisible && toast?.action ? toast.generation : null;
+  useEffect(() => {
+    toastErrorPaused.current = hiddenActionToast !== null;
+    // Removing the toast does not emit mouseleave. Discard holds from its old DOM node.
+    toastHold.current = 0;
+    if (hiddenActionToast !== null) clearToastTimer();
+    else if (toastLifetime.current) {
+      const { generation, durationMs } = toastLifetime.current;
+      armToastTimer(generation, durationMs);
+    }
+  }, [hiddenActionToast, clearToastTimer, armToastTimer]);
+  useEffect(() => {
+    if (toast?.action && toast.projectPath !== (store.snapshot?.projectPath ?? null))
+      dismissToast(toast.generation);
+  }, [store.snapshot?.projectPath, toast, dismissToast]);
   const refreshProjects = useCallback(async () => {
     useAppStore.getState().set({ projects: await window.imnota.listProjects() });
   }, []);
@@ -447,6 +476,7 @@ export default function App() {
 
   useEffect(() => {
     setHistory([]);
+    annotationUndoKey.current = null;
     setRedo([]);
     setSelectedAnnotationId(null);
   }, [persistence.loadedScreenshotId]);
@@ -456,10 +486,20 @@ export default function App() {
       window.clearTimeout(metadataTimer.current);
       metadataTimer.current = null;
     }
-    if (!(await contentPersistence.flush())) return false;
-    if (!(await persistence.flush())) return false;
-    if (persistence.hasPendingProjectMetadata() && !(await persistence.flushProjectMetadata())) return false;
-    return true;
+    // A failed leg must not prevent independent drafts from reaching disk.
+    let saved = true;
+    for (const save of [
+      () => contentPersistence.flush(),
+      () => persistence.flushProjectDrafts(),
+      () => persistence.flushProjectMetadata(),
+    ]) {
+      try {
+        if (!(await save())) saved = false;
+      } catch {
+        saved = false;
+      }
+    }
+    return saved;
   }, [persistence, contentPersistence]);
 
   const currentLocation = useCallback((): NavigationLocation => {
@@ -515,6 +555,17 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [flushAll, persistence.hasUnsavedChanges, contentPersistence.hasUnsavedChanges]);
 
+  // Error fallbacks reload through the same save protection as closing the window. There is no
+  // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
+  useEffect(() => {
+    setReloadProtection({
+      flush: () => persistence.withReloadWatch(flushAll),
+      allowUnload: () => {
+        allowClose.current = true;
+      },
+    });
+  }, [flushAll, persistence]);
+
   const queueProjectSave = useCallback(
     (project: ProjectData, changedShot?: ScreenshotRecord) => {
       if (changedShot) {
@@ -555,14 +606,17 @@ export default function App() {
   );
 
   const changeAnnotations = useCallback(
-    (next: Annotation[]) => {
-      setHistory((items) => [...items, persistence.annotations]);
+    (next: Annotation[], options?: AnnotationChangeOptions) => {
+      if (!continuesUndoStep(annotationUndoKey.current, options))
+        setHistory((items) => [...items, persistence.annotations]);
+      annotationUndoKey.current = options?.coalesce ?? null;
       setRedo([]);
       persistence.changeAnnotations(next);
     },
     [persistence],
   );
   const undoAnnotations = useCallback(() => {
+    annotationUndoKey.current = null;
     const previous = history.at(-1);
     if (!previous) return;
     setRedo((items) => [...items, persistence.annotations]);
@@ -570,6 +624,7 @@ export default function App() {
     setHistory((items) => items.slice(0, -1));
   }, [history, persistence]);
   const redoAnnotations = useCallback(() => {
+    annotationUndoKey.current = null;
     const next = redo.at(-1);
     if (!next) return;
     setHistory((items) => [...items, persistence.annotations]);
@@ -788,6 +843,14 @@ export default function App() {
       showToast('Workspace ready');
       return true;
     } catch (reason) {
+      if (isCommittedWriteWarning(reason)) {
+        await refreshCommittedSettings();
+        try {
+          store.set({ projects: await window.imnota.listProjects() });
+        } catch {
+          /* Keep the original durability warning if project refresh fails. */
+        }
+      }
       setError(reason instanceof Error ? reason.message : 'Workspace could not be selected.');
       return false;
     }
@@ -1277,15 +1340,49 @@ export default function App() {
     }
     await mutateContent('delete', pending);
   }
-  async function undoContent(projectPath: string, undoToken: string, itemId: string) {
+  async function undoContent(
+    projectPath: string,
+    undoToken: string,
+    itemId: string,
+    onError: (message: string) => void = setError,
+    onWarning?: (message: string) => void,
+  ): Promise<boolean> {
+    if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
+    if (persistence.externalChange) {
+      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+      return false;
+    }
     const token = await beginCurrentProjectMutation();
-    if (token === null) return;
+    if (token === null) return false;
     try {
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(token);
+        return false;
+      }
       const snapshot = await window.imnota.undoDeleteContentItem({ projectPath, undoToken });
-      if (!(await persistence.acceptMutationSnapshot(snapshot, itemId, token))) return;
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(token);
+        onError('The original project was restored, but a different project is now open.');
+        return false;
+      }
+      const accepted = await persistence.acceptMutationSnapshot(
+        snapshot,
+        itemId,
+        token,
+        undefined,
+        snapshot.projectRevision,
+      );
+      if (accepted && snapshot.warnings?.length) onWarning?.(snapshot.warnings.join(' '));
+      return accepted;
     } catch (reason) {
-      await persistence.cancelNativeMutation(token);
-      setError(reason instanceof Error ? reason.message : 'The item could not be restored.');
+      await persistence.cancelNativeMutation(
+        token,
+        useAppStore.getState().snapshot?.projectPath === projectPath && isUnconfirmedRestore(reason)
+          ? (reason as Error).message
+          : undefined,
+      );
+      onError(reason instanceof Error ? reason.message : 'The item could not be restored.');
+      return false;
     }
   }
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
@@ -1469,16 +1566,73 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be moved to trash.');
     }
   }
-  async function undoDeletedScreenshot(projectPath: string, undoToken: string, screenshotId: string) {
-    const nativeMutationToken = await beginCurrentProjectMutation();
-    if (nativeMutationToken === null) return;
-    try {
-      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
-      await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken);
-    } catch (reason) {
-      await persistence.cancelNativeMutation(nativeMutationToken);
-      setError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
+  async function undoDeletedScreenshot(
+    projectPath: string,
+    undoToken: string,
+    screenshotId: string,
+    onError: (message: string) => void = setError,
+    onWarning?: (message: string) => void,
+  ): Promise<boolean> {
+    if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
+    if (persistence.externalChange) {
+      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+      return false;
     }
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return false;
+    try {
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        return false;
+      }
+      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        onError('The original project was restored, but a different project is now open.');
+        return false;
+      }
+      const accepted = await persistence.acceptMutationSnapshot(
+        restored,
+        screenshotId,
+        nativeMutationToken,
+        undefined,
+        restored.projectRevision,
+      );
+      if (accepted && restored.warnings?.length) onWarning?.(restored.warnings.join(' '));
+      return accepted;
+    } catch (reason) {
+      await persistence.cancelNativeMutation(
+        nativeMutationToken,
+        useAppStore.getState().snapshot?.projectPath === projectPath && isUnconfirmedRestore(reason)
+          ? (reason as Error).message
+          : undefined,
+      );
+      onError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
+      return false;
+    }
+  }
+  /** Recently deleted restores through the Undo path; its dialog shows the failure itself. */
+  async function restoreDeletedItem(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult> {
+    const projectPath = useAppStore.getState().snapshot?.projectPath;
+    if (!projectPath) return 'The project is no longer open.';
+    const failure: { message?: string; warning?: string } = {};
+    const undo = item.kind === 'screenshot' ? undoDeletedScreenshot : undoContent;
+    const restored = await undo(
+      projectPath,
+      item.undoToken,
+      item.itemId,
+      (message) => {
+        failure.message = message;
+      },
+      (warning) => {
+        failure.warning = warning;
+      },
+    );
+    if (restored) return failure.warning ? { warning: failure.warning } : null;
+    return (
+      failure.message ??
+      'Saving or adopting the restored project did not complete. Refresh the list and resolve any save or external-change warning before retrying.'
+    );
   }
   function requestProjectDeletion(projectPath: string) {
     const project = useAppStore.getState().projects.find((entry) => entry.projectPath === projectPath);
@@ -1916,7 +2070,13 @@ export default function App() {
               ? 'saving'
               : 'saved'
         }
-        onRetrySave={contentPersistence.saveState === 'error' ? contentPersistence.retry : undefined}
+        onRetrySave={
+          contentPersistence.saveState === 'error'
+            ? contentPersistence.retry
+            : persistence.saveState === 'error'
+              ? () => void flushAll()
+              : undefined
+        }
         searchShortcut={shortcutLabel('project.search')}
         navigationShortcuts={{
           projects: shortcutLabel('navigation.projects'),
@@ -2053,6 +2213,7 @@ export default function App() {
               persistence.discardRestoredProject(result.projectPath);
               contentPersistence.reset();
               setHistory([]);
+              annotationUndoKey.current = null;
               setRedo([]);
               setDescriptionHistory({});
               setSelectedAnnotationId(null);
@@ -2142,6 +2303,8 @@ export default function App() {
               });
             }}
             image={persistence.image}
+            imageLoadFailed={persistence.imageLoadFailed}
+            onRetryImageLoad={persistence.retryImageLoad}
             annotations={persistence.annotations}
             selectedAnnotationId={selectedAnnotationId}
             revealAnnotationId={pendingSearchAnnotationId}
@@ -2235,6 +2398,7 @@ export default function App() {
             onDeleteItem={(id, kind) =>
               kind === 'screenshot' ? requestScreenshotDeletion(id) : requestContentDeletion(id)
             }
+            onRestoreDeleted={restoreDeletedItem}
           />
         )}
         <input
@@ -2311,6 +2475,7 @@ export default function App() {
             onClick={() => {
               setPermissionHelp(null);
               setError('');
+              contentPersistence.clearError();
               persistence.clearError();
               preferences.clearError();
             }}

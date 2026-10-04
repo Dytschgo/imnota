@@ -2,6 +2,7 @@ import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ContentItemContent } from '../../shared/content-items';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import type Konva from 'konva';
 import type {
   Annotation,
@@ -13,6 +14,8 @@ import type {
 } from '../../shared/types';
 import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
+import type { AnnotationChangeOptions } from '../canvas/undo-coalescing';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -34,6 +37,9 @@ export interface WorkspaceProps {
   onDrawingTitle?(title: string): void;
   onDrawingDescription?(description: string): void;
   image: ImagePayload | null;
+  /** The active screenshot failed to load; without it, a missing image means it is still loading. */
+  imageLoadFailed?: boolean;
+  onRetryImageLoad?(): void;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   revealAnnotationId?: string | null;
@@ -51,7 +57,7 @@ export interface WorkspaceProps {
   reorderBindings?: { up: string | null; down: string | null };
   onTool(tool: 'select' | AnnotationKind): void;
   onColor(color: string): void;
-  onChangeAnnotations(next: Annotation[]): void;
+  onChangeAnnotations(next: Annotation[], options?: AnnotationChangeOptions): void;
   onSelectAnnotation(id: string | null): void;
   onUndo(): void;
   onRedo(): void;
@@ -78,6 +84,7 @@ export interface WorkspaceProps {
   onUndoDescription(): void;
   onDuplicate(): void | Promise<void>;
   onDeleteItem(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
+  onRestoreDeleted?(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
 }
 
 export function Workspace(props: WorkspaceProps) {
@@ -224,6 +231,7 @@ export function Workspace(props: WorkspaceProps) {
         deleteShortcut={props.shortcutLabels.delete}
         reorderBindings={props.reorderBindings}
         onDeleteItem={props.onDeleteItem}
+        onRestoreDeleted={props.onRestoreDeleted}
       />
       <div className="canvas-column">
         {(!item || item.kind === 'text') && (
@@ -271,20 +279,22 @@ export function Workspace(props: WorkspaceProps) {
               </div>
             )
           ) : item.kind === 'drawing' ? (
-            <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
-              <DrawingEditor
-                key={item.id}
-                source={props.content.source ?? ''}
-                theme={props.resolvedTheme}
-                title={item.title}
-                showInspector={!store.rightPanelOpen}
-                onShowInspector={(trigger) => {
-                  inspectorTriggerRef.current = trigger;
-                  store.set({ rightPanelOpen: true });
-                }}
-                onChange={(source) => props.onContentChange?.({ source })}
-              />
-            </Suspense>
+            <ErrorBoundary variant="panel" resetKey={item.id}>
+              <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
+                <DrawingEditor
+                  key={item.id}
+                  source={props.content.source ?? ''}
+                  theme={props.resolvedTheme}
+                  title={item.title}
+                  showInspector={!store.rightPanelOpen}
+                  onShowInspector={(trigger) => {
+                    inspectorTriggerRef.current = trigger;
+                    store.set({ rightPanelOpen: true });
+                  }}
+                  onChange={(source) => props.onContentChange?.({ source })}
+                />
+              </Suspense>
+            </ErrorBoundary>
           ) : (
             <TextBlockEditor
               key={item.id}
@@ -293,20 +303,25 @@ export function Workspace(props: WorkspaceProps) {
             />
           )
         ) : shot ? (
-          <AnnotationCanvas
-            image={props.image}
-            annotations={props.annotations}
-            selectedId={props.selectedAnnotationId}
-            revealAnnotationId={props.revealAnnotationId}
-            tool={props.tool}
-            onChange={props.onChangeAnnotations}
-            onSelect={props.onSelectAnnotation}
-            onMessage={props.onMessage}
-            stageRef={props.stageRef}
-            onTool={props.onTool}
-            theme={props.resolvedTheme}
-            annotationColor={props.annotationColor}
-          />
+          <ErrorBoundary variant="panel" resetKey={shot.id}>
+            <AnnotationCanvas
+              key={`${store.snapshot?.projectPath}:${shot.id}`}
+              image={props.image}
+              loadFailed={props.imageLoadFailed}
+              onRetryLoad={props.onRetryImageLoad}
+              annotations={props.annotations}
+              selectedId={props.selectedAnnotationId}
+              revealAnnotationId={props.revealAnnotationId}
+              tool={props.tool}
+              onChange={props.onChangeAnnotations}
+              onSelect={props.onSelectAnnotation}
+              onMessage={props.onMessage}
+              stageRef={props.stageRef}
+              onTool={props.onTool}
+              theme={props.resolvedTheme}
+              annotationColor={props.annotationColor}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="workspace-empty-state">
             <EmptyState

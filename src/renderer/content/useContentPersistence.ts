@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContentItemContent, SaveContentItemResult } from '../../shared/content-items';
-import type { ProjectSnapshot } from '../../shared/types';
+import type { ProjectRevisionTransition, ProjectSnapshot } from '../../shared/types';
 
 interface Draft {
   projectPath: string;
@@ -15,7 +15,12 @@ interface Options {
   itemId: string | null;
   beforeSave(): Promise<boolean>;
   beginMutation(): number;
-  acceptSnapshot(snapshot: ProjectSnapshot, itemId: string, token: number): Promise<boolean>;
+  acceptSnapshot(
+    snapshot: ProjectSnapshot,
+    itemId: string,
+    token: number,
+    transition?: ProjectRevisionTransition,
+  ): Promise<boolean>;
   cancelMutation(token: number): Promise<boolean>;
 }
 
@@ -112,7 +117,12 @@ export function useContentPersistence(options: Options) {
             const pending = current.pendingAdoption;
             token = callbacks.current.beginMutation();
             if (
-              !(await callbacks.current.acceptSnapshot(pending.saved.snapshot, pending.saved.itemId, token))
+              !(await callbacks.current.acceptSnapshot(
+                pending.saved.snapshot,
+                pending.saved.itemId,
+                token,
+                pending.saved.projectRevisionTransition,
+              ))
             )
               throw new Error(
                 'Content was saved, but the project still needs to be reloaded. Retry to reconnect.',
@@ -152,7 +162,14 @@ export function useContentPersistence(options: Options) {
             image,
           };
           current.pendingAdoption = { saved, version };
-          if (!(await callbacks.current.acceptSnapshot(saved.snapshot, saved.itemId, token)))
+          if (
+            !(await callbacks.current.acceptSnapshot(
+              saved.snapshot,
+              saved.itemId,
+              token,
+              saved.projectRevisionTransition,
+            ))
+          )
             throw new Error(
               'Content was saved, but the latest project could not be adopted. Reload to review it.',
             );
@@ -195,6 +212,8 @@ export function useContentPersistence(options: Options) {
     error,
     change,
     flush,
+    /** Dismiss the notice only; a failed save keeps its error state and Retry. */
+    clearError: () => setError(''),
     hasUnsavedChanges: Boolean(
       draft.current &&
       (draft.current.pendingAdoption || draft.current.version !== draft.current.savedVersion),

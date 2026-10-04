@@ -1,3 +1,4 @@
+import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sharingSenderNameSchema } from '../../shared/schema';
 import type { WorkspaceSettings } from '../../shared/types';
@@ -27,12 +28,30 @@ export function validateSharingSenderName(
 
 /** Serializes settings writes so a slower earlier response cannot replace a newer preference. */
 export function saveWorkspaceSettingsPatch(patch: Partial<WorkspaceSettings>): Promise<WorkspaceSettings> {
-  const operation = settingsWriteQueue.catch(() => undefined).then(() => window.imnota.setSettings(patch));
+  const operation = settingsWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        return await window.imnota.setSettings(patch);
+      } catch (error) {
+        if (isCommittedWriteWarning(error)) await refreshCommittedSettings();
+        throw error;
+      }
+    });
   settingsWriteQueue = operation.then(
     () => undefined,
     () => undefined,
   );
   return operation;
+}
+
+/** Read back the committed state without automatically retrying a write. */
+export async function refreshCommittedSettings(): Promise<void> {
+  try {
+    useAppStore.getState().set({ settings: await window.imnota.getSettings() });
+  } catch {
+    // Keep the original durability warning if the follow-up read is unavailable.
+  }
 }
 
 export interface SharingSenderNameState {
@@ -108,9 +127,13 @@ export function useSharingSenderName(): SharingSenderNameState {
         }
         return true;
       })
-      .catch(() => {
+      .catch((reason) => {
         if (mounted.current && requestGeneration === generation.current)
-          setError('The sender name could not be saved. Your previous name is still active.');
+          setError(
+            isCommittedWriteWarning(reason)
+              ? (reason as Error).message
+              : 'The sender name could not be saved. Your previous name is still active.',
+          );
         return false;
       })
       .finally(() => {

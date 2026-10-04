@@ -10,6 +10,7 @@ import type { ProjectIconKey } from './project-icons.js';
 import type { ProjectSearchInput, ProjectSearchResponse } from './project-search.js';
 import type { ContentSearchRequest, ContentSearchResponse } from './content-search.js';
 import type { BackupBridge } from './backups.js';
+import type { RecentlyDeletedItem } from './recently-deleted.js';
 
 export type ProjectStatus = 'active' | 'archived';
 export type Priority = 'low' | 'medium' | 'high';
@@ -186,6 +187,12 @@ export interface ExportRequest {
   includeAnnotations: boolean;
 }
 
+/** Exact project.json bytes checked and committed by one native transaction. */
+export interface ProjectRevisionTransition {
+  before: string;
+  after: string;
+}
+
 export interface SaveScreenshotResult {
   project: ProjectData;
   savedScreenshotId: string;
@@ -193,6 +200,7 @@ export interface SaveScreenshotResult {
   contentRevision: string;
   /** Fresh project.json revision after this native mutation. */
   projectRevision?: string;
+  projectRevisionTransition?: ProjectRevisionTransition;
   warnings?: string[];
 }
 
@@ -246,6 +254,8 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   duplicateScreenshot(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<ProjectSnapshot>;
   deleteScreenshot(input: { projectPath: string; screenshotId: string }): Promise<DeleteScreenshotResult>;
   undoDeleteScreenshot(input: { projectPath: string; undoToken: string }): Promise<ProjectSnapshot>;
+  /** Deleted items of one project that can still be restored with their Undo token. */
+  listRecentlyDeleted(projectPath: string): Promise<RecentlyDeletedItem[]>;
   duplicateProject(projectPath: string): Promise<ProjectSnapshot>;
   archiveProject(projectPath: string): Promise<void>;
   updateProjectMetadata(input: {

@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImnotaBridge, WorkspaceSettings } from '../../shared/types';
@@ -123,4 +124,19 @@ describe('sharing sender-name preferences', () => {
     ]);
     expect(useAppStore.getState().settings.sharingSenderName).toBe('Alpha');
   });
+});
+
+it('reads back committed settings and shows the durability warning without retrying the save', async () => {
+  useAppStore.setState({ settings: settings('Before') });
+  const setSettings = vi.fn().mockRejectedValue(new Error(COMMITTED_WRITE_WARNING));
+  const getSettings = vi.fn().mockResolvedValue(settings('After'));
+  window.imnota = { setSettings, getSettings } as unknown as ImnotaBridge;
+  const { result } = renderHook(() => useSharingSenderName());
+  act(() => result.current.setSenderName('After'));
+  await act(async () => expect(await result.current.saveSenderName()).toBe(false));
+  expect(useAppStore.getState().settings.sharingSenderName).toBe('After');
+  expect(result.current.error).toBe(COMMITTED_WRITE_WARNING);
+  expect(result.current.error).not.toContain('previous name');
+  expect(setSettings).toHaveBeenCalledOnce();
+  expect(getSettings).toHaveBeenCalledOnce();
 });

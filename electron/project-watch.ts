@@ -9,6 +9,7 @@ import type {
 } from '../src/shared/workflow-bridge.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { NativeWorkflowError } from './workflow-errors.js';
+import { CommittedWriteError } from './files.js';
 
 const WATCH_DEBOUNCE_MS = 180;
 
@@ -71,7 +72,31 @@ function defaultDependencies(
 ): ProjectWatchDependencies {
   return {
     ...dependencies,
-    createWatch: (projectPath, listener) => fs.watch(projectPath, { recursive: true }, listener) as FSWatcher,
+    createWatch: (projectPath, listener) => {
+      const recursive = fs.watch(projectPath, { recursive: true }, listener) as FSWatcher;
+      if (process.platform !== 'linux') return recursive;
+      // Linux recursive watches can retain a file's old inode after atomic replacement.
+      // Watch the stable parent too, so later project.json writes still reach revision checks.
+      let metadata: FSWatcher;
+      try {
+        metadata = fs.watch(projectPath, { recursive: false }, (eventType, filename) => {
+          if (normalizedRelativePath(filename) === 'project.json') listener(eventType, filename);
+        });
+      } catch (error) {
+        recursive.close();
+        throw error;
+      }
+      return {
+        close: () => {
+          recursive.close();
+          metadata.close();
+        },
+        on: (event, handler) => {
+          recursive.on(event, handler);
+          metadata.on(event, handler);
+        },
+      };
+    },
     readProjectSource: (projectPath) => fsPromises.readFile(path.join(projectPath, 'project.json'), 'utf8'),
     readWatchedFile: (filePath) => fsPromises.readFile(filePath).catch(() => null),
     randomId: () => randomUUID(),
@@ -174,10 +199,56 @@ export class ProjectWatchManager {
         true,
         { currentRevision },
       );
-    await this.dependencies.saveProject(state.projectPath, project);
-    const saved = await this.reload(watchId);
+    let warning: CommittedWriteError | undefined;
+    let committedRevision: string | undefined;
+    try {
+      await this.dependencies.saveProject(state.projectPath, project);
+    } catch (error) {
+      // Only this metadata file's commit can complete this CAS. Sidecar/journal commits
+      // cannot authorize it, and a readback alone must never bless external bytes.
+      const ownRevision = state.selfFileRevisions.get('project.json');
+      if (
+        !(error instanceof CommittedWriteError) ||
+        path.resolve(error.filePath) !== path.join(state.projectPath, 'project.json') ||
+        !ownRevision
+      )
+        throw error;
+      warning = error;
+      committedRevision = ownRevision;
+    }
+    let saved: ProjectRevisionSnapshot;
+    try {
+      saved = await this.reload(watchId);
+    } catch (error) {
+      if (!warning) throw error;
+      throw new NativeWorkflowError(
+        'io-failure',
+        `${warning.message} Committed project details could not be confirmed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (warning) {
+      if (saved.projectRevision !== committedRevision)
+        throw new NativeWorkflowError(
+          'project-changed',
+          `${warning.message} The project changed again on disk. Review and reload it before saving metadata.`,
+          true,
+        );
+      saved.snapshot = {
+        ...saved.snapshot,
+        warnings: [...(saved.snapshot.warnings ?? []), warning.message],
+      };
+    }
     state.selfFileRevisions.set('project.json', saved.projectRevision);
     return saved;
+  }
+
+  hasSelfProjectRevision(projectPath: string, revision: string): boolean {
+    const resolved = path.resolve(projectPath);
+    return [...this.watches.values()].some(
+      (state) =>
+        path.resolve(state.projectPath) === resolved &&
+        state.selfFileRevisions.get('project.json') === revision,
+    );
   }
 
   recordSelfWrite(filePath: string, source: string | Uint8Array): void {

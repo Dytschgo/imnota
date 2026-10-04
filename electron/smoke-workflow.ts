@@ -4,6 +4,7 @@ import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
 import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
+import { withRestoredCanvasSmokeState } from './canvas-basics-smoke-state.js';
 import { onboardingHandoffRoot } from './onboarding-handoff.js';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -12,7 +13,8 @@ import type { Annotation, ProjectData, ProjectSnapshot, WorkspaceSettings } from
 import { BACKDROP_PRESETS, GENERIC_BACKDROP_PRESETS } from '../src/shared/preferences.js';
 import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
-import { readMacClipboardFiles } from './mac-clipboard.js';
+import { readMacClipboardFiles, readMacClipboardObservation } from './mac-clipboard.js';
+import { onboardingCopyEvidence } from './smoke-onboarding-copy.js';
 import { setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
@@ -346,7 +348,7 @@ async function exerciseOnboarding(
   await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
-  await driver.click({ text: 'Rich copy', exact: true });
+  await driver.clickOnboardingCopy({ text: 'Rich copy', exact: true }, 'rich');
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown + image prepared', exact: true });
 
   const directories = await fs.readdir(handoffRoot, { withFileTypes: true });
@@ -405,7 +407,7 @@ async function exerciseOnboarding(
 
   if (process.platform === 'win32') {
     await chooseNativeCopyFunction('files', 'Copy files');
-    await driver.click({ text: 'Copy files', exact: true });
+    await driver.clickOnboardingCopy({ text: 'Copy files', exact: true }, 'files');
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
       selector: '[data-testid="onboarding-copy-warning"]',
@@ -423,7 +425,7 @@ async function exerciseOnboarding(
     )
       throw new Error('Onboarding Copy files did not preserve the exact Markdown/PNG file list.');
     await chooseNativeCopyFunction('files-rich', 'Files + rich copy');
-    await driver.click({ text: 'Files + rich copy', exact: true });
+    await driver.clickOnboardingCopy({ text: 'Files + rich copy', exact: true }, 'files-rich');
     await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
     await driver.waitFor({
       selector: '[data-testid="onboarding-copy-warning"]',
@@ -472,32 +474,67 @@ async function exerciseOnboarding(
   }
 
   if (process.platform === 'darwin') {
-    // macOS Copy files writes the exact pair; receiver acceptance is separate.
-    await chooseNativeCopyFunction('files', 'Copy files');
-    await driver.click({ text: 'Copy files', exact: true });
-    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    const macFiles = await readMacClipboardFiles();
-    if (
-      macFiles.length !== 2 ||
-      path.resolve(macFiles[0]!) !== path.resolve(markdownPath) ||
-      path.resolve(macFiles[1]!) !== path.resolve(pngPath)
-    )
-      throw new Error(
-        `macOS Copy files did not place the exact Markdown/PNG pair: ${JSON.stringify(macFiles)}`,
-      );
-    await chooseNativeCopyFunction('files-rich', 'Files + text');
-    await driver.click({ text: 'Files + text', exact: true });
-    await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
-    const macFilesWithText = await readMacClipboardFiles();
-    if (
-      macFilesWithText.length !== 2 ||
-      path.resolve(macFilesWithText[0]!) !== path.resolve(markdownPath) ||
-      path.resolve(macFilesWithText[1]!) !== path.resolve(pngPath) ||
-      (await nativeClipboard.readText()) !== markdown ||
-      (await nativeClipboard.readHTML()) !== '' ||
-      !(await nativeClipboard.readImage()).isEmpty()
-    )
-      throw new Error('macOS Files + text did not preserve the exact file pair and plain Markdown.');
+    const verifyMacCopy = async (action: 'files' | 'files-rich', label: string) => {
+      await chooseNativeCopyFunction(action, label);
+      const attempt = await driver.clickOnboardingCopy({ text: label, exact: true }, action);
+      await driver.waitFor({ selector: '[role="status"]', text: 'Files ready', exact: true });
+      let before;
+      let stage = 'native metadata before read';
+      let evidence;
+      try {
+        before = await readMacClipboardObservation();
+        stage = 'file URL read';
+        const actualFiles = await readMacClipboardFiles();
+        stage = 'text read';
+        const actualText = await nativeClipboard.readText();
+        stage = 'HTML read';
+        const html = await nativeClipboard.readHTML();
+        stage = 'image read';
+        const image = await nativeClipboard.readImage();
+        stage = 'native metadata after read';
+        const after = await readMacClipboardObservation();
+        evidence = await onboardingCopyEvidence({
+          attempt,
+          action,
+          expectedFiles: [markdownPath, pngPath],
+          actualFiles,
+          expectedText: markdown,
+          actualText,
+          html,
+          image: { empty: image.isEmpty(), ...image.getSize() },
+          before,
+          after,
+        });
+      } catch (error) {
+        // Retain the read stage without including an exception's possible clipboard payload.
+        const failure = { attempt, action, before, stage, readFailed: true };
+        console.info(`Onboarding ${label} read failed: ${JSON.stringify(failure)}`);
+        if (artifactDirectory)
+          await fs.writeFile(
+            path.join(artifactDirectory, `onboarding-copy-${attempt}-${action}.json`),
+            JSON.stringify(failure, null, 2),
+            { flag: 'wx' },
+          );
+        throw error;
+      }
+      if (artifactDirectory)
+        await fs.writeFile(
+          path.join(artifactDirectory, `onboarding-copy-${attempt}-${action}.json`),
+          JSON.stringify(evidence, null, 2),
+          { flag: 'wx' },
+        );
+      console.info(`Onboarding ${label} readback: ${JSON.stringify(evidence)}`);
+      if (!evidence.native.consistent)
+        throw new Error(
+          `macOS ${label} pasteboard changed during the completed-attempt read; no recopy or content retry was attempted.`,
+        );
+      if (!evidence.formatsValid)
+        throw new Error(
+          `macOS ${label} exact clipboard operands failed: ${JSON.stringify(evidence.operands)}`,
+        );
+    };
+    await verifyMacCopy('files', 'Copy files');
+    await verifyMacCopy('files-rich', 'Files + text');
     await chooseNativeCopyFunction('rich', 'Rich copy');
   }
 
@@ -2946,6 +2983,10 @@ export async function runSmokeWorkflow(
   await driver.waitFor({ selector: '.konvajs-content' });
   await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
   await assertNativeCanvasAnnotationsPersisted(driver, projectPath);
+  await exerciseCanvasBasics(driver, projectPath, artifactDirectory, artifacts);
+  assertions.push(
+    'Shift-constrained creation, focused keyboard selection/nudge, grouped Undo, and zoom preserved on resize',
+  );
   assertions.push(
     'trusted pan, crop, redaction, outside-bound arrow creation, double-click, Enter and Escape',
   );
@@ -2954,8 +2995,7 @@ export async function runSmokeWorkflow(
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
-  if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-collection-picker.png'));
+  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'collection-picker.png'));
   const focusedPickerSelection = await driver.evaluate<boolean>(`(() => {
     const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
     option?.focus();
@@ -3276,6 +3316,7 @@ export async function runSmokeWorkflow(
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
+    'Recently deleted restores screenshot, drawing and text through the dialog after Undo toast expiry; success focus and saved/reopened bytes agree',
   );
   artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
   assertions.push(
@@ -3325,4 +3366,84 @@ export async function runSmokeWorkflow(
   };
   await writeReportArtifact(artifactDirectory, report);
   return report;
+}
+
+/** Observe editing outcomes through saved fixture content, with no personal project involved. */
+async function exerciseCanvasBasics(
+  driver: NativeUiDriver,
+  projectPath: string,
+  artifactDirectory: string | undefined,
+  artifacts: SmokeCapture[],
+): Promise<void> {
+  await withRestoredCanvasSmokeState(
+    driver,
+    () => waitForStableCanvas(driver),
+    async () => {
+      const command = (detail: string) =>
+        driver.evaluate(
+          `document.querySelector('.konvajs-content').parentElement.dispatchEvent(new CustomEvent('imnota:canvas-command', { detail: ${JSON.stringify(detail)} }))`,
+        );
+      await command('fit');
+      await waitForStableCanvas(driver);
+      const geometry = await canvasGeometry(driver);
+      const from = {
+        x: Math.round(geometry.image.x + geometry.image.width * 0.3),
+        y: Math.round(geometry.image.y + geometry.image.height * 0.3),
+      };
+      await selectTool(driver, 'Rectangle');
+      await driver.drag(from, { x: from.x + 70, y: from.y + 20 }, 8, ['shift']);
+      const waitForRectangle = async (condition: string) =>
+        driver.evaluate<Annotation>(`(async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+        const content = await window.imnota.loadScreenshotContent({ projectPath: snapshot.projectPath, screenshot: snapshot.project.screenshots[0] });
+        const rectangle = content.annotations.filter(annotation => annotation.kind === 'rectangle').at(-1);
+        if (rectangle && (${condition})) return rectangle;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('Canvas basics did not persist the expected rectangle state: ' + ${JSON.stringify(condition)});
+    })()`);
+      const rectangle = await waitForRectangle(
+        'rectangle.width > 4 && Math.abs(rectangle.width - rectangle.height) < 0.001',
+      );
+      await driver.evaluate(`document.querySelector('[data-testid="annotation-canvas"]').focus()`);
+      await driver.press('Right');
+      await driver.press('Down', ['shift']);
+      await waitForRectangle(`rectangle.x === ${rectangle.x + 1} && rectangle.y === ${rectangle.y + 10}`);
+      await driver.press('Z', [process.platform === 'darwin' ? 'meta' : 'control']);
+      await waitForRectangle(`rectangle.x === ${rectangle.x} && rectangle.y === ${rectangle.y}`);
+      await driver.press('Escape');
+      await driver.press('Tab');
+      await driver.waitFor({ selector: '[data-testid="annotation-canvas-status"]', text: 'selected, 1 of' });
+      await driver.press('Tab', ['shift']);
+      if (
+        await driver.evaluate<boolean>(
+          `document.activeElement?.getAttribute('data-testid') === 'annotation-canvas'`,
+        )
+      )
+        throw new Error('Shift+Tab at the first annotation trapped focus in the canvas.');
+      await command('zoom-in');
+      await waitForStableCanvas(driver);
+      const viewport = () =>
+        driver.evaluate<{ x: number; y: number; scale: number; width: number; height: number }>(`(() => {
+      const canvas = document.querySelector('[data-testid="annotation-canvas"]');
+      return { x: Number(canvas.dataset.imageX), y: Number(canvas.dataset.imageY), scale: Number(canvas.dataset.imageScale), width: canvas.clientWidth, height: canvas.clientHeight };
+    })()`);
+      const before = await viewport();
+      await driver.resize({ width: 1440, height: 900 });
+      await waitForStableCanvas(driver);
+      const after = await viewport();
+      if (
+        before.scale !== after.scale ||
+        Math.abs((before.width / 2 - before.x) / before.scale - (after.width / 2 - after.x) / after.scale) >
+          0.01 ||
+        Math.abs((before.height / 2 - before.y) / before.scale - (after.height / 2 - after.y) / after.scale) >
+          0.01
+      )
+        throw new Error('Canvas resize lost the user zoom or centred image point.');
+      if (artifactDirectory)
+        artifacts.push(await driver.capture(artifactDirectory, 'canvas-basics-keyboard-resize.png'));
+    },
+  );
 }

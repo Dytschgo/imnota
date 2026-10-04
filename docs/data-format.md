@@ -77,3 +77,15 @@ Adding the first text block or drawing to a schema 3 project retains `project.v3
 ## Hosted artifacts
 
 Hosted sharing is separate from the project format. The native client reads finalized PNG/Markdown bundles and uploads only the approved manifest. Local share history and recovery metadata live in the app profile; editable sources, local project paths, recovery journals and the project folder are not part of the upload. Server storage and retention are documented in the [service guide](../share-service/README.md).
+
+## Deleted-item retention
+
+`.imnota-undo` and `.imnota-content-undo` contain the private journals used by immediate Undo and Recently deleted. Only committed `deleted` records at least 30 days old qualify for expiry when the project opens. Before removal, Imnota validates project identity, collection and restore-path availability, all referenced backup hashes, journal file ownership and absence of links. Pending, malformed, unsafe or unrestorable journals stay intact and failures are reported. Future or invalid deletion timestamps do not expire.
+
+Expiry renames a validated journal to a unique `expired-*` directory within its existing journal root before removing it. This rename is the irreversible retention boundary. If cleanup fails, the remainder is excluded from recovery discovery and automatic cleanup; inspect it manually. This avoids presenting an interrupted cleanup as a valid Undo operation. `damaged-*` quarantine directories are never expiry candidates. These exceptions deliberately favor preserving uncertain data over enforcing a hard disk-space limit.
+
+Project duplication excludes both deletion roots, `.imnota-transactions`, `.imnota-recovery.json` and `.imnota-recovery-backup.json` at the project root (case-insensitively). Same-named folders below collections remain ordinary content. The source is unchanged. A duplicated project starts with a new identity and no inherited private recovery grants.
+
+Opening preflights the deletion list before any retention. An unreadable or unsafe list leaves both journal families and recovered Undo grants intact, skips expiry, and returns a warning. Grants are revoked only for validated journals that crossed the expiry rename, including journals whose subsequent cleanup failed.
+
+Duplicate creates its destination exclusively and copies content before publishing metadata with the new identity. The source `project.json` is never copied. Failed copies remove only the invocation-owned destination after identity and link checks. If those checks or cleanup fail, the error names the retained incomplete folder for manual inspection; it is not reported as a successful duplicate. Preexisting destinations and replaced or linked paths are preserved.

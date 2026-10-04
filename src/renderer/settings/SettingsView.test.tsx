@@ -1,4 +1,6 @@
 import { localAgentAccessStdioSnippet } from '../../shared/preferences';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
+import { useAppStore } from '../store';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsView } from './SettingsView';
@@ -90,4 +92,24 @@ it('copies the Windows relay command while keeping other-platform executable sni
   expect(
     JSON.parse(localAgentAccessStdioSnippet('/Applications/Imnota', 'MacIntel')).mcpServers.imnota,
   ).toEqual({ command: '/Applications/Imnota', args: ['--mcp'] });
+});
+
+it('refreshes a committed workspace and reports durability without claiming the old workspace remains active', async () => {
+  const before = useAppStore.getState().settings;
+  const next = { ...before, workspacePath: '/committed-workspace' };
+  const chooseWorkspace = vi.fn().mockRejectedValue(new Error(COMMITTED_WRITE_WARNING));
+  const getSettings = vi.fn().mockResolvedValue(next);
+  window.imnota = { chooseWorkspace, getSettings } as unknown as typeof window.imnota;
+  const onWorkspaceChanged = vi.fn();
+  try {
+    render(<SettingsView activeCategory="Workspace" onWorkspaceChanged={onWorkspaceChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Change folder' }));
+    expect(await screen.findByText(COMMITTED_WRITE_WARNING)).toBeInTheDocument();
+    expect(screen.getByText('/committed-workspace')).toBeInTheDocument();
+    expect(onWorkspaceChanged).toHaveBeenCalledOnce();
+    expect(chooseWorkspace).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/current workspace remains active/)).not.toBeInTheDocument();
+  } finally {
+    useAppStore.setState({ settings: before });
+  }
 });

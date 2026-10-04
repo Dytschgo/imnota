@@ -15,6 +15,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Clipboard receiver matrix](clipboard-receiver-matrix.md) and [clipboard compatibility plan](clipboard-images-plan.md) — receiver acceptance and fallback results.
 - [User-feedback protocol](user-feedback-protocol.md) — consented manual sessions and evidence boundaries.
 - [Test coverage map](pr-test-coverage.md), [CI routing](ci-routing.md) and [CI artifacts](ci-artifacts.md) — automated check ownership and classification.
+- [Property tests](property-testing.md) — reproducible generated cases, known findings and diagnostic application coverage.
 
 - [Data-loss investigation](data-loss-investigation.md) - preservation steps, local diagnostics and the September Windows report.
 
