@@ -318,11 +318,30 @@ describe('renderer bridge, contracts and handlers stay consistent', () => {
         if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
         return electron.module;
       },
-      process: { platform: 'win32' },
+      process: { platform: 'win32', argv: [] },
     });
     const bridge = electron.exposed.imnota as Record<string, unknown>;
     for (const member of Object.values(bridge))
       if (typeof member === 'function') await (member as (...args: unknown[]) => unknown)(() => undefined);
+    expect(electron.exposed.imnotaNativeFault).toBeUndefined();
+    expect(electron.listened).not.toContain('smoke:fault-command');
+    // Exercise the separate closed receiver as well; retain complete channel enumeration.
+    const nonce = '11111111-1111-4111-8111-111111111111';
+    new vm.Script(compiled.outputText, { filename: 'preload.cjs' }).runInNewContext({
+      exports: {},
+      require: (name: string) => {
+        if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
+        return electron.module;
+      },
+      process: { platform: 'win32', argv: [`--imnota-native-fault=${nonce}`] },
+    });
+    const receiver = electron.exposed.imnotaNativeFault as {
+      nonce: string;
+      onCommand(callback: () => void): void;
+    };
+    expect(Object.keys(receiver).sort()).toEqual(['nonce', 'onCommand', 'report']);
+    expect(receiver.nonce).toBe(nonce);
+    receiver.onCommand(() => undefined);
     invoked = sorted(electron.invoked);
     listened = sorted(electron.listened);
     preloadSource = await readSource('preload.cts');

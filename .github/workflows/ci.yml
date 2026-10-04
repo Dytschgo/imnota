@@ -152,7 +152,7 @@ jobs:
           - os: macos-latest
             command: pnpm package:mac
     runs-on: ${{ matrix.os }}
-    # Covers two packaged walkthroughs per OS, each with its own six-minute launcher deadline.
+    # Ordinary, focused and fixed fault partitions retain their existing per-child deadlines.
     timeout-minutes: 45
     steps:
       - name: Documentation-only PR
@@ -247,6 +247,28 @@ jobs:
           name: clipboard-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
           if-no-files-found: ignore
+      - name: Verify packaged native faults on macos
+        if: env.RUN_APPLICATION == 'true' && matrix.os == 'macos-latest'
+        run: bash scripts/verify-mac.sh --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+      - name: Verify packaged native faults on windows
+        if: env.RUN_APPLICATION == 'true' && matrix.os == 'windows-latest'
+        run: node scripts/verify-packaged.mjs windows --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+      - name: Verify packaged native faults on linux
+        if: env.RUN_APPLICATION == 'true' && matrix.os == 'ubuntu-latest'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+      - name: Retain native fault evidence
+        if: env.RUN_APPLICATION == 'true' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-fault-evidence-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-native-faults/
+          if-no-files-found: error
       - name: Retain review installers and build diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: env.RUN_APPLICATION == 'true'

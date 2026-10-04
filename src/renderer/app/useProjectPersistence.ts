@@ -55,6 +55,8 @@ export interface ProjectPersistenceOptions {
   snapshot: ProjectSnapshot | null;
   activeScreenshot: ScreenshotRecord | null;
   sessionGeneration?: number;
+  nativeFaultVerification?: boolean;
+  verificationObserver?(): void;
   onProject(project: ProjectData): void;
   onSnapshot(snapshot: ProjectSnapshot, selectedItemId?: string): void;
   onSelectScreenshot(id: string): void;
@@ -75,7 +77,16 @@ export interface ProjectPersistenceController {
   hasUnsavedChanges: boolean;
   hasPendingProjectMetadata(): boolean;
   changeAnnotations(next: Annotation[]): void;
-  markScreenshotDirty(screenshot: ScreenshotRecord): void;
+  markScreenshotDirty(screenshot: ScreenshotRecord, retainedFixtureDraft?: boolean): void;
+  verificationState?(): {
+    acceptedRevision: string | null;
+    pendingMetadata: boolean;
+    pendingScreenshot: boolean;
+    nativeMutations: number;
+    externalChange: string | null;
+    warning: string;
+    error: string;
+  };
   queueProjectMetadata(project: ProjectData): number;
   flush(): Promise<boolean>;
   flushProjectDrafts(): Promise<boolean>;
@@ -332,6 +343,8 @@ export function useProjectPersistence({
   snapshot,
   activeScreenshot,
   sessionGeneration = 0,
+  nativeFaultVerification = false,
+  verificationObserver,
   onProject,
   onSnapshot,
   onSelectScreenshot,
@@ -381,17 +394,31 @@ export function useProjectPersistence({
   const pendingExternalChange = useRef<ExternalProjectChange | null>(null);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
-  const [error, setError] = useState('');
-  const [warning, setWarning] = useState('');
+  const [error, setErrorState] = useState('');
+  const [warning, setWarningState] = useState('');
+  const observedError = useRef('');
+  const observedWarning = useRef('');
+  const setError = useCallback((value: string) => {
+    observedError.current = value;
+    setErrorState(value);
+  }, []);
+  const setWarning = useCallback((value: string) => {
+    observedWarning.current = value;
+    setWarningState(value);
+  }, []);
   const [externalChange, setExternalChange] = useState<ExternalProjectChange | null>(null);
   const [projectRevision, setProjectRevision] = useState<string | null>(null);
   const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
-  const publishAcceptedRevision = useCallback((revision: string | null) => {
-    acceptedRevision.current = revision;
-    setProjectRevision(revision);
-  }, []);
+  const publishAcceptedRevision = useCallback(
+    (revision: string | null) => {
+      acceptedRevision.current = revision;
+      setProjectRevision(revision);
+      verificationObserver?.();
+    },
+    [verificationObserver],
+  );
 
   const publishExternalChange = useCallback((change: ExternalProjectChange | null) => {
     // Losing monitoring must never downgrade an already observed external edit/conflict.
@@ -560,7 +587,7 @@ export function useProjectPersistence({
         setFailedLoadKey(activeKey);
         setError(workflowMessage(reason, 'The screenshot could not be loaded.'));
       });
-  }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, snapshot]);
+  }, [activeKey, activeScreenshot, evictCleanDrafts, loadAttempt, setCurrentDraft, setError, snapshot]);
 
   const saveKey = useCallback(
     (key: string): Promise<boolean> => {
@@ -708,6 +735,8 @@ export function useProjectPersistence({
       publishAcceptedRevision,
       publishExternalChange,
       setCurrentDraft,
+      setError,
+      setWarning,
     ],
   );
 
@@ -924,7 +953,7 @@ export function useProjectPersistence({
     });
     metadataSave.current = operation;
     return operation;
-  }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange]);
+  }, [flush, overlayTrackedMetadata, publishAcceptedRevision, publishExternalChange, setError]);
 
   // A root error boundary unmounts the watcher before its retained save closure runs.
   // Reconnect only for that recovery save, retaining the last accepted CAS baseline:
@@ -1086,7 +1115,7 @@ export function useProjectPersistence({
         return false;
       }
     },
-    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange],
+    [flush, hasDirtyDrafts, publishAcceptedRevision, publishExternalChange, setError],
   );
 
   const adoptAuthoritativeSnapshot = useCallback(
@@ -1178,6 +1207,7 @@ export function useProjectPersistence({
       finishNativeMutation,
       flush,
       flushProjectMetadata,
+      setError,
       hasDirtyDrafts,
       overlayTrackedMetadata,
       publishAcceptedRevision,
@@ -1202,13 +1232,32 @@ export function useProjectPersistence({
     projectRevision,
     hasUnsavedChanges: hasDirtyDrafts() || metadataDirty.current,
     hasPendingProjectMetadata: () => metadataDirty.current,
+    ...(nativeFaultVerification
+      ? {
+          verificationState: () => ({
+            acceptedRevision: acceptedRevision.current,
+            pendingMetadata: metadataDirty.current,
+            pendingScreenshot: hasDirtyDrafts(),
+            nativeMutations: nativeMutationTokens.current.size,
+            externalChange: pendingExternalChange.current?.message ?? null,
+            warning: observedWarning.current,
+            error: observedError.current,
+          }),
+        }
+      : {}),
     changeAnnotations(next) {
       const current = activeKeyRef.current ? drafts.current.get(activeKeyRef.current) : undefined;
       if (!current) return;
       setCurrentDraft({ ...current, annotations: next, editRevision: current.editRevision + 1 });
     },
-    markScreenshotDirty(screenshot) {
-      const current = activeKeyRef.current ? drafts.current.get(activeKeyRef.current) : undefined;
+    markScreenshotDirty(screenshot, retainedFixtureDraft = false) {
+      if (retainedFixtureDraft && !nativeFaultVerification) throw new Error('Unowned fixture draft input.');
+      const key =
+        retainedFixtureDraft && snapshotRef.current
+          ? draftKey(snapshotRef.current.projectPath, screenshot.id)
+          : activeKeyRef.current;
+      const current = key ? drafts.current.get(key) : undefined;
+      if (retainedFixtureDraft && !current) throw new Error('Fixture screenshot was never loaded.');
       if (!current) return;
       setCurrentDraft({ ...current, screenshot, editRevision: current.editRevision + 1 });
     },

@@ -154,6 +154,31 @@ jobs:
           name: mcp-evidence-${{ matrix.platform }}
           path: release/imnota-verification-artifacts-mcp/
           if-no-files-found: ignore
+      - name: Verify packaged native faults on macos
+        if: matrix.platform == 'macos'
+        run: bash scripts/verify-mac.sh --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify packaged native faults on windows
+        if: matrix.platform == 'windows'
+        run: node scripts/verify-packaged.mjs windows --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify packaged native faults on linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Retain native fault evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-fault-evidence-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-native-faults/
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-${{ matrix.platform }}
