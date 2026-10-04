@@ -10,7 +10,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function fixture() {
-  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'imnota-smoke-result-')));
+  const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'imnota-smoke-result-')));
   roots.push(root);
   const profile = path.join(root, 'mcp-enabled');
   mkdirSync(profile);
@@ -41,7 +41,7 @@ it('rejects relative, unowned and personal profile targets without changing thei
   ).toThrow();
   rmSync(path.join(root, '.imnota-mcp-owned'));
   expect(() => mcpVerificationProfile(env, ['--mcp'])).toThrow();
-  expect(realpathSync(profile)).toBe(profile);
+  expect(realpathSync.native(profile)).toBe(profile);
 });
 it('rejects a junction/symlink to a foreign profile and a linked fixture root', () => {
   const { env, root, profile } = fixture();
