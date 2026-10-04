@@ -10,6 +10,11 @@ import { SettingsView } from './SettingsView';
 import { mergePreferenceSettings } from '../../shared/preference-settings';
 
 vi.mock('../components/UpdateControl', () => ({ UpdateControl: () => null }));
+vi.mock('./background-library', () => ({
+  savedBackgrounds: vi.fn(async () => []),
+  saveBackground: vi.fn(async () => {}),
+  removeBackground: vi.fn(async () => {}),
+}));
 
 afterEach(cleanup);
 
@@ -306,7 +311,7 @@ for (const panel of ['appearance', 'shortcuts'] as const) {
           fireEvent.click(recorder);
           fireEvent.keyDown(recorder, { key: 'x', ctrlKey: true, shiftKey: true });
         }
-        expect(await screen.findByRole('alert')).toHaveTextContent(failure);
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(failure));
         expect(screen.getByRole('alert')).not.toHaveTextContent(/previous .* active/);
         if (panel === 'appearance')
           expect(
