@@ -75,26 +75,41 @@ it('accepts only the bound fresh fixture proof without executing any candidate',
   const value = await proofFixture();
   expect(await validateFaultLaunch(value.input)).toEqual(value.proof);
 });
-it.each(['nonce', 'version', 'marker', 'profile', 'asar', 'manifest', 'link', 'hardlink'] as const)(
-  'refuses %s ownership mismatch before granting a preload capability',
-  async (problem) => {
-    const value = await proofFixture();
-    if (problem === 'nonce') value.input.env.IMNOTA_FAULT_NONCE = randomUUID();
-    if (problem === 'version') value.input.version = 'wrong';
-    if (problem === 'marker') await fs.unlink(value.marker);
-    if (problem === 'profile')
-      await fs.writeFile(path.join(value.proof.profileRoot, 'not-fresh'), 'preserve me');
-    if (problem === 'asar') await fs.writeFile(value.input.asar, 'changed');
-    if (problem === 'manifest') await fs.writeFile(value.input.env.IMNOTA_FAULT_BUILD_MANIFEST, '{}');
-    if (problem === 'link') {
-      await fs.rmdir(value.proof.profileRoot);
-      await fs.symlink(
-        value.proof.artifactRoot,
-        value.proof.profileRoot,
-        process.platform === 'win32' ? 'junction' : 'dir',
-      );
-    }
-    if (problem === 'hardlink') await fs.link(value.marker, path.join(value.proof.runRoot, 'marker-peer'));
-    await expect(validateFaultLaunch(value.input)).rejects.toThrow();
-  },
-);
+it.each([
+  'nonce',
+  'version',
+  'marker',
+  'profile',
+  'asar',
+  'asar-directory',
+  'asar-hardlink',
+  'manifest',
+  'link',
+  'hardlink',
+] as const)('refuses %s ownership mismatch before granting a preload capability', async (problem) => {
+  const value = await proofFixture();
+  if (problem === 'nonce') value.input.env.IMNOTA_FAULT_NONCE = randomUUID();
+  if (problem === 'version') value.input.version = 'wrong';
+  if (problem === 'marker') await fs.unlink(value.marker);
+  if (problem === 'profile')
+    await fs.writeFile(path.join(value.proof.profileRoot, 'not-fresh'), 'preserve me');
+  if (problem === 'asar') await fs.writeFile(value.input.asar, 'changed');
+  if (problem === 'asar-directory') {
+    await fs.unlink(value.input.asar);
+    await fs.mkdir(value.input.asar);
+  }
+  if (problem === 'asar-hardlink')
+    await fs.link(value.input.asar, path.join(path.dirname(value.input.asar), 'archive-peer'));
+
+  if (problem === 'manifest') await fs.writeFile(value.input.env.IMNOTA_FAULT_BUILD_MANIFEST, '{}');
+  if (problem === 'link') {
+    await fs.rmdir(value.proof.profileRoot);
+    await fs.symlink(
+      value.proof.artifactRoot,
+      value.proof.profileRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  }
+  if (problem === 'hardlink') await fs.link(value.marker, path.join(value.proof.runRoot, 'marker-peer'));
+  await expect(validateFaultLaunch(value.input)).rejects.toThrow();
+});

@@ -75,6 +75,7 @@ describe('closed packaged native fault gate', () => {
       assert.match(upload, /always\(\)/);
       assert.match(upload, /name: native-fault-evidence-/);
       assert.match(upload, /if-no-files-found: error/);
+      assert.match(upload, /include-hidden-files: true/);
       assert.doesNotMatch(upload, /continue-on-error/);
       if (name === 'nightly') {
         assert.match(source, /needs: \[guard, quality, package\]/);

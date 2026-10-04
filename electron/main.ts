@@ -177,7 +177,12 @@ try {
   process.stderr.write('Invalid owned MCP verification profile.\n');
   process.exit(1);
 }
-validateFaultProfileBootstrap(process.env, app.getPath('temp'));
+try {
+  validateFaultProfileBootstrap(process.env, app.getPath('temp'));
+} catch (error) {
+  process.stderr.write(`Invalid owned fault verification profile: ${String(error)}\n`);
+  process.exit(1);
+}
 
 // Smoke never reads or writes the installed application's profile or caches.
 if (process.env.IMNOTA_SMOKE === '1') {
@@ -196,6 +201,10 @@ const faultLaunch = await validateFaultLaunch({
   asar: path.join(process.resourcesPath, 'app.asar'),
   version: app.getVersion(),
   packaged: app.isPackaged,
+}).catch((error: unknown) => {
+  // An owned verifier must fail at startup, not wait on Electron's error dialog.
+  process.stderr.write(`Invalid owned fault verification candidate: ${String(error)}\n`);
+  process.exit(1);
 });
 let smokeFaultController: OwnedSmokeFaultController | undefined;
 

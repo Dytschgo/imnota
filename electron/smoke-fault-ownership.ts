@@ -1,9 +1,16 @@
-import fs from 'node:fs/promises';
+import nodeFs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertNoLinks, isWithin } from './files.js';
 import { faultOwnershipSchema, type NativeFaultOwnership } from '../src/shared/native-faults.js';
+
+// Electron's ASAR-aware fs presents app.asar as a virtual directory. Candidate
+// ownership must measure the physical archive with real bigint file identities.
+const fs: typeof nodeFs = process.versions.electron
+  ? createRequire(import.meta.url)('original-fs').promises
+  : nodeFs;
 
 export const faultDigest = (bytes: string | Uint8Array): string =>
   createHash('sha256').update(bytes).digest('hex');
