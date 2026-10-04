@@ -6,13 +6,13 @@ import { createHash } from 'node:crypto';
 /** Called after the launcher's child exits. Never removes the original failed operands. */
 export function retainFaultOperands(proof, outcome) {
   if (!proof || !outcome) return; // No observed child exit: keep originals and report termination as unknown.
-  const temporary = realpathSync(tmpdir());
+  const temporary = realpathSync.native(tmpdir());
   const entries = [];
   let bytes = 0;
   function canonical(target, directory) {
     const stat = lstatSync(target, { bigint: true });
     if (
-      realpathSync(target) !== resolve(target) ||
+      realpathSync.native(target) !== resolve(target) ||
       stat.isSymbolicLink() ||
       (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1n)
     )
@@ -109,7 +109,7 @@ function evidenceInventory(root) {
   let total = 0;
   function visit(target) {
     const stat = lstatSync(target);
-    if (stat.isSymbolicLink() || realpathSync(target) !== resolve(target))
+    if (stat.isSymbolicLink() || realpathSync.native(target) !== resolve(target))
       throw new Error('Indirect native fault evidence.');
     if (stat.isDirectory()) {
       for (const name of readdirSync(target).sort()) visit(join(target, name));

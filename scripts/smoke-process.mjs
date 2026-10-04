@@ -56,10 +56,10 @@ export function prepareArtifactDirectory(requestedPath) {
     throw new Error(
       'IMNOTA_SMOKE_ARTIFACT_DIR must name a dedicated imnota-smoke-artifacts-* or imnota-verification-artifacts-* directory.',
     );
-  const parent = realpathSync(resolve(target, '..'));
+  const parent = realpathSync.native(resolve(target, '..'));
   if (!isStrictChild(parent, target)) throw new Error('Artifact directory escaped its verified parent.');
   if (!existsSync(target)) mkdirSync(target);
-  const real = realpathSync(target);
+  const real = realpathSync.native(target);
   if (comparable(real) !== comparable(target))
     throw new Error('Artifact directory cannot be a link or alias.');
   const stat = lstatSync(real);
@@ -71,7 +71,7 @@ export function prepareArtifactDirectory(requestedPath) {
 }
 
 export function createRunDirectory() {
-  const created = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
+  const created = realpathSync.native(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
   if (!RESULT_NAME.test(basename(created))) throw new Error('Unexpected smoke result directory name.');
   writeFileSync(join(created, '.imnota-smoke-owned'), 'disposable native verification fixture\n', {
     flag: 'wx',
@@ -83,11 +83,11 @@ export function removeRunDirectory(runDirectory) {
   const resolved = resolve(runDirectory);
   if (!RESULT_NAME.test(basename(resolved)))
     throw new Error('Refusing to clean a directory not created for Imnota smoke results.');
-  const temporaryRoot = realpathSync(tmpdir());
+  const temporaryRoot = realpathSync.native(tmpdir());
   if (!isStrictChild(temporaryRoot, resolved))
     throw new Error('Refusing to clean a smoke directory outside the system temporary directory.');
   if (existsSync(resolved)) {
-    const real = realpathSync(resolved);
+    const real = realpathSync.native(resolved);
     if (comparable(real) !== comparable(resolved))
       throw new Error('Refusing to clean a linked smoke directory.');
     const marker = join(real, '.imnota-smoke-owned');
@@ -169,7 +169,7 @@ export async function runNativeVerification({
         if (!/^[a-f0-9]{64}$/.test(env[key] ?? '')) throw new Error(`Missing fault hash ${key}.`);
       for (const key of ['IMNOTA_FAULT_SOURCE_SHA', 'IMNOTA_FAULT_SOURCE_TREE'])
         if (!/^[a-f0-9]{40}$/.test(env[key] ?? '')) throw new Error(`Missing fault source ${key}.`);
-      const supplied = realpathSync(env.IMNOTA_FAULT_SUPPLIED);
+      const supplied = realpathSync.native(env.IMNOTA_FAULT_SUPPLIED);
       if (
         createHash('sha256').update(readFileSync(supplied)).digest('hex') !== env.IMNOTA_FAULT_SUPPLIED_SHA256
       )

@@ -22,15 +22,15 @@ import {
 const roots = [];
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    assert.equal(dirname(root), realpathSync(tmpdir()));
+    assert.equal(dirname(root), realpathSync.native(tmpdir()));
     assert.match(basename(root), /^imnota-(?:smoke|native-fault-retain)/);
     rmSync(root, { recursive: true });
   }
 });
 function fixture() {
-  const runRoot = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
-  const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-smoke-')));
-  const artifactRoot = realpathSync(mkdtempSync(join(tmpdir(), 'imnota-native-fault-retain-')));
+  const runRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'imnota-smoke-result-')));
+  const fixtureRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'imnota-smoke-')));
+  const artifactRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'imnota-native-fault-retain-')));
   roots.push(runRoot, fixtureRoot, artifactRoot);
   const proof = { runRoot, artifactRoot, profileRoot: join(runRoot, 'profile'), nonce: randomUUID() };
   mkdirSync(proof.profileRoot);

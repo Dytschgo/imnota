@@ -15,7 +15,7 @@ function git(...args) {
 }
 function file(target) {
   const absolute = resolve(target);
-  if (realpathSync(absolute) !== absolute || !lstatSync(absolute).isFile())
+  if (realpathSync.native(absolute) !== absolute || !lstatSync(absolute).isFile())
     throw new Error('Indirect fault package operand.');
   return absolute;
 }

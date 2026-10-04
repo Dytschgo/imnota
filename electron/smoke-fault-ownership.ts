@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { assertNoLinks, isWithin } from './files.js';
+import { isWithin } from './files.js';
 import { faultOwnershipSchema, type NativeFaultOwnership } from '../src/shared/native-faults.js';
 
 // Electron's ASAR-aware fs presents app.asar as a virtual directory. Candidate
@@ -24,14 +24,14 @@ export function validateFaultProfileBootstrap(env: NodeJS.ProcessEnv, temporaryR
   const run = path.dirname(profile);
   if (
     !path.isAbsolute(profile) ||
-    path.dirname(run) !== realpathSync(temporaryRoot) ||
+    path.dirname(run) !== realpathSync.native(temporaryRoot) ||
     !/^imnota-smoke-result-[a-zA-Z0-9_-]+$/.test(path.basename(run)) ||
     profile !== path.join(run, 'profile')
   )
     throw new Error('Unowned fault profile path.');
   for (const directory of [run, profile]) {
     if (
-      realpathSync(directory) !== directory ||
+      realpathSync.native(directory) !== directory ||
       !lstatSync(directory).isDirectory() ||
       lstatSync(directory).isSymbolicLink()
     )
@@ -51,10 +51,21 @@ export function validateFaultProfileBootstrap(env: NodeJS.ProcessEnv, temporaryR
     throw new Error('Fault profile marker or freshness mismatch.');
 }
 
+async function assertPhysicalNoLinks(target: string): Promise<void> {
+  let current = path.resolve(target);
+  while (true) {
+    if ((await fs.lstat(current)).isSymbolicLink())
+      throw new Error('Linked fault operands are not supported.');
+    const parent = path.dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
 export async function faultIdentity(target: string, directory = false) {
   if (!path.isAbsolute(target) || path.resolve(target) !== target)
     throw new Error('Fault operand must be an absolute canonical path.');
-  await assertNoLinks(target);
+  await assertPhysicalNoLinks(target);
   if ((await fs.realpath(target)) !== target) throw new Error('Fault operand is a path alias.');
   const stat = await fs.lstat(target, { bigint: true });
   if (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1n)
@@ -110,10 +121,16 @@ export async function validateFaultLaunch(input: {
     throw new Error('Fault artifact namespace mismatch.');
   await faultIdentity(proof.artifactRoot, true);
   if ((await fs.readdir(proof.artifactRoot)).length) throw new Error('Fault artifact root is not fresh.');
+  // These two paths come from Electron itself, which may retain Windows 8.3
+  // spelling. Reject links before resolving them; the proof's supplied path stays strict.
+  await assertPhysicalNoLinks(input.executable);
+  await assertPhysicalNoLinks(input.asar);
+  const executable = await fs.realpath(input.executable);
+  const asar = await fs.realpath(input.asar);
   for (const [target, expected] of [
     [proof.suppliedExecutable, proof.suppliedSha256],
-    [input.executable, proof.executableSha256],
-    [input.asar, proof.asarSha256],
+    [executable, proof.executableSha256],
+    [asar, proof.asarSha256],
   ]) {
     await faultIdentity(target);
     if (faultDigest(await fs.readFile(target)) !== expected)
@@ -134,7 +151,7 @@ export async function validateFaultLaunch(input: {
     build.suppliedSha256 !== proof.suppliedSha256
   )
     throw new Error('Source/build/candidate manifest mismatch.');
-  assertFaultRootsDisjoint([run, proof.artifactRoot, path.dirname(input.executable)]);
+  assertFaultRootsDisjoint([run, proof.artifactRoot, path.dirname(executable)]);
   return Object.freeze(proof);
 }
 
