@@ -142,6 +142,11 @@ must leave focus on the restore status inside the still-open dialog. Run
 `corepack pnpm exec vitest run src/renderer/collection/RecentlyDeleted.test.tsx src/renderer/components/ui.test.tsx`
 for deterministic editor loads before and after the announcement, repeated
 restores, stacked/hidden dialogs, Tab from the status and focus return on close.
+Modal tab stops exclude unavailable controls, including the actions inside closed
+shared-link history. `src/renderer/export/HostedShareDialog.test.tsx` verifies the
+real history component's forward/backward wrap. The packaged smoke also sends
+native Tab through a synthetic matching history structure in the hosted-share
+dialog, both collapsed and expanded, without creating or uploading a share.
 The packaged mixed-content smoke retains its existing status-and-focus assertion
 and five-second deadline; renderer tests do not substitute for the macOS package
 job on the PR's exact revision.

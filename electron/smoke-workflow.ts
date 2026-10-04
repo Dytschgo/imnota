@@ -3148,6 +3148,38 @@ export async function runSmokeWorkflow(
   );
   if (!shareConsent) throw new Error('Share size preflight bypassed consent.');
   if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'hosted-share-size.png'));
+  // Exercise the shared modal with the same collapsed history structure as an
+  // unexpired hosted link, without uploading or creating a persistent share.
+  await driver.evaluate(`(() => {
+    const host = document.querySelector('.hosted-share');
+    if (!host) throw new Error('Hosted share dialog is missing.');
+    const history = document.createElement('details');
+    history.id = 'imnota-smoke-share-history';
+    history.className = 'hosted-share-history';
+    history.innerHTML = '<summary>Your shared links (verification)</summary>' +
+      '<div class="hosted-share-history-row"><p>Synthetic unexpired link</p>' +
+      '<button type="button">Copy</button><a href="#">Open</a>' +
+      '<button type="button">Revoke</button></div>';
+    host.append(history);
+    history.querySelector('summary').focus();
+  })()`);
+  await driver.waitFor({ selector: '#imnota-smoke-share-history summary:focus' });
+  await driver.press('Tab');
+  await driver.waitFor({ selector: '[data-testid="hosted-share-close"]:focus' });
+  await driver.press('Tab', ['shift']);
+  await driver.waitFor({ selector: '#imnota-smoke-share-history summary:focus' });
+  await driver.press('Enter');
+  await driver.waitFor({ selector: '#imnota-smoke-share-history[open]' });
+  for (const selector of ['button:first-of-type', 'a', 'button:last-of-type']) {
+    await driver.press('Tab');
+    await driver.waitFor({ selector: `#imnota-smoke-share-history ${selector}:focus` });
+  }
+  await driver.press('Tab');
+  await driver.waitFor({ selector: '[data-testid="hosted-share-close"]:focus' });
+  await driver.press('Tab', ['shift']);
+  await driver.waitFor({ selector: '#imnota-smoke-share-history button:last-of-type:focus' });
+  await driver.evaluate(`document.getElementById('imnota-smoke-share-history').remove()`);
+  assertions.push('native Tab wraps within the modal around collapsed and expanded shared-link history');
   await driver.click({ selector: '[data-testid="hosted-share-close"]' });
   await closePromptDialog(driver);
   assertions.push('native hosted-share plan displays its text allowance before explicit upload consent');

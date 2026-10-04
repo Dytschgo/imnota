@@ -5,6 +5,34 @@ import { Button, Modal } from './ui';
 afterEach(cleanup);
 
 describe('UI primitives', () => {
+  it.each(['hidden', 'inert', 'display:none', 'visibility:hidden', 'disabled', 'tabindex=-1'])(
+    'excludes %s controls when wrapping in either direction',
+    (kind) => {
+      render(
+        <Modal title="Tab boundaries" onClose={vi.fn()}>
+          <button>Last visible action</button>
+          <div data-testid="unavailable-parent">
+            <button data-testid="unavailable-action">Unavailable action</button>
+          </div>
+        </Modal>,
+      );
+      const parent = screen.getByTestId('unavailable-parent');
+      const unavailable = screen.getByTestId('unavailable-action');
+      if (kind === 'hidden' || kind === 'inert') parent.setAttribute(kind, '');
+      if (kind === 'display:none') parent.style.display = 'none';
+      if (kind === 'visibility:hidden') parent.style.visibility = 'hidden';
+      if (kind === 'disabled') unavailable.setAttribute('disabled', '');
+      if (kind === 'tabindex=-1') unavailable.tabIndex = -1;
+      const close = screen.getByRole('button', { name: 'Close' });
+      const last = screen.getByRole('button', { name: 'Last visible action' });
+      last.focus();
+      expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(false);
+      expect(close).toHaveFocus();
+      expect(fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })).toBe(false);
+      expect(last).toHaveFocus();
+    },
+  );
+
   it('places dialogs outside clipped glass panels and dismisses only the backdrop', () => {
     const onClose = vi.fn();
     const { container } = render(

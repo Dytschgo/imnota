@@ -70,6 +70,22 @@ export function TextArea({
   );
 }
 
+/** Visibility shared by tab stops and programmatic focus restoration (including statuses). */
+function isAvailableFocusTarget(element: HTMLElement): boolean {
+  if (!element.isConnected || element.closest('[hidden], [inert]') || element.matches(':disabled'))
+    return false;
+  const visibility = getComputedStyle(element).visibility;
+  if (visibility === 'hidden' || visibility === 'collapse') return false;
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    if (getComputedStyle(ancestor).display === 'none') return false;
+    if (ancestor !== element && ancestor instanceof HTMLDetailsElement && !ancestor.open) {
+      const summary = Array.from(ancestor.children).find((child) => child.tagName === 'SUMMARY');
+      if (!summary?.contains(element)) return false;
+    }
+  }
+  return true;
+}
+
 export function Modal({
   title,
   description,
@@ -99,15 +115,17 @@ export function Modal({
     const focusable = () =>
       Array.from(
         dialog?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]',
+          'button, input, textarea, select, a[href], summary, [tabindex]',
         ) ?? [],
-      );
+      ).filter((element) => element.tabIndex >= 0 && isAvailableFocusTarget(element));
     const isTopDialog = () =>
       Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
         .filter((element) => !element.closest('[hidden]'))
         .at(-1) === dialog;
-    const initialFocus = () =>
-      dialog.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog;
+    const initialFocus = () => {
+      const preferred = dialog.querySelector<HTMLElement>('[data-autofocus]');
+      return preferred && isAvailableFocusTarget(preferred) ? preferred : (focusable()[0] ?? dialog);
+    };
     let lastFocused: HTMLElement | null = null;
     const containFocus = (event: FocusEvent) => {
       if (!isTopDialog()) return;
@@ -119,7 +137,7 @@ export function Modal({
       // Background editors can autofocus after an async load. Keep the user's
       // current dialog target (including a restore status with tabIndex=-1).
       const destination =
-        lastFocused && dialog.contains(lastFocused) && !lastFocused.matches(':disabled')
+        lastFocused && dialog.contains(lastFocused) && isAvailableFocusTarget(lastFocused)
           ? lastFocused
           : initialFocus();
       destination.focus();

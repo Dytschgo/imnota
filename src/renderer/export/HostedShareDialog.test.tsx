@@ -83,6 +83,39 @@ function approveAndPublish() {
 }
 
 describe('HostedShareDialog', () => {
+  it.each(['forward', 'backward'] as const)(
+    'wraps %s around collapsed shared-link history instead of targeting its hidden Revoke button',
+    async (direction) => {
+      bridge({
+        listHostedShares: vi.fn(async () => ({
+          ok: true as const,
+          value: { records: [active], recoveryErrors: [] },
+        })),
+      });
+      render(<HostedShareDialog artifacts={artifacts} onClose={vi.fn()} onError={vi.fn()} />);
+      const summary = await screen.findByText('Your shared links (1)');
+      const details = summary.closest('details')!;
+      const close = screen.getByRole('button', { name: 'Close' });
+      const revoke = within(details).getByRole('button', { name: 'Revoke' });
+      expect(details.open).toBe(false);
+      expect(revoke).toBeEnabled();
+      const from = direction === 'forward' ? summary : close;
+      const to = direction === 'forward' ? close : summary;
+      from.focus();
+      // fireEvent does not navigate on Tab: cancellation and focus must both
+      // come from the modal's actual first/last wrap handler.
+      expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey: direction === 'backward' })).toBe(false);
+      expect(to).toHaveFocus();
+
+      details.open = true;
+      close.focus();
+      expect(fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })).toBe(false);
+      expect(revoke).toHaveFocus();
+      expect(fireEvent.keyDown(revoke, { key: 'Tab' })).toBe(false);
+      expect(close).toHaveFocus();
+    },
+  );
+
   it.each([false, true])(
     'locks the form while saving the name and honours cancellation (%s)',
     async (cancel) => {
