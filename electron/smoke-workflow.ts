@@ -3168,7 +3168,9 @@ export async function runSmokeWorkflow(
   await driver.waitFor({ selector: '[data-testid="hosted-share-close"]:focus' });
   await driver.press('Tab', ['shift']);
   await driver.waitFor({ selector: '#imnota-smoke-share-history summary:focus' });
-  await driver.press('Enter');
+  // press() emits keyDown/keyUp only, whereas summary's Enter activation needs
+  // a keypress. Use one native click to expand before checking real Tab order.
+  await driver.click({ selector: '#imnota-smoke-share-history summary' });
   await driver.waitFor({ selector: '#imnota-smoke-share-history[open]' });
   for (const selector of ['button:first-of-type', 'a', 'button:last-of-type']) {
     await driver.press('Tab');
