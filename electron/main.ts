@@ -1924,6 +1924,8 @@ function registerIpc(): void {
     },
     transactionOperations: screenshotTransactionOperations,
     trashOperations: contentTrashOperations,
+    ownsRestoreRevision: (projectPath, revision) =>
+      projectWatchManager?.hasSelfProjectRevision(projectPath, revision) ?? false,
     trashItem: async (target) => {
       await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
       projectWatchManager?.recordSelfDelete(target);

@@ -1,6 +1,7 @@
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RecentlyDeletedItem } from '../../shared/recently-deleted';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import type { Collection, ImnotaBridge } from '../../shared/types';
 import { RecentlyDeleted } from './RecentlyDeleted';
 
@@ -39,7 +40,7 @@ function bridge(...responses: RecentlyDeletedItem[][]) {
   return listRecentlyDeleted;
 }
 
-function open(onRestore: (item: RecentlyDeletedItem) => Promise<string | null>) {
+function open(onRestore: (item: RecentlyDeletedItem) => Promise<RecentlyDeletedRestoreResult>) {
   render(
     <RecentlyDeleted projectPath="/workspace/project" collections={collections} onRestore={onRestore} />,
   );
@@ -87,6 +88,20 @@ describe('RecentlyDeleted', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveFocus());
   });
 
+  it('announces and focuses the warning for a committed Restore inside the dialog', async () => {
+    bridge([shot], []);
+    open(async () => ({ warning: COMMITTED_WRITE_WARNING }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore screenshot: Payment form' }));
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        `Restored “Payment form”. ${COMMITTED_WRITE_WARNING}`,
+      );
+      expect(screen.getByRole('status')).toHaveFocus();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Restore screenshot: Payment form' })).toBeNull();
+  });
+
   it('keeps the item and shows why when Undo reports a conflict', async () => {
     bridge([shot], [shot]);
     open(vi.fn(async () => 'The screenshot collection no longer exists.'));
@@ -105,7 +120,7 @@ describe('RecentlyDeleted', () => {
   it('blocks a second restore while one is running', async () => {
     bridge([shot, text], [text]);
     let finish: (value: string | null) => void = () => undefined;
-    const onRestore = vi.fn(() => new Promise<string | null>((resolve) => (finish = resolve)));
+    const onRestore = vi.fn(() => new Promise<RecentlyDeletedRestoreResult>((resolve) => (finish = resolve)));
     open(onRestore);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Restore screenshot: Payment form' }));

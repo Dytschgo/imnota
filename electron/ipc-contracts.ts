@@ -108,6 +108,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
   'projects:create': z.tuple([projectInput]),
   'projects:open-dialog': z.tuple([]),
   'projects:load': singlePath,
+  'projects:recently-deleted': singlePath,
   'projects:duplicate': singlePath,
   'projects:archive': singlePath,
   'projects:delete': singlePath,

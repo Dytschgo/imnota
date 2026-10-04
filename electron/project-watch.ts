@@ -218,6 +218,15 @@ export class ProjectWatchManager {
     return saved;
   }
 
+  hasSelfProjectRevision(projectPath: string, revision: string): boolean {
+    const resolved = path.resolve(projectPath);
+    return [...this.watches.values()].some(
+      (state) =>
+        path.resolve(state.projectPath) === resolved &&
+        state.selfFileRevisions.get('project.json') === revision,
+    );
+  }
+
   recordSelfWrite(filePath: string, source: string | Uint8Array): void {
     const resolved = path.resolve(filePath);
     const revision = projectRevisionForSource(source);

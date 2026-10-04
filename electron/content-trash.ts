@@ -1,3 +1,4 @@
+import { RestoreConfirmationError } from './restore-confirmation.js';
 import { retireDeleteJournal } from './delete-retention.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -609,6 +610,7 @@ export async function undoContentItemDelete(
   project: ProjectData,
   token: string,
   suppliedOperations?: ContentTrashOperations,
+  confirm?: (project: ProjectData, warning?: string) => Promise<void>,
 ): Promise<{ project: ProjectData; warning?: string }> {
   const root = await projectRoot(projectPath);
   const operations = operationsWithDefaults(suppliedOperations);
@@ -630,6 +632,7 @@ export async function undoContentItemDelete(
     manifest.phase === 'restored' ||
     (manifest.undoAfter && (await classify(metadataPath, loaded.directory, manifest.undoAfter)))
   ) {
+    await confirm?.(currentProject);
     return {
       project: currentProject,
       warning: await finishContentUndo(loaded.directory, manifest, operations),
@@ -658,6 +661,7 @@ export async function undoContentItemDelete(
     undoAfter: undoAfterStored,
   };
   await writeManifest(loaded.directory, manifest, operations);
+  let metadataWriteStarted = false;
   try {
     await restoreContent(root, loaded.directory, manifest, operations);
     if (!(await classify(metadataPath, loaded.directory, undoBeforeStored)))
@@ -666,27 +670,73 @@ export async function undoContentItemDelete(
         'project.json changed before content Undo commit.',
         token,
       );
+    metadataWriteStarted = true;
     await applyStored(metadataPath, loaded.directory, undoAfterStored, operations);
     if (!(await classify(metadataPath, loaded.directory, undoAfterStored)))
       throw new Error('project.json did not reach its restored state.');
+    await confirm?.(restoredProject);
+    let phaseRecorded = false;
     try {
       await setPhase(loaded.directory, manifest, 'restored', operations);
+      phaseRecorded = true;
       await clean(loaded.directory, operations);
       return { project: restoredProject };
     } catch (error) {
+      if (confirm && !phaseRecorded)
+        throw new RestoreConfirmationError(
+          `Restore could not be confirmed: The restored journal phase could not be recorded: ${error instanceof Error ? error.message : String(error)} Recovery files were preserved. Reload and compare before retrying.`,
+          { cause: error },
+        );
       return {
         project: restoredProject,
         warning: `Content restored, but Undo cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   } catch (error) {
-    if (await classify(metadataPath, loaded.directory, undoAfterStored))
+    if (error instanceof RestoreConfirmationError) throw error;
+    let committed: boolean;
+    try {
+      committed = await classify(metadataPath, loaded.directory, undoAfterStored);
+      if (
+        !committed &&
+        metadataWriteStarted &&
+        !(await classify(metadataPath, loaded.directory, undoBeforeStored))
+      )
+        throw new Error('The project changed again during Restore.');
+    } catch (readError) {
+      throw new RestoreConfirmationError(
+        `Restore could not be confirmed: ${error instanceof Error ? error.message : String(error)} ${readError instanceof Error ? readError.message : String(readError)} Recovery files were preserved. Reload and compare before retrying.`,
+        { cause: error },
+      );
+    }
+    if (committed) {
+      await confirm?.(restoredProject, error instanceof Error ? error.message : String(error));
+      if (confirm) {
+        try {
+          await setPhase(loaded.directory, manifest, 'restored', operations);
+        } catch (phaseError) {
+          throw new RestoreConfirmationError(
+            `Restore could not be confirmed: ${error instanceof Error ? error.message : String(error)} The restored journal phase could not be recorded: ${phaseError instanceof Error ? phaseError.message : String(phaseError)} Recovery files were preserved. Reload and compare before retrying.`,
+            { cause: phaseError },
+          );
+        }
+      }
       return {
         project: restoredProject,
         warning: `Content restored; Undo cleanup is pending: ${error instanceof Error ? error.message : String(error)}`,
       };
-    await removeOwnContent(root, loaded.directory, manifest, operations);
-    await setPhase(loaded.directory, manifest, 'deleted', operations);
+    }
+    try {
+      await removeOwnContent(root, loaded.directory, manifest, operations);
+      await setPhase(loaded.directory, manifest, 'deleted', operations);
+    } catch (rollbackError) {
+      throw new ContentTrashError(
+        'rollback-failed',
+        `Content Undo failed (${error instanceof Error ? error.message : String(error)}) and recovery is incomplete: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        token,
+        { cause: error },
+      );
+    }
     throw new ContentTrashError(
       error instanceof ContentTrashError ? error.code : 'undo-failed',
       `Content Undo failed and remains retryable: ${error instanceof Error ? error.message : String(error)}`,

@@ -508,12 +508,16 @@ describe('project duplication', () => {
 
 describe('open retention failure boundaries', () => {
   it.each(['file', 'link'] as const)(
-    'keeps open available and all journals/grants when a token-shaped %s prevents listing',
+    'keeps retention nonblocking and all journals/grants when a token-shaped %s appears after recovery',
     async (kind) => {
       const { projectPath } = await fixture();
       const shot = await deleteScreenshot(projectPath, 'shot_a');
       const old = await deleteText(projectPath);
       await patchManifest(projectPath, old, { deletedAt: '2020-01-01T00:00:00.000Z' });
+      // Recovery rejects an unsafe token. Exercise the separate retention preflight boundary:
+      // the unexpected entry appears after successful recovery but before listing/pruning.
+      const recovered = await recoverScreenshotTrashTransactions(projectPath);
+      const content = await recoverContentTrashTransactions(projectPath);
       const unsafe = path.join(projectPath, '.imnota-undo', 'delete-12345678-1234-4234-8234-123456789abc');
       const outside = path.join(projectPath, 'outside');
       await fs.mkdir(outside);
@@ -531,8 +535,9 @@ describe('open retention failure boundaries', () => {
           ),
         ),
       );
-      const recovered = await recoverScreenshotTrashTransactions(projectPath);
-      const content = await recoverContentTrashTransactions(projectPath);
+      await expect(recoverScreenshotTrashTransactions(projectPath)).rejects.toThrow(
+        kind === 'file' ? /not a directory/ : /Linked workspace paths/,
+      );
       const result = await applyOpenDeleteRetention(projectPath);
       expect(result.warnings).toEqual([expect.stringMatching(/could not be listed.*retention was skipped/)]);
       expect(result.retired.size).toBe(0);

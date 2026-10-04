@@ -18,7 +18,7 @@ import {
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
-import type { RecentlyDeletedItem } from '../../shared/recently-deleted';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import { collectionDisplayName } from './collection-display-name';
 import { RecentlyDeleted } from './RecentlyDeleted';
 import { orderedCollectionItems } from '../../shared/content-items';
@@ -40,7 +40,7 @@ export interface CollectionRailProps {
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
   /** Restores a deleted item like Undo. Resolves with a message when it was not restored. */
-  onRestoreDeleted?(item: RecentlyDeletedItem): Promise<string | null>;
+  onRestoreDeleted?(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
   /** The only in-window capture entry point besides the shortcut; shares its enablement and platform limits. */
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */

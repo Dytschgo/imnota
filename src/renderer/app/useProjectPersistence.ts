@@ -84,12 +84,13 @@ export interface ProjectPersistenceController {
   flushProjectMetadata(): Promise<boolean>;
   saveProjectMetadata(project: ProjectData): Promise<boolean>;
   beginNativeMutation(): number;
-  cancelNativeMutation(token: number): Promise<boolean>;
+  cancelNativeMutation(token: number, unconfirmedRestore?: string): Promise<boolean>;
   acceptMutationSnapshot(
     snapshot: ProjectSnapshot,
     selectScreenshotId?: string,
     nativeMutationToken?: number,
     transition?: ProjectRevisionTransition,
+    restoredRevision?: string,
   ): Promise<boolean>;
   adoptAuthoritativeSnapshot(
     snapshot: ProjectSnapshot,
@@ -1024,8 +1025,14 @@ export function useProjectPersistence({
   );
 
   const cancelNativeMutation = useCallback(
-    (token: number): Promise<boolean> => finishNativeMutation(token, true),
-    [finishNativeMutation],
+    (token: number, unconfirmedRestore?: string): Promise<boolean> => {
+      if (unconfirmedRestore) {
+        publishAcceptedRevision(null);
+        publishExternalChange({ kind: 'metadata-conflict', message: unconfirmedRestore });
+      }
+      return finishNativeMutation(token, !unconfirmedRestore);
+    },
+    [finishNativeMutation, publishAcceptedRevision, publishExternalChange],
   );
 
   const reloadExternal = useCallback(
@@ -1220,7 +1227,13 @@ export function useProjectPersistence({
     saveProjectMetadata,
     beginNativeMutation,
     cancelNativeMutation,
-    async acceptMutationSnapshot(mutationSnapshot, selectScreenshotId, nativeMutationToken, transition) {
+    async acceptMutationSnapshot(
+      mutationSnapshot,
+      selectScreenshotId,
+      nativeMutationToken,
+      transition,
+      restoredRevision,
+    ) {
       const mutatesCurrentProject = snapshotRef.current?.projectPath === mutationSnapshot.projectPath;
       if (!mutatesCurrentProject) {
         await finishNativeMutation(nativeMutationToken, false);
@@ -1257,6 +1270,10 @@ export function useProjectPersistence({
         // Always reload after a native mutation. Its response can be older than edits saved while the
         // native request was in flight, whereas the watcher returns the latest authoritative snapshot.
         const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
+        if (restoredRevision && latest.projectRevision !== restoredRevision)
+          throw new Error(
+            'The project changed again after Restore. Your edits remain open; reload, compare, and save again.',
+          );
         ownRevisionGeneration.current += 1;
         lastSavedSnapshot.current = latest.snapshot;
         if (!recovering.current) publishAcceptedRevision(latest.projectRevision);
@@ -1303,10 +1320,13 @@ export function useProjectPersistence({
         publishAcceptedRevision(null);
         publishExternalChange({
           kind: 'watch-error',
-          message: workflowMessage(
-            reason,
-            'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
-          ),
+          message: [
+            ...(mutationSnapshot.warnings ?? []),
+            workflowMessage(
+              reason,
+              'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
+            ),
+          ].join(' '),
         });
         return false;
       }

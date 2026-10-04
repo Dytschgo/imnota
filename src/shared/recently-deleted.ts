@@ -31,3 +31,6 @@ export function deleteRetentionExpired(
     now - deleted >= retentionMs
   );
 }
+
+/** Null is clean success; a string is failure; an object is success with a visible warning. */
+export type RecentlyDeletedRestoreResult = string | null | { warning: string };

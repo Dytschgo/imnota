@@ -113,3 +113,9 @@ PowerShell fixtures check the actual exception message separately from the
 no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
 temporary junction cleanup without traversing its target. The existing Linux,
 macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
+
+## Recently deleted integration verification
+
+`corepack pnpm exec vitest run src/renderer/app/useProjectPersistence.restore.test.tsx` exercises screenshot IPC, content persistence, atomic writes, the filesystem watcher and the mounted persistence hook against disposable projects. It covers metadata-last Restore warnings, changed/unreadable readback, typed write authority, queued metadata, member rollback and failed repair. Windows substitutes directory handles for POSIX sync faults; file writes and renames stay real. This does not substitute for supported-platform packaged verification.
+
+On the exact built candidate, the existing `corepack pnpm smoke` / packaged verifier must still execute Recently deleted after Undo-toast expiry for all three kinds, actual restored focus, unsafe-list errors, exact restored/reopened member bytes, and composed history with two screenshots, two drawings and one Markdown item. Native fault-injected warning/adoption and renderer-crash/watch-outage sequences require separately recorded direct evidence; the ordinary smoke does not inject these faults. Keep these acceptance gaps open rather than inferring them from a general smoke pass. Do not launch while another verification task owns the native lease.

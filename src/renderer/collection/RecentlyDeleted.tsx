@@ -1,6 +1,10 @@
 import { FileImage, FileText, History, Pencil } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DELETED_ITEM_RETENTION_DAYS, type RecentlyDeletedItem } from '../../shared/recently-deleted';
+import {
+  DELETED_ITEM_RETENTION_DAYS,
+  type RecentlyDeletedItem,
+  type RecentlyDeletedRestoreResult,
+} from '../../shared/recently-deleted';
 import type { Collection } from '../../shared/types';
 import { Button, Modal } from '../components/ui';
 import { collectionDisplayName } from './collection-display-name';
@@ -18,7 +22,7 @@ export interface RecentlyDeletedProps {
    * Runs the same restore as the Undo toast. Resolves with a message when the item was not
    * restored, so the reason is shown in this dialog instead of behind it.
    */
-  onRestore(item: RecentlyDeletedItem): Promise<string | null>;
+  onRestore(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
 }
 
 function deletedTime(value: string): string {
@@ -103,19 +107,21 @@ function RecentlyDeletedDialog({
     setRestoring(item.undoToken);
     setError('');
     setStatus('');
-    let failure: string | null;
+    let outcome: RecentlyDeletedRestoreResult;
     try {
-      failure = await onRestore(item);
+      outcome = await onRestore(item);
     } catch (reason) {
-      failure = reason instanceof Error ? reason.message : 'The item could not be restored.';
+      outcome = reason instanceof Error ? reason.message : 'The item could not be restored.';
     }
     if (!mounted.current) return;
     // The journal is the source of truth for what can still be restored.
     await load();
     if (!mounted.current) return;
     setRestoring(null);
+    const failure = typeof outcome === 'string' ? outcome : null;
+    const warning = outcome && typeof outcome === 'object' ? outcome.warning : '';
     if (failure) setError(`Restore could not be completed for “${item.title}”. ${failure}`);
-    else setStatus(`Restored “${item.title}”.`);
+    else setStatus([`Restored “${item.title}”.`, warning].filter(Boolean).join(' '));
     setFocusRequest({ undoToken: failure ? item.undoToken : null });
   }
 
