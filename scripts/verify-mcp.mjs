@@ -202,6 +202,22 @@ async function sha256(file) {
   return hash.digest('hex');
 }
 
+export function inspectMcpClientNode(configured = process.env.IMNOTA_MCP_CLIENT_NODE, probe = spawnSync) {
+  const executable = configured ?? process.execPath;
+  const result = probe(executable, ['--version'], { encoding: 'utf8', windowsHide: true });
+  if (result.error || result.status !== 0)
+    throw new Error(
+      `MCP client Node binary is unavailable: ${executable}${result.error ? ` (${result.error.message})` : ''}`,
+    );
+  const version = result.stdout.trim();
+  const major = /^v(\d+)\.\d+\.\d+$/.exec(version)?.[1];
+  if (!major)
+    throw new Error(`MCP client Node binary returned an invalid version: ${executable} (${version})`);
+  if (configured !== undefined && Number(major) < 24)
+    throw new Error(`MCP client Node must be version 24 or later: ${executable} is ${version}`);
+  return { executable, version };
+}
+
 export async function verifyPackagedMcp(executable, packagedArtifact = executable) {
   assert.ok(executable, 'An actual packaged executable is required.');
   executable = await realpath(resolve(executable));
@@ -234,6 +250,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
     report.asarSha256 = await sha256(asar);
     let launch;
     if (process.platform === 'win32') {
+      report.clientNode = inspectMcpClientNode();
       const relay = resolve(executable, '..', 'resources', 'imnota-mcp.mjs');
       report.relay = relay;
       report.relaySha256 = await sha256(relay);
@@ -283,7 +300,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
         delete env.ELECTRON_ENABLE_LOGGING;
         delete env.NODE_OPTIONS;
         const result = await runMcpProcess(
-          outer ? process.execPath : executable,
+          outer ? report.clientNode.executable : executable,
           outer ? [report.relay] : ['--mcp'],
           env,
           async (request) => {
@@ -342,7 +359,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
           transport: outer ? 'installed-node-command' : report.transport,
           root: runRoot,
           workspaceHashes: before,
-          command: outer ? [process.execPath, report.relay] : [executable, '--mcp'],
+          command: outer ? [report.clientNode.executable, report.relay] : [executable, '--mcp'],
           ...result,
         });
         assert.equal(result.rawStdoutBytes, result.stdoutBytes + (launch && !outer ? 2 : 0));
