@@ -179,4 +179,40 @@ describe('UI primitives', () => {
     copy.focus();
     expect(copy).toHaveFocus();
   });
+
+  it.each([undefined, -1])(
+    'honors an editable receiver with tabindex %s in both tab boundaries',
+    (tabIndex) => {
+      render(
+        <Modal title="Share bundles" onClose={vi.fn()}>
+          <button>Rich copy</button>
+          <div contentEditable tabIndex={tabIndex} role="textbox" aria-label="Paste receiver" />
+        </Modal>,
+      );
+      const close = screen.getByRole('button', { name: 'Close' });
+      const copy = screen.getByRole('button', { name: 'Rich copy' });
+      const receiver = screen.getByRole('textbox', { name: 'Paste receiver' });
+      // jsdom supports focusing contenteditable but does not implement this getter.
+      Object.defineProperty(receiver, 'isContentEditable', { value: true });
+      expect(receiver.tabIndex).toBe(-1);
+      if (tabIndex === undefined) expect(receiver).not.toHaveAttribute('tabindex');
+      else expect(receiver).toHaveAttribute('tabindex', '-1');
+
+      copy.focus();
+      if (tabIndex === undefined) {
+        // fireEvent does not perform native Tab navigation. The handler must leave
+        // this move uncancelled so the browser can advance to the editing host.
+        expect(fireEvent.keyDown(copy, { key: 'Tab' })).toBe(true);
+        receiver.focus();
+        expect(receiver).toHaveFocus();
+        expect(fireEvent.keyDown(receiver, { key: 'Tab', shiftKey: true })).toBe(true);
+        expect(fireEvent.keyDown(receiver, { key: 'Tab' })).toBe(false);
+      } else {
+        expect(fireEvent.keyDown(copy, { key: 'Tab' })).toBe(false);
+      }
+      expect(close).toHaveFocus();
+      expect(fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })).toBe(false);
+      expect(tabIndex === undefined ? receiver : copy).toHaveFocus();
+    },
+  );
 });

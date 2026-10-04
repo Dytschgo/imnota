@@ -86,6 +86,15 @@ function isAvailableFocusTarget(element: HTMLElement): boolean {
   return true;
 }
 
+function isTabStop(element: HTMLElement): boolean {
+  if (element.hasAttribute('tabindex')) return element.tabIndex >= 0;
+  // Editing hosts can be sequentially focused despite a negative tabIndex getter.
+  return (
+    element.tabIndex >= 0 ||
+    (element.isContentEditable && element.getAttribute('contenteditable') !== 'false')
+  );
+}
+
 export function Modal({
   title,
   description,
@@ -115,9 +124,9 @@ export function Modal({
     const focusable = () =>
       Array.from(
         dialog?.querySelectorAll<HTMLElement>(
-          'button, input, textarea, select, a[href], summary, [tabindex]',
+          'button, input, textarea, select, a[href], summary, [tabindex], [contenteditable]',
         ) ?? [],
-      ).filter((element) => element.tabIndex >= 0 && isAvailableFocusTarget(element));
+      ).filter((element) => isTabStop(element) && isAvailableFocusTarget(element));
     const isTopDialog = () =>
       Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
         .filter((element) => !element.closest('[hidden]'))
@@ -161,7 +170,7 @@ export function Modal({
         const first = items[0];
         const last = items.at(-1);
         const active = document.activeElement;
-        if (active instanceof HTMLElement && active.tabIndex < 0) {
+        if (active instanceof HTMLElement && !isTabStop(active)) {
           // Status messages and the dialog itself are programmatically focusable
           // but absent from the tab order. Advance from their document position.
           event.preventDefault();
