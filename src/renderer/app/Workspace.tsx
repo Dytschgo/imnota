@@ -2,6 +2,7 @@ import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CaptureDelaySeconds } from '../../shared/capture';
 import type { ContentItemContent } from '../../shared/content-items';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import type Konva from 'konva';
 import type {
   Annotation,
@@ -83,6 +84,7 @@ export interface WorkspaceProps {
   onUndoDescription(): void;
   onDuplicate(): void | Promise<void>;
   onDeleteItem(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
+  onRestoreDeleted?(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
 }
 
 export function Workspace(props: WorkspaceProps) {
@@ -229,6 +231,7 @@ export function Workspace(props: WorkspaceProps) {
         deleteShortcut={props.shortcutLabels.delete}
         reorderBindings={props.reorderBindings}
         onDeleteItem={props.onDeleteItem}
+        onRestoreDeleted={props.onRestoreDeleted}
       />
       <div className="canvas-column">
         {(!item || item.kind === 'text') && (

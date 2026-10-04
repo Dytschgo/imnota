@@ -2,13 +2,14 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectData } from '../src/shared/types.js';
 import { assertNoLinks, isWithin } from './files.js';
 import { ProjectSearchService, SEARCH_LIMITS } from './project-search.js';
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporaryDirectories.splice(0).map((folder) => fs.rm(folder, { recursive: true })));
 });
 
@@ -219,4 +220,83 @@ describe('ProjectSearchService', () => {
     expect(result.truncated).toBe(true);
     expect(result.warnings?.[0]).toMatch(/skipped/i);
   });
+});
+
+// Real rename/open/read flow: vary one identity field and hold its counterpart equal.
+// Only identity fields are projected; no native filesystem collision is assumed.
+it.each(
+  (['ino', 'dev'] as const).flatMap((field) => [100n, 9851624189743415n].map((own) => ({ field, own }))),
+)('rejects opened replacement with exact $field identity $own', async ({ field, own }) => {
+  const foreign = own + 1n;
+  const { workspace, projectPath, collectionId } = await fixture();
+  const target = path.join(projectPath, 'collections', collectionId, 'text', 'notes.md');
+  const original = `${target}.original`;
+  const moved = `${target}.opened`;
+  const replacement = `${target}.replacement`;
+  const bytes = await fs.readFile(target);
+  await fs.writeFile(replacement, 'secret replacement content');
+  const open = fs.open.bind(fs);
+  const lstat = fs.lstat.bind(fs);
+  const closed = vi.fn();
+  let openedStats = 0;
+  let pathStats = 0;
+  const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (String(args[0]) === target) {
+      const stat = handle.stat.bind(handle);
+      const close = handle.close.bind(handle);
+      handle.stat = (async (options?: { bigint?: boolean }) => {
+        const value = options?.bigint ? await stat({ bigint: true }) : await stat();
+        openedStats++;
+        Object.assign(
+          value,
+          typeof value.ino === 'bigint'
+            ? { [field]: foreign, [field === 'ino' ? 'dev' : 'ino']: 7n }
+            : { [field]: Number(foreign), [field === 'ino' ? 'dev' : 'ino']: 7 },
+        );
+        return value;
+      }) as typeof handle.stat;
+      handle.close = async () => {
+        await close();
+        closed();
+      };
+    }
+    return handle;
+  });
+  const pathSpy = vi.spyOn(fs, 'lstat').mockImplementation((async (file, options?: { bigint?: boolean }) => {
+    const value = options?.bigint ? await lstat(file, { bigint: true }) : await lstat(file);
+    if (String(file) === target) {
+      pathStats++;
+      Object.assign(
+        value,
+        typeof value.ino === 'bigint'
+          ? { [field]: own, [field === 'ino' ? 'dev' : 'ino']: 7n }
+          : { [field]: Number(own), [field === 'ino' ? 'dev' : 'ino']: 7 },
+      );
+    }
+    return value;
+  }) as typeof fs.lstat);
+  const search = service(workspace, {
+    beforeFileOpen: async (file) => {
+      if (file !== target) return;
+      await fs.rename(target, original);
+      await fs.rename(replacement, target);
+    },
+    afterFileOpen: async (file) => {
+      if (file !== target) return;
+      await fs.rename(target, moved);
+      await fs.rename(original, target);
+    },
+  });
+  const result = await search.search({ query: 'secret replacement' });
+  expect(await fs.readFile(target)).toEqual(bytes);
+  expect(await fs.readFile(moved, 'utf8')).toBe('secret replacement content');
+  expect(openedStats).toBeGreaterThan(0);
+  expect(pathStats).toBeGreaterThan(0);
+  expect(closed).toHaveBeenCalledOnce();
+  expect(result.results).toEqual([]);
+  expect(result.truncated).toBe(true);
+  expect(result.warnings?.[0]).toMatch(/skipped/i);
+  openSpy.mockRestore();
+  pathSpy.mockRestore();
 });

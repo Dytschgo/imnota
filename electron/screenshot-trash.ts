@@ -1,8 +1,11 @@
+import { RestoreConfirmationError } from './restore-confirmation.js';
+import { retireDeleteJournal } from './delete-retention.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
 import { screenshotSchema, validateProject } from '../src/shared/schema.js';
+import { DELETED_ITEM_RETENTION_MS, deleteRetentionExpired } from '../src/shared/recently-deleted.js';
 import { nowIso } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, CommittedWriteError, isWithin } from './files.js';
 import { quarantineDamagedJournal, type DamagedJournalReporter } from './journal-quarantine.js';
@@ -613,16 +616,28 @@ async function finishUndo(
   manifest: TrashManifest,
   project: ProjectData,
   operations: ResolvedTrashOperations,
+  confirm?: (project: ProjectData, warning?: string) => Promise<void>,
+  warning?: string,
 ): Promise<UndoScreenshotResult> {
+  await confirm?.(project, warning);
+  // A warned Restore retains its journal until explicit open recovery, including the interval
+  // between the IPC response and renderer adoption. Confirmation is not power-loss durability.
   let finalManifest = manifest;
-  let durabilityWarning: string | undefined;
+  let durabilityWarning: string | undefined = warning;
   try {
     if (manifest.phase !== 'restored')
       finalManifest = await setPhase(directory, manifest, 'restored', operations);
   } catch (error) {
-    if (error instanceof CommittedWriteError) durabilityWarning = error.message;
+    if (confirm)
+      throw new RestoreConfirmationError(
+        `Restore could not be confirmed: ${warning ?? ''} The restored journal phase could not be recorded: ${error instanceof Error ? error.message : String(error)} Recovery files were preserved. Reload and compare before retrying.`,
+        { cause: error },
+      );
+    if (error instanceof CommittedWriteError)
+      durabilityWarning = [warning, error.message].filter(Boolean).join(' ');
     // The undoAfter metadata image is the commit point and is checked during recovery.
   }
+  if (confirm && warning) return { project, cleanup: 'pending', warning };
   try {
     await cleanupUndo(directory, finalManifest, operations);
     return { project, cleanup: 'complete', ...(durabilityWarning ? { warning: durabilityWarning } : {}) };
@@ -813,6 +828,7 @@ export async function undoScreenshotDelete(
   project: ProjectData,
   token: string,
   suppliedOperations: ScreenshotTrashOperations = defaultOperations,
+  confirm?: (project: ProjectData, warning?: string) => Promise<void>,
 ): Promise<UndoScreenshotResult> {
   const root = await projectRoot(projectPath);
   const operations = operationsWithDefaults(suppliedOperations);
@@ -832,12 +848,13 @@ export async function undoScreenshotDelete(
   if (currentProject.id !== project.id || currentProject.id !== originalProject.id)
     throw new ScreenshotTrashError('baseline-changed', 'Undo belongs to a different project.', token);
 
-  if (manifest.phase === 'restored') return finishUndo(directory, manifest, currentProject, operations);
+  if (manifest.phase === 'restored')
+    return finishUndo(directory, manifest, currentProject, operations, confirm);
   if (manifest.undoAfter && (await classify(metadataPath, directory, manifest.undoAfter)) === 'expected') {
     const restored = validateProject(
       JSON.parse((await backupBytes(directory, manifest.undoAfter))!.toString('utf8')),
     );
-    return finishUndo(directory, manifest, restored, operations);
+    return finishUndo(directory, manifest, restored, operations, confirm);
   }
   if (manifest.phase === 'undoing') {
     if (!manifest.undoBefore || !manifest.undoAfter)
@@ -875,6 +892,7 @@ export async function undoScreenshotDelete(
   };
   await writeManifest(directory, manifest, operations);
 
+  let metadataWriteStarted = false;
   try {
     for (const item of manifest.content) {
       const target = resolveRelative(root, item.relativePath);
@@ -897,16 +915,37 @@ export async function undoScreenshotDelete(
         'project.json changed before the Undo commit point; candidate was preserved.',
         token,
       );
+    metadataWriteStarted = true;
     await applyStored(metadataPath, directory, undoAfterStored, operations);
     if ((await classify(metadataPath, directory, undoAfterStored)) !== 'expected')
       throw new Error('project.json did not reach its restored state.');
-    return finishUndo(directory, manifest, restoredProject, operations);
+    return finishUndo(directory, manifest, restoredProject, operations, confirm);
   } catch (error) {
-    if ((await classify(metadataPath, directory, undoAfterStored)) === 'expected') {
-      const result = await finishUndo(directory, manifest, restoredProject, operations);
-      if (error instanceof CommittedWriteError)
-        result.warning = [error.message, result.warning].filter(Boolean).join(' ');
-      return result;
+    if (error instanceof RestoreConfirmationError) throw error;
+    let committed: boolean;
+    try {
+      committed = (await classify(metadataPath, directory, undoAfterStored)) === 'expected';
+      if (
+        !committed &&
+        metadataWriteStarted &&
+        (await classify(metadataPath, directory, undoBeforeStored)) !== 'expected'
+      )
+        throw new Error('The project changed again during Restore.');
+    } catch (readError) {
+      throw new RestoreConfirmationError(
+        `Restore could not be confirmed: ${error instanceof Error ? error.message : String(error)} ${readError instanceof Error ? readError.message : String(readError)} Recovery files were preserved. Reload and compare before retrying.`,
+        { cause: error },
+      );
+    }
+    if (committed) {
+      return finishUndo(
+        directory,
+        manifest,
+        restoredProject,
+        operations,
+        confirm,
+        error instanceof Error ? error.message : String(error),
+      );
     }
     try {
       await restoreDeletedState(root, directory, manifest, operations);
@@ -914,7 +953,7 @@ export async function undoScreenshotDelete(
     } catch (rollbackError) {
       throw new ScreenshotTrashError(
         'rollback-failed',
-        `Screenshot Undo failed and recovery is incomplete: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        `Screenshot Undo failed (${error instanceof Error ? error.message : String(error)}) and recovery is incomplete: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
         token,
         { cause: error },
       );
@@ -1111,4 +1150,153 @@ export async function recoverScreenshotTrashTransactions(
     });
   }
   return results;
+}
+
+export interface DeletedScreenshotSummary {
+  undoToken: string;
+  screenshot: ScreenshotRecord;
+  deletedAt: string;
+}
+
+export interface TrashPruneResult {
+  pruned: string[];
+  failed: Array<{ undoToken?: string; error: unknown }>;
+}
+
+/** Well-formed journal directories only. Read-only: anything else is left for recovery to judge. */
+async function journalDirectories(projectPath: string): Promise<string[]> {
+  const root = undoRoot(projectPath);
+  await assertNoLinks(root);
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const result: string[] = [];
+  for (const entry of entries) {
+    await assertNoLinks(path.join(root, entry.name));
+    if (!TOKEN_PATTERN.test(entry.name)) continue;
+    if (!entry.isDirectory()) throw new Error('Unsafe journal token path; recovery data was preserved.');
+    result.push(entry.name);
+  }
+  return result.sort();
+}
+
+/**
+ * Committed deletes that can still be restored. Pending and expired journals are omitted;
+ * malformed journals and unsafe paths surface an error. Listing never changes files.
+ */
+export async function listDeletedScreenshots(
+  projectPath: string,
+  now = Date.now(),
+  retentionMs = DELETED_ITEM_RETENTION_MS,
+): Promise<DeletedScreenshotSummary[]> {
+  const root = await projectRoot(projectPath);
+  const summaries: DeletedScreenshotSummary[] = [];
+  for (const token of await journalDirectories(root)) {
+    const loaded = await loadManifest(root, token);
+    if (loaded.manifest.phase !== 'deleted') continue;
+    if (deleteRetentionExpired(loaded.manifest.deletedAt, now, retentionMs)) continue;
+    summaries.push({
+      undoToken: token,
+      screenshot: loaded.manifest.screenshot,
+      deletedAt: loaded.manifest.deletedAt,
+    });
+  }
+  return summaries;
+}
+
+async function assertRestorableDelete(
+  root: string,
+  directory: string,
+  manifest: TrashManifest,
+): Promise<Buffer> {
+  const current = await readOptional(path.join(root, 'project.json'));
+  if (!current) throw new Error('Project metadata is missing; retention preserved the journal.');
+  const project = validateProject(JSON.parse(current.toString('utf8')));
+  const before = await backupBytes(directory, manifest.metadataBefore);
+  if (!before) throw new Error('Recovery metadata is missing; retention preserved the journal.');
+  const original = validateProject(JSON.parse(before.toString('utf8')));
+  if (project.id !== original.id) throw new Error('Recovery belongs to another project; journal preserved.');
+  withScreenshot(project, manifest.screenshot, manifest.token);
+  for (const bytes of [manifest.metadataDeleted, manifest.undoBefore, manifest.undoAfter])
+    if (bytes) await backupBytes(directory, bytes);
+  for (const entry of manifest.content) {
+    const backup = await backupBytes(directory, entry.bytes);
+    const live = await readOptional(resolveRelative(root, entry.relativePath));
+    if (live !== null && !equalBytes(live, backup))
+      throw new Error('A restore path is occupied; retention preserved the journal.');
+  }
+  if (!(await backupBytes(directory, manifest.content[0].bytes)))
+    throw new Error('The source backup is missing; retention preserved the journal.');
+  return current;
+}
+
+async function removeExpiredJournal(
+  directory: string,
+  manifest: TrashManifest,
+  operations: ResolvedTrashOperations,
+  assertCurrent: () => Promise<void>,
+): Promise<void> {
+  await assertNoLinks(directory);
+  const expected = expectedJournalFiles(manifest);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !expected.has(entry.name))
+      throw new ScreenshotTrashError(
+        'invalid-manifest',
+        'Undo retention stopped because the journal contains an unknown path.',
+        manifest.token,
+      );
+    await assertNoLinks(path.join(directory, entry.name));
+  }
+  await retireDeleteJournal(directory, operations.removeDirectory, assertCurrent);
+}
+
+/**
+ * Removes committed-delete journals older than the retention window. Only the `deleted` phase is
+ * eligible: in-flight, interrupted, unreadable or unexpectedly shaped journals are never touched.
+ * Validation failures keep the original journal. After the expiry rename, cleanup failures keep
+ * the remaining expired files for manual inspection. All failures are reported to the caller.
+ */
+export async function pruneExpiredScreenshotDeletes(
+  projectPath: string,
+  now = Date.now(),
+  suppliedOperations: ScreenshotTrashOperations = defaultOperations,
+  retentionMs = DELETED_ITEM_RETENTION_MS,
+): Promise<TrashPruneResult> {
+  const result: TrashPruneResult = { pruned: [], failed: [] };
+  const operations = operationsWithDefaults(suppliedOperations);
+  let root: string;
+  let journals: string[];
+  try {
+    root = await projectRoot(projectPath);
+    journals = await journalDirectories(root);
+  } catch (error) {
+    result.failed.push({ error });
+    return result;
+  }
+  for (const token of journals) {
+    try {
+      const manifestPath = path.join(undoDirectory(root, token), 'manifest.json');
+      await assertNoLinks(manifestPath);
+      const manifestBytes = await fs.readFile(manifestPath);
+      const loaded = await loadManifest(root, token);
+      if (loaded.manifest.phase !== 'deleted') continue;
+      if (!deleteRetentionExpired(loaded.manifest.deletedAt, now, retentionMs)) continue;
+      const projectBytes = await assertRestorableDelete(root, loaded.directory, loaded.manifest);
+      await removeExpiredJournal(loaded.directory, loaded.manifest, operations, async () => {
+        await assertNoLinks(manifestPath);
+        await assertNoLinks(path.join(root, 'project.json'));
+        if (
+          !(await fs.readFile(manifestPath)).equals(manifestBytes) ||
+          !(await fs.readFile(path.join(root, 'project.json'))).equals(projectBytes)
+        )
+          throw new Error('The project or recovery journal changed during retention; files were preserved.');
+      });
+      result.pruned.push(token);
+    } catch (error) {
+      result.failed.push({ undoToken: token, error });
+    }
+  }
+  return result;
 }

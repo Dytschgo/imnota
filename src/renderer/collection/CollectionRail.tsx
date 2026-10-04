@@ -18,7 +18,9 @@ import {
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CAPTURE_DELAY_SECONDS, type CaptureDelaySeconds } from '../../shared/capture';
 import type { ProjectData, ProjectSnapshot } from '../../shared/types';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import { collectionDisplayName } from './collection-display-name';
+import { RecentlyDeleted } from './RecentlyDeleted';
 import { orderedCollectionItems } from '../../shared/content-items';
 import { detectShortcutPlatform, formatShortcut, shortcutMatchesEvent } from '../../shared/shortcuts';
 import { nowIso } from '../../shared/utils';
@@ -37,6 +39,8 @@ export interface CollectionRailProps {
   onSnapshot(snapshot: ProjectSnapshot, selectScreenshotId?: string): void | Promise<void>;
   onAddContent?(kind: 'drawing' | 'text'): void | Promise<void>;
   onDeleteItem?(id: string, kind: 'screenshot' | 'drawing' | 'text'): void | Promise<void>;
+  /** Restores a deleted item like Undo. Resolves with a message when it was not restored. */
+  onRestoreDeleted?(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult>;
   /** The only in-window capture entry point besides the shortcut; shares its enablement and platform limits. */
   onCapture?(delaySeconds?: CaptureDelaySeconds): void;
   /** Windows makes capture the primary screenshot action; other platforms keep import primary. */
@@ -425,6 +429,7 @@ export function CollectionRail({
   onSnapshot,
   onAddContent,
   onDeleteItem,
+  onRestoreDeleted,
   onCapture,
   capturePrimary = false,
   captureEnabled = false,
@@ -896,6 +901,14 @@ export function CollectionRail({
                 </div>
               )}
             </div>
+            {onRestoreDeleted && store.snapshot && (
+              <RecentlyDeleted
+                key={store.snapshot.projectPath}
+                projectPath={store.snapshot.projectPath}
+                collections={store.snapshot.project.collections}
+                onRestore={onRestoreDeleted}
+              />
+            )}
           </div>
         </>
       )}

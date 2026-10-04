@@ -99,6 +99,7 @@ import { LocalMcpServer } from './mcp-server.js';
 import { assertProjectPath as authorizeProjectPath } from './project-path.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { recoverContentTrashTransactions, type ContentTrashOperations } from './content-trash.js';
+import { applyOpenDeleteRetention } from './recently-deleted.js';
 import { ProjectSearchService } from './project-search.js';
 import { BackupService } from './backup-service.js';
 import { CaptureService, CaptureServiceError, type CapturedDisplayImage } from './capture-service.js';
@@ -610,7 +611,26 @@ async function recoverNativeProjectTransactions(projectPath: string): Promise<{
         itemId: transaction.itemId,
       });
   }
-  return { warnings, recoveredDeletes, recoveredContentDeletes };
+  // Retention runs after recovery so only journals already settled as committed deletes are
+  // eligible. Validation failures preserve the journal; cleanup failures retain expired remnants for inspection.
+  const retention = await applyOpenDeleteRetention(projectPath, {
+    screenshots: screenshotTrashOperations,
+    content: contentTrashOperations,
+  });
+  await diagnostics.record({
+    category: 'integrity',
+    action: 'delete-retention-applied',
+    phase: retention.failures.length ? 'failed' : 'observed',
+    target: projectPath,
+    count: retention.pruned,
+    ...(retention.failures.length ? { error: retention.failures[0] } : {}),
+  });
+  warnings.push(...retention.warnings);
+  return {
+    warnings,
+    recoveredDeletes: recoveredDeletes.filter((item) => !retention.retired.has(item.undoToken)),
+    recoveredContentDeletes: recoveredContentDeletes.filter((item) => !retention.retired.has(item.undoToken)),
+  };
 }
 
 function imageType(filename: string): string {
@@ -1904,6 +1924,8 @@ function registerIpc(): void {
     },
     transactionOperations: screenshotTransactionOperations,
     trashOperations: contentTrashOperations,
+    ownsRestoreRevision: (projectPath, revision) =>
+      projectWatchManager?.hasSelfProjectRevision(projectPath, revision) ?? false,
     trashItem: async (target) => {
       await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
       projectWatchManager?.recordSelfDelete(target);

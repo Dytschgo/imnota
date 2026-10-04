@@ -505,6 +505,7 @@ const screenshot = () => ({
 /** A well-formed call for every channel whose handler authorizes a renderer-supplied project path. */
 const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
   'projects:load': (projectPath) => [projectPath],
+  'projects:recently-deleted': (projectPath) => [projectPath],
   'projects:save': (projectPath) => [projectPath, projectData()],
   'projects:duplicate': (projectPath) => [projectPath],
   'projects:archive': (projectPath) => [projectPath],
@@ -715,6 +716,9 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['projects:create', 'an oversized name', [{ name: long(121), description: '' }]],
     ['projects:create', 'an oversized description', [{ name: 'Project', description: long(3001) }]],
     ['projects:create', 'an unknown icon', [{ name: 'Project', description: '', icon: '../icon' }]],
+    ['projects:recently-deleted', 'an empty path', ['']],
+    ['projects:recently-deleted', 'an oversized path', [long(2001)]],
+    ['projects:recently-deleted', 'a second argument', [anyPath, anyPath]],
     ['projects:load', 'an empty path', ['']],
     ['projects:load', 'an oversized path', [long(2001)]],
     ['projects:load', 'a second argument', [anyPath, anyPath]],

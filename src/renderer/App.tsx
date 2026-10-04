@@ -1,4 +1,4 @@
-import { isCommittedWriteWarning } from '../shared/write-outcome';
+import { isCommittedWriteWarning, isUnconfirmedRestore } from '../shared/write-outcome';
 import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
@@ -20,6 +20,7 @@ import type {
 } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
 import type { CaptureDelaySeconds } from '../shared/capture';
+import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../shared/recently-deleted';
 import { nowIso } from '../shared/utils';
 import { orderedCollectionItems } from '../shared/content-items';
 import { useContentPersistence } from './content/useContentPersistence';
@@ -1339,15 +1340,49 @@ export default function App() {
     }
     await mutateContent('delete', pending);
   }
-  async function undoContent(projectPath: string, undoToken: string, itemId: string) {
+  async function undoContent(
+    projectPath: string,
+    undoToken: string,
+    itemId: string,
+    onError: (message: string) => void = setError,
+    onWarning?: (message: string) => void,
+  ): Promise<boolean> {
+    if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
+    if (persistence.externalChange) {
+      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+      return false;
+    }
     const token = await beginCurrentProjectMutation();
-    if (token === null) return;
+    if (token === null) return false;
     try {
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(token);
+        return false;
+      }
       const snapshot = await window.imnota.undoDeleteContentItem({ projectPath, undoToken });
-      if (!(await persistence.acceptMutationSnapshot(snapshot, itemId, token))) return;
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(token);
+        onError('The original project was restored, but a different project is now open.');
+        return false;
+      }
+      const accepted = await persistence.acceptMutationSnapshot(
+        snapshot,
+        itemId,
+        token,
+        undefined,
+        snapshot.projectRevision,
+      );
+      if (accepted && snapshot.warnings?.length) onWarning?.(snapshot.warnings.join(' '));
+      return accepted;
     } catch (reason) {
-      await persistence.cancelNativeMutation(token);
-      setError(reason instanceof Error ? reason.message : 'The item could not be restored.');
+      await persistence.cancelNativeMutation(
+        token,
+        useAppStore.getState().snapshot?.projectPath === projectPath && isUnconfirmedRestore(reason)
+          ? (reason as Error).message
+          : undefined,
+      );
+      onError(reason instanceof Error ? reason.message : 'The item could not be restored.');
+      return false;
     }
   }
   async function selectCollection(id: string, navigationIdentityAtStart?: number) {
@@ -1531,16 +1566,73 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : 'The screenshot could not be moved to trash.');
     }
   }
-  async function undoDeletedScreenshot(projectPath: string, undoToken: string, screenshotId: string) {
-    const nativeMutationToken = await beginCurrentProjectMutation();
-    if (nativeMutationToken === null) return;
-    try {
-      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
-      await persistence.acceptMutationSnapshot(restored, screenshotId, nativeMutationToken);
-    } catch (reason) {
-      await persistence.cancelNativeMutation(nativeMutationToken);
-      setError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
+  async function undoDeletedScreenshot(
+    projectPath: string,
+    undoToken: string,
+    screenshotId: string,
+    onError: (message: string) => void = setError,
+    onWarning?: (message: string) => void,
+  ): Promise<boolean> {
+    if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
+    if (persistence.externalChange) {
+      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+      return false;
     }
+    const nativeMutationToken = await beginCurrentProjectMutation();
+    if (nativeMutationToken === null) return false;
+    try {
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        return false;
+      }
+      const restored = await window.imnota.undoDeleteScreenshot({ projectPath, undoToken });
+      if (useAppStore.getState().snapshot?.projectPath !== projectPath) {
+        await persistence.cancelNativeMutation(nativeMutationToken);
+        onError('The original project was restored, but a different project is now open.');
+        return false;
+      }
+      const accepted = await persistence.acceptMutationSnapshot(
+        restored,
+        screenshotId,
+        nativeMutationToken,
+        undefined,
+        restored.projectRevision,
+      );
+      if (accepted && restored.warnings?.length) onWarning?.(restored.warnings.join(' '));
+      return accepted;
+    } catch (reason) {
+      await persistence.cancelNativeMutation(
+        nativeMutationToken,
+        useAppStore.getState().snapshot?.projectPath === projectPath && isUnconfirmedRestore(reason)
+          ? (reason as Error).message
+          : undefined,
+      );
+      onError(reason instanceof Error ? reason.message : 'The screenshot could not be restored.');
+      return false;
+    }
+  }
+  /** Recently deleted restores through the Undo path; its dialog shows the failure itself. */
+  async function restoreDeletedItem(item: RecentlyDeletedItem): Promise<RecentlyDeletedRestoreResult> {
+    const projectPath = useAppStore.getState().snapshot?.projectPath;
+    if (!projectPath) return 'The project is no longer open.';
+    const failure: { message?: string; warning?: string } = {};
+    const undo = item.kind === 'screenshot' ? undoDeletedScreenshot : undoContent;
+    const restored = await undo(
+      projectPath,
+      item.undoToken,
+      item.itemId,
+      (message) => {
+        failure.message = message;
+      },
+      (warning) => {
+        failure.warning = warning;
+      },
+    );
+    if (restored) return failure.warning ? { warning: failure.warning } : null;
+    return (
+      failure.message ??
+      'Saving or adopting the restored project did not complete. Refresh the list and resolve any save or external-change warning before retrying.'
+    );
   }
   function requestProjectDeletion(projectPath: string) {
     const project = useAppStore.getState().projects.find((entry) => entry.projectPath === projectPath);
@@ -2306,6 +2398,7 @@ export default function App() {
             onDeleteItem={(id, kind) =>
               kind === 'screenshot' ? requestScreenshotDeletion(id) : requestContentDeletion(id)
             }
+            onRestoreDeleted={restoreDeletedItem}
           />
         )}
         <input
