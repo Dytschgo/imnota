@@ -142,7 +142,7 @@ describe('native mixed content persistence', () => {
     await expect(recoverContentTrashTransactions(projectPath)).rejects.toThrow(/commit receipt/);
     expect(await fs.readFile(extra, 'utf8')).toBe('Preserve this file');
   });
-  it('preserves external edits after Undo committed but its completion marker could not be written', async () => {
+  it('refuses adoption without a completion marker and preserves later external edits during recovery', async () => {
     const { projectPath, service, snapshot } = await fixture();
     const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
     const item = created.project.contentItems![0];
@@ -162,7 +162,9 @@ describe('native mixed content persistence', () => {
         removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
       },
     });
-    await retrying.undoDelete({ projectPath, undoToken: deleted.undoToken });
+    await expect(retrying.undoDelete({ projectPath, undoToken: deleted.undoToken })).rejects.toThrow(
+      /Restore could not be confirmed:.*completion marker blocked/,
+    );
     const target = path.join(projectPath, contentItemRelativePaths(item).markdown!);
     await fs.writeFile(target, 'External edit after Undo');
     const metadata = await fs.readFile(path.join(projectPath, 'project.json'));

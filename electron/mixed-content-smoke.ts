@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import type { ProjectSnapshot } from '../src/shared/types.js';
+import { contentItemRelativePaths } from './content-paths.js';
 import path from 'node:path';
 import { dialog, nativeImage } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
@@ -331,6 +333,118 @@ export async function exerciseMixedContent(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
     captures.push(await driver.capture(artifactDirectory, 'mixed-content-text.png'));
+  }
+  // This project and all of its files were created by this smoke invocation.
+  // Preserve the immediate Undo assertions above, then prove the later dialog path.
+  await driver.evaluate('window.imnota.setSettings({confirmBeforeDeletion:false})');
+  try {
+    await nativeClipboard.writeImage(png);
+    const withScreenshot = await driver.evaluate<ProjectSnapshot>(
+      `window.imnota.pasteImage(${JSON.stringify(projectPath)}, ${JSON.stringify(drawing.collectionId)})`,
+    );
+    const screenshot = withScreenshot.project.screenshots[0];
+    if (!screenshot) throw new Error('Recently deleted fixture screenshot was not created.');
+    const ids = [screenshot.id, drawing.id, text.id];
+    const relativeFiles = [
+      `collections/${screenshot.collectionId}/screenshots/${screenshot.storedFilename}`,
+      screenshot.annotationFile,
+      screenshot.descriptionFile,
+      ...Object.values(contentItemRelativePaths(drawing)),
+      ...Object.values(contentItemRelativePaths(text)),
+    ];
+    const before = await Promise.all(
+      relativeFiles.map(async (relative) => ({
+        relative,
+        bytes: await fs.readFile(path.join(projectPath, relative)),
+      })),
+    );
+    driver.setWindow(await host.reopenWindow());
+    for (const id of ids) {
+      await driver.waitFor({ selector: `[data-testid="item-delete-${id}"]` });
+      await driver.click({ selector: `[data-testid="item-delete-${id}"]` });
+      await driver.waitFor({ selector: `[data-testid="screenshot-${id}"]` }, { absent: true });
+      await driver.waitFor({ selector: '.toast-action', text: 'Undo', exact: true });
+    }
+    // Wait for the observable toast expiry; do not sleep, dismiss it, or call Undo.
+    await driver.waitFor(
+      { selector: '.toast-action', text: 'Undo', exact: true },
+      { absent: true, timeoutMs: 20000 },
+    );
+    for (const { relative } of before) {
+      const present = await fs.stat(path.join(projectPath, relative)).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return false;
+          throw error;
+        },
+      );
+      if (present) throw new Error(`Deleted fixture file remained: ${relative}`);
+    }
+    await driver.click({ selector: '[data-testid="recently-deleted-open"]' });
+    for (const id of ids) await driver.waitFor({ selector: `[data-testid="recently-deleted-${id}"]` });
+    if (artifactDirectory)
+      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-three-kinds.png'));
+    for (const id of ids) {
+      await driver.click({ selector: `[data-testid="recently-deleted-${id}"] button` });
+      await driver.waitFor({ selector: `[data-testid="recently-deleted-${id}"]` }, { absent: true });
+      await driver.evaluate(`new Promise((resolve, reject) => {
+        const deadline = Date.now() + 5000;
+        const check = () => {
+          const status = document.querySelector('[data-testid="recently-deleted-dialog"] [role="status"]');
+          if (status?.textContent.startsWith('Restored') && document.activeElement === status) return resolve(true);
+          if (Date.now() >= deadline) return reject(new Error('Restore did not announce success and focus its status.'));
+          requestAnimationFrame(check);
+        }; check();
+      })`);
+    }
+    await driver.waitFor({ selector: '.recently-deleted-empty' });
+    if (artifactDirectory)
+      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-restored.png'));
+    await driver.press('Escape');
+    await driver.waitFor({ selector: '[data-testid="recently-deleted-dialog"]' }, { absent: true });
+    for (const { relative, bytes } of before)
+      if (!(await fs.readFile(path.join(projectPath, relative))).equals(bytes))
+        throw new Error(`Recently deleted changed restored bytes: ${relative}`);
+    driver.setWindow(await host.reopenWindow());
+    const reopened = await host.readProject(projectPath);
+    const reopenedIds = [...reopened.screenshots, ...(reopened.contentItems ?? [])].map((item) => item.id);
+    if (ids.some((id) => !reopenedIds.includes(id)))
+      throw new Error('Recently deleted records were missing after reopen.');
+    for (const { relative, bytes } of before)
+      if (!(await fs.readFile(path.join(projectPath, relative))).equals(bytes))
+        throw new Error(`Reopening changed restored bytes: ${relative}`);
+    await driver.waitFor({ selector: `[data-testid="screenshot-${text.id}"]` });
+    await driver.click({ selector: `[data-testid="screenshot-${text.id}"]` });
+    await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
+    const reopenedMarkdown = await driver.evaluate<string>(
+      `document.querySelector('[data-testid="markdown-input"]').value`,
+    );
+    if (reopenedMarkdown !== markdown)
+      throw new Error('Recently deleted Markdown did not reopen in the editor.');
+    // A separate synthetic unsafe entry exercises the dialog's real list-error path.
+    const unsafe = path.join(projectPath, '.imnota-undo', 'delete-12345678-1234-4234-8234-123456789abc');
+    await fs.mkdir(path.dirname(unsafe), { recursive: true });
+    await fs.writeFile(unsafe, 'smoke-only unsafe entry', { flag: 'wx' });
+    try {
+      await driver.click({ selector: '[data-testid="recently-deleted-open"]' });
+      await driver.waitFor({
+        selector: '[data-testid="recently-deleted-dialog"] [role="alert"]',
+        text: 'Unsafe journal token path',
+      });
+      if (artifactDirectory)
+        captures.push(await driver.capture(artifactDirectory, 'recently-deleted-list-error.png'));
+      const listed = await driver.evaluate<number>(
+        `document.querySelectorAll('[data-testid="recently-deleted-dialog"] li').length`,
+      );
+      if (listed !== 0) throw new Error('Failed listing exposed stale restore actions.');
+      await driver.press('Escape');
+    } finally {
+      await fs.unlink(unsafe);
+    }
+  } finally {
+    await driver.evaluate(
+      `window.imnota.setSettings({confirmBeforeDeletion:${JSON.stringify(previousSettings.confirmBeforeDeletion)}})`,
+    );
   }
   return captures;
 }

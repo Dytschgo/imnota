@@ -1,3 +1,4 @@
+import { restoreConfirmation } from './restore-confirmation.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -91,6 +92,7 @@ export interface ContentPersistenceDependencies {
   beforeSchemaMigration?(projectPath: string, project: ProjectData): Promise<void>;
   transactionOperations?: ScreenshotTransactionOperations;
   trashOperations?: ContentTrashOperations;
+  ownsRestoreRevision?(projectPath: string, revision: string): boolean;
   trashItem(target: string): Promise<void>;
   randomId?: () => string;
   now?: () => Date;
@@ -862,12 +864,25 @@ export class ContentPersistenceService {
 
   async undoDelete(input: { projectPath: string; undoToken: string }): Promise<ProjectSnapshot> {
     const baseline = await this.baseline(input.projectPath);
+    const confirmation = restoreConfirmation(
+      input.projectPath,
+      this.dependencies.trashOperations?.write ?? atomicWrite,
+      this.dependencies.snapshot,
+      this.dependencies.ownsRestoreRevision,
+    );
     const result = await undoContentItemDelete(
       input.projectPath,
       baseline.project,
       input.undoToken,
-      this.dependencies.trashOperations,
+      {
+        ...this.dependencies.trashOperations,
+        write: confirmation.write,
+        removeDirectory:
+          this.dependencies.trashOperations?.removeDirectory ??
+          ((target) => fs.rm(target, { recursive: true, force: true })),
+      },
+      confirmation.confirm,
     );
-    return withWarning(await this.dependencies.snapshot(input.projectPath), result.warning);
+    return confirmation.snapshot(result.warning);
   }
 }

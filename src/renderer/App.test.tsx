@@ -1,3 +1,4 @@
+import { COMMITTED_WRITE_WARNING, RESTORE_CONFIRMATION_FAILURE } from '../shared/write-outcome';
 import { reloadWindow, setReloadProtection } from './app/reload-guard';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -700,6 +701,134 @@ describe('feedback controls', () => {
     useAppStore.setState((state) => ({
       settings: { ...state.settings, confirmBeforeDeletion: true },
     }));
+  });
+
+  it('does not adopt a Recently deleted restore after a different project opens', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'delete-token',
+      itemId: 'deleted',
+      title: 'Old screen',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    let finish!: (value: ProjectSnapshot) => void;
+    const undoDeleteScreenshot = vi.fn(
+      () =>
+        new Promise<ProjectSnapshot>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await renderEditingProject({ listRecentlyDeleted: async () => [deleted], undoDeleteScreenshot });
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore screenshot: Old screen' }));
+    await waitFor(() => expect(undoDeleteScreenshot).toHaveBeenCalledOnce());
+    act(() => useAppStore.getState().setProject({ ...snapshot, projectPath: '/workspace/other' }));
+    expect(screen.queryByRole('dialog', { name: 'Recently deleted' })).toBeNull();
+    await act(async () => finish(snapshot));
+    expect(useAppStore.getState().snapshot?.projectPath).toBe('/workspace/other');
+  });
+
+  it('keeps a committed Restore warning in the focused dialog success message', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'delete-token',
+      itemId: 'deleted',
+      title: 'Warned screen',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    const listRecentlyDeleted = vi
+      .fn<ImnotaBridge['listRecentlyDeleted']>()
+      .mockResolvedValueOnce([deleted])
+      .mockResolvedValue([]);
+    const undoDeleteScreenshot = vi
+      .fn<ImnotaBridge['undoDeleteScreenshot']>()
+      .mockResolvedValue({ ...snapshot, warnings: [COMMITTED_WRITE_WARNING] });
+    await renderEditingProject({ listRecentlyDeleted, undoDeleteScreenshot });
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restore screenshot: Warned screen' }));
+    await waitFor(() => {
+      expect(within(dialog).getByRole('status')).toHaveTextContent(
+        `Restored “Warned screen”. ${COMMITTED_WRITE_WARNING}`,
+      );
+      expect(within(dialog).getByRole('status')).toHaveFocus();
+    });
+    expect(undoDeleteScreenshot).toHaveBeenCalledOnce();
+  });
+
+  it('shows an unconfirmed Restore warning in the dialog and keeps later saves blocked', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'delete-token',
+      itemId: 'deleted',
+      title: 'Unconfirmed screen',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    const message = `${COMMITTED_WRITE_WARNING} ${RESTORE_CONFIRMATION_FAILURE} Readback unavailable. Reload and compare the project before saving or restoring again.`;
+    const undoDeleteScreenshot = vi
+      .fn<ImnotaBridge['undoDeleteScreenshot']>()
+      .mockRejectedValue(new Error(message));
+    const saveProjectCompareAndSwap = vi.fn();
+    await renderEditingProject({
+      listRecentlyDeleted: async () => [deleted],
+      undoDeleteScreenshot,
+      saveProjectCompareAndSwap,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+    fireEvent.click(
+      await within(dialog).findByRole('button', { name: 'Restore screenshot: Unconfirmed screen' }),
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore screenshot: Unconfirmed screen' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(message);
+    expect(undoDeleteScreenshot).toHaveBeenCalledOnce();
+    expect(saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  });
+
+  it('restores from Recently deleted through the Undo bridge and shows an Undo conflict in the dialog', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'delete-token',
+      itemId: 'shot-deleted',
+      title: 'Deleted screen',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+    const undoDeleteScreenshot = vi
+      .fn<ImnotaBridge['undoDeleteScreenshot']>()
+      .mockRejectedValueOnce(new Error('A later screenshot already owns one of the paths required by Undo.'))
+      .mockResolvedValue(snapshot);
+    await renderEditingProject({ listRecentlyDeleted, undoDeleteScreenshot });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+    expect(listRecentlyDeleted).toHaveBeenCalledWith('/workspace/project');
+    const restore = await within(dialog).findByRole('button', { name: 'Restore screenshot: Deleted screen' });
+
+    fireEvent.click(restore);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'A later screenshot already owns one of the paths required by Undo.',
+    );
+    expect(undoDeleteScreenshot).toHaveBeenCalledWith({
+      projectPath: '/workspace/project',
+      undoToken: 'delete-token',
+    });
+
+    listRecentlyDeleted.mockResolvedValue([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore screenshot: Deleted screen' }));
+    await waitFor(() =>
+      expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Deleted screen”.'),
+    );
+    expect(undoDeleteScreenshot).toHaveBeenCalledTimes(2);
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('keeps an Undo offer alive while an error notice covers it', async () => {

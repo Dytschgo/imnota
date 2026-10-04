@@ -3312,6 +3312,7 @@ export async function runSmokeWorkflow(
   artifacts.push(...(await exerciseMixedContent(driver, host, artifactDirectory)));
   assertions.push(
     'mixed text/drawing UI, Markdown preview, autosave before navigation, editable scene and white PNG, duplicate/trash/Undo and reopen',
+    'Recently deleted restores screenshot, drawing and text through the dialog after Undo toast expiry; success focus and saved/reopened bytes agree',
   );
   artifacts.push(...(await exerciseUiFeedback(driver, host, artifactDirectory)));
   assertions.push(
