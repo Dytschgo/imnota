@@ -18,7 +18,16 @@ it('uses the configured client Node only at version 24 or later', () => {
     () => inspectMcpClientNode('C:/missing/node.exe', () => ({ error: new Error('ENOENT') })),
     /binary is unavailable.*ENOENT/,
   );
-  assert.equal(inspectMcpClientNode(undefined, probe).executable, process.execPath);
+  const previous = process.env.IMNOTA_MCP_CLIENT_NODE;
+  try {
+    process.env.IMNOTA_MCP_CLIENT_NODE = 'C:/node24/node.exe';
+    assert.equal(inspectMcpClientNode(undefined, probe).executable, 'C:/node24/node.exe');
+    delete process.env.IMNOTA_MCP_CLIENT_NODE;
+    assert.equal(inspectMcpClientNode(undefined, probe).executable, process.execPath);
+  } finally {
+    if (previous === undefined) delete process.env.IMNOTA_MCP_CLIENT_NODE;
+    else process.env.IMNOTA_MCP_CLIENT_NODE = previous;
+  }
 });
 
 // Node fixtures test only the launcher failure contract. They are never packaged acceptance evidence.
