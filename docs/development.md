@@ -136,6 +136,21 @@ macOS and Windows CI jobs run these native boundaries; no workflow gate is remov
 
 ## Recently deleted integration verification
 
+The shared modal contains programmatic focus as well as Tab navigation. Restoring
+an item selects its background editor; a drawing's delayed Excalidraw autofocus
+must leave focus on the restore status inside the still-open dialog. Run
+`corepack pnpm exec vitest run src/renderer/collection/RecentlyDeleted.test.tsx src/renderer/components/ui.test.tsx`
+for deterministic editor loads before and after the announcement, repeated
+restores, stacked/hidden dialogs, Tab from the status and focus return on close.
+Modal tab stops exclude unavailable controls, including the actions inside closed
+shared-link history. `src/renderer/export/HostedShareDialog.test.tsx` verifies the
+real history component's forward/backward wrap. The packaged smoke also sends
+native Tab through a synthetic matching history structure in the hosted-share
+dialog, both collapsed and expanded, without creating or uploading a share.
+The packaged mixed-content smoke retains its existing status-and-focus assertion
+and five-second deadline; renderer tests do not substitute for the macOS package
+job on the PR's exact revision.
+
 `corepack pnpm exec vitest run src/renderer/app/useProjectPersistence.restore.test.tsx` exercises screenshot IPC, content persistence, atomic writes, the filesystem watcher and the mounted persistence hook against disposable projects. It covers metadata-last Restore warnings, changed/unreadable readback, typed write authority, queued metadata, member rollback and failed repair. Windows substitutes directory handles for POSIX sync faults; file writes and renames stay real. This does not substitute for supported-platform packaged verification.
 
 On the exact built candidate, the existing `corepack pnpm smoke` / packaged verifier must still execute Recently deleted after Undo-toast expiry for all three kinds, actual restored focus, unsafe-list errors, exact restored/reopened member bytes, and composed history with two screenshots, two drawings and one Markdown item. Native fault-injected warning/adoption and renderer-crash/watch-outage sequences require separately recorded direct evidence; the ordinary smoke does not inject these faults. Keep these acceptance gaps open rather than inferring them from a general smoke pass. Do not launch while another verification task owns the native lease.
