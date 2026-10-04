@@ -93,6 +93,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.classify.outputs.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.platform == 'windows'
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Capture MCP client Node
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: '"IMNOTA_MCP_CLIENT_NODE=$((Get-Command node).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
