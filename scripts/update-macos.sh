@@ -17,6 +17,12 @@ keep_staging=0
 rollback_failed=0
 ORIGINAL_APP_IDENTITY=""
 EXPECTED_CURRENT_VERSION=""
+# In-app mode: Imnota runs this helper in the background, requests installation
+# with SIGUSR1 and quits itself. Output goes to a log file, never a pipe.
+in_app=0
+app_pid=""
+install_requested=0
+app_quit_observed=0
 
 die() {
   printf 'Update failed: %s\n' "$*" >&2
@@ -77,6 +83,12 @@ cleanup() {
     /bin/rm -rf -- "$stage_dir" 2>/dev/null || true
   fi
   release_lock
+
+  # Nobody watches a background update: reopen the restored app it closed.
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 && rollback_failed == 0 )) &&
+    [[ -n "$app_path" && -d "$app_path" ]] && ! is_app_running; then
+    launch_app "$app_path" || warn "The previous Imnota version could not be reopened."
+  fi
 
   if (( status != 0 )); then
     if (( rollback_failed == 0 )); then
@@ -157,13 +169,22 @@ acquire_lock() {
   local parent=$1
   lock_dir="${parent}/.imnota-update.lock"
 
-  if /bin/mkdir -- "$lock_dir" 2>/dev/null; then
-    lock_owned=1
-    printf '%s\n' "$$" > "$lock_dir/pid" || die "The update lock could not be recorded."
-    return 0
+  if ! /bin/mkdir -- "$lock_dir" 2>/dev/null; then
+    # A helper that was killed or lost power leaves its lock behind; reclaim it once.
+    local recorded_pid=""
+    if [[ -f "$lock_dir/pid" ]]; then
+      IFS= read -r recorded_pid < "$lock_dir/pid" || true
+    fi
+    # ps also sees another user's live helper, which kill -0 would report as missing.
+    if [[ "$recorded_pid" =~ ^[1-9][0-9]*$ ]] && ! /bin/ps -p "$recorded_pid" >/dev/null 2>&1; then
+      /bin/rm -f -- "$lock_dir/pid" 2>/dev/null || true
+      /bin/rmdir -- "$lock_dir" 2>/dev/null || true
+    fi
+    /bin/mkdir -- "$lock_dir" 2>/dev/null ||
+      die "Another Imnota update is running. Wait for it to finish, or restart your Mac if none is running, then try again. Lock folder: $lock_dir"
   fi
-
-  die "Another update may be running or was interrupted. After confirming no Imnota update Terminal is running, use Finder's Go > Go to Folder to remove this lock folder, then try again: $lock_dir"
+  lock_owned=1
+  printf '%s\n' "$$" > "$lock_dir/pid" || die "The update lock could not be recorded."
 }
 
 download_file() {
@@ -289,7 +310,12 @@ request_quit() {
 }
 
 is_app_running() {
-  /usr/bin/pgrep -x "$APP_NAME" >/dev/null 2>&1
+  # In-app mode follows the exact Imnota process that started it, not any instance.
+  if [[ -n "$app_pid" ]]; then
+    /bin/kill -0 "$app_pid" 2>/dev/null
+  else
+    /usr/bin/pgrep -x "$APP_NAME" >/dev/null 2>&1
+  fi
 }
 
 launch_app() {
@@ -426,10 +452,19 @@ assert_original_app_unchanged() {
     die "The installed Imnota version changed while the update was being prepared. Check for updates again."
 }
 
+wait_for_install_request() {
+  while (( install_requested == 0 )); do
+    is_app_running || die "Imnota closed before the update was installed. The downloaded update was discarded."
+    /bin/sleep 1
+  done
+}
+
 wait_for_app_to_quit() {
   local elapsed=0 timeout=60 next_quit_request=10
-  is_app_running || return 0
-  if ! request_quit && is_app_running; then
+  is_app_running || { app_quit_observed=1; return 0; }
+  # In-app mode Imnota quits itself after requesting installation.
+  (( in_app == 0 )) || next_quit_request=0
+  if (( in_app == 0 )) && ! request_quit && is_app_running; then
     die "Imnota could not be asked to quit."
   fi
 
@@ -437,13 +472,14 @@ wait_for_app_to_quit() {
     (( elapsed < timeout )) || die "Imnota did not quit within ${timeout} seconds. Save your work, close it, and try again."
     /bin/sleep 1
     elapsed=$((elapsed + 1))
-    if (( elapsed < timeout && elapsed == next_quit_request )) && is_app_running; then
+    if (( next_quit_request != 0 && elapsed < timeout && elapsed == next_quit_request )) && is_app_running; then
       if ! request_quit && is_app_running; then
         die "Imnota could not be asked to finish quitting."
       fi
       next_quit_request=$((next_quit_request + 10))
     fi
   done
+  app_quit_observed=1
 }
 
 swap_and_launch() {
@@ -472,8 +508,16 @@ swap_and_launch() {
 }
 
 main() {
+  if [[ "${1:-}" == "--in-app" ]]; then
+    in_app=1
+    # Installed before the ready marker, so a request can never terminate the helper.
+    trap 'install_requested=1' USR1
+    [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "The in-app update needs the Imnota process ID."
+    app_pid=$2
+    shift 2
+  fi
   [[ "$#" -eq 5 ]] ||
-    die "Usage: update-macos.sh <tag> <zip-url> <sha256sums-url> <current-app-path> <expected-current-version>"
+    die "Usage: update-macos.sh [--in-app <imnota-pid>] <tag> <zip-url> <sha256sums-url> <current-app-path> <expected-current-version>"
   trap cleanup EXIT
   trap 'exit 130' HUP INT TERM
 
@@ -495,6 +539,7 @@ main() {
 
   printf 'Downloading Imnota %s...\n' "$RELEASE_VERSION"
   download_file "$sums_url" "$sums" || die "SHA256SUMS.txt could not be downloaded."
+  (( in_app == 0 )) || printf 'IMNOTA_UPDATE archive\n'
   download_file "$archive_url" "$archive" || die "The Imnota update could not be downloaded."
 
   read_expected_checksum "$sums" "$ARCHIVE_NAME"
@@ -507,6 +552,10 @@ main() {
   extract_archive "$archive" "$extracted" || die "The verified update could not be extracted."
   validate_extracted_bundle "$extracted" "$RELEASE_VERSION"
 
+  if (( in_app != 0 )); then
+    printf 'IMNOTA_UPDATE ready\n'
+    wait_for_install_request
+  fi
   printf 'The update is verified. Waiting for Imnota to close safely...\n'
   wait_for_app_to_quit
   assert_original_app_unchanged

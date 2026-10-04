@@ -6,7 +6,7 @@ Imnota has two update channels in the same public GitHub repository. Stable is t
 
 Open **Settings → App updates → Update channel**. Selecting **Nightly (preview)** asks you to confirm and back up your workspace. **Keep Stable** cancels without changing preferences. The selected channel is saved locally and used by both Settings and the sidebar refresh button.
 
-Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit, replaces the app and retains a backup. It does not require Developer ID signing, administrator privileges or removal of quarantine.
+Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported builds. On macOS a bundled background helper downloads the exact selected release and verifies it; after **Restart to install** Imnota quits and the helper replaces the app, retains a backup and reopens it. Older macOS builds offer **Run update in Terminal** once instead. It does not require Developer ID signing, administrator privileges or removal of quarantine.
 
 Channel switching is disabled while checking, downloading or awaiting native installation. Failed checks/downloads allow retry. Nightly checks compare the latest nightly with the latest stable release and offer the newer version. For example, stable `0.2.2` supersedes `0.2.2-nightly.20260905.1234`; a later `0.2.3-nightly` becomes eligible again. The preference remains Nightly throughout, and an already newer installed version is never downgraded.
 

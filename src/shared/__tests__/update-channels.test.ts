@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { compareReleaseVersions, discoverRelease, selectRelease } from '../../../electron/releases';
-import { UpdateController } from '../../../electron/update-controller';
+import { UpdateController, UpdateFailure } from '../../../electron/update-controller';
 import { prepareNativeUpdate } from '../../../electron/native-update';
 import { settingsPatchSchema } from '../schema';
 
@@ -289,54 +289,43 @@ it('recovers from a rejected install without losing the downloaded update', asyn
   await expect(instance.install()).rejects.toThrow('could not be installed');
   expect(instance.getStatus()).toMatchObject({ state: 'downloaded', installing: false });
 });
-it('uses exact manual Mac release links and never prepares or downloads a native update', async () => {
+it('explains a download failure only when its reason is meant for the user', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  ops.download.mockRejectedValueOnce(new UpdateFailure('Move Imnota to a permanent folder before updating.'));
+  await instance.download();
+  expect(instance.getStatus()).toMatchObject({
+    state: 'error',
+    message: expect.stringMatching(/^Move Imnota to a permanent folder before updating\. Check for updates/),
+  });
+  await instance.check();
+  ops.download.mockRejectedValueOnce(new Error('ENOENT /private/tmp/x'));
+  await instance.download();
+  expect(instance.getStatus().message).toMatch(/^The download failed\./);
+});
+it('drops a downloaded update whose installer is lost, before or during installation', async () => {
+  const { instance, ops } = controller();
+  await instance.check();
+  instance.downloadLost('ignored before download');
+  expect(instance.getStatus().state).toBe('available');
+  await instance.download();
+  await instance.install();
+  instance.downloadLost('Imnota did not quit within 60 seconds.');
+  expect(instance.getStatus()).toMatchObject({
+    state: 'error',
+    message: expect.stringMatching(/^Imnota did not quit within 60 seconds\. Check for updates to retry/),
+  });
+  await expect(instance.install()).rejects.toThrow();
+  await expect(instance.download()).rejects.toThrow(/No update/);
+  expect(ops.install).toHaveBeenCalledOnce();
+});
+it('uses exact release links for manual builds and never prepares or downloads a native update', async () => {
   const { instance, ops, candidate } = controller(true);
   await instance.check();
   await instance.download();
   expect(ops.open).toHaveBeenCalledWith(candidate.url);
   expect(ops.prepare).not.toHaveBeenCalled();
   expect(ops.download).not.toHaveBeenCalled();
-});
-it('prepares the terminal updater during a Mac upgrade check without opening GitHub', async () => {
-  const { ops, candidate } = controller(true);
-  const run = vi.fn(async () => {});
-  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run }));
-  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
-  await instance.check();
-  expect(prepareTerminal).toHaveBeenCalledWith(candidate);
-  expect(instance.getStatus().terminalCommand).toBe('/bin/bash local-update.command');
-  await instance.download();
-  expect(run).toHaveBeenCalledOnce();
-  expect(ops.open).not.toHaveBeenCalled();
-  expect(ops.prepare).not.toHaveBeenCalled();
-});
-it('reuses an identical terminal updater across background checks', async () => {
-  const { ops, candidate } = controller(true);
-  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run: vi.fn() }));
-  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
-
-  await instance.check();
-  await instance.check({ background: true });
-
-  expect(instance.getStatus().state).toBe('available');
-  expect(prepareTerminal).toHaveBeenCalledOnce();
-
-  ops.discover.mockResolvedValueOnce({
-    ...candidate,
-    assetUrls: [...candidate.assetUrls, `${candidate.feedUrl}Imnota-rebuilt-mac.zip`],
-    checksumUrl: `${candidate.feedUrl}SHA256SUMS-rebuilt.txt`,
-  });
-  await instance.check({ background: true });
-  expect(prepareTerminal).toHaveBeenCalledTimes(2);
-});
-it('does not prepare a terminal command for a downgrade', async () => {
-  const { ops } = controller(true);
-  ops.currentVersion = '1.0.0';
-  const prepareTerminal = vi.fn();
-  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
-  await instance.check();
-  expect(prepareTerminal).not.toHaveBeenCalled();
-  expect(instance.getStatus().terminalCommand).toBeUndefined();
 });
 it('offers a manual stable fallback for a newer installed nightly, never a downgrade', async () => {
   const { ops } = controller();
@@ -422,23 +411,6 @@ it('invalidates a cached candidate when background native preparation fails', as
   await instance.check();
   expect(instance.getStatus().state).toBe('available');
   ops.prepare.mockRejectedValueOnce(new Error('manifest changed'));
-
-  await instance.check({ background: true });
-
-  expect(instance.getStatus()).toMatchObject({ state: 'error' });
-  await expect(instance.download()).rejects.toThrow('No update is available');
-  expect(ops.download).not.toHaveBeenCalled();
-});
-it('invalidates a cached candidate when background terminal preparation fails', async () => {
-  const { ops, candidate } = controller(true);
-  const prepareTerminal = vi.fn(async () => ({ command: '/bin/bash local-update.command', run: vi.fn() }));
-  const instance = new UpdateController('nightly', { ...ops, prepareTerminal });
-  await instance.check();
-  ops.discover.mockResolvedValueOnce({
-    ...candidate,
-    assetUrls: [...candidate.assetUrls, `${candidate.feedUrl}Imnota-rebuilt-mac.zip`],
-  });
-  prepareTerminal.mockRejectedValueOnce(new Error('helper write failed'));
 
   await instance.check({ background: true });
 

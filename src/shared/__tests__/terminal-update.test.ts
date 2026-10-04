@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { shellQuote, terminalUpdateArguments } from '../../../electron/terminal-update.js';
+import { terminalUpdateArguments } from '../../../electron/terminal-update.js';
 import { selectRelease } from '../../../electron/releases.js';
 
 const version = '0.2.2-nightly.20260905.33994708543';
@@ -52,12 +52,5 @@ describe('terminal updates', () => {
     expect(() =>
       terminalUpdateArguments({ ...release, checksumUrl: undefined }, '/Applications/Imnota.app', '0.2.1'),
     ).toThrow();
-  });
-  it('quotes shell metacharacters as literal path content', () => {
-    expect(shellQuote("/Users/Dylan's files/$(touch injected);`cmd`/Imnota.app")).toBe(
-      "'/Users/Dylan'\\''s files/$(touch injected);`cmd`/Imnota.app'",
-    );
-    expect(() => shellQuote('bad\npath')).toThrow();
-    expect(() => shellQuote('bad\0path')).toThrow();
   });
 });

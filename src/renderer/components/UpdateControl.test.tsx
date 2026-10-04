@@ -152,31 +152,12 @@ it('moves from available through download progress to a ready-to-install action'
   await waitFor(() => expect(window.imnota.installUpdate).toHaveBeenCalledOnce());
 });
 
-it('copies and runs the supplied Terminal command for an available upgrade', async () => {
-  const api = setup();
-  const command = 'curl -fsSL https://updates.example/imnota | sh';
-  render(<UpdateControl />);
-  await act(async () =>
-    api.emit({ state: 'available', version: '0.3.0', terminalCommand: command, manualDownload: true }),
-  );
-
-  expect(screen.getByText(command)).toBeInTheDocument();
-  expect(screen.getAllByText(/Terminal downloads and verifies the update/)).toHaveLength(2);
-  expect(screen.queryByText(/This build opens the release download page/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
-  await waitFor(() => expect(window.imnota.copyText).toHaveBeenCalledWith(command));
-  const runUpdate = screen.getByRole('button', { name: 'Run update in Terminal' });
-  await waitFor(() => expect(runUpdate).toBeEnabled());
-  fireEvent.click(runUpdate);
-  await waitFor(() => expect(window.imnota.downloadUpdate).toHaveBeenCalledOnce());
-});
-
-it('uses the guarded download callback for a Terminal update from Settings', async () => {
+it('uses the guarded download callback for an update from Settings', async () => {
   const api = setup();
   const onDownload = vi.fn(async () => {});
   render(<UpdateControl onDownload={onDownload} />);
-  act(() => api.emit({ state: 'available', manualDownload: true, terminalCommand: 'update-command' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  act(() => api.emit({ state: 'available', version: '0.3.0' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download update' }));
   await waitFor(() => expect(onDownload).toHaveBeenCalledOnce());
   expect(window.imnota.downloadUpdate).not.toHaveBeenCalled();
 });
