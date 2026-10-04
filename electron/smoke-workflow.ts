@@ -2147,13 +2147,17 @@ async function assertPromptPasteReceiver(
   const expectedHtmlFragment = clipboardContextHtml(expectedText);
   await driver.evaluate(`(() => {
     document.getElementById('imnota-smoke-paste-receiver')?.remove();
+    const dialog = document.querySelector('[data-testid="prompt-sharing-dialog"]')?.closest('[role="dialog"]');
+    if (!dialog || dialog.closest('[hidden]')) throw new Error('The bundle dialog must be visible for paste verification.');
     const receiver = document.createElement('div');
     receiver.id = 'imnota-smoke-paste-receiver';
     receiver.contentEditable = 'true';
     receiver.setAttribute('role', 'textbox');
     receiver.setAttribute('aria-label', 'Clipboard verification receiver');
     receiver.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;width:240px;height:60px;overflow:hidden;padding:8px;background:#fff;color:#111;border:2px solid #4b78ff;';
-    document.body.append(receiver);
+    // The real modal contains focus; the test-only receiver must participate in
+    // its focus scope rather than attempting to focus the background page.
+    dialog.append(receiver);
     window.__imnotaPasteResult = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Paste receiver did not receive the native Paste command within 5000ms.')), 5000);
       receiver.addEventListener('paste', async event => {

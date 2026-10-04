@@ -129,4 +129,26 @@ describe('UI primitives', () => {
     fireEvent.keyDown(status, { key: 'Tab', shiftKey: true });
     expect(screen.getByRole('link', { name: 'Source' })).toHaveFocus();
   });
+
+  it('allows a dynamically inserted paste receiver only inside the open modal', () => {
+    render(
+      <Modal title="Share bundles" onClose={vi.fn()}>
+        <button>Rich copy</button>
+      </Modal>,
+    );
+    const copy = screen.getByRole('button', { name: 'Rich copy' });
+    copy.focus();
+    const receiver = document.createElement('div');
+    receiver.contentEditable = 'true';
+    receiver.tabIndex = 0;
+    document.body.append(receiver);
+    receiver.focus();
+    expect(copy).toHaveFocus();
+    screen.getByRole('dialog').append(receiver);
+    receiver.focus();
+    expect(receiver).toHaveFocus();
+    receiver.remove();
+    copy.focus();
+    expect(copy).toHaveFocus();
+  });
 });
