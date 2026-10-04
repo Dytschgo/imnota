@@ -1,9 +1,4 @@
 // @vitest-environment node
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 // @ts-expect-error The separately packaged JavaScript service intentionally has no TypeScript surface.
 import { createService } from '../share-service/src/app.js';
@@ -14,23 +9,43 @@ import { HostedShareClient } from './hosted-share-client.js';
 import { planHostedShares } from './hosted-share-plan.js';
 import { randomUUID } from 'node:crypto';
 
-const temporary: string[] = [];
+// @ts-expect-error Test-only Node fixture helper has no production TypeScript surface.
+import { ShareFixture, ownShareDatabase } from '../scripts/test-support/share-fixture.mjs';
+
+vi.mock('node:sqlite', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:sqlite')>();
+  return {
+    ...original,
+    DatabaseSync: class extends original.DatabaseSync {
+      constructor(...args: ConstructorParameters<typeof original.DatabaseSync>) {
+        super(...args);
+        ownShareDatabase(this);
+      }
+    },
+  };
+});
+
+let activeFixture: ShareFixture | undefined;
+let retainedFixture = false;
+const withFixture = (body: (fixture: ShareFixture) => Promise<void>) => () => {
+  if (retainedFixture) throw new Error('Previous share fixture was retained after teardown failure');
+  const fixture = new ShareFixture();
+  activeFixture = fixture;
+  return fixture.run(() => body(fixture));
+};
 const pngBase64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
-it('publishes and downloads every byte of oversized Unicode Markdown through split links', async () => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-split-data-'));
-  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-split-user-'));
-  temporary.push(dataDir, userData);
-  const service = createService({
-    dataDir,
-    publicOrigin: 'https://app.imnota.xyz',
-    receiptSecret: Buffer.alloc(32, 7).toString('base64url'),
-  });
-  const server = service.app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  try {
+it(
+  'publishes and downloads every byte of oversized Unicode Markdown through split links',
+  withFixture(async (fixture) => {
+    const dataDir = await fixture.directory('imnota-share-split-data-');
+    const userData = await fixture.directory('imnota-share-split-user-');
+    const origin = await fixture.start(createService, {
+      dataDir,
+      publicOrigin: 'https://app.imnota.xyz',
+      receiptSecret: Buffer.alloc(32, 7).toString('base64url'),
+    });
     const transport = async (target: string, init: RequestInit) => {
       const url = new URL(target);
       const response = await fetch(origin + url.pathname, init);
@@ -72,41 +87,40 @@ it('publishes and downloads every byte of oversized Unicode Markdown through spl
     }
     expect(downloads.join('')).toBe(markdown);
     expect((await client.list()).records).toHaveLength(parts.length);
+  }),
+);
+
+afterEach(async () => {
+  const fixture = activeFixture;
+  activeFixture = undefined;
+  try {
+    if (fixture) await fixture.teardown();
+  } catch (error) {
+    retainedFixture = true;
+    throw error;
   } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error?: Error) => (error ? reject(error) : resolve())),
-    );
-    service.close();
+    // Do not change transport globals underneath a body still using them.
+    if (!retainedFixture || fixture?.bodySettled) vi.unstubAllGlobals();
   }
 });
 
-afterEach(async () => {
-  vi.unstubAllGlobals();
-  await Promise.all(
-    temporary.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })),
-  );
-});
+it(
+  'uses the real service HTTP contract for creation, lost-response recovery, and revocation',
+  withFixture(async (fixture) => {
+    const dataDir = await fixture.directory('imnota-share-contract-data-');
+    const userData = await fixture.directory('imnota-share-contract-user-');
+    const localOrigin = await fixture.start(createService, {
+      dataDir,
+      publicOrigin: 'https://app.imnota.xyz',
+      receiptSecret: Buffer.alloc(32, 7).toString('base64url'),
+      rateLimits: {
+        pairing: { windowMs: 60_000, limit: 100 },
+        upload: { windowMs: 60_000, limit: 100 },
+        publicRead: { windowMs: 60_000, limit: 100 },
+      },
+    });
+    const realFetch = globalThis.fetch;
 
-it('uses the real service HTTP contract for creation, lost-response recovery, and revocation', async () => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-contract-data-'));
-  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-contract-user-'));
-  temporary.push(dataDir, userData);
-  const service = createService({
-    dataDir,
-    publicOrigin: 'https://app.imnota.xyz',
-    receiptSecret: Buffer.alloc(32, 7).toString('base64url'),
-    rateLimits: {
-      pairing: { windowMs: 60_000, limit: 100 },
-      upload: { windowMs: 60_000, limit: 100 },
-      publicRead: { windowMs: 60_000, limit: 100 },
-    },
-  });
-  const server = service.app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const realFetch = globalThis.fetch;
-
-  try {
     const pair = async (): Promise<string> => {
       const response = await realFetch(`${localOrigin}/api/pairing`, {
         method: 'POST',
@@ -206,15 +220,13 @@ it('uses the real service HTTP contract for creation, lost-response recovery, an
     await expect(client.list()).resolves.toMatchObject({
       records: expect.arrayContaining([{ ...first, revokedAt: revoked.revokedAt }]),
     });
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error?: Error) => (error ? reject(error) : resolve())),
-    );
-    service.close();
-  }
-});
+  }),
+);
 
 it('places the same HTML representation on the clipboard as the desktop Rich copy', () => {
   const markdown = `# Prompt <b>&</b>\r\n\r\n"quoted" 'single' café 🙂\n`;
   expect(browserClipboardHtml(markdown)).toBe(clipboardContextHtml(markdown));
 });
+
+// Test-only lifecycle controls run in this separate service suite.
+import '../scripts/test-support/share-fixture-regressions.mjs';
