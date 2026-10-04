@@ -355,6 +355,8 @@ async function writeArchive(directory, images) {
 
 function markdownRenderer() {
   const renderer = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: true });
+  // Pin linkify-it 5 defaults across markdown-it's linkify-it 6 upgrade.
+  renderer.linkify.set({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: false, urlAuth: true });
   const originalLinkOpen =
     renderer.renderer.rules.link_open ??
     ((tokens, index, options, _environment, self) => self.renderToken(tokens, index, options));
