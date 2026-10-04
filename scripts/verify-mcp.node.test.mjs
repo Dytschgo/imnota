@@ -1,5 +1,6 @@
 import { it } from 'node:test';
 import { Buffer } from 'node:buffer';
+import { URL } from 'node:url';
 import assert from 'node:assert/strict';
 import { runMcpProcess } from './verify-mcp.mjs';
 
@@ -59,4 +60,44 @@ it('caps raw failure evidence while preserving the actual byte count', async () 
     assert.ok(error.mcpProcess.stdoutBytes > 1_000_000);
     return true;
   });
+});
+
+it('rejects an outer relay exit without confirmation that the owned server closed', async () => {
+  await assert.rejects(run('', undefined, { relayLifecycle: true }), (error) => {
+    assert.match(error.message, /without confirming/);
+    assert.equal(error.processStillRunning, true);
+    return true;
+  });
+});
+
+it('asks the real relay to stop its owned server on a request deadline, then observes both exits', async () => {
+  const relayUrl = new URL('./imnota-mcp.mjs', import.meta.url).href;
+  const serverSource = `process.stdout.write('\\r\\n');process.stdin.resume();setInterval(()=>{},1000)`;
+  await assert.rejects(
+    runMcpProcess(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+    import { relayWindowsMcp } from ${JSON.stringify(relayUrl)};
+    process.exitCode = await relayWindowsMcp(process.execPath, { args: ['-e', ${JSON.stringify(serverSource)}] });
+  `,
+      ],
+      process.env,
+      (request) => request('initialize', {}),
+      { timeoutMs: 1500, relayLifecycle: true },
+    ),
+    (error) => {
+      assert.match(error.message, /deadline/);
+      assert.deepEqual(
+        error.mcpProcess.serverLifecycle.map(({ event }) => event),
+        ['spawn', 'close'],
+      );
+      assert.equal(Boolean(error.processStillRunning), false);
+      assert.throws(() => process.kill(error.mcpProcess.serverLifecycle[0].pid, 0));
+      assert.throws(() => process.kill(error.mcpProcess.pid, 0));
+      return true;
+    },
+  );
 });

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
-import { afterFileCommit, CommittedWriteError } from './files.js';
+import {
+  afterFileCommit,
+  CommittedWriteError,
+  FileReadLimitError,
+  readStableRegularFileBytes,
+} from './files.js';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -9,6 +13,8 @@ import { z } from 'zod';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import type { ContentSearchRequest, ContentSearchResponse } from '../src/shared/content-search.js';
 import { LOCAL_AGENT_ACCESS_PORT } from '../src/shared/preferences.js';
+import { resolvePreferenceSettings } from '../src/shared/preference-settings.js';
+import { resolveWorkspaceSettings } from '../src/shared/workspace-settings.js';
 import { filenameSchema, parseProjectFile } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { screenshotPath } from './collections.js';
@@ -42,10 +48,11 @@ const BUNDLE_FILE_SUFFIX = /^(\d{2,3})\.(md|png)$/;
 const BUNDLE_ID = /^b_[0-9a-f]{32}$/;
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 /**
- * Export names carry local wall-clock time. Zones span UTC-12 to UTC+14, so a genuine export can
- * read up to 26 hours ahead of this machine's clock after travel; anything later is not trusted.
+ * Five minutes accommodates small clock corrections and ordinary one-second export-name
+ * reservations. Names use local time, parsed in this machine's zone just like the writer.
+ * Travel or very large reservation offsets can hide a set until its name falls within this window.
  */
-const EXPORT_TIMESTAMP_SKEW_MS = 26 * 60 * 60 * 1000;
+const EXPORT_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
 const MAX_EXPORT_DIRECTORY_ENTRIES = 5_000;
 const MAX_LISTED_BUNDLES_PER_COLLECTION = 10;
 
@@ -249,9 +256,9 @@ function compareLatest(left: PreparedSet, right: PreparedSet): number {
 }
 
 /**
- * Accept only a timestamp the bundle store could have written: a real local date and time that is
- * not ahead of the clock. A crafted folder name such as `x - 999999-999999` is ignored, so it
- * cannot pin itself as the latest bundle.
+ * Accept a real local date within the future-skew allowance. This validates the naming
+ * convention, not publication provenance. Malformed names such as `x - 999999-999999`
+ * are ignored; workspace writers can still influence ordering with plausible names.
  */
 function preparedTimestamp(setName: string, latestAllowed: number) {
   if (!filenameSchema.safeParse(setName).success) return null;
@@ -329,39 +336,11 @@ async function preparedSets(
 
 /** Bounded read of a regular, unlinked file. Returns null when it is larger than the allowance. */
 async function readBoundedImage(target: string, maximumBytes: number): Promise<Buffer | null> {
-  await assertNoLinks(target);
-  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
-  const handle = await fs.open(target, fsConstants.O_RDONLY | noFollow);
   try {
-    await assertNoLinks(target);
-    const stat = await handle.stat();
-    const pathStat = await fs.lstat(target);
-    if (pathStat.isSymbolicLink() || !stat.isFile() || stat.dev !== pathStat.dev || stat.ino !== pathStat.ino)
-      throw new Error('A bundle image changed while it was opened.');
-    if (stat.size > maximumBytes) return null;
-    const buffer = Buffer.alloc(stat.size + 1);
-    let bytes = 0;
-    while (bytes < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, bytes, buffer.length - bytes, bytes);
-      if (!bytesRead) break;
-      bytes += bytesRead;
-    }
-    if (bytes !== stat.size) throw new Error('A bundle image changed while it was read.');
-    await assertNoLinks(target);
-    const finalPath = await fs.lstat(target);
-    const finalHandle = await handle.stat();
-    if (
-      finalPath.isSymbolicLink() ||
-      finalPath.dev !== stat.dev ||
-      finalPath.ino !== stat.ino ||
-      finalHandle.size !== stat.size ||
-      finalHandle.mtimeMs !== stat.mtimeMs ||
-      finalHandle.ctimeMs !== stat.ctimeMs
-    )
-      throw new Error('A bundle image changed while it was read.');
-    return buffer.subarray(0, bytes);
-  } finally {
-    await handle.close();
+    return await readStableRegularFileBytes(target, maximumBytes);
+  } catch (error) {
+    if (error instanceof FileReadLimitError) return null;
+    throw error;
   }
 }
 
@@ -893,7 +872,10 @@ export class LocalMcpServer {
   private http: http.Server | null = null;
   private readonly tools: McpTool[];
 
-  constructor(private readonly context: LocalMcpContext) {
+  constructor(
+    private readonly context: LocalMcpContext,
+    private readonly stdioSettingsFile?: string,
+  ) {
     this.tools = createMcpTools(context);
   }
 
@@ -967,14 +949,19 @@ export class LocalMcpServer {
     output: NodeJS.WritableStream = process.stdout,
   ): Promise<boolean> {
     if (!this.context.enabled()) return false;
+    let access = { enabled: false, workspacePath: null as string | null };
+    const context = this.stdioSettingsFile
+      ? {
+          enabled: () => access.enabled,
+          workspacePath: () => access.workspacePath,
+          appVersion: this.context.appVersion,
+        }
+      : this.context;
+    const tools = this.stdioSettingsFile ? createMcpTools(context) : this.tools;
     const lines = readline.createInterface({ input, crlfDelay: Infinity });
     for await (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      if (!this.context.enabled()) {
-        output.write(`${JSON.stringify(jsonRpcError(null, -32000, 'Local agent access is off.'))}\n`);
-        continue;
-      }
       if (Buffer.byteLength(line, 'utf8') > MAX_JSON_RPC_BYTES) {
         output.write(
           `${JSON.stringify(jsonRpcError(null, -32600, 'JSON-RPC request exceeds the read limit.'))}\n`,
@@ -988,7 +975,27 @@ export class LocalMcpServer {
         output.write(`${JSON.stringify(jsonRpcError(null, -32700, 'Parse error'))}\n`);
         continue;
       }
-      const response = await handleMcpJsonRpc(message, this.tools, this.context.appVersion());
+      if (this.stdioSettingsFile && message?.method === 'tools/call') {
+        // One current settings read per call. Never retain an enabled snapshot after failure.
+        access = { enabled: false, workspacePath: null };
+        try {
+          const persisted: unknown = JSON.parse(await fs.readFile(this.stdioSettingsFile, 'utf8'));
+          const { settings } = resolveWorkspaceSettings(persisted, { isAbsolutePath: path.isAbsolute });
+          access = {
+            enabled: resolvePreferenceSettings(persisted, true).settings.agentAccess.enabled,
+            workspacePath: settings.workspacePath,
+          };
+        } catch {
+          /* Missing, unreadable or malformed settings fail closed. */
+        }
+      }
+      if (!(this.stdioSettingsFile && message?.method !== 'tools/call') && !context.enabled()) {
+        output.write(
+          `${JSON.stringify(jsonRpcError(idOf(message?.id), -32000, 'Local agent access is off.'))}\n`,
+        );
+        continue;
+      }
+      const response = await handleMcpJsonRpc(message, tools, this.context.appVersion());
       if (response) output.write(`${JSON.stringify(response)}\n`);
     }
     return true;
@@ -1014,7 +1021,7 @@ export class LocalMcpServer {
     if (!isLoopbackAddress(request.socket.remoteAddress)) return fail(403, 'Loopback clients only.');
     if (!isLoopbackHostHeader(request.headers.host, port)) return fail(403, 'Loopback Host required.');
     // Browsers send Origin; native MCP clients do not. Reject rather than CORS-allow loopback pages.
-    if (request.headers.origin) return fail(403, 'Browser Origin is not accepted.');
+    if (request.headers.origin !== undefined) return fail(403, 'Browser Origin is not accepted.');
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
     if (url.pathname !== LOCAL_MCP_PATH) return fail(404, 'Not found.');
     if (request.method !== 'POST') return fail(405, 'POST JSON-RPC to /mcp.');

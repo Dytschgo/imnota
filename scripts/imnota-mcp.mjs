@@ -136,9 +136,26 @@ export async function relayWindowsMcp(
   for (const stream of [input, output, errorOutput, child.stdin, child.stdout, child.stderr, stdout, child])
     stream.on('error', fail);
   const onSignal = () => fail();
+  // Optional private verifier channel; the documented command/stdio bytes are unchanged.
+  // This process retains the exact server ChildProcess and performs all server termination.
+  const observeChild = (event, details = {}) => {
+    if (process.connected)
+      process.send({ type: 'imnota-mcp-child', event, pid: child.pid, ...details }, (error) => {
+        if (error) fail();
+      });
+  };
+  const onControl = (message) => {
+    if (message?.type === 'imnota-mcp-stop') fail();
+  };
+  if (process.send) {
+    process.on('message', onControl);
+    process.on('disconnect', fail);
+    child.once('spawn', () => observeChild('spawn'));
+  }
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, onSignal);
   child.once('close', (code, signal) => {
     closed = true;
+    observeChild('close', { code, signal });
     finish(signal ? 1 : (code ?? 1));
   });
   input.once('end', onEof);
@@ -160,6 +177,9 @@ export async function relayWindowsMcp(
   globalThis.clearTimeout(forceKill);
   globalThis.clearTimeout(abandon);
   globalThis.clearTimeout(eofDeadline);
+  process.off('message', onControl);
+  process.off('disconnect', fail);
+  if (process.connected) process.disconnect();
   // Keep stream error handlers until pending writes settle; no stdout diagnostics.
   if (failure) {
     errorOutput.write(`${failure.message}\n`);

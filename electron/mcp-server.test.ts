@@ -3,8 +3,10 @@ import fs from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
+import { formatPromptTimestamp } from './prompt-bundle-store.js';
 import type { ProjectData } from '../src/shared/types.js';
 import { emptyProject } from '../src/shared/utils.js';
 import {
@@ -75,6 +77,7 @@ describe('local MCP preference lifecycle', () => {
   });
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const server of servers.splice(0)) await server.stop();
   for (const fixture of fixtures.splice(0)) await fs.rm(fixture, { recursive: true, force: true });
 });
@@ -496,6 +499,100 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
     );
   });
 
+  it('rejects a plausible forged future name with local-time parsing and a five-minute allowance', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const now = new Date(2026, 9, 4, 12, 0, 0).getTime();
+    const current = `Review - ${formatPromptTimestamp(new Date(now))}`;
+    const allowed = `Review - ${formatPromptTimestamp(new Date(now + 5 * 60_000))}`;
+    for (const name of [current, allowed, 'Injected - 261005-120000', 'Injected - 261004-120501'])
+      await writeBundle(projectPath, name, name, null);
+    const tools = createMcpTools({
+      enabled: () => true,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+      now: () => now,
+    });
+    const listed = await protocolCall(tools, 'list_collections', { projectPath });
+    expect(
+      JSON.parse(listed.result!.content[0]!.text!).collections[0].preparedBundles.map(
+        (bundle: { setName: string }) => bundle.setName,
+      ),
+    ).toEqual([allowed, current]);
+    const latest = await protocolCall(tools, 'get_latest_bundle');
+    expect(JSON.parse(latest.result!.content[0]!.text!).setName).toBe(allowed);
+  });
+
+  it.each(['ino', 'dev'] as const)(
+    'rejects colliding Number %s identities during an actual PNG bundle read',
+    async (field) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      const folder = await writeBundle(projectPath);
+      const target = path.join(folder, 'Review - 260913-120000 - 01.png');
+      const replacement = path.join(root, 'replacement.png');
+      const original = path.join(root, 'original.png');
+      const moved = path.join(root, 'opened.png');
+      await fs.writeFile(replacement, TEST_PNG);
+      const own = 9851624189743415n;
+      const foreign = own + 1n;
+      expect(Number(own)).toBe(Number(foreign));
+      const other = field === 'ino' ? 'dev' : 'ino';
+      const open = fs.open.bind(fs);
+      let read = false;
+      const closed = vi.fn();
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) !== target) return open(...args);
+        await fs.rename(target, original);
+        await fs.rename(replacement, target);
+        const handle = await open(...args);
+        await fs.rename(target, moved);
+        await fs.rename(original, target);
+        const stat = handle.stat.bind(handle);
+        handle.stat = (async (options?: { bigint?: boolean }) => {
+          const value = options?.bigint ? await stat({ bigint: true }) : await stat();
+          Object.assign(
+            value,
+            options?.bigint ? { [field]: foreign, [other]: 7n } : { [field]: Number(foreign), [other]: 7 },
+          );
+          return value;
+        }) as typeof handle.stat;
+        const originalRead = handle.read.bind(handle);
+        handle.read = (async (...readArgs: Parameters<typeof handle.read>) => {
+          read = true;
+          return originalRead(...readArgs);
+        }) as typeof handle.read;
+        const close = handle.close.bind(handle);
+        handle.close = async () => {
+          await close();
+          closed();
+        };
+        return handle;
+      });
+      const lstat = fs.lstat.bind(fs);
+      vi.spyOn(fs, 'lstat').mockImplementation((async (file, options?: { bigint?: boolean }) => {
+        const value = options?.bigint ? await lstat(file, { bigint: true }) : await lstat(file);
+        if (String(file) === target) {
+          // Initial identity matches; only the final path check distinguishes the restored file.
+          const identity = read ? own : foreign;
+          Object.assign(
+            value,
+            options?.bigint ? { [field]: identity, [other]: 7n } : { [field]: Number(identity), [other]: 7 },
+          );
+        }
+        return value;
+      }) as typeof fs.lstat);
+      const response = await protocolCall(toolsFor(root), 'get_latest_bundle', { projectPath });
+      expect(response.result?.isError).toBe(true);
+      expect(response.result?.content).toHaveLength(1);
+      expect(response.result?.content[0]?.text).toBe(BUNDLE_NOT_PREPARED);
+      expect(read).toBe(true);
+      expect(closed).toHaveBeenCalledOnce();
+      expect(await fs.readFile(target)).toEqual(TEST_PNG);
+      expect(await fs.readFile(moved)).toEqual(TEST_PNG);
+    },
+  );
+
   it('bounds discoverable set metadata and skips a corrupt linked newest set without following it', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());
@@ -749,6 +846,19 @@ describe('MCP wire protocol for prepared data', () => {
       request.end('{}');
     });
     expect(foreignHostStatus).toBe(403);
+    const emptyOriginStatus = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(
+        url,
+        { method: 'POST', headers: ['Host', `127.0.0.1:${address!.port}`, 'Origin', ''] },
+        (response) => {
+          response.resume();
+          response.on('end', () => resolve(response.statusCode));
+        },
+      );
+      request.on('error', reject);
+      request.end('{}');
+    });
+    expect(emptyOriginStatus).toBe(403);
     expect(
       (await fetch(url, { method: 'POST', headers: { origin: 'http://localhost' }, body: '{}' })).status,
     ).toBe(403);
@@ -766,6 +876,86 @@ describe('MCP wire protocol for prepared data', () => {
         })
       ).status,
     ).toBe(403);
+  });
+
+  it('reloads real settings between calls in one stdio session and fails closed', async () => {
+    const profile = await workspace();
+    const settingsFile = path.join(profile, 'settings.json');
+    const firstRoot = await workspace();
+    const secondRoot = await workspace();
+    const firstProject = await writeProject(firstRoot, projectData('first-project'));
+    const secondProject = await writeProject(secondRoot, projectData('second-project'));
+    const save = (enabled: unknown, workspacePath: unknown) =>
+      fs.writeFile(
+        settingsFile,
+        JSON.stringify({
+          workspacePath,
+          preferences: { ...DEFAULT_PREFERENCE_SETTINGS, agentAccess: { enabled } },
+        }),
+      );
+    await save(true, firstRoot);
+    const server = new LocalMcpServer(
+      { enabled: () => true, workspacePath: () => firstRoot, appVersion: () => 'test' },
+      settingsFile,
+    );
+    const input = new PassThrough();
+    let reply: (response: RpcResponse) => void;
+    const session = server.startStdio(
+      input,
+      new Writable({
+        write(chunk, _encoding, done) {
+          reply(JSON.parse(chunk.toString()));
+          done();
+        },
+      }),
+    );
+    let id = 0;
+    const call = (name = 'list_projects', args = {}) =>
+      new Promise<RpcResponse>((resolve) => {
+        reply = resolve;
+        input.write(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: ++id,
+            method: 'tools/call',
+            params: { name, arguments: args },
+          }) + '\n',
+        );
+      });
+    const projects = (response: RpcResponse) =>
+      JSON.parse(response.result!.content[0]!.text!).projects.map(
+        (project: { path: string }) => project.path,
+      );
+    try {
+      expect(projects(await call())).toEqual([firstProject]);
+      await save(false, firstRoot);
+      expect((await call()).error?.message).toBe('Local agent access is off.');
+      await save(true, secondRoot);
+      expect(projects(await call())).toEqual([secondProject]);
+      expect((await call('list_collections', { projectPath: firstProject })).result?.isError).toBe(true);
+      for (const corrupt of [
+        '{',
+        '{}',
+        JSON.stringify({ preferences: { agentAccess: { enabled: 'true' } } }),
+      ]) {
+        await save(true, firstRoot);
+        expect(projects(await call())).toEqual([firstProject]);
+        await fs.writeFile(settingsFile, corrupt);
+        expect((await call()).error?.message).toBe('Local agent access is off.');
+      }
+      await save(true, firstRoot);
+      expect(projects(await call())).toEqual([firstProject]);
+      await fs.unlink(settingsFile);
+      expect((await call()).error?.message).toBe('Local agent access is off.');
+      await save(true, 'relative/root');
+      expect((await call()).result?.isError).toBe(true);
+      await fs.unlink(settingsFile);
+      await fs.mkdir(settingsFile);
+      expect((await call()).error?.message).toBe('Local agent access is off.');
+    } finally {
+      input.end();
+      await session;
+    }
   });
 
   it('rejects later stdio reads after opt-in is revoked, and bounds text responses', async () => {

@@ -49,6 +49,16 @@ export async function readStableRegularFile(
   maximumBytes: number,
   hooks: StableReadHooks = {},
 ): Promise<{ text: string; bytes: number } | null> {
+  const buffer = await readStableRegularFileBytes(target, maximumBytes, hooks);
+  return buffer === null ? null : { text: utf8.decode(buffer), bytes: buffer.length };
+}
+
+/** Binary counterpart with the same exact identity, time, size and handle-cleanup checks. */
+export async function readStableRegularFileBytes(
+  target: string,
+  maximumBytes: number,
+  hooks: StableReadHooks = {},
+): Promise<Buffer | null> {
   // Leave room for the growth sentinel and reject unsafe caller bounds before I/O.
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || maximumBytes >= Number.MAX_SAFE_INTEGER)
     throw new FileReadLimitError('The read limit must be a nonnegative safe byte count.');
@@ -74,7 +84,7 @@ export async function readStableRegularFile(
       throw new FileReadLimitError('The file exceeds the read limit.');
     // Convert only after the exact size is within the validated, safely representable bound.
     const size = Number(stat.size);
-    const buffer = new Uint8Array(size + 1);
+    const buffer = Buffer.alloc(size + 1);
     let bytes = 0;
     while (bytes < buffer.length) {
       const { bytesRead } = await handle.read(buffer, bytes, buffer.length - bytes, bytes);
@@ -82,6 +92,7 @@ export async function readStableRegularFile(
       bytes += bytesRead;
     }
     if (bytes > size) throw new FileReadLimitError('The file grew beyond its read limit while it was read.');
+    await assertNoLinks(target);
     const finalPath = await fs.lstat(target, { bigint: true });
     const finalHandle = await handle.stat({ bigint: true });
     if (
@@ -94,7 +105,7 @@ export async function readStableRegularFile(
       stat.ctimeNs !== finalHandle.ctimeNs
     )
       throw new Error('A file changed while it was read.');
-    return { text: utf8.decode(buffer.subarray(0, bytes)), bytes };
+    return buffer.subarray(0, bytes);
   } finally {
     await handle.close();
   }

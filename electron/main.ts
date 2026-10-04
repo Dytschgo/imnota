@@ -2167,12 +2167,15 @@ app.whenReady().then(async () => {
       },
     });
   });
-  localMcpServer = new LocalMcpServer({
-    enabled: () => preferenceSettingsResult.settings.agentAccess.enabled,
-    workspacePath: () => settings.workspacePath,
-    appVersion: () => app.getVersion(),
-    search: (input) => contentSearch.search(input),
-  });
+  localMcpServer = new LocalMcpServer(
+    {
+      enabled: () => preferenceSettingsResult.settings.agentAccess.enabled,
+      workspacePath: () => settings.workspacePath,
+      appVersion: () => app.getVersion(),
+      search: (input) => contentSearch.search(input),
+    },
+    process.argv.includes('--mcp') ? settingsFile() : undefined,
+  );
   if (process.argv.includes('--mcp') && process.env.IMNOTA_SMOKE !== '1') {
     let started: boolean;
     try {

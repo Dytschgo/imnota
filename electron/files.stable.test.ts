@@ -70,7 +70,7 @@ describe('stable regular file boundaries', () => {
       const stat = options?.bigint ? await lstat(file, { bigint: true }) : await lstat(file);
       // Link guards do not compare identities. The first post-open identity observation
       // deliberately matches the opened file to isolate rejection at the FINAL boundary.
-      if (String(file) === target && controls.read.mock.calls.length > 0) observations++;
+      if (String(file) === target && options?.bigint && controls.read.mock.calls.length > 0) observations++;
       if (String(file) === target) {
         const exact = controls.read.mock.calls.length > 0 ? own : foreign;
         Object.assign(

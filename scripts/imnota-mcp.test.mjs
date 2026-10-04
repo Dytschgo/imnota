@@ -94,7 +94,7 @@ const runRelay = (source, exercise = async () => {}, eofTimeoutMs = 1000) =>
     ],
     process.env,
     exercise,
-    { timeoutMs: 5000 },
+    { timeoutMs: 5000, relayLifecycle: true },
   );
 // These Node child fixtures verify pipe forwarding only, never actual packaged acceptance.
 it('forwards actual child requests/responses and EOF; preserves refusal status and stderr', async () => {
@@ -109,6 +109,12 @@ it('forwards actual child requests/responses and EOF; preserves refusal status a
       }),
   );
   assert.equal(result.code, 0);
+  assert.deepEqual(
+    result.serverLifecycle.map(({ event }) => event),
+    ['spawn', 'close'],
+  );
+  assert.throws(() => process.kill(result.serverLifecycle[0].pid, 0));
+  assert.throws(() => process.kill(result.pid, 0));
   const off = await runRelay(
     `process.stdout.write('\\r\\n');process.stderr.write('Local agent access is off.\\n');process.exitCode=1;`,
   );
