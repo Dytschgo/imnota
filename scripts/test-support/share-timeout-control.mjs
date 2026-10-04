@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 export async function timeoutControl(source) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-share-lifetime-control-'));
   const report = path.join(directory, 'trace.json');
+  const resultsFile = path.join(directory, 'vitest-results.json');
   await fs.symlink(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
   source ??= await fs.readFile(path.join(root, 'electron/hosted-share-contract.test.ts'), 'utf8');
   source = source.replace(/^import .*share-fixture-regressions.mjs.*;\r?\n/m, '');
@@ -101,7 +102,7 @@ afterAll(async () => {
   const config = path.join(directory, 'vitest.config.mjs');
   await fs.writeFile(
     config,
-    `export default {root: ${JSON.stringify(directory)}, test: { environment: 'node', include: [${JSON.stringify(testFile.replaceAll('\\', '/'))}] }};`,
+    `export default {root: ${JSON.stringify(directory)}, test: { environment: 'node', reporters: ['verbose', 'json'], outputFile: {json: ${JSON.stringify(resultsFile)}}, include: [${JSON.stringify(testFile.replaceAll('\\', '/'))}] }};`,
   );
   const preload = path.join(directory, 'owned-processes.mjs');
   await fs.writeFile(
@@ -138,8 +139,6 @@ setTimeout(() => { for (const child of children) child.kill(); process.exit(97);
     '--no-cache',
     '--testNamePattern',
     'publishes and downloads every byte',
-    '--reporter',
-    'verbose',
   ];
   const child = spawn(process.execPath, args, {
     cwd: root,
@@ -165,7 +164,8 @@ setTimeout(() => { for (const child of children) child.kill(); process.exit(97);
   }).finally(() => clearTimeout(timer));
   await fs.writeFile(path.join(directory, 'child.log'), output);
   const events = JSON.parse(await fs.readFile(report, 'utf8'));
-  return { directory, ...outcome, output, events };
+  const results = JSON.parse(await fs.readFile(resultsFile, 'utf8'));
+  return { directory, ...outcome, output, events, results };
 }
 
 export function assertTimeoutLifecycle(result) {
@@ -173,7 +173,21 @@ export function assertTimeoutLifecycle(result) {
   assert.equal(result.code, 1, `Child must FAIL, not pass: ${result.directory}`);
   assert.equal(result.signal, null);
   assert.match(output, /Test timed out in 5000ms/);
-  assert.match(output, /1 failed/);
+  assert.equal(result.results.success, false);
+  assert.equal(result.results.numTotalTests, 3);
+  assert.equal(result.results.numFailedTests, 1);
+  assert.equal(result.results.numPendingTests, 2);
+  assert.equal(result.results.numPassedTests, 0);
+  assert.equal(result.results.testResults.length, 1);
+  const failed = result.results.testResults[0].assertionResults.filter((test) => test.status === 'failed');
+  assert.equal(failed.length, 1);
+  assert.equal(
+    failed[0].title,
+    'publishes and downloads every byte of oversized Unicode Markdown through split links',
+  );
+  assert.equal(failed[0].failureMessages.length, 1);
+  // Vitest JSON emits e.stack (STACK_TRACE_ERROR for timeout registration),
+  // so the exact timeout message is asserted against its verbose report above.
   assert.doesNotMatch(output, /EBUSY|ENOENT|Unhandled|unhandled|teardown deadline/);
   const index = (event) => events.findIndex((entry) => entry.event === event);
   assert.ok(index('upload.barrier') >= 0);
@@ -200,4 +214,12 @@ export function assertTimeoutLifecycle(result) {
   assert.equal(terminal.bodySettled, true);
   assert.equal(terminal.openDatabases, 0);
   assert.equal(terminal.listening, 0);
+  for (const fixture of terminal.fixtures) {
+    assert.equal(fixture.bodySettled, true);
+    assert.equal(fixture.operations, 0);
+    assert.equal(fixture.requests, 0);
+    assert.equal(fixture.openDatabases, 0);
+    assert.equal(fixture.listening, false);
+    assert.equal(fixture.retained, false);
+  }
 }
