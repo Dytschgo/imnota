@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path';
 import { faultCaseSets, assertFaultAggregate, assertFaultReport } from './native-fault-catalog.mjs';
 import { prepareArtifactDirectory, runNativeVerification } from './smoke-process.mjs';
 
+import { writeFaultEvidenceManifest } from './native-fault-retention.mjs';
+
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 function git(...args) {
   const result = spawnSync('git', args, { encoding: 'utf8', cwd: process.cwd(), windowsHide: true });
@@ -114,5 +116,6 @@ export async function runPackagedFaults({ executable, suppliedPackage, runningEx
       ),
       { flag: 'wx' },
     );
+    writeFaultEvidenceManifest(root);
   }
 }

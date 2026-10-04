@@ -19,7 +19,7 @@ const receiver = vi.hoisted(() => {
   Object.assign(window, { imnotaNativeFault: value });
   return value;
 });
-import { NativeFaultProbe, registerNativeFaultAdapter } from './native-fault-probe';
+import { NativeFaultProbe, registerNativeFaultAdapter, observeNativeFaultSave } from './native-fault-probe';
 
 const projectId = 'project_22222222-2222-4222-8222-222222222222';
 function command(action: FaultCommand['action'], extra: Partial<FaultCommand> = {}) {
@@ -129,4 +129,35 @@ it('retains authentic read closures after the root unmount, then releases on dis
   );
   act(() => command('disarm'));
   expect(() => command('observe')).toThrow('Unowned');
+});
+
+it.each([true, false])('observes a newly armed save through delayed completion (%s)', async (saved) => {
+  adapter();
+  let finish!: (result: boolean) => void;
+  const save = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  command('arm-save');
+  expect(save).not.toHaveBeenCalled();
+  expect(receiver.report.mock.calls.some(([value]) => value.event.startsWith('save:'))).toBe(false);
+  const pending = observeNativeFaultSave(save);
+  expect(receiver.report).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'save:started' }));
+  command('observe', { requestId: '44444444-4444-4444-8444-444444444444' });
+  expect(
+    receiver.report.mock.calls.some(([value]) => ['save:completed', 'save:refused'].includes(value.event)),
+  ).toBe(false);
+  finish(saved);
+  await expect(pending).resolves.toBe(saved);
+  expect(receiver.report).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      requestId: '33333333-3333-4333-8333-333333333333',
+      event: saved ? 'save:completed' : 'save:refused',
+    }),
+  );
+  receiver.report.mockClear();
+  await observeNativeFaultSave(async () => true);
+  expect(receiver.report).not.toHaveBeenCalled();
 });

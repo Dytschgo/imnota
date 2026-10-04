@@ -103,3 +103,52 @@ export function retainFaultOperands(proof, outcome) {
     { flag: 'wx' },
   );
 }
+
+function evidenceInventory(root) {
+  const entries = [];
+  let total = 0;
+  function visit(target) {
+    const stat = lstatSync(target);
+    if (stat.isSymbolicLink() || realpathSync(target) !== resolve(target))
+      throw new Error('Indirect native fault evidence.');
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(target).sort()) visit(join(target, name));
+      return;
+    }
+    const name = relative(root, target).replaceAll('\\', '/');
+    if (name === 'upload-manifest.json') return;
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error('Non-regular native fault evidence.');
+    total += stat.size;
+    if (total > 2 * 1024 * 1024 * 1024 || entries.length >= 250000)
+      throw new Error('Native fault upload exceeds its evidence bound.');
+    const bytes = readFileSync(target);
+    entries.push({
+      relative: name,
+      bytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+  }
+  visit(resolve(root));
+  return entries.sort((a, b) => (a.relative < b.relative ? -1 : a.relative > b.relative ? 1 : 0));
+}
+
+export function writeFaultEvidenceManifest(root) {
+  const entries = evidenceInventory(root);
+  writeFileSync(join(root, 'upload-manifest.json'), JSON.stringify({ schemaVersion: 1, entries }, null, 2), {
+    flag: 'wx',
+  });
+}
+
+/** Read-only validation after artifact download, including hidden journals and ownership markers. */
+export function verifyFaultEvidenceManifest(root) {
+  const manifest = JSON.parse(readFileSync(join(root, 'upload-manifest.json'), 'utf8'));
+  const actual = evidenceInventory(root);
+  if (
+    manifest.schemaVersion !== 1 ||
+    !actual.length ||
+    JSON.stringify(manifest.entries) !== JSON.stringify(actual)
+  )
+    throw new Error('Downloaded native fault evidence differs from its complete upload manifest.');
+  console.log(`Verified native fault artifact manifest: ${actual.length} files, including hidden operands.`);
+  return actual.length;
+}

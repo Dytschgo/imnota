@@ -76,6 +76,8 @@ describe('closed packaged native fault gate', () => {
       assert.match(upload, /name: native-fault-evidence-/);
       assert.match(upload, /if-no-files-found: error/);
       assert.match(upload, /include-hidden-files: true/);
+      assert.match(source, /node scripts\/smoke\.mjs --verify-fault-evidence/);
+      assert.match(source, /name: Download native fault evidence for manifest verification/);
       assert.doesNotMatch(upload, /continue-on-error/);
       if (name === 'nightly') {
         assert.match(source, /needs: \[guard, quality, package\]/);

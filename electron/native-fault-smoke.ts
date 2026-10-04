@@ -187,6 +187,45 @@ async function waitObservation(
   throw new Error('The real renderer did not reach the required fault postcondition in 15 seconds.');
 }
 
+async function observedSave(
+  controller: OwnedSmokeFaultController,
+  expectedSaved: boolean,
+  action: () => Promise<unknown>,
+) {
+  const armed = await controller.command('arm-save');
+  await action();
+  const deadline = Date.now() + 15000;
+  do {
+    controller.assertHealthy();
+    const receipt = controller.caseEvents.find((event) => {
+      const value = event.value as import('../src/shared/native-faults.js').FaultObservation | undefined;
+      return (
+        event.event === 'renderer' &&
+        value?.requestId === armed.requestId &&
+        ['save:completed', 'save:refused', 'save:error'].includes(value.event)
+      );
+    });
+    if (receipt) {
+      const state = receipt.value as import('../src/shared/native-faults.js').FaultObservation;
+      requireThat(
+        state.event === (expectedSaved ? 'save:completed' : 'save:refused'),
+        'The native save handler did not produce the expected completion/refusal.',
+      );
+      return state;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  throw new Error('The newly armed native save attempt did not complete within 15 seconds.');
+}
+
+function assertForeignBytes(controller: OwnedSmokeFaultController, bytes: Buffer) {
+  const recorded = controller.caseEvents.filter((event) => event.event === 'foreign-metadata').at(-1);
+  requireThat(
+    recorded && recorded.sha256 === faultDigest(bytes) && recorded.bytes === bytes.length,
+    'Foreign metadata bytes differ from the exact recorded external write.',
+  );
+}
+
 async function restoreCase(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
@@ -317,7 +356,7 @@ async function restoreCase(
       ['screenshots:undo-delete', 'content:undo-delete'].includes(String(event.channel)),
   );
   const cas = events.filter(
-    (event) => event.event === 'ipc-result' && event.channel === 'workflow:project-watch:cas',
+    (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
   );
   if (success) {
     requireThat(
@@ -346,7 +385,7 @@ async function restoreCase(
     requireThat(cas.length === 0, 'Unconfirmed Restore permitted a metadata CAS.');
     const foreign = controller.proof.caseSet === 'restore-later-change' || caseId.endsWith('changed');
     requireThat(
-      foreign ? JSON.parse(disk.toString()).name === 'Fixture foreign metadata' : disk.equals(restored),
+      foreign ? (assertForeignBytes(controller, disk), true) : disk.equals(restored),
       'Refused Restore changed the required disk bytes.',
     );
   }
@@ -363,7 +402,9 @@ async function restoreCase(
   if (!success) {
     // Exercise the actual save shortcut against the refusal, never a synthetic flush result.
     await driver.press('Escape');
-    await driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']);
+    await observedSave(controller, false, () =>
+      driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']),
+    );
     const retained = await controller.command('observe');
     {
       requireThat(
@@ -373,6 +414,14 @@ async function restoreCase(
       requireThat(
         (await fs.readFile(path.join(snapshot.projectPath, 'project.json'))).equals(disk),
         'Retry save changed refused Restore bytes.',
+      );
+      if (controller.proof.caseSet === 'restore-later-change' || caseId.endsWith('changed'))
+        assertForeignBytes(controller, await fs.readFile(path.join(snapshot.projectPath, 'project.json')));
+      requireThat(
+        !controller.caseEvents.some(
+          (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
+        ),
+        'Refused Restore retry attempted metadata CAS.',
       );
     }
   }
@@ -442,13 +491,17 @@ async function restoreCase(
     assertSearch(updatedSearch, snapshot.projectPath, externalItem.id, true);
     assertSearch(invalidatedSearch, snapshot.projectPath, externalItem.id, false);
     await controller.command('queue-fixture-metadata');
-    await driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']);
+    await observedSave(controller, false, () =>
+      driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']),
+    );
     const retained = await waitObservation(
       controller,
       (value) => value.pendingMetadata && Boolean(value.externalChange),
     );
     requireThat(
-      !controller.caseEvents.slice(start).some((event) => event.channel === 'workflow:project-watch:cas'),
+      !controller.caseEvents
+        .slice(start)
+        .some((event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas'),
       'External member change did not block metadata saving.',
     );
     externalEvidence = {
@@ -524,7 +577,9 @@ async function recoveryCase(
     'Root fallback did not focus Reload.',
   );
   await controller.command('clear-render-failure');
-  await driver.click({ selector: '[data-testid="error-fallback-app"] button', text: 'Reload', exact: true });
+  await observedSave(controller, false, () =>
+    driver.click({ selector: '[data-testid="error-fallback-app"] button', text: 'Reload', exact: true }),
+  );
   await driver.waitFor({
     selector: '[data-testid="error-fallback-app"] button',
     text: 'Save and reload',
@@ -556,7 +611,7 @@ async function recoveryCase(
     );
     requireThat(
       !controller.caseEvents.some(
-        (event) => event.event === 'ipc-result' && event.channel === 'workflow:project-watch:cas',
+        (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
       ),
       'First failed recovery attempted metadata CAS.',
     );
@@ -608,13 +663,15 @@ async function recoveryCase(
     );
     requireThat(first.pendingContent, 'Precommit failure discarded the real content draft.');
   }
-  // One deliberate user retry, never an automatic test rerun.
-  await driver.click({
-    selector: '[data-testid="error-fallback-app"] button',
-    text: 'Save and reload',
-    exact: true,
-  });
   const foreign = lineage && caseId === 'foreign';
+  // One deliberate user retry, never an automatic test rerun.
+  await observedSave(controller, !foreign, () =>
+    driver.click({
+      selector: '[data-testid="error-fallback-app"] button',
+      text: 'Save and reload',
+      exact: true,
+    }),
+  );
   if (foreign) {
     await driver.waitFor({
       selector: '[data-testid="error-fallback-app"] button',
@@ -622,15 +679,11 @@ async function recoveryCase(
       exact: true,
     });
     const refused = await controller.command('observe');
-    requireThat(
-      refused.pendingMetadata &&
-        JSON.parse(await fs.readFile(path.join(snapshot.projectPath, 'project.json'), 'utf8')).name ===
-          'Fixture foreign metadata',
-      'Foreign metadata or queued draft was lost.',
-    );
+    requireThat(refused.pendingMetadata, 'Foreign recovery lost the queued draft.');
+    assertForeignBytes(controller, await fs.readFile(path.join(snapshot.projectPath, 'project.json')));
     requireThat(
       !controller.caseEvents.some(
-        (event) => event.event === 'ipc-result' && event.channel === 'workflow:project-watch:cas',
+        (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
       ),
       'Foreign recovery permitted CAS.',
     );
@@ -689,7 +742,9 @@ async function recoveryCase(
         writes.filter((event) => event.channel === 'projects:save-screenshot').length === 1,
       'Recovery replayed an independently committed draft.',
     );
-    const cas = writes.filter((event) => event.channel === 'workflow:project-watch:cas');
+    const cas = controller.caseEvents.filter(
+      (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
+    );
     if (!foreign) {
       const transition = writes.find((event) => event.channel === 'projects:save-screenshot')!.transition as {
         after: string;
@@ -700,9 +755,13 @@ async function recoveryCase(
         'Healthy recovery metadata did not CAS against the exact last own draft revision.',
       );
       await waitObservation(controller, (state) => Boolean(state.acceptedRevision) && !state.pendingMetadata);
-      await driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']);
+      await observedSave(controller, true, () =>
+        driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']),
+      );
       requireThat(
-        controller.caseEvents.filter((event) => event.channel === 'workflow:project-watch:cas').length === 1,
+        controller.caseEvents.filter(
+          (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
+        ).length === 1,
         'A clean guard save repeated the metadata CAS.',
       );
     }

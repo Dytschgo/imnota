@@ -108,7 +108,7 @@ describe('owned real-filesystem fault boundary', () => {
       projectPath: value.project,
       projectId: value.id,
     });
-    while (value.controller.events.length < 2000) value.controller.events.push({ event: 'bounded-fixture' });
+    while (value.controller.events.length < 1999) value.controller.events.push({ event: 'bounded-fixture' });
     const original = new Error('original persistence failure');
     await expect(
       value.controller.invoke('content:save', [{ projectPath: value.project }], () => {
@@ -264,5 +264,36 @@ describe('owned real-filesystem fault boundary', () => {
       controller.events.filter((event) => event.event === 'consumed').map((event) => event.fault),
     ).toEqual(['metadata', 'marker']);
     expect(() => controller.assertHealthy()).not.toThrow();
+  });
+});
+
+it('records CAS entry before a delayed rejected attempt and records exact foreign bytes', async () => {
+  const value = await fixture();
+  await value.controller.arm({ caseId: 'baseline-repair', projectPath: value.project, projectId: value.id });
+  let refuse!: (reason: Error) => void;
+  const pending = value.controller.invoke(
+    'workflow:project-watch:cas',
+    [{ watchId: 'watch', expectedRevision: 'old' }],
+    () =>
+      new Promise((_, reject) => {
+        refuse = reject;
+      }),
+  );
+  expect(
+    value.controller.caseEvents.filter(
+      (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
+    ),
+  ).toHaveLength(1);
+  expect(value.controller.caseEvents.filter((event) => event.event === 'ipc-result')).toHaveLength(0);
+  refuse(new Error('project-changed'));
+  await expect(pending).rejects.toThrow('project-changed');
+  expect(value.controller.caseEvents.filter((event) => event.event === 'ipc-error')).toHaveLength(1);
+  await value.controller.writeForeignMetadata();
+  const bytes = await fs.readFile(value.target);
+  expect(JSON.parse(bytes.toString()).description).toContain('Distinct foreign description');
+  expect(value.controller.caseEvents.at(-1)).toMatchObject({
+    event: 'foreign-metadata',
+    sha256: faultDigest(bytes),
+    bytes: bytes.length,
   });
 });

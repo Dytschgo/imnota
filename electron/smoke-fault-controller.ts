@@ -65,6 +65,7 @@ const SAVES = new Set(['content:save', 'projects:save-screenshot', 'workflow:pro
 
 /** Main-only, one case at a time. The renderer cannot arm faults or select operands. */
 export class OwnedSmokeFaultController {
+  private saveObservation?: { requestId: string; started: boolean };
   private readonly context = new AsyncLocalStorage<Invocation>();
   private active?: CaseInput & {
     identity: Awaited<ReturnType<typeof faultIdentity>>;
@@ -391,7 +392,15 @@ export class OwnedSmokeFaultController {
     await this.validate();
     const target = path.join(this.active!.projectPath, 'project.json');
     const project = JSON.parse(await fs.readFile(target, 'utf8'));
-    const source = JSON.stringify({ ...project, name: 'Fixture foreign metadata' }, null, 2);
+    const source = JSON.stringify(
+      {
+        ...project,
+        name: 'Fixture foreign metadata',
+        description: `Distinct foreign description ${this.proof.nonce}`,
+      },
+      null,
+      2,
+    );
     // Deliberately external: no application atomicWrite/self marker or fabricated watch event.
     await fs.writeFile(target, source);
     this.record({ event: 'foreign-metadata', sha256: faultDigest(source), bytes: Buffer.byteLength(source) });
@@ -400,6 +409,13 @@ export class OwnedSmokeFaultController {
   async invoke<T>(channel: string, args: unknown[], actual: () => T | Promise<T>): Promise<T> {
     const invocation = { channel, args, serial: ++this.serial };
     return this.context.run(invocation, async () => {
+      if (this.active)
+        this.record({
+          event: 'ipc-invocation',
+          channel,
+          serial: invocation.serial,
+          input: this.inputEvidence(args),
+        });
       let result: T;
       try {
         result = await actual();
@@ -561,6 +577,24 @@ export class OwnedSmokeFaultController {
         this.record({ event: 'renderer', value: observation });
         return;
       }
+      if (observation.event.startsWith('save:')) {
+        const save = this.saveObservation;
+        if (
+          !save ||
+          observation.requestId !== save.requestId ||
+          observation.nonce !== this.proof.nonce ||
+          observation.caseId !== this.active?.caseId ||
+          observation.projectPath !== this.active.projectPath ||
+          observation.projectId !== this.active.projectId
+        )
+          this.fail('Unmatched native save observation.');
+        if (observation.event === 'save:started' && !save.started) save.started = true;
+        else if (['save:completed', 'save:refused', 'save:error'].includes(observation.event) && save.started)
+          this.saveObservation = undefined;
+        else this.fail('Native save completion has no unique invocation.');
+        this.record({ event: 'renderer', value: observation });
+        return;
+      }
       const pending = this.request;
       if (
         !pending ||
@@ -597,6 +631,10 @@ export class OwnedSmokeFaultController {
       projectId: this.active.projectId,
       action,
     };
+    if (action === 'arm-save') {
+      if (this.saveObservation) this.fail('A native save observation is already pending.');
+      this.saveObservation = { requestId: command.requestId, started: false };
+    }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.fatal ??= new Error('Fault renderer acknowledgement exceeded 15 seconds.');
@@ -621,6 +659,7 @@ export class OwnedSmokeFaultController {
     let failure: unknown;
     try {
       this.assertHealthy();
+      if (this.saveObservation) this.fail('Native save observation did not complete.');
       if (expected.slice().sort().join() !== [...this.consumed].sort().join())
         this.fail(`Fault consumption mismatch: expected ${expected}; observed ${[...this.consumed]}.`);
       if (this.active) await this.command('disarm');
@@ -641,6 +680,7 @@ export class OwnedSmokeFaultController {
   cancel(): void {
     if (this.terminal) return;
     this.terminal = true;
+    this.saveObservation = undefined;
     this.uiBarrier?.reject(new Error('Fault session terminated.'));
     this.active = undefined;
     this.request?.reject(new Error('Fault session terminated.'));

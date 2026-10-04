@@ -55,6 +55,7 @@ import {
   nativeFaultReceiverPresent,
   registerNativeFaultAdapter,
   reportNativeFaultTransition,
+  observeNativeFaultSave,
 } from './app/native-fault-probe';
 import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-faults';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
@@ -568,7 +569,7 @@ export default function App() {
   // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
   useEffect(() => {
     setReloadProtection({
-      flush: () => persistence.withReloadWatch(flushAll),
+      flush: () => observeNativeFaultSave(() => persistence.withReloadWatch(flushAll)),
       allowUnload: () => {
         allowClose.current = true;
       },
@@ -1987,7 +1988,7 @@ export default function App() {
     'navigation.recent': () => void navigate('recent'),
     'navigation.favourites': () => void navigate('favourites'),
     'navigation.settings': () => void navigate('settings'),
-    'edit.save': () => void flushAll(),
+    'edit.save': () => void observeNativeFaultSave(flushAll),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
     'edit.copyAnnotation': () => {

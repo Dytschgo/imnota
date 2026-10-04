@@ -13,7 +13,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { retainFaultOperands } from './native-fault-retention.mjs';
+import {
+  retainFaultOperands,
+  writeFaultEvidenceManifest,
+  verifyFaultEvidenceManifest,
+} from './native-fault-retention.mjs';
 
 const roots = [];
 afterEach(() => {
@@ -82,4 +86,23 @@ it('does not capture or clean a run whose child exit has not been observed', () 
   retainFaultOperands(proof, undefined);
   assert.ok(existsSync(proof.profileRoot));
   assert.equal(existsSync(join(proof.artifactRoot, 'retained-run')), false);
+});
+
+it('detects hidden journal loss, byte changes and extra files after evidence transport', () => {
+  const { proof } = fixture();
+  const journal = join(proof.artifactRoot, '.imnota-undo');
+  mkdirSync(journal);
+  const member = join(journal, 'undo-before.bin');
+  writeFileSync(member, 'foreign exact bytes');
+  writeFileSync(join(proof.artifactRoot, '.ownership'), 'nonce');
+  writeFaultEvidenceManifest(proof.artifactRoot);
+  assert.equal(verifyFaultEvidenceManifest(proof.artifactRoot), 2);
+  writeFileSync(member, 'changed exact bytes');
+  assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
+  writeFileSync(member, 'foreign exact bytes');
+  writeFileSync(join(proof.artifactRoot, 'extra'), 'unexpected');
+  assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
+  rmSync(join(proof.artifactRoot, 'extra'));
+  rmSync(member);
+  assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
 });

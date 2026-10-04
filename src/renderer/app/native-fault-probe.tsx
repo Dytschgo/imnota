@@ -25,6 +25,32 @@ export function reportNativeFaultTransition(): void {
     event: 'state:revision',
   });
 }
+let armedSave: import('../../shared/native-faults').FaultCommand | undefined;
+
+/** Observe the actual user save handler; arming never triggers or substitutes a save. */
+export async function observeNativeFaultSave(save: () => Promise<boolean>): Promise<boolean> {
+  const armed = armedSave;
+  if (!receiver || !adapter || !armed) return save();
+  armedSave = undefined;
+  const report = (event: string) =>
+    receiver.report({
+      ...adapter!.read(),
+      nonce: armed.nonce,
+      caseId: armed.caseId,
+      requestId: armed.requestId,
+      event,
+    });
+  report('save:started');
+  try {
+    const saved = await save();
+    report(saved ? 'save:completed' : 'save:refused');
+    return saved;
+  } catch (error) {
+    report('save:error');
+    throw error;
+  }
+}
+
 let failure: 'app' | 'panel' | undefined;
 const listeners = new Set<() => void>();
 const notify = () => {
@@ -63,9 +89,14 @@ if (receiver) {
       case 'clear-render-failure':
         failure = undefined;
         break;
+      case 'arm-save':
+        if (armedSave) throw new Error('A native save observation is already armed.');
+        armedSave = command;
+        break;
       case 'observe':
         break;
       case 'disarm':
+        armedSave = undefined;
         failure = undefined;
         break;
     }
@@ -81,6 +112,7 @@ if (receiver) {
   });
   window.addEventListener('pagehide', () => {
     adapter = undefined;
+    armedSave = undefined;
     failure = undefined;
     listeners.clear();
   });

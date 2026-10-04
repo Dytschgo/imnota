@@ -58,6 +58,7 @@ export const faultCommandSchema = z
     projectId: z.string().regex(/^project_[a-f0-9-]{36}$/),
     action: z.enum([
       'observe',
+      'arm-save',
       'queue-fixture-metadata',
       'stage-recovery-drafts',
       'render-app-failure',
