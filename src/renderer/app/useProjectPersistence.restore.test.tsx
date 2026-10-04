@@ -466,15 +466,24 @@ it.each(kinds)(
     });
     assertFault();
     await waitFor(() => expect(f.watchedReads).toHaveBeenCalledWith(f.projectFile));
+    // Invocation alone does not establish which bytes the asynchronous read observed.
+    const readIndex = f.watchedReads.mock.calls.findIndex(([target]) => target === f.projectFile);
+    expect(await f.watchedReads.mock.results[readIndex].value).toEqual(await fs.readFile(f.projectFile));
     expect(f.events).toEqual([]);
     expect(
       (await f.search.search({ workspacePath: f.root, query })).results.some((r) => r.itemId === f.itemId),
     ).toBe(true);
-    await fs.writeFile(
-      f.projectFile,
-      JSON.stringify({ ...(await f.readProject()), favourite: true }, null, 2),
-    );
+    const foreign = Buffer.from(JSON.stringify({ ...(await f.readProject()), favourite: true }, null, 2));
+    await fs.writeFile(f.projectFile, foreign);
     await waitFor(() => expect(f.events.some((e) => e.kind === 'external-change')).toBe(true));
+    expect(f.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'external-change',
+        projectRevision: projectRevisionForSource(foreign),
+        changedPaths: expect.arrayContaining(['project.json']),
+      }),
+    );
+    expect(await fs.readFile(f.projectFile)).toEqual(foreign);
   },
 );
 

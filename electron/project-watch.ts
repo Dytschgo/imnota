@@ -72,7 +72,31 @@ function defaultDependencies(
 ): ProjectWatchDependencies {
   return {
     ...dependencies,
-    createWatch: (projectPath, listener) => fs.watch(projectPath, { recursive: true }, listener) as FSWatcher,
+    createWatch: (projectPath, listener) => {
+      const recursive = fs.watch(projectPath, { recursive: true }, listener) as FSWatcher;
+      if (process.platform !== 'linux') return recursive;
+      // Linux recursive watches can retain a file's old inode after atomic replacement.
+      // Watch the stable parent too, so later project.json writes still reach revision checks.
+      let metadata: FSWatcher;
+      try {
+        metadata = fs.watch(projectPath, { recursive: false }, (eventType, filename) => {
+          if (normalizedRelativePath(filename) === 'project.json') listener(eventType, filename);
+        });
+      } catch (error) {
+        recursive.close();
+        throw error;
+      }
+      return {
+        close: () => {
+          recursive.close();
+          metadata.close();
+        },
+        on: (event, handler) => {
+          recursive.on(event, handler);
+          metadata.on(event, handler);
+        },
+      };
+    },
     readProjectSource: (projectPath) => fsPromises.readFile(path.join(projectPath, 'project.json'), 'utf8'),
     readWatchedFile: (filePath) => fsPromises.readFile(filePath).catch(() => null),
     randomId: () => randomUUID(),
