@@ -35,10 +35,10 @@ export async function copyProjectForDuplicate(
   const original = validateProject(JSON.parse(await fs.readFile(path.join(root, 'project.json'), 'utf8')));
   if (copy.id === original.id) throw new Error('A duplicate must have a new project identity.');
   await fs.mkdir(destination, { recursive: false });
-  const owned = await fs.lstat(destination);
+  const owned = await fs.lstat(destination, { bigint: true });
   const assertOwned = async () => {
     await assertNoLinks(destination);
-    const current = await fs.lstat(destination);
+    const current = await fs.lstat(destination, { bigint: true });
     if (!current.isDirectory() || current.dev !== owned.dev || current.ino !== owned.ino)
       throw new Error('Duplicate destination changed; it was preserved for manual inspection.');
   };
@@ -67,11 +67,11 @@ export async function copyProjectForDuplicate(
       const removeOwned = async (directory: string): Promise<void> => {
         await assertOwned();
         await assertNoLinks(directory);
-        const identity = await fs.lstat(directory);
+        const identity = await fs.lstat(directory, { bigint: true });
         const assertDirectory = async () => {
           await assertOwned();
           await assertNoLinks(directory);
-          const current = await fs.lstat(directory);
+          const current = await fs.lstat(directory, { bigint: true });
           if (identity.dev !== current.dev || identity.ino !== current.ino)
             throw new Error('Duplicate cleanup path changed.');
         };

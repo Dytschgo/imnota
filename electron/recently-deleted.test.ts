@@ -674,3 +674,89 @@ describe('duplicate failure boundaries', () => {
     expect(await exists(projectPath + '-unused')).toBe(false);
   });
 });
+
+describe('exact duplicate cleanup identity', () => {
+  it.each(
+    (['root', 'nested'] as const).flatMap((boundary) =>
+      (['ino', 'dev'] as const).flatMap((field) =>
+        [100n, 9851624189743415n].map((own) => ({ boundary, field, own })),
+      ),
+    ),
+  )(
+    'preserves a foreign $boundary directory with exact $field identity $own',
+    async ({ boundary, field, own }) => {
+      const { projectPath, project } = await fixture();
+      const workspace = await fs.realpath(
+        await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-duplicate-identity-')),
+      );
+      temporary.push(workspace);
+      const target = path.join(workspace, 'copy');
+      const selected = boundary === 'root' ? target : path.join(target, 'nested');
+      const retained = path.join(workspace, 'retained');
+      const foreign = path.join(workspace, 'foreign');
+      await fs.mkdir(foreign);
+      await fs.writeFile(path.join(foreign, 'keep.txt'), 'foreign bytes');
+      const metadata = await fs.readFile(path.join(projectPath, 'project.json'));
+      const lstat = fs.lstat.bind(fs);
+      const readdir = fs.readdir.bind(fs);
+      let replaced = false;
+      let ownStats = 0;
+      let foreignStats = 0;
+      const replace = async () => {
+        await fs.rename(selected, retained);
+        await fs.rename(foreign, selected);
+        replaced = true;
+      };
+      const statSpy = vi.spyOn(fs, 'lstat').mockImplementation((async (
+        file,
+        options?: { bigint?: boolean },
+      ) => {
+        const stat = options?.bigint ? await lstat(file, { bigint: true }) : await lstat(file);
+        if (String(file) === selected) {
+          if (replaced) foreignStats++;
+          else ownStats++;
+          const exact = replaced ? own + 1n : own;
+          Object.assign(
+            stat,
+            typeof stat.ino === 'bigint'
+              ? { [field]: exact, [field === 'ino' ? 'dev' : 'ino']: 7n }
+              : { [field]: Number(exact), [field === 'ino' ? 'dev' : 'ino']: 7 },
+          );
+        }
+        return stat;
+      }) as typeof fs.lstat);
+      const directorySpy = vi.spyOn(fs, 'readdir').mockImplementation((async (
+        ...args: Parameters<typeof fs.readdir>
+      ) => {
+        // The nested directory identity has been observed; replace it before traversal.
+        if (boundary === 'nested' && String(args[0]) === selected && !replaced) await replace();
+        return readdir(...args);
+      }) as typeof fs.readdir);
+      const copy = vi.spyOn(fs, 'cp').mockImplementationOnce(async () => {
+        await fs.mkdir(path.join(target, 'nested'));
+        await fs.writeFile(path.join(target, 'nested', 'own.txt'), 'owned partial copy');
+        if (boundary === 'root') await replace();
+        throw new Error('copy failed after allocation');
+      });
+      const error = await copyProjectForDuplicate(projectPath, target, {
+        ...project,
+        id: 'project_copy',
+      }).catch((reason: unknown) => reason);
+      expect(copy).toHaveBeenCalledOnce();
+      expect(replaced).toBe(true);
+      expect(ownStats).toBeGreaterThan(0);
+      expect(foreignStats).toBeGreaterThan(0);
+      expect(await fs.readFile(path.join(selected, 'keep.txt')).catch(() => null)).toEqual(
+        Buffer.from('foreign bytes'),
+      );
+      expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(metadata);
+      expect(await exists(path.join(target, 'project.json'))).toBe(false);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/retained.*manual inspection/);
+      expect((error as Error).cause).toMatchObject({ message: 'copy failed after allocation' });
+      copy.mockRestore();
+      directorySpy.mockRestore();
+      statSpy.mockRestore();
+    },
+  );
+});
