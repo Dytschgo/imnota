@@ -264,6 +264,13 @@ jobs:
             release/builder-effective-config.yaml
           if-no-files-found: error
           compression-level: 0
+      - name: Retain packaged MCP evidence
+        if: env.RUN_APPLICATION == 'true' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcp-evidence-${{ matrix.os }}
+          path: release/imnota-verification-artifacts-mcp/
+          if-no-files-found: ignore
 
   dependency-review:
     if: github.event_name == 'pull_request'

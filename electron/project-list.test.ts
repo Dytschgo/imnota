@@ -56,6 +56,20 @@ async function tree(root: string): Promise<unknown[]> {
 }
 
 describe('read-only project listing', () => {
+  it('bounds agent directory scans and response metadata without changing ordinary listing or saved files', async () => {
+    const root = await workspace();
+    await writeProject(root, 'One', emptyProject('One', 'A long description'));
+    await writeProject(root, 'Two', emptyProject('Two', 'Another description'));
+    const before = await tree(root);
+    await expect(listWorkspaceProjects(root, undefined, { maxEntries: 1 })).rejects.toThrow(
+      'too many entries',
+    );
+    await expect(listWorkspaceProjects(root, undefined, { maxResponseBytes: 1 })).rejects.toThrow(
+      'exceeds the read limit',
+    );
+    expect(await listWorkspaceProjects(root)).toHaveLength(2);
+    expect(await tree(root)).toEqual(before);
+  });
   it('rejects backup and recovery ancestry even when the selected workspace is inside it', () => {
     expect(isReservedProjectPath(path.join('workspace', '.imnota-backups', 'snapshots', 'id', 'data'))).toBe(
       true,

@@ -117,7 +117,13 @@
         "nsis",
         "portable"
       ],
-      "signExecutable": false
+      "signExecutable": false,
+      "extraResources": [
+        {
+          "from": "scripts/imnota-mcp.mjs",
+          "to": "imnota-mcp.mjs"
+        }
+      ]
     },
     "mac": {
       "minimumSystemVersion": "13.0.0",

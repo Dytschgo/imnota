@@ -57,6 +57,8 @@ async function smokeLinuxAppImage(target) {
     // Match the existing CI Electron helper policy without disabling the sandbox or changing host AppArmor.
     run('sudo', ['chown', 'root:root', sandboxHelper]);
     run('sudo', ['chmod', '4755', sandboxHelper]);
+    if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
+      run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
     run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -78,8 +80,17 @@ async function main() {
   await access(target);
   if (!(await lstat(target)).isFile()) throw new Error(`Expected a regular packaged file: ${target}`);
   if (platform === 'linux') return smokeLinuxAppImage(target);
-  if (platform === 'windows')
+  if (platform === 'windows') {
+    // The portable launcher extracts a child; use the same build's direct packaged exe for owned stdio.
+    // The portable distributable still receives the existing full UI/clipboard walkthroughs.
+    if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
+      run(
+        process.execPath,
+        ['scripts/verify-mcp.mjs', resolve(process.argv[3] ?? 'release', 'win-unpacked/Imnota.exe'), target],
+        { env: process.env },
+      );
     return run(process.execPath, ['scripts/smoke.mjs', target], { env: process.env });
+  }
 }
 
 await main();
