@@ -1,6 +1,6 @@
 import {
   forwardRef,
-  useEffect,
+  useLayoutEffect,
   useId,
   useRef,
   type ButtonHTMLAttributes,
@@ -92,19 +92,44 @@ export function Modal({
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
+    if (!dialog) return;
     const focusable = () =>
       Array.from(
         dialog?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]',
         ) ?? [],
       );
-    (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus();
+    const isTopDialog = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
+        .filter((element) => !element.closest('[hidden]'))
+        .at(-1) === dialog;
+    const initialFocus = () =>
+      dialog.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog;
+    let lastFocused: HTMLElement | null = null;
+    const containFocus = (event: FocusEvent) => {
+      if (!isTopDialog()) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && dialog.contains(target)) {
+        lastFocused = target;
+        return;
+      }
+      // Background editors can autofocus after an async load. Keep the user's
+      // current dialog target (including a restore status with tabIndex=-1).
+      const destination =
+        lastFocused && dialog.contains(lastFocused) && !lastFocused.matches(':disabled')
+          ? lastFocused
+          : initialFocus();
+      destination.focus();
+    };
+    document.addEventListener('focusin', containFocus, true);
+    if (isTopDialog()) initialFocus().focus();
     const keydown = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
+        !isTopDialog() ||
         (event.target as HTMLElement | null)?.closest('[role="dialog"]') !== dialog
       )
         return;
@@ -117,7 +142,19 @@ export function Modal({
         const items = focusable();
         const first = items[0];
         const last = items.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.tabIndex < 0) {
+          // Status messages and the dialog itself are programmatically focusable
+          // but absent from the tab order. Advance from their document position.
+          event.preventDefault();
+          const direction = event.shiftKey
+            ? Node.DOCUMENT_POSITION_PRECEDING
+            : Node.DOCUMENT_POSITION_FOLLOWING;
+          const next = (event.shiftKey ? [...items].reverse() : items).find(
+            (item) => active.compareDocumentPosition(item) & direction,
+          );
+          (next ?? (event.shiftKey ? last : first) ?? dialog).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
           last?.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -128,6 +165,7 @@ export function Modal({
     };
     dialog?.addEventListener('keydown', keydown);
     return () => {
+      document.removeEventListener('focusin', containFocus, true);
       dialog?.removeEventListener('keydown', keydown);
       if (previous?.isConnected) previous.focus();
     };

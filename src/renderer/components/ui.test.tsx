@@ -54,4 +54,79 @@ describe('UI primitives', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy AI context' }));
     expect(onClick).toHaveBeenCalledOnce();
   });
+
+  it('contains background autofocus in the top dialog and returns to the underlying dialog', () => {
+    const view = (confirm: boolean, hidden = false) => (
+      <>
+        <button>Background editor</button>
+        <Modal title="Restore" onClose={vi.fn()} hidden={hidden}>
+          <button>Restore drawing</button>
+        </Modal>
+        {confirm && (
+          <Modal title="Confirm" onClose={vi.fn()}>
+            <input aria-label="Confirmation" data-autofocus />
+          </Modal>
+        )}
+      </>
+    );
+    const { rerender, unmount } = render(view(false));
+    const restore = screen.getByRole('button', { name: 'Restore drawing' });
+    restore.focus();
+    rerender(view(true));
+    const confirmation = screen.getByRole('textbox', { name: 'Confirmation' });
+    expect(confirmation).toHaveFocus();
+    const background = screen.getByRole('button', { name: 'Background editor' });
+    background.focus();
+    expect(confirmation).toHaveFocus();
+    restore.focus();
+    expect(confirmation).toHaveFocus();
+    rerender(view(false));
+    expect(restore).toHaveFocus();
+    background.focus();
+    expect(restore).toHaveFocus();
+    rerender(view(false, true));
+    background.focus();
+    expect(background).toHaveFocus();
+    rerender(view(false));
+    // Revealing a hidden parent preserves its previous inner focus target.
+    screen.getByRole('button', { name: 'Close' }).focus();
+    restore.focus();
+    background.focus();
+    expect(restore).toHaveFocus();
+    unmount();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('falls back inside the dialog after its focused action is removed and tabs from a status', () => {
+    const view = (action: boolean) => (
+      <>
+        <button>Background editor</button>
+        <Modal title="Restore" onClose={vi.fn()}>
+          <a href="https://example.com">Help</a>
+          <a href="https://example.com/source">Source</a>
+          <p role="status" tabIndex={-1}>
+            Restored drawing.
+          </p>
+          {action && <button>Restore drawing</button>}
+        </Modal>
+      </>
+    );
+    const { rerender } = render(view(true));
+    screen.getByRole('button', { name: 'Restore drawing' }).focus();
+    rerender(view(false));
+    screen.getByRole('button', { name: 'Background editor' }).focus();
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close).toHaveFocus();
+    const link = screen.getByRole('link', { name: 'Help' });
+    link.focus();
+    // Let the browser advance between ordinary links in its native tab order.
+    expect(fireEvent.keyDown(link, { key: 'Tab' })).toBe(true);
+    const status = screen.getByRole('status');
+    status.focus();
+    fireEvent.keyDown(status, { key: 'Tab' });
+    expect(close).toHaveFocus();
+    status.focus();
+    fireEvent.keyDown(status, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('link', { name: 'Source' })).toHaveFocus();
+  });
 });

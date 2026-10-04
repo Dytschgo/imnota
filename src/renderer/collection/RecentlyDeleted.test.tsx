@@ -1,5 +1,6 @@
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import type { Collection, ImnotaBridge } from '../../shared/types';
@@ -101,6 +102,64 @@ describe('RecentlyDeleted', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Restore screenshot: Payment form' })).toBeNull();
   });
+
+  it.each(['before', 'after'] as const)(
+    'keeps restore focus inside the dialog when the background editor loads %s the status',
+    async (ordering) => {
+      const drawings = [1, 2].map((id) => ({
+        ...shot,
+        kind: 'drawing' as const,
+        undoToken: `drawing-delete-${id}`,
+        itemId: `drawing-${id}`,
+        title: `Drawing ${id}`,
+      }));
+      bridge(drawings, [drawings[1]], []);
+      let finishRestore: (value: RecentlyDeletedRestoreResult) => void = () => undefined;
+      const onRestore = vi.fn(
+        () => new Promise<RecentlyDeletedRestoreResult>((resolve) => (finishRestore = resolve)),
+      );
+      // Excalidraw focuses its container when it mounts. Resolve that background
+      // load explicitly on either side of the dialog's restore announcement.
+      function BackgroundEditor({ itemId }: { itemId: string }) {
+        const ref = useRef<HTMLDivElement>(null);
+        useEffect(() => ref.current?.focus(), [itemId]);
+        return <div ref={ref} tabIndex={0} aria-label="Background drawing editor" />;
+      }
+      const view = (itemId: string) => (
+        <>
+          <RecentlyDeleted projectPath="/workspace/project" collections={collections} onRestore={onRestore} />
+          {itemId && <BackgroundEditor itemId={itemId} />}
+        </>
+      );
+      const { rerender } = render(view(''));
+      const trigger = screen.getByRole('button', { name: 'Recently deleted' });
+      trigger.focus();
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole('dialog');
+
+      for (const drawing of drawings) {
+        const restore = await screen.findByRole('button', { name: `Restore drawing: ${drawing.title}` });
+        restore.focus();
+        fireEvent.click(restore);
+        if (ordering === 'before') {
+          rerender(view(drawing.itemId));
+          expect(dialog).toContainElement(document.activeElement as HTMLElement);
+        }
+        await act(async () => finishRestore(null));
+        const status = within(dialog).getByRole('status');
+        await waitFor(() => {
+          expect(status).toHaveTextContent(`Restored “${drawing.title}”.`);
+          expect(status).toHaveFocus();
+        });
+        if (ordering === 'after') rerender(view(drawing.itemId));
+        expect(status).toHaveFocus();
+      }
+
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(trigger).toHaveFocus();
+    },
+  );
 
   it('keeps the item and shows why when Undo reports a conflict', async () => {
     bridge([shot], [shot]);
