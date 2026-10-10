@@ -357,11 +357,25 @@ describe('prompt bundle planning', () => {
     expect(redacted.kind).toBe('ready');
     if (redacted.kind !== 'ready') return;
     expect(redacted.bundles[0].markdown).toContain(
-      '### Picture 1 / Marks\n\n- rectangle `r4` at 10.0%,20.0% 30.0%×15.0%',
+      '### Picture 1 / Marks\n\n- rectangle `r4` at 10.0%,20.0% 30.0%×15.0%\n- 2 redacted regions\n',
     );
     expect(redacted.bundles[0].markdown).not.toContain('blur');
     expect(redacted.bundles[0].markdown).not.toContain('pixelate');
-    expect(redacted.bundles[0].markdown).not.toContain('33.0%');
+    expect(redacted.bundles[0].markdown).not.toContain('pixels');
+    // No redaction position or size, in percent or pixels.
+    for (const leaked of [
+      '33.0%',
+      '44.0%',
+      '55.0%',
+      '16.0%',
+      '12.0%',
+      '8.0%',
+      '9.0%',
+      '7.0%',
+      '55×16',
+      '9×7',
+    ])
+      expect(redacted.bundles[0].markdown).not.toContain(leaked);
   });
 
   it('appends Visible text from injected OCR and omits it for redacted screenshots', () => {
