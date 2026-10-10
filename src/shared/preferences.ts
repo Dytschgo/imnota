@@ -170,6 +170,11 @@ export interface ExportPreset {
 /** Application export Markdown options. Not stored on project.json. */
 export interface PromptExportPreferences {
   includeRecognisedText: boolean;
+  /**
+   * Record app, window title and time at capture or import, and write them into exported
+   * Markdown. Stays on this device unless the user shares an export. Off by default.
+   */
+  includeSourceContext: boolean;
 }
 
 export interface PreferenceSettings {
@@ -232,7 +237,10 @@ export const DEFAULT_WORKBENCH: WorkbenchPreferences = {
 export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = {};
 export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultFunction: 'files' };
 export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
-export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = { includeRecognisedText: false };
+export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = {
+  includeRecognisedText: false,
+  includeSourceContext: false,
+};
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {
   appearance: DEFAULT_APPEARANCE,

@@ -119,6 +119,8 @@ import type {
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
+import type { CaptureSourceDetails } from './capture-source.js';
+import { createScreenshotSource, type ScreenshotSource } from '../src/shared/source-context.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
@@ -900,6 +902,13 @@ async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRe
   };
 }
 
+/** Source info is recorded only while the user's setting is on; nothing leaves the device. */
+function recordedSource(source: () => ScreenshotSource): ScreenshotSource | undefined {
+  return preferenceSettingsResult.settings.promptExport.includeSourceContext ? source() : undefined;
+}
+
+const withSource = (source: ScreenshotSource | undefined) => (source ? { source } : {});
+
 async function importOne(
   projectPath: string,
   sourcePath: string,
@@ -939,6 +948,7 @@ async function importOne(
     originalWidth: image.getSize().width,
     originalHeight: image.getSize().height,
     includeInExport: true,
+    ...withSource(recordedSource(() => createScreenshotSource({ via: 'import', now: new Date() }))),
   });
   const added = project.screenshots.at(-1)!;
   await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
@@ -1372,6 +1382,8 @@ async function insertCapturedPng(
   collectionId: string,
   png: Buffer,
   assertAdmission: () => void,
+  sourceDetails: CaptureSourceDetails = {},
+  capturedAt = new Date(),
 ): Promise<{
   snapshot: ProjectSnapshot;
   screenshotId: string;
@@ -1439,6 +1451,9 @@ async function insertCapturedPng(
     originalWidth: dimensions.width,
     originalHeight: dimensions.height,
     includeInExport: true,
+    ...withSource(
+      recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...sourceDetails })),
+    ),
   };
   project.screenshots.push(screenshot);
   collection.archived = false;

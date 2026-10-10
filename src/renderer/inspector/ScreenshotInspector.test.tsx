@@ -59,3 +59,43 @@ it('offers deletion only while an annotation is selected', () => {
   renderInspector(null);
   expect(screen.queryByRole('button', { name: 'Delete annotation' })).not.toBeInTheDocument();
 });
+
+it('edits and removes recorded source info, and explains when it is off', () => {
+  const onUpdateShot = vi.fn();
+  const source = {
+    via: 'capture' as const,
+    capturedAt: '2026-10-10T10:15:00.000Z',
+    app: 'Visual Studio Code',
+    windowTitle: 'C:\\Users\\Dylan\\App.tsx - Visual Studio Code',
+  };
+  const props = {
+    selectedAnnotation: null,
+    onUpdateShot,
+    onDescriptionChange: vi.fn(),
+    onUndoDescription: vi.fn(),
+    canUndoDescription: false,
+    onChangeAnnotation: vi.fn(),
+    onDeleteAnnotation: vi.fn(),
+    onDuplicate: vi.fn(),
+  };
+  const { rerender } = render(
+    <ScreenshotInspector {...props} shot={{ ...shot, source }} sourceContextEnabled />,
+  );
+  expect(screen.getByLabelText('Window title')).toHaveValue('C:\\Users\\Dylan\\App.tsx - Visual Studio Code');
+  expect(screen.getByText(/Written into exported Markdown/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://shop.example' } });
+  expect(onUpdateShot).toHaveBeenLastCalledWith({ source: { ...source, url: 'https://shop.example' } });
+  fireEvent.change(screen.getByLabelText('App'), { target: { value: '' } });
+  expect(onUpdateShot).toHaveBeenLastCalledWith({
+    source: { via: 'capture', capturedAt: source.capturedAt, windowTitle: source.windowTitle },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove source info' }));
+  expect(onUpdateShot).toHaveBeenLastCalledWith({ source: undefined });
+
+  rerender(<ScreenshotInspector {...props} shot={{ ...shot, source }} sourceContextEnabled={false} />);
+  expect(screen.getByText(/Not exported while source info is off/)).toBeInTheDocument();
+  // Off is the default.
+  rerender(<ScreenshotInspector {...props} shot={shot} />);
+  expect(screen.getByText(/Source info is off/)).toBeInTheDocument();
+  expect(screen.queryByLabelText('Window title')).not.toBeInTheDocument();
+});

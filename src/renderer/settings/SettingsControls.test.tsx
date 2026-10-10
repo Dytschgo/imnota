@@ -252,8 +252,35 @@ describe('preference controls', () => {
     const toggle = screen.getByRole('checkbox', { name: 'Include recognised text in Markdown' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    await waitFor(() => expect(onPromptExportChange).toHaveBeenCalledWith({ includeRecognisedText: true }));
+    await waitFor(() =>
+      expect(onPromptExportChange).toHaveBeenCalledWith({
+        includeRecognisedText: true,
+        includeSourceContext: false,
+      }),
+    );
   });
+});
+
+it('defaults source info off and emits a persisted change when turned on', async () => {
+  const onPromptExportChange = vi.fn(async () => {});
+  render(
+    <SettingsView
+      activeCategory="Features"
+      preferences={DEFAULT_PREFERENCE_SETTINGS}
+      onPromptExportChange={onPromptExportChange}
+    />,
+  );
+  const toggle = screen.getByRole('checkbox', { name: 'Record source info' });
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByText(/Imnota sends it nowhere/)).toBeInTheDocument();
+  expect(screen.getByText(/want it exported. Off by default./)).toBeInTheDocument();
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(onPromptExportChange).toHaveBeenCalledWith({
+      includeRecognisedText: false,
+      includeSourceContext: true,
+    }),
+  );
 });
 
 function PreferenceSaveHarness({ panel }: { panel: 'appearance' | 'shortcuts' }) {
