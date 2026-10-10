@@ -410,7 +410,33 @@ export function SettingsView({
                 onChange={(event) => {
                   const includeRecognisedText = event.target.checked;
                   void Promise.resolve()
-                    .then(() => onPromptExportChange?.({ includeRecognisedText }))
+                    .then(() =>
+                      onPromptExportChange?.({ ...preferences.promptExport, includeRecognisedText }),
+                    )
+                    .catch(() => undefined);
+                }}
+              />
+            </label>
+            <label className="settings-switch">
+              <span>
+                <strong>Record source info</strong>
+                <small>
+                  Saves the app, window title and time with each new capture or import, and writes them under
+                  the picture in Copy Bundle Markdown. Window titles can contain private details; edit or
+                  remove them per screenshot in the inspector. Stored only in your project; Imnota sends it
+                  nowhere. A browser URL is never read automatically; type one in the inspector if you want it
+                  exported.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Record source info"
+                checked={preferences.promptExport.includeSourceContext}
+                disabled={savingPreferences || !onPromptExportChange}
+                onChange={(event) => {
+                  const includeSourceContext = event.target.checked;
+                  void Promise.resolve()
+                    .then(() => onPromptExportChange?.({ ...preferences.promptExport, includeSourceContext }))
                     .catch(() => undefined);
                 }}
               />

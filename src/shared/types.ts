@@ -1,3 +1,4 @@
+import type { ScreenshotSource } from './source-context.js';
 import type {
   ClipboardFormatsReport,
   OnboardingHandoffAction,
@@ -70,6 +71,8 @@ export interface ScreenshotRecord {
   originalHeight: number;
   includeInExport: boolean;
   conflict?: boolean;
+  /** Recorded at capture or import while source info is on; editable and removable. */
+  source?: ScreenshotSource;
 }
 
 /** Version 1/2 note fields retained only for lossless migration. */

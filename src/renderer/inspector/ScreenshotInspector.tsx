@@ -3,6 +3,7 @@ import { Copy, PanelRight, Trash2, Undo2 } from 'lucide-react';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ANNOTATION_COLORS } from '../canvas/annotation-layout';
 import { Button, EmptyState, TextArea, TextInput } from '../components/ui';
+import { SourceInfoSection } from './SourceInfoSection';
 
 export interface ScreenshotInspectorProps {
   headerAction?: ReactNode;
@@ -16,6 +17,8 @@ export interface ScreenshotInspectorProps {
   onDeleteAnnotation(): void;
   onDuplicate(): void | Promise<void>;
   duplicateShortcut?: string;
+  /** Source info setting; defaults to on. */
+  sourceContextEnabled?: boolean;
 }
 
 export function ScreenshotInspector({
@@ -30,6 +33,7 @@ export function ScreenshotInspector({
   onDeleteAnnotation,
   onDuplicate,
   duplicateShortcut,
+  sourceContextEnabled = true,
 }: ScreenshotInspectorProps) {
   if (!shot)
     return (
@@ -111,6 +115,7 @@ export function ScreenshotInspector({
             </p>
           )}
         </section>
+        <SourceInfoSection source={shot.source} enabled={sourceContextEnabled} onUpdateShot={onUpdateShot} />
         {selectedAnnotation && (
           <section
             className="annotation-properties inspector-section"

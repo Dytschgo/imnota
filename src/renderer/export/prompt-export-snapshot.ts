@@ -28,6 +28,8 @@ export interface PromptExportSnapshotCaptureOptions {
   signal: AbortSignal;
   reuseCheck: boolean;
   includeRecognisedText: boolean;
+  /** Omitted means on, matching the setting's default. */
+  includeSourceContext?: boolean;
   assertActive(): void;
   loadContentItem(input: { projectPath: string; itemId: string }): Promise<{
     item: CollectionContentItem;
@@ -234,6 +236,7 @@ export async function capturePromptExportSnapshot(
         contentRevision: loaded.contentRevision,
         annotations,
         ...(visibleText ? { visibleText } : {}),
+        ...(options.includeSourceContext !== false && screenshot.source ? { source: screenshot.source } : {}),
       });
     }
   } finally {

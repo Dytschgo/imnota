@@ -130,7 +130,24 @@ describe('profile-aware preference settings', () => {
     expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(false);
     expect(
       mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
-    ).toEqual({ includeRecognisedText: false });
+    ).toEqual({ includeRecognisedText: false, includeSourceContext: true });
+    expect(withoutPromptExport.settings.promptExport.includeSourceContext).toBe(true);
+    // A profile saved before source info existed gets the default; a patch never re-enables it.
+    const olderPromptExport = resolvePreferenceSettings(
+      { preferences: { ...current, promptExport: { includeRecognisedText: true } } },
+      true,
+    );
+    expect(olderPromptExport.settings.promptExport).toEqual({
+      includeRecognisedText: true,
+      includeSourceContext: true,
+    });
+    const off = mergePreferenceSettings(current, { promptExport: { includeSourceContext: false } });
+    expect(
+      mergePreferenceSettings(
+        off,
+        preferenceSettingsUpdateSchema.parse({ promptExport: { includeRecognisedText: true } }),
+      ).promptExport,
+    ).toEqual({ includeRecognisedText: true, includeSourceContext: false });
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });
