@@ -4,7 +4,7 @@ Imnota has two update channels in the same public GitHub repository. Stable is t
 
 ## Choose a channel
 
-Open **Settings → App updates → Update channel**. Selecting **Nightly (preview)** asks you to confirm and back up your workspace. **Keep Stable** cancels without changing preferences. The selected channel is saved locally and used by both Settings and the sidebar refresh button.
+Open **Settings → Updates & about → App updates → Update channel**. Selecting **Nightly (preview)** asks you to confirm and back up your workspace. **Keep Stable** cancels without changing preferences. The selected channel is saved locally and used by both Settings and the sidebar refresh button.
 
 Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit, replaces the app and retains a backup. It does not require Developer ID signing, administrator privileges or removal of quarantine.
 
