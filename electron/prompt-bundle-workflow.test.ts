@@ -103,6 +103,31 @@ describe('main-owned prompt bundle grants', () => {
     expect(copyText).toHaveBeenCalledTimes(1);
   });
 
+  it('copies a quoted terminal hand-off with a summary, and a WSL variant only on Windows', async () => {
+    const { workflow, projectPath, collectionId, copyText } = await fixture();
+    const session = await workflow.start(projectPath, collectionId, manifest);
+    await workflow.write(session.sessionId, 1, pngDataUrl(), '# Context\n\nBundle 1 of 1\n');
+    const final = await workflow.finish(session.sessionId);
+    const folder = path.join(projectPath, 'collections', collectionId, 'exports', session.setName);
+    const markdown = path.join(folder, final.bundles[0].markdownFilename);
+    const png = path.join(folder, final.bundles[0].pngFilename);
+    await workflow.copy(session.sessionId, 1, 'terminal');
+    const text = copyText.mock.lastCall?.[0] as string;
+    expect(text.split('\n').slice(0, 1)).toEqual(['Imnota: Context (bundle 1 of 1)']);
+    const quote =
+      process.platform === 'win32' ? (value: string) => `"${value}"` : (value: string) => `'${value}'`;
+    expect(text).toContain(`Markdown: ${quote(markdown)}`);
+    expect(text).toContain(`Image: ${quote(png)}`);
+    expect(text.endsWith('\n')).toBe(false);
+    if (process.platform !== 'win32')
+      await expect(workflow.copy(session.sessionId, 1, 'terminal-wsl')).rejects.toThrow(
+        /only offered on Windows/,
+      );
+    await fs.unlink(png);
+    await expect(workflow.copy(session.sessionId, 1, 'terminal')).rejects.toThrow();
+    expect(copyText).toHaveBeenCalledTimes(1);
+  });
+
   it('does not write any clipboard representation if combined preparation fails', async () => {
     const { workflow, projectPath, collectionId, copyText, copyImage, copyContext } = await fixture();
     const session = await workflow.start(projectPath, collectionId, manifest);

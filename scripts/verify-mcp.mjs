@@ -281,6 +281,14 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
       );
       await writeFile(join(folder, `${setName} - 01.md`), markdown);
       await writeFile(join(folder, `${setName} - 01.png`), png);
+      const archivedPath = join(workspace, 'archived-project');
+      const archivedProject = emptyProject('Archived MCP fixture', '', 'Synthetic');
+      archivedProject.status = 'archived';
+      const archivedFolder = join(archivedPath, 'collections', collectionId, 'exports', setName);
+      await mkdir(archivedFolder, { recursive: true });
+      await writeFile(join(archivedPath, 'project.json'), JSON.stringify(archivedProject));
+      await writeFile(join(archivedFolder, `${setName} - 01.md`), markdown);
+      await writeFile(join(archivedFolder, `${setName} - 01.png`), png);
       const before = await snapshot(workspace);
       for (const enabled of [false, true]) {
         const profile = join(runRoot, enabled ? 'mcp-enabled' : 'mcp-disabled');
@@ -313,7 +321,13 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(init.result.serverInfo.version, version);
             assert.equal(init.result.serverInfo.name, 'imnota');
             const tools = await request('tools/list', {});
-            for (const name of ['list_projects', 'list_collections', 'get_bundle', 'get_latest_bundle'])
+            for (const name of [
+              'list_projects',
+              'list_collections',
+              'get_bundle',
+              'get_latest_bundle',
+              'list_new_since',
+            ])
               assert.ok(
                 tools.result.tools.some((tool) => tool.name === name),
                 `Missing ${name}`,
@@ -329,6 +343,26 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(collections.length, 2);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
+            for (const args of [{}, { projectPath, limit: 1 }]) {
+              const inbox = await call('list_new_since', args);
+              assert.equal(inbox.isError, false);
+              const result = JSON.parse(inbox.content[0].text);
+              assert.equal(result.bundles.length, 1);
+              assert.equal(result.bundles[0].id, id);
+              assert.equal(result.bundles[0].projectPath, projectPath);
+              assert.equal(result.bundles[0].folderPath, folder);
+              assert.equal(result.bundles[0].preparedAt, '2026-09-13T12:00:00');
+              assert.equal(result.more, false);
+            }
+            for (const args of [
+              { projectPath: archivedPath },
+              { projectPath, since: '2026-09-13T12:00:00' },
+            ]) {
+              const inbox = await call('list_new_since', args);
+              assert.equal(inbox.isError, false);
+              assert.deepEqual(JSON.parse(inbox.content[0].text).bundles, []);
+              assert.equal(JSON.parse(inbox.content[0].text).more, false);
+            }
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],

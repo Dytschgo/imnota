@@ -107,6 +107,9 @@ interface McpTool {
   handle(args: Record<string, unknown>): Promise<unknown>;
 }
 
+const MAX_LISTED_NEW_BUNDLES = 50;
+const DEFAULT_LISTED_NEW_BUNDLES = 10;
+
 const projectPathSchema = z.string().min(1).max(2000);
 const collectionIdSchema = filenameSchema;
 const itemIdSchema = z.string().min(1).max(200);
@@ -119,6 +122,15 @@ const listCollectionItemsInput = z
 const listCollectionsInput = z.object({ projectPath: projectPathSchema }).strict();
 const getLatestBundleInput = z
   .object({ projectPath: projectPathSchema.optional(), collectionId: collectionIdSchema.optional() })
+  .strict();
+/** Local wall-clock time in the same shape as `preparedAt`, so the comparison is a fixed-width string order. */
+const preparedAtSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+const listNewSinceInput = z
+  .object({
+    since: preparedAtSchema.optional(),
+    projectPath: projectPathSchema.optional(),
+    limit: z.number().int().min(1).max(MAX_LISTED_NEW_BUNDLES).optional(),
+  })
   .strict();
 /** Opaque identifier: a fixed-shape digest that cannot carry separators, dots or drive letters. */
 const bundleIdSchema = z.string().regex(BUNDLE_ID);
@@ -662,6 +674,47 @@ export function createMcpTools(
         const bundle = await firstReadable(sets);
         if (!bundle) throw new Error(BUNDLE_NOT_PREPARED);
         return bundle;
+      },
+    },
+    {
+      name: 'list_new_since',
+      description:
+        'List already-prepared bundles newer than `since` (local time YYYY-MM-DDTHH:MM:SS, the preparedAt format), newest first. Without `since` it lists the most recent ones. Active projects and collections only; projectPath narrows to one project. Returns ids, paths and times only: read one with get_bundle. Does not generate an export.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          since: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$' },
+          projectPath: { type: 'string', minLength: 1, maxLength: 2000 },
+          limit: { type: 'integer', minimum: 1, maximum: MAX_LISTED_NEW_BUNDLES },
+        },
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = listNewSinceInput.parse(args);
+        let sets: PreparedSet[];
+        if (input.projectPath) {
+          const projectPath = await authorize(input.projectPath);
+          const project = await readProjectDocument(projectPath);
+          sets =
+            project.status === 'active'
+              ? await projectSets(projectPath, project, (collection) => !collection.archived)
+              : [];
+        } else sets = await workspaceSets(true);
+        const { since } = input;
+        const newer = sets.filter((set) => !since || set.preparedAt > since).sort(compareLatest);
+        const limit = input.limit ?? DEFAULT_LISTED_NEW_BUNDLES;
+        return {
+          ...(since ? { since } : {}),
+          bundles: newer.slice(0, limit).map((set) => ({
+            id: set.id,
+            setName: set.setName,
+            projectPath: set.projectPath,
+            collectionId: set.collectionId,
+            preparedAt: set.preparedAt,
+            folderPath: set.folder,
+          })),
+          more: newer.length > limit,
+        };
       },
     },
     {

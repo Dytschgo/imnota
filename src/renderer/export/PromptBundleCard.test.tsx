@@ -383,6 +383,39 @@ it('identifies prepared formats and exposes generated filenames and path copying
   );
 });
 
+it('offers Copy for terminal everywhere and the WSL path variant only on Windows', () => {
+  const copyForTerminal = vi.fn();
+  const { unmount } = render(
+    <PromptBundleCard
+      bundle={model({})}
+      platform="windows"
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyForTerminal={copyForTerminal}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy for terminal (WSL paths)' }));
+  expect(copyForTerminal).toHaveBeenLastCalledWith(expect.objectContaining({ bundleNumber: 2 }), true);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy for terminal' }));
+  expect(copyForTerminal).toHaveBeenLastCalledWith(expect.objectContaining({ bundleNumber: 2 }), false);
+  unmount();
+  render(
+    <PromptBundleCard
+      bundle={model({ outcome: 'terminal' })}
+      platform="mac"
+      onCopyFresh={vi.fn()}
+      onPrepareFreshFiles={vi.fn()}
+      onCopyForTerminal={copyForTerminal}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Last copied: Terminal hand-off');
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  expect(screen.getByRole('menuitem', { name: 'Copy for terminal' })).toBeEnabled();
+  expect(screen.queryByRole('menuitem', { name: /WSL/ })).not.toBeInTheDocument();
+});
+
 it('does not claim Markdown + image prepared when only one format is confirmed', () => {
   render(
     <PromptBundleCard

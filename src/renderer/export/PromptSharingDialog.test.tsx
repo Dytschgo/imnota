@@ -162,6 +162,7 @@ it.each([false, true])(
       copyImage: vi.fn(success),
       openFiles: vi.fn(success),
       copyPaths: vi.fn(success),
+      copyForTerminal: vi.fn(success),
       openFolder: vi.fn(success),
       cancel: vi.fn(success),
       loadPreview: vi.fn(success),
