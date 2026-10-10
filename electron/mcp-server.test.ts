@@ -218,6 +218,7 @@ describe('local MCP server lifecycle', () => {
       'list_collections',
       'list_collection_items',
       'get_latest_bundle',
+      'list_new_since',
       'get_bundle',
       'get_item',
       'search_saved_text',
@@ -260,6 +261,53 @@ describe('local MCP tools', () => {
         collectionId: '../exports',
       }),
     ).rejects.toThrow();
+  });
+
+  it('lists bundles newer than a time, newest first, without content or writes', async () => {
+    const root = await workspace();
+    const project = projectData();
+    project.collections.push({ ...project.collections[0]!, id: '002-archived', name: 'Old', archived: true });
+    const projectPath = await writeProject(root, project);
+    await writeBundle(projectPath, 'Review - 260901-090000');
+    await writeBundle(projectPath, 'Review - 260902-110000');
+    await writeBundle(projectPath, 'Review - 260902-120000');
+    await writeBundle(projectPath, 'Old - 260902-123000', '# Archived', TEST_PNG, '002-archived');
+    const before = await savedFiles(root);
+    const listed = (await callTool(root, 'list_new_since', { since: '2026-09-02T11:00:00' })) as {
+      bundles: Array<{ id: string; setName: string; preparedAt: string; folderPath: string }>;
+      more: boolean;
+    };
+    expect(listed.bundles.map((bundle) => bundle.setName)).toEqual(['Review - 260902-120000']);
+    expect(listed.bundles[0]).toMatchObject({ preparedAt: '2026-09-02T12:00:00', projectPath });
+    expect(listed.bundles[0]).not.toHaveProperty('markdown');
+    expect(listed.more).toBe(false);
+    // The id is the same one get_bundle accepts.
+    const read = (await callTool(root, 'get_bundle', { id: listed.bundles[0]!.id })) as BundleResult;
+    expect(read.setName).toBe('Review - 260902-120000');
+
+    const recent = (await callTool(root, 'list_new_since', { projectPath, limit: 2 })) as typeof listed;
+    expect(recent.bundles.map((bundle) => bundle.setName)).toEqual([
+      'Review - 260902-120000',
+      'Review - 260902-110000',
+    ]);
+    expect(recent.more).toBe(true);
+    expect(await savedFiles(root)).toEqual(before);
+  });
+
+  it('keeps list_new_since inside the workspace and behind the access switch', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    await writeBundle(projectPath);
+    await expect(
+      callTool(root, 'list_new_since', { projectPath: path.join(root, '..', 'outside') }),
+    ).rejects.toThrow(/outside the selected workspace/);
+    await expect(
+      callTool(root, 'list_new_since', { projectPath: 'C:\\Users\\someone\\Elsewhere' }),
+    ).rejects.toThrow(/outside the selected workspace/);
+    await expect(callTool(root, 'list_new_since', { since: '10/10/2026' })).rejects.toThrow();
+    await expect(callTool(root, 'list_new_since', { limit: 51 })).rejects.toThrow();
+    const off = toolsFor(root, false).find((tool) => tool.name === 'list_new_since')!;
+    await expect(off.handle({})).rejects.toThrow('Local agent access is off.');
   });
 
   it('errors get_latest_bundle without creating an export', async () => {

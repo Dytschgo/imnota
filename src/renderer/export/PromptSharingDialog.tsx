@@ -33,6 +33,7 @@ export interface PromptSharingDialogProps {
   onCopyImage?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
+  onCopyForTerminal?(request: PromptBundleActionRequest, wsl: boolean): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
@@ -78,6 +79,7 @@ export function PromptSharingDialog({
   onCopyImage,
   onOpenFiles,
   onCopyPaths,
+  onCopyForTerminal,
   onLoadPreview,
   onOpenExportFolder,
   onCancel,
@@ -185,6 +187,7 @@ export function PromptSharingDialog({
                 onCopyImage={onCopyImage}
                 onOpenFiles={onOpenFiles}
                 onCopyPaths={onCopyPaths}
+                onCopyForTerminal={onCopyForTerminal}
                 onLoadPreview={onLoadPreview}
               />
             ))}

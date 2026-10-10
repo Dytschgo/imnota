@@ -1127,6 +1127,20 @@ describe('prompt export controller orchestration', () => {
     });
   });
 
+  test('copies the terminal hand-off and its WSL variant through the main-owned grant', async () => {
+    const native = fakeBridge();
+    const renderer = fakeRendering();
+    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
+    await controller.open();
+    expect((await controller.copyForTerminal(controller.getState().cards[0])).ok).toBe(true);
+    expect((await controller.copyForTerminal(1, true)).ok).toBe(true);
+    expect(native.copies).toEqual([
+      { sessionId: 'session-1', bundleNumber: 1, target: 'terminal' },
+      { sessionId: 'session-1', bundleNumber: 1, target: 'terminal-wsl' },
+    ]);
+    expect(controller.getState().cards[0]).toMatchObject({ outcome: 'terminal' });
+  });
+
   test('reports a partial Windows clipboard write and points at the separate fallback', async () => {
     const native = fakeBridge({ placed: { text: true, html: true, image: false, files: false } });
     const renderer = fakeRendering();
