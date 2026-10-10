@@ -38,7 +38,7 @@ import {
   type SmokePoint,
 } from './smoke-native-driver.js';
 
-export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard';
+export type SmokeWorkflowMode = 'smoke' | 'stress' | 'clipboard' | 'faults';
 
 export interface SmokeWorkflowHost {
   diagnosticsHealth(): ReturnType<PersistenceDiagnostics['health']>;
@@ -68,6 +68,7 @@ export interface SmokeWorkflowOptions {
   version: string;
   expectedVersion?: string;
   mode?: SmokeWorkflowMode;
+  faultController?: import('./smoke-fault-controller.js').OwnedSmokeFaultController;
 }
 
 export interface SmokeMemoryReading {
@@ -103,6 +104,7 @@ export interface SmokeWorkflowReport {
   assertions: string[];
   diagnosticsHealth: ReturnType<PersistenceDiagnostics['health']>;
   capture?: Awaited<ReturnType<typeof exerciseRegionCapture>>;
+  faults?: Awaited<ReturnType<typeof import('./native-fault-smoke.js').exerciseNativeFaultCases>>;
 }
 
 interface FixtureSource {
@@ -2789,6 +2791,27 @@ export async function runSmokeWorkflow(
   const timings: SmokeTiming[] = [];
   const checkpoint = await createSmokeCheckpoint(artifactDirectory);
   await checkpoint('starting isolated native workflow');
+  if (mode === 'faults') {
+    if (!options.faultController || !artifactDirectory)
+      throw new Error('Fault verification requires owned operands.');
+    const { exerciseNativeFaultCases } = await import('./native-fault-smoke.js');
+    const driver = new NativeUiDriver(activeWindow, 15_000);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
+    const faults = await exerciseNativeFaultCases(driver, host, options.faultController);
+    const report: SmokeWorkflowReport = {
+      passed: true,
+      version: options.version,
+      mode,
+      artifacts: faults.artifacts,
+      timings: [],
+      assertions: faults.cases.map((value) => value.caseId),
+      faults,
+      diagnosticsHealth: host.diagnosticsHealth(),
+    };
+    await writeReportArtifact(artifactDirectory, report);
+    return report;
+  }
   const sources = await createFixtureSources(fixtureRoot);
   const driver = new NativeUiDriver(activeWindow, mode === 'stress' ? 30_000 : 15_000);
   if (!activeWindow.isVisible()) activeWindow.show();
