@@ -294,6 +294,26 @@ describe('local MCP tools', () => {
     expect(await savedFiles(root)).toEqual(before);
   });
 
+  it('excludes archived projects from broad and narrowed list_new_since queries without writes', async () => {
+    const root = await workspace();
+    const activePath = await writeProject(root, projectData('active-project'));
+    const archived = projectData('archived-project');
+    archived.status = 'archived';
+    const archivedPath = await writeProject(root, archived);
+    await writeBundle(activePath);
+    await writeBundle(archivedPath);
+    const before = await savedFiles(root);
+    const listed = (await callTool(root, 'list_new_since', {})) as {
+      bundles: Array<{ projectPath: string }>;
+    };
+    expect(listed.bundles.map((bundle) => bundle.projectPath)).toEqual([activePath]);
+    expect(await callTool(root, 'list_new_since', { projectPath: archivedPath })).toEqual({
+      bundles: [],
+      more: false,
+    });
+    expect(await savedFiles(root)).toEqual(before);
+  });
+
   it('keeps list_new_since inside the workspace and behind the access switch', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());

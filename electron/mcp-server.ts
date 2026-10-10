@@ -695,7 +695,10 @@ export function createMcpTools(
         if (input.projectPath) {
           const projectPath = await authorize(input.projectPath);
           const project = await readProjectDocument(projectPath);
-          sets = await projectSets(projectPath, project, (collection) => !collection.archived);
+          sets =
+            project.status === 'active'
+              ? await projectSets(projectPath, project, (collection) => !collection.archived)
+              : [];
         } else sets = await workspaceSets(true);
         const { since } = input;
         const newer = sets.filter((set) => !since || set.preparedAt > since).sort(compareLatest);
