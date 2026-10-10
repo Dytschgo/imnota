@@ -82,23 +82,31 @@ describe('template project creation', () => {
   it('waits for every started writer before cleanup and never leaves a late staging file', async () => {
     const root = await workspace();
     let calls = 0;
-    await expect(
-      createTemplateProject(
-        root,
-        { name: 'Delayed failure', description: '', templateId: 'bug-report' },
-        {
-          randomId: () => 'delayed',
-          write: async (target, value) => {
-            calls += 1;
-            if (calls === 2) throw new Error('disk unavailable');
-            await new Promise((resolve) => setTimeout(resolve, 25));
-            await fs.mkdir(path.dirname(target), { recursive: true });
-            await fs.writeFile(target, value);
-          },
+    let releaseFirstWriter!: () => void;
+    const firstWriterGate = new Promise<void>((resolve) => (releaseFirstWriter = resolve));
+    let firstWriterDone = false;
+    let settled = false;
+    const creation = createTemplateProject(
+      root,
+      { name: 'Delayed failure', description: '', templateId: 'bug-report' },
+      {
+        randomId: () => 'delayed',
+        write: async (target, value) => {
+          calls += 1;
+          if (calls === 2) throw new Error('disk unavailable');
+          await firstWriterGate;
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, value);
+          firstWriterDone = true;
         },
-      ),
-    ).rejects.toThrow('disk unavailable');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+      },
+    ).finally(() => (settled = true));
+    await vi.waitFor(() => expect(calls).toBe(1));
+    // The first writer is still in flight, so creation must not have failed or cleaned up yet.
+    expect(settled).toBe(false);
+    releaseFirstWriter();
+    await expect(creation).rejects.toThrow('disk unavailable');
+    expect(firstWriterDone).toBe(true);
     expect(calls).toBe(2);
     expect(await fs.readdir(root)).toEqual([]);
   });
