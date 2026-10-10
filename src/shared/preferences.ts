@@ -172,7 +172,7 @@ export interface PromptExportPreferences {
   includeRecognisedText: boolean;
   /**
    * Record app, window title and time at capture or import, and write them into exported
-   * Markdown. Stays on this device unless the user shares an export. On by default.
+   * Markdown. Stays on this device unless the user shares an export. Off by default.
    */
   includeSourceContext: boolean;
 }
@@ -239,7 +239,7 @@ export const DEFAULT_NATIVE_COPY_PREFERENCES: NativeCopyPreferences = { defaultF
 export const DEFAULT_AGENT_ACCESS: AgentAccessPreferences = { enabled: false };
 export const DEFAULT_PROMPT_EXPORT_PREFERENCES: PromptExportPreferences = {
   includeRecognisedText: false,
-  includeSourceContext: true,
+  includeSourceContext: false,
 };
 
 export const DEFAULT_PREFERENCE_SETTINGS: PreferenceSettings = {

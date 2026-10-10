@@ -17,7 +17,7 @@ export interface ScreenshotInspectorProps {
   onDeleteAnnotation(): void;
   onDuplicate(): void | Promise<void>;
   duplicateShortcut?: string;
-  /** Source info setting; defaults to on. */
+  /** Source info setting; defaults to off. */
   sourceContextEnabled?: boolean;
 }
 
@@ -33,7 +33,7 @@ export function ScreenshotInspector({
   onDeleteAnnotation,
   onDuplicate,
   duplicateShortcut,
-  sourceContextEnabled = true,
+  sourceContextEnabled = false,
 }: ScreenshotInspectorProps) {
   if (!shot)
     return (

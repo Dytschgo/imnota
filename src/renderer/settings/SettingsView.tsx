@@ -425,7 +425,7 @@ export function SettingsView({
                   the picture in Copy Bundle Markdown. Window titles can contain private details; edit or
                   remove them per screenshot in the inspector. Stored only in your project; Imnota sends it
                   nowhere. A browser URL is never read automatically; type one in the inspector if you want it
-                  exported.
+                  exported. Off by default.
                 </small>
               </span>
               <input

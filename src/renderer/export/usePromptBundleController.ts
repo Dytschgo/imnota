@@ -87,7 +87,7 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
     engineRef.current = new PromptBundleControllerEngine({
       getSavedContext: () => getSavedContextRef.current(),
       getIncludeRecognisedText: () => getIncludeRecognisedTextRef.current?.() ?? true,
-      getIncludeSourceContext: () => getIncludeSourceContextRef.current?.() ?? true,
+      getIncludeSourceContext: () => getIncludeSourceContextRef.current?.() ?? false,
       bridge: options.bridge ?? browserBridge(),
       rendering: options.rendering,
       includeMasterOverview: options.includeMasterOverview,

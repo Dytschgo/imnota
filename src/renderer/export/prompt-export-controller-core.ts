@@ -221,7 +221,7 @@ export interface PromptBundleControllerEngineOptions {
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
   getIncludeRecognisedText?(): boolean;
-  /** Write each screenshot's recorded source info into the Markdown. Defaults to on. */
+  /** Write each screenshot's recorded source info into the Markdown. Defaults to off. */
   getIncludeSourceContext?(): boolean;
 }
 
@@ -250,7 +250,7 @@ export class PromptBundleControllerEngine {
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
     this.getIncludeRecognisedText = options.getIncludeRecognisedText ?? (() => true);
-    this.getIncludeSourceContext = options.getIncludeSourceContext ?? (() => true);
+    this.getIncludeSourceContext = options.getIncludeSourceContext ?? (() => false);
     this.pipeline = new PromptExportPipeline({
       bridge: this.bridge,
       rendering: this.rendering,

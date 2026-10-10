@@ -78,7 +78,9 @@ it('edits and removes recorded source info, and explains when it is off', () => 
     onDeleteAnnotation: vi.fn(),
     onDuplicate: vi.fn(),
   };
-  const { rerender } = render(<ScreenshotInspector {...props} shot={{ ...shot, source }} />);
+  const { rerender } = render(
+    <ScreenshotInspector {...props} shot={{ ...shot, source }} sourceContextEnabled />,
+  );
   expect(screen.getByLabelText('Window title')).toHaveValue('C:\\Users\\Dylan\\App.tsx - Visual Studio Code');
   expect(screen.getByText(/Written into exported Markdown/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://shop.example' } });
@@ -92,7 +94,8 @@ it('edits and removes recorded source info, and explains when it is off', () => 
 
   rerender(<ScreenshotInspector {...props} shot={{ ...shot, source }} sourceContextEnabled={false} />);
   expect(screen.getByText(/Not exported while source info is off/)).toBeInTheDocument();
-  rerender(<ScreenshotInspector {...props} shot={shot} sourceContextEnabled={false} />);
+  // Off is the default.
+  rerender(<ScreenshotInspector {...props} shot={shot} />);
   expect(screen.getByText(/Source info is off/)).toBeInTheDocument();
   expect(screen.queryByLabelText('Window title')).not.toBeInTheDocument();
 });

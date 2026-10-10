@@ -20,8 +20,8 @@ const nativeCopyPreferencesSchema = z
 const promptExportPreferencesSchema = z
   .object({
     includeRecognisedText: z.boolean(),
-    // Profiles saved before source info existed keep validating and get the default.
-    includeSourceContext: z.boolean().default(true),
+    // Profiles saved before source info existed keep validating and stay off.
+    includeSourceContext: z.boolean().default(false),
   })
   .strict();
 // Patches carry only supplied keys: Zod 4 would otherwise fill the default into a partial patch.
@@ -109,7 +109,7 @@ export const preferenceSettingsSchema = z
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
     promptExport: promptExportPreferencesSchema.default({
       includeRecognisedText: false,
-      includeSourceContext: true,
+      includeSourceContext: false,
     }),
     exportPresets: exportPresetsSchema.default([]),
     updates: updatePreferencesSchema.default({}),

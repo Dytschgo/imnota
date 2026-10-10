@@ -21,7 +21,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Separate Markdown/image copy, generated-file access and file-path fallbacks
 - Manual local snapshots, optional automatic history and validated restore with safety copies
 - Area, window and display capture on Windows and macOS, saved as PNG screenshots
-- Optional source info (app, window title, time, display) recorded locally at capture or import, editable per screenshot and written into exported Markdown
+- Optional source info, off by default (app, window title, time, display), recorded locally at capture or import, editable per screenshot and written into exported Markdown
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
 - Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks

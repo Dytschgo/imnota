@@ -75,7 +75,7 @@ The overlay defaults to Area. Drag a rectangle, choose Window and click a window
 
 ### Source info
 
-While **Settings → Features → Record source info** is on (the default), each new capture or import stores where it came from with the screenshot, and Copy Bundle writes it under the picture's heading as a `Source:` list. The record is stored in `project.json` and nowhere else. Imnota does not send it anywhere; it leaves the device only inside an export or hosted link that you share yourself. Edit any field or choose **Remove source info** in the inspector's **Source** section. Turning the setting off stops recording for new screenshots and leaves source info out of exports; existing records stay in the project until you remove them.
+Record source info is **off by default**; turn it on under Settings → Features. While **Settings → Features → Record source info** is on, each new capture or import stores where it came from with the screenshot, and Copy Bundle writes it under the picture's heading as a `Source:` list. The record is stored in `project.json` and nowhere else. Imnota does not send it anywhere; it leaves the device only inside an export or hosted link that you share yourself. Edit any field or choose **Remove source info** in the inspector's **Source** section. Turning the setting off stops recording for new screenshots and leaves source info out of exports; existing records stay in the project until you remove them.
 
 What is recorded depends on the platform and capture mode:
 

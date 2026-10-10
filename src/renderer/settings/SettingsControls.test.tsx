@@ -255,13 +255,13 @@ describe('preference controls', () => {
     await waitFor(() =>
       expect(onPromptExportChange).toHaveBeenCalledWith({
         includeRecognisedText: true,
-        includeSourceContext: true,
+        includeSourceContext: false,
       }),
     );
   });
 });
 
-it('defaults source info on and emits a persisted change when turned off', async () => {
+it('defaults source info off and emits a persisted change when turned on', async () => {
   const onPromptExportChange = vi.fn(async () => {});
   render(
     <SettingsView
@@ -271,13 +271,14 @@ it('defaults source info on and emits a persisted change when turned off', async
     />,
   );
   const toggle = screen.getByRole('checkbox', { name: 'Record source info' });
-  expect(toggle).toBeChecked();
+  expect(toggle).not.toBeChecked();
   expect(screen.getByText(/Imnota sends it nowhere/)).toBeInTheDocument();
+  expect(screen.getByText(/want it exported. Off by default./)).toBeInTheDocument();
   fireEvent.click(toggle);
   await waitFor(() =>
     expect(onPromptExportChange).toHaveBeenCalledWith({
       includeRecognisedText: false,
-      includeSourceContext: false,
+      includeSourceContext: true,
     }),
   );
 });
