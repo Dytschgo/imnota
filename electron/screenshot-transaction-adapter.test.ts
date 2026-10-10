@@ -201,16 +201,15 @@ describe('screenshot transaction baseline adapter', () => {
     );
   });
 
-  // This is a correctness test of a multi-screenshot recovery through real flushed
-  // journal/live-file replacements, not a save-latency budget. 20 screenshots is not a code
-  // limit: the 256-write transaction cap is covered in screenshot-transactions.test.ts.
-  // Hosted Windows fsync is slow, so keep a finite platform-specific limit.
+  // This is a correctness test with 509 flushed journal/live-file replacements, not a
+  // save-latency budget. Hosted Windows exceeded 30 s after file fsync was introduced;
+  // retain the complete real-filesystem workload with a finite platform-specific limit.
   it(
-    'commits a bounded 20-screenshot recovery containing 43 writes',
+    'commits a bounded 100-screenshot recovery containing 203 writes',
     async () => {
-      const fixture = await recoveryFixture(20, true);
+      const fixture = await recoveryFixture(100, true);
       const prepared = await prepareRecoveryRestoreTransaction(fixture.projectPath, fixture);
-      expect(prepared.writes).toHaveLength(43);
+      expect(prepared.writes).toHaveLength(203);
       const committed = await commitScreenshotFileTransaction(fixture.projectPath, {
         kind: 'recovery-restore',
         writes: prepared.writes,
@@ -225,10 +224,10 @@ describe('screenshot transaction baseline adapter', () => {
       }
       expect(
         await fs.readFile(
-          path.join(fixture.projectPath, fixture.recoveredProject.screenshots[19].descriptionFile),
+          path.join(fixture.projectPath, fixture.recoveredProject.screenshots[99].descriptionFile),
           'utf8',
         ),
-      ).toBe('recovered description 20');
+      ).toBe('recovered description 100');
       expect(await listScreenshotTransactions(fixture.projectPath)).toEqual([]);
     },
     process.platform === 'win32' ? 120_000 : 30_000,
