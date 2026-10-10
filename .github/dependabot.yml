@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Node types must not run ahead of the supported Node 22/24 runtimes.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   # The share service has its own npm lockfile. Security updates reach it without this entry;
   # version updates do not.
   - package-ecosystem: npm
