@@ -85,6 +85,7 @@ function nativeMock(initial: Array<[number, Buffer]> = []): MockNative {
           [0xc008, 'CanIncludeInClipboardHistory'],
           [0xc009, 'CanUploadToCloudClipboard'],
           [0xc00a, 'ExcludeClipboardContentFromMonitorProcessing'],
+          [0xc00b, 'System.Drawing.Bitmap'],
         ]).get(format) ?? '';
       output.write(name, 'utf16le');
       return name.length;
@@ -493,6 +494,43 @@ describe('Windows clipboard payloads', () => {
       /cannot be restored safely/i,
     );
     expect(native.emptyClipboard).not.toHaveBeenCalled();
+  });
+
+  it('copies over and restores a prior System.Drawing.Bitmap handle', async () => {
+    // .NET and Paint put an HBITMAP, not an HGLOBAL, under this registered format.
+    const bitmapNative = (failSetFormat?: number) => {
+      const native = nativeMock([[0xc00b, Buffer.from('prior HBITMAP')]]);
+      const source = native.clipboard.get(0xc00b);
+      native.failSetFormat = failSetFormat;
+      native.api.globalSize = vi.fn(native.api.globalSize);
+      native.api.getObject = vi.fn((handle, bytes, output: Buffer) => {
+        if (Number(handle) !== source) return 0;
+        output.writeInt32LE(640, 4);
+        output.writeInt32LE(480, 8);
+        output.writeInt32LE(640 * 4, 12);
+        return bytes;
+      });
+      native.api.copyImage = vi.fn(() => 900);
+      native.api.deleteObject = vi.fn(() => true);
+      return native;
+    };
+
+    const copied = bitmapNative();
+    const source = copied.clipboard.get(0xc00b);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, copied.api)).resolves.toBeUndefined();
+    expect(copied.api.copyImage).toHaveBeenCalledWith(source, 0, 0, 0, 0x2000);
+    expect(copied.api.globalSize).not.toHaveBeenCalledWith(source);
+    expect([...copied.clipboard.keys()]).toEqual([15]);
+    expect(copied.api.deleteObject).toHaveBeenCalledWith(900);
+
+    const failed = bitmapNative(15);
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, failed.api)).rejects.toThrow(
+      /rejected clipboard format 15/i,
+    );
+    expect(failed.emptyClipboard).toHaveBeenCalledTimes(2);
+    expect(failed.setClipboardData).toHaveBeenLastCalledWith(0xc00b, 900);
+    expect([...failed.clipboard]).toEqual([[0xc00b, 900]]);
+    expect(failed.api.deleteObject).not.toHaveBeenCalled();
   });
 
   it('leaves an unsupported registered content format untouched', async () => {
