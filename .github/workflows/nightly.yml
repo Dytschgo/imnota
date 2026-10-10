@@ -7,6 +7,9 @@ on:
         description: Exact immutable main commit SHA to build
         required: true
         type: string
+  schedule:
+    # 02:17 UTC (04:17 Zurich in summer, 03:17 in winter). Skipped when main has not moved.
+    - cron: '17 2 * * *'
 
 permissions:
   contents: read
@@ -21,6 +24,7 @@ jobs:
       sha: ${{ steps.candidate.outputs.sha }}
       version: ${{ steps.candidate.outputs.version }}
       tag: ${{ steps.candidate.outputs.tag }}
+      skip: ${{ steps.candidate.outputs.skip }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,8 +33,26 @@ jobs:
         shell: bash
         env:
           REQUESTED_SHA: ${{ inputs.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [[ "$EVENT_NAME" == schedule ]]; then
+            # Scheduled runs build the current main, unless the latest published nightly already has it.
+            git fetch origin main
+            REQUESTED_SHA="$(git rev-parse origin/main)"
+            latest_tag="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName,publishedAt \
+              --jq '[.[] | select(.tagName | test("-nightly\\."))] | sort_by(.publishedAt) | last | .tagName // ""')"
+            if [[ -n "$latest_tag" ]]; then
+              latest_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$latest_tag" --jq .sha)"
+              if [[ "$latest_sha" == "$REQUESTED_SHA" ]]; then
+                echo "main ($REQUESTED_SHA) is unchanged since $latest_tag; skipping the scheduled nightly." >> "$GITHUB_STEP_SUMMARY"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           [[ "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
           actual="$(git rev-parse "$REQUESTED_SHA^{commit}")"
           test "$actual" = "${REQUESTED_SHA,,}"
@@ -45,6 +67,7 @@ jobs:
 
   quality:
     needs: guard
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -78,6 +101,7 @@ jobs:
   package:
     # Build alongside quality; publish still requires both to pass.
     needs: guard
+    if: needs.guard.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -212,3 +236,48 @@ jobs:
           draft: false
           prerelease: true
           make_latest: false
+
+  staleness:
+    # Runs after every scheduled or manual attempt, including failed or skipped ones, so a broken
+    # nightly cannot go unnoticed: alert when main is ahead of a nightly published over 48 hours ago.
+    needs: [guard, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the "Nightly is stale" issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          latest="$(gh release list --exclude-drafts --limit 100 --json tagName,publishedAt \
+            --jq '[.[] | select(.tagName | test("-nightly\\."))] | sort_by(.publishedAt) | last // {} | [.tagName // "", .publishedAt // ""] | @tsv')"
+          IFS=$'\t' read -r tag published <<< "$latest"
+          if [[ -n "$tag" ]]; then
+            nightly_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)"
+            age_hours=$(( ($(date -u +%s) - $(date -u -d "$published" +%s)) / 3600 ))
+          else
+            nightly_sha=""
+            age_hours=999999
+          fi
+          if [[ "$nightly_sha" == "$main_sha" || "$age_hours" -le 48 ]]; then
+            echo "Nightly ${tag:-none} is ${age_hours}h old and main is ${main_sha:0:7}; not stale."
+            exit 0
+          fi
+          ahead="$(gh api "repos/$GH_REPO/compare/${nightly_sha:-$main_sha}...$main_sha" --jq .ahead_by 2>/dev/null || echo unknown)"
+          body="$(printf 'The latest nightly is more than 48 hours behind main.\n\n- Latest nightly: %s (published %s, %sh ago, commit %s)\n- main: %s (%s commits ahead)\n- Checked by: %s\n\nRun **Build nightly prerelease** or check why the scheduled run did not publish.' \
+            "${tag:-none}" "${published:-never}" "$age_hours" "${nightly_sha:0:7}" "${main_sha:0:7}" "$ahead" "$RUN_URL")"
+          existing="$(gh issue list --state open --search 'in:title "Nightly is stale"' --json number,title \
+            --jq '[.[] | select(.title == "Nightly is stale")][0].number // ""')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Nightly is stale" --body "$body"
+          fi
