@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { IpcRouter, type IpcRouterOptions } from './ipc-router.js';
 
+// Lets every pending promise continuation run (one macrotask turn) without a timed wait.
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 const trusted = { trusted: true } as unknown as IpcMainInvokeEvent;
 const untrusted = { trusted: false } as unknown as IpcMainInvokeEvent;
 
@@ -110,11 +113,18 @@ describe('IpcRouter', () => {
   it('drains every operation queued before an install starts', async () => {
     const { router } = setup();
     let finished = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     void router.enqueue(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gate;
       finished = true;
     });
-    await router.drain();
+    let drained = false;
+    const drain = router.drain().then(() => (drained = true));
+    await settle();
+    expect(drained).toBe(false);
+    release();
+    await drain;
     expect(finished).toBe(true);
   });
 
@@ -134,7 +144,7 @@ describe('IpcRouter', () => {
     expect(order).toEqual(['request started', 'save']);
     let drained = false;
     const drain = router.drain().then(() => (drained = true));
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
     expect(drained).toBe(false);
     releaseRequest();
     await drain;
@@ -164,7 +174,7 @@ describe('IpcRouter', () => {
       queuedSettled = true;
       return result;
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
     expect(queuedSettled).toBe(false);
     releaseSlow();
     await slow;

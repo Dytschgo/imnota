@@ -13,7 +13,9 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((item) => fs.rm(item, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(
+  overrides: { readWatchedFile?: (filePath: string) => Promise<Uint8Array | null> } = {},
+) {
   const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-watch-')));
   temporary.push(projectPath);
   const project = emptyProject('Watch', '');
@@ -39,6 +41,7 @@ async function fixture() {
       return { projectPath, project: next, thumbnails: {}, recoveryFound: false };
     },
     emit: (event) => events.push(event),
+    ...overrides,
   });
   return { manager, projectPath, projectFile, project, listener: () => listener, events, close };
 }
@@ -53,25 +56,37 @@ describe('project file watch and compare-and-swap', () => {
   });
 
   it('debounces external changes while ignoring exports and known self revisions', async () => {
-    const { manager, projectPath, projectFile, listener, events } = await fixture();
+    const readWatchedFile = vi.fn((filePath: string) => fs.readFile(filePath).catch(() => null));
+    const { manager, projectPath, projectFile, listener, events } = await fixture({ readWatchedFile });
     await manager.start(projectPath);
-    listener()('rename', 'collections/001/exports/prompt.png');
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    expect(events).toEqual([]);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      listener()('rename', 'collections/001/exports/prompt.png');
+      // Past the debounce window: an ignored path must not schedule or emit anything.
+      await vi.advanceTimersByTimeAsync(220);
+      expect(events).toEqual([]);
 
-    const ownSource = JSON.stringify({ marker: 'self' });
-    await fs.writeFile(projectFile, ownSource);
-    manager.recordSelfProjectWrite(projectFile, ownSource);
-    listener()('change', 'project.json');
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    expect(events).toEqual([]);
+      const ownSource = JSON.stringify({ marker: 'self' });
+      await fs.writeFile(projectFile, ownSource);
+      manager.recordSelfProjectWrite(projectFile, ownSource);
+      listener()('change', 'project.json');
+      await vi.advanceTimersByTimeAsync(220);
+      // The debounced flush ran and compared the bytes; wait for that read, then confirm no event.
+      expect(readWatchedFile).toHaveBeenCalledOnce();
+      await readWatchedFile.mock.results[0]!.value;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events).toEqual([]);
 
-    await fs.writeFile(projectFile, JSON.stringify({ marker: 'external' }));
-    listener()('change', 'project.json');
-    listener()('change', 'project.json');
-    await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 2_000, interval: 25 });
-    expect(events[0]).toMatchObject({ kind: 'external-change', changedPaths: ['project.json'] });
-    manager.stopAll();
+      await fs.writeFile(projectFile, JSON.stringify({ marker: 'external' }));
+      listener()('change', 'project.json');
+      listener()('change', 'project.json');
+      await vi.advanceTimersByTimeAsync(220);
+      await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 2_000, interval: 25 });
+      expect(events[0]).toMatchObject({ kind: 'external-change', changedPaths: ['project.json'] });
+    } finally {
+      vi.useRealTimers();
+      manager.stopAll();
+    }
   });
 
   it.each(['latest bytes', 'stale bytes'] as const)(
