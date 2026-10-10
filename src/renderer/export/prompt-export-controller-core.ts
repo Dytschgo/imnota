@@ -732,15 +732,35 @@ export class PromptBundleControllerEngine {
     this.emit({ preview: undefined });
   }
 
+  /**
+   * Cards emitted before the artifact existed (or re-emitted by Markdown-only/open)
+   * carry no artifactSessionId. If the selection still points at the plan that the
+   * current artifact was built from, attach the artifact so every format reuses it
+   * instead of falling into fresh() and rebuilding the bundle.
+   */
+  private withReusableArtifact(selection: PromptBundleSelection): PromptBundleSelection {
+    const artifact = this.latestArtifact;
+    if (
+      typeof selection === 'number' ||
+      selection.artifactSessionId ||
+      !artifact ||
+      this.latestPlan?.planId !== artifact.planId ||
+      selection.planId !== artifact.planId ||
+      !artifact.grants.has(selection.bundleNumber)
+    )
+      return selection;
+    return { ...selection, artifactSessionId: artifact.sessionId };
+  }
+
   async copyFresh(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
-    return this.copyWithReusableArtifact(selection, 'rich');
+    return this.copyWithReusableArtifact(this.withReusableArtifact(selection), 'rich');
   }
 
   async copyVariant(
     selection: PromptBundleSelection,
     variant: WindowsCopyVariantId,
   ): Promise<PromptBundleControllerActionResult> {
-    return this.copyWithReusableArtifact(selection, variant);
+    return this.copyWithReusableArtifact(this.withReusableArtifact(selection), variant);
   }
 
   private selectedBundleIdentity(selection: PromptBundleSelection): SelectedBundleIdentity | undefined {
@@ -1095,6 +1115,7 @@ export class PromptBundleControllerEngine {
     outcome: PromptDeliveryOutcome = 'files',
     opened?: 'files' | 'folder',
   ): Promise<PromptBundleControllerActionResult> {
+    selection = this.withReusableArtifact(selection);
     if (this.activeRun) {
       const detail = failure('busy', 'Wait for the active prompt export to finish.', true).detail;
       return { ok: false, error: detail };
@@ -1166,6 +1187,7 @@ export class PromptBundleControllerEngine {
   }
 
   async copyMarkdown(selection: PromptBundleSelection): Promise<PromptBundleControllerActionResult> {
+    selection = this.withReusableArtifact(selection);
     const hasGrant =
       typeof selection === 'number'
         ? this.latestArtifact?.grants.has(selection)
@@ -1223,8 +1245,13 @@ export class PromptBundleControllerEngine {
         this.assertActive(run);
         await this.bridge.copyText(bundle.markdown);
         this.assertActive(run);
-        this.latestPlan = prepared;
-        this.emit({ cards: cardsForPlan(prepared) });
+        // Do not orphan a finalized artifact for the same content: replacing latestPlan
+        // gives it a new random planId, which makes open()/copy treat it as stale.
+        const artifact = this.latestArtifact;
+        if (!artifact || artifact.snapshotFingerprint !== prepared.snapshotFingerprint) {
+          this.latestPlan = prepared;
+          this.emit({ cards: cardsForPlan(prepared) });
+        }
         this.deliveryCompleted(bundle.number, 'markdown');
         this.activeRun = undefined;
         return { ok: true, bundleNumber: bundle.number };
