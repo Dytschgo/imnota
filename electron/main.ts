@@ -152,6 +152,7 @@ import { assertCaptureCommitAdmission, readWithCaptureAdmission } from './captur
 import { syntheticCaptureColor } from './capture-smoke-contract.js';
 import { mcpVerificationProfile } from './mcp-verification-profile.js';
 import { requiresSingleInstanceLock } from './single-instance.js';
+import { AGENT_ACCESS_OFF_MESSAGE, AGENT_ACCESS_PORT_IN_USE_MESSAGE } from './agent-access-messages.js';
 import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
 
@@ -2206,7 +2207,7 @@ app.whenReady().then(async () => {
       );
     }
     if (!started) {
-      process.stderr.write('Local agent access is off. Enable it in Settings → Workspace.\n');
+      process.stderr.write(`${AGENT_ACCESS_OFF_MESSAGE}\n`);
       app.exit(1);
       return;
     }
@@ -2219,8 +2220,7 @@ app.whenReady().then(async () => {
   let agentAccessStartupError = '';
   if (process.env.IMNOTA_SMOKE !== '1')
     await localMcpServer.sync().catch(async () => {
-      agentAccessStartupError =
-        'Local agent access could not start. Port 17384 may be in use. Access is off; free the port and enable it again in Settings → Workspace.';
+      agentAccessStartupError = AGENT_ACCESS_PORT_IN_USE_MESSAGE;
       const next = { ...preferenceSettingsResult.settings, agentAccess: { enabled: false } };
       // Fail closed for this process even if storing the disabled preference also fails.
       preferenceSettingsResult = { ...preferenceSettingsResult, settings: next };

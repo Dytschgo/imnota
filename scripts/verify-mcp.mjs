@@ -373,7 +373,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
         assert.equal(result.code, enabled ? 0 : 1);
         if (!enabled) {
           assert.equal(result.stdoutBytes, 0);
-          assert.match(result.stderr, /Local agent access is off/);
+          assert.match(result.stderr, /Local agent access is off\. Enable it in Settings → Features\./);
         }
         assert.doesNotMatch(result.stderr, /UnhandledPromiseRejection|Uncaught Exception|JavaScript error/i);
         const lifecycle = JSON.parse(await readFile(join(profile, 'mcp-lifecycle.json'), 'utf8'));
