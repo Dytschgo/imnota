@@ -49,6 +49,9 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
 // OLE ownership metadata points back to the previous clipboard owner. EmptyClipboard
 // releases that owner, so a byte clone cannot recreate these broker references.
 const TRANSIENT_OLE_FORMATS = new Set(['dataobject', 'ole private data', 'wine marshalled dataobject']);
+// .NET and Paint publish this registered format as an HBITMAP, like CF_BITMAP, not
+// as an HGLOBAL. Snapshot it as a bitmap object rather than through globalSize.
+const SYSTEM_DRAWING_BITMAP_FORMAT = 'System.Drawing.Bitmap';
 type NativeHandle = unknown;
 
 interface KoffiLibrary {
@@ -378,7 +381,7 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
       }
       const source = api.getClipboardData(format);
       if (!truthyHandle(source)) throw new Error(`Clipboard format ${format} could not be captured.`);
-      if (format === CF_BITMAP) {
+      if (format === CF_BITMAP || registeredName === SYSTEM_DRAWING_BITMAP_FORMAT) {
         const bitmapInfo = Buffer.alloc(process.arch === 'x64' || process.arch === 'arm64' ? 32 : 24);
         if (api.getObject(source, bitmapInfo.length, bitmapInfo) !== bitmapInfo.length)
           throw new Error('The existing clipboard bitmap dimensions could not be read safely.');
