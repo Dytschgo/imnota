@@ -1182,6 +1182,71 @@ describe('prompt export controller orchestration', () => {
     expect(controller.getState().progress).toBeUndefined();
   });
 
+  test.each([
+    { contentChanges: false, expectedSessions: 1 },
+    { contentChanges: true, expectedSessions: 2 },
+  ])(
+    'Markdown-only copy before any export does not orphan the bundle cache (content changes: $contentChanges)',
+    async ({ contentChanges, expectedSessions }) => {
+      const native = fakeBridge();
+      native.bridge.copyText = vi.fn(async () => undefined);
+      const load = native.bridge.loadScreenshotContent;
+      let pixels = PNG;
+      native.bridge.loadScreenshotContent = async (input) => {
+        const result = await load(input);
+        return { ...result, image: { ...result.image, dataUrl: pixels } };
+      };
+      const start = vi.spyOn(native.bridge, 'startPromptExport');
+      const write = vi.spyOn(native.bridge, 'writePromptExportBundle');
+      const controller = engine(
+        async () => savedContext([screenshot(0)]),
+        native.bridge,
+        fakeRendering({ reflectSourceImage: true }).rendering,
+      );
+      await controller.open();
+      // Dialog actions identify a card by plan and bundle; they need not carry the
+      // artifact session id that was attached to the card after an export.
+      const request = () => ({ ...controller.getState().cards[0], artifactSessionId: undefined });
+
+      expect((await controller.copyMarkdown(request())).ok).toBe(true);
+      expect(start).not.toHaveBeenCalled();
+      expect(await controller.copyVariant(request(), 'files')).toMatchObject({
+        ok: true,
+        sessionId: 'session-1',
+      });
+      if (contentChanges) {
+        pixels = 'data:image/png;base64,REVG';
+        // Stale files are refused rather than silently reused...
+        expect(await controller.copyImage(request())).toMatchObject({
+          ok: false,
+          error: { code: 'content-changed' },
+        });
+        // ...and the next Copy files rebuilds the bundle from the new content.
+        expect(await controller.copyVariant(request(), 'files')).toMatchObject({
+          ok: true,
+          sessionId: 'session-2',
+        });
+      }
+      expect((await controller.copyImage(request())).ok).toBe(true);
+      expect((await controller.openFolder()).ok).toBe(true);
+
+      if (contentChanges) {
+        expect(start).toHaveBeenCalledTimes(2);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(native.writes.map((entry) => entry.pngDataUrl)).toEqual([PNG, pixels]);
+      } else {
+        expect(start.mock.calls.length).toBeLessThanOrEqual(1);
+        expect(write.mock.calls.length).toBeLessThanOrEqual(1);
+      }
+      expect(native.starts).toHaveLength(expectedSessions);
+      expect(native.copies.at(-1)).toMatchObject({
+        sessionId: `session-${expectedSessions}`,
+        target: 'image',
+      });
+      expect(native.opens.at(-1)?.sessionId).toBe(`session-${expectedSessions}`);
+    },
+  );
+
   test('rebuilds copied files when external screenshot pixels change at the same dimensions', async () => {
     const native = fakeBridge();
     const load = native.bridge.loadScreenshotContent;
