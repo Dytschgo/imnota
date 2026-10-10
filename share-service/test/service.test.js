@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import zlib from 'node:zlib';
 import request from 'supertest';
-import { createService } from '../src/app.js';
+import { createService, writeArchive } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
 import { randomToken, tokenHash } from '../src/security.js';
@@ -78,6 +78,34 @@ function craftedPng(width, height, inflatedData, { depth = 8, colorType = 6 } = 
     pngChunk('IDAT', zlib.deflateSync(inflatedData)),
     pngChunk('IEND'),
   ]);
+}
+
+function zipEntries(bytes) {
+  const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(end >= 0, 'ZIP central directory is present');
+  const count = bytes.readUInt16LE(end + 10);
+  let offset = bytes.readUInt32LE(end + 16);
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    assert.equal(bytes.readUInt32LE(offset), 0x02014b50);
+    const method = bytes.readUInt16LE(offset + 10);
+    const compressedSize = bytes.readUInt32LE(offset + 20);
+    const nameLength = bytes.readUInt16LE(offset + 28);
+    const extraLength = bytes.readUInt16LE(offset + 30);
+    const commentLength = bytes.readUInt16LE(offset + 32);
+    const localOffset = bytes.readUInt32LE(offset + 42);
+    const name = bytes.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
+    assert.equal(bytes.readUInt32LE(localOffset), 0x04034b50);
+    const dataOffset =
+      localOffset + 30 + bytes.readUInt16LE(localOffset + 26) + bytes.readUInt16LE(localOffset + 28);
+    const compressed = bytes.subarray(dataOffset, dataOffset + compressedSize);
+    const data = method === 8 ? zlib.inflateRawSync(compressed) : compressed;
+    assert.equal(data.length, bytes.readUInt32LE(offset + 24));
+    assert.equal(testCrc32(data), bytes.readUInt32LE(offset + 16));
+    entries.push({ name, data });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
 }
 
 async function fixture(options = {}) {
@@ -203,6 +231,10 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   const created = await share(instance, {
     title: '<img src=x onerror=alert(1)>',
     markdown: '# Heading\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(2))',
+    images: [
+      { filename: 'prompt-001.png', dataBase64: onePixelPng.toString('base64') },
+      { filename: 'prompt-002.png', dataBase64: onePixelPng.toString('base64') },
+    ],
   });
   assert.equal(created.status, 201, created.text);
   assert.equal(created.body.title, '<img src=x onerror=alert(1)>');
@@ -236,6 +268,7 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.match(markdown.headers['content-type'], /^text\/markdown/);
   assert.equal(markdown.headers['content-disposition'], 'attachment; filename="prompt.md"');
   const image = await instance.api.get(`/s/${publicToken}/assets/prompt-001.png`).expect(200);
+  const secondImage = await instance.api.get(`/s/${publicToken}/assets/prompt-002.png`).expect(200);
   assert.match(image.headers['content-type'], /^image\/png/);
   assert.equal(image.headers['x-content-type-options'], 'nosniff');
   const zip = await instance.api
@@ -248,7 +281,44 @@ test('creates, renders and downloads only controlled finalized artifacts', async
     })
     .expect(200);
   assert.match(zip.headers['content-type'], /^application\/zip/);
-  assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
+  const entries = zipEntries(zip.body);
+  assert.deepEqual(
+    entries.map(({ name }) => name),
+    ['prompt.md', 'prompt-001.png', 'prompt-002.png'],
+  );
+  assert.deepEqual(entries[0].data, Buffer.from(markdown.text));
+  assert.deepEqual(entries[1].data, image.body);
+  assert.deepEqual(entries[2].data, secondImage.body);
+});
+
+test('archive source warning removes the partial ZIP before returning an error', async (t) => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'imnota-archive-test-'));
+  t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
+  await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
+  assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+});
+
+test('archive write failure returns an error without a share or staged files', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const originalCreateWriteStream = fs.createWriteStream;
+  fs.createWriteStream = (file, options) => {
+    const output = originalCreateWriteStream(file, options);
+    if (file.endsWith('archive.zip'))
+      output.once('open', () => output.destroy(new Error('simulated archive write failure')));
+    return output;
+  };
+  try {
+    const response = await share(instance);
+    assert.equal(response.status, 500);
+    assert.equal(response.body.error.code, 'internal_error');
+    assert.deepEqual(await fsp.readdir(instance.config.uploadsDir), []);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM shares').get().count, 0);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM staging_uploads').get().count, 0);
+  } finally {
+    fs.createWriteStream = originalCreateWriteStream;
+  }
 });
 
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {
