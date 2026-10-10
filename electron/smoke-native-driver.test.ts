@@ -95,6 +95,42 @@ describe('native smoke driver', () => {
     },
   );
 
+  it('records the focused element and a screenshot when waitFor times out', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-waitfor-timeout-'));
+    temporary.push(directory);
+    vi.stubEnv('IMNOTA_SMOKE_ARTIFACT_DIR', directory);
+    try {
+      const executeJavaScript = vi.fn(async (source: string) =>
+        source.includes('document.activeElement')
+          ? '<summary class="history">Your shared links</summary>'
+          : null,
+      );
+      const window = {
+        webContents: {
+          executeJavaScript,
+          getURL: () => 'file:///app/index.html',
+          capturePage: async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('png') }),
+        },
+      } as unknown as BrowserWindow;
+      const driver = new NativeUiDriver(window, 60);
+      await expect(driver.waitFor({ text: 'Missing', exact: true })).rejects.toThrow(
+        /Timed out waiting for .*Missing.*Focused element: <summary class="history">/,
+      );
+      const files = (await fs.readdir(directory)).sort();
+      expect(files).toEqual([
+        expect.stringMatching(/^waitfor-timeout-.*-focus\.json$/),
+        expect.stringMatching(/^waitfor-timeout-.*\.png$/),
+      ]);
+      const evidence = JSON.parse(await fs.readFile(path.join(directory, files[0]), 'utf8'));
+      expect(evidence).toEqual({
+        focused: '<summary class="history">Your shared links</summary>',
+        url: 'file:///app/index.html',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('maps native source pixels through expanded bounds and prompt offsets', () => {
     expect(mapSourcePointToPromptPixel({ x: 1200, y: 400 }, { x: 160, y: 76 }, { x: 32, y: 80 })).toEqual({
       x: 1072,

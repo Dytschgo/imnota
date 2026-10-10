@@ -249,6 +249,24 @@ jobs:
         env:
           IMNOTA_SMOKE_MODE: clipboard
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
+      - name: Smoke packaged Linux application with a window manager
+        # Bare xvfb has no window manager, so focus behaves unlike a desktop. Keep the bare-xvfb
+        # step above and also run under openbox; waitFor timeouts save the focused element and a
+        # screenshot to the evidence directory.
+        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openbox
+          xvfb-run --auto-servernum -s "-screen 0 1920x1080x24" bash -c 'openbox & sleep 1; node scripts/verify-packaged.mjs linux'
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-linux-wm
+      - name: Retain Linux window manager smoke evidence
+        if: env.RUN_APPLICATION == 'true' && always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-wm-smoke-evidence
+          path: ${{ runner.temp }}/imnota-verification-artifacts-linux-wm/
+          if-no-files-found: ignore
       - name: Retain bundle copy evidence
         if: env.RUN_APPLICATION == 'true' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

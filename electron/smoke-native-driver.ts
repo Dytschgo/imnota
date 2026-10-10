@@ -293,9 +293,47 @@ export class NativeUiDriver {
       }
       await wait(50);
     } while (Date.now() - started < timeout);
+    const focused = await this.recordTimeoutDiagnostics(process.env.IMNOTA_SMOKE_ARTIFACT_DIR);
     throw new Error(
-      `Timed out waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)}.`,
+      `Timed out waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)}.` +
+        (focused ? ` Focused element: ${focused}` : ''),
     );
+  }
+
+  /**
+   * Best-effort evidence for a waitFor timeout: the focused element's outerHTML (also returned
+   * for the error message) and a screenshot, saved into the smoke artifact directory when set.
+   * Focus behaviour depends on the window manager, so this makes focus failures diagnosable in CI.
+   */
+  async recordTimeoutDiagnostics(artifactDirectory: string | undefined): Promise<string | undefined> {
+    const focused = await boundedSmokeDiagnostic(() =>
+      this.evaluate<string>(
+        `(() => { const element = document.activeElement; return element ? element.outerHTML.slice(0, 2000) : '(none)'; })()`,
+        1_000,
+      ),
+    );
+    if (artifactDirectory) {
+      const stamp = `${Date.now()}-${process.pid}`;
+      await boundedSmokeDiagnostic(() =>
+        fs.writeFile(
+          path.join(artifactDirectory, `waitfor-timeout-${stamp}-focus.json`),
+          JSON.stringify({ focused: focused ?? null, url: this.window.webContents.getURL() }, null, 2),
+          { flag: 'wx' },
+        ),
+      );
+      await boundedSmokeDiagnostic(async () => {
+        const image = await this.window.webContents.capturePage();
+        if (!image.isEmpty())
+          await fs.writeFile(
+            safeArtifactPath(artifactDirectory, `waitfor-timeout-${stamp}.png`),
+            image.toPNG(),
+            {
+              flag: 'wx',
+            },
+          );
+      }, 5_000);
+    }
+    return focused === undefined ? undefined : focused.replace(/\s+/g, ' ').slice(0, 300);
   }
 
   async exists(locator: SmokeLocator): Promise<boolean> {
