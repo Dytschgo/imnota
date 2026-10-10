@@ -70,10 +70,11 @@ import {
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
 import { clipboardContextHtml, clipboardPngDimensions } from '../src/shared/clipboard-context.js';
-import { UpdateController } from './update-controller.js';
-import { discoverRelease } from './releases.js';
+import { UpdateController, UpdateFailure } from './update-controller.js';
+import { discoverRelease, type ReleaseCandidate } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
-import { prepareTerminalUpdate } from './terminal-update.js';
+import { terminalUpdateArguments } from './terminal-update.js';
+import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
 import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
 import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
@@ -2036,31 +2037,67 @@ const UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 function configureAutoUpdates(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // Unsigned Mac builds cannot use Squirrel.Mac. The bundled helper downloads and
+  // verifies in the background, then replaces and reopens the app once it quits.
+  const macHelper = process.platform === 'darwin';
+  const macAppPath = () => path.resolve(app.getPath('exe'), '../../..');
+  let macRelease: ReleaseCandidate | null = null;
+  let macSession: MacUpdateSession | null = null;
   updateController = new UpdateController(settings.updateChannel, {
     currentVersion: app.getVersion(),
     enabled: app.isPackaged && process.env.IMNOTA_SMOKE !== '1',
     manual:
-      process.platform === 'darwin' ||
       Boolean(process.env.PORTABLE_EXECUTABLE_FILE) ||
       (process.platform === 'linux' && !process.env.APPIMAGE),
     discover: (channel) => discoverRelease(channel, process.platform),
-    prepare: (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
-    prepareTerminal:
-      process.platform === 'darwin'
-        ? (release) =>
-            prepareTerminalUpdate(
-              release,
-              path.resolve(app.getPath('exe'), '../../..'),
-              path.join(app.getAppPath(), 'scripts/update-macos.sh'),
-              app.getPath('temp'),
-              app.getVersion(),
-            )
-        : undefined,
-    download: () => autoUpdater.downloadUpdate(),
-    install: () => autoUpdater.quitAndInstall(),
+    prepare: macHelper
+      ? async (release) => {
+          macRelease = null;
+          terminalUpdateArguments(release, macAppPath(), app.getVersion());
+          macRelease = release;
+        }
+      : (release, channel) => prepareNativeUpdate(autoUpdater, release, channel),
+    download: macHelper
+      ? async () => {
+          if (!macRelease) throw new Error('No update is available to download.');
+          macSession = null;
+          const session = await startMacUpdate(
+            macRelease,
+            {
+              appPath: macAppPath(),
+              appPid: process.pid,
+              helperPath: path.join(app.getAppPath(), 'scripts/update-macos.sh'),
+              cachePath: app.getPath('temp'),
+              currentVersion: app.getVersion(),
+            },
+            {
+              progress: (percent) => updateController.progress(percent),
+              failed: (message) => updateController.downloadLost(message),
+            },
+          );
+          await session.ready;
+          // A helper that stopped right after verifying cannot install anything.
+          if (session.finished) throw new UpdateFailure(session.failureMessage);
+          macSession = session;
+        }
+      : () => autoUpdater.downloadUpdate(),
+    install: macHelper
+      ? () => {
+          if (!macSession) throw new Error('No downloaded update is ready.');
+          try {
+            macSession.install();
+          } catch (error) {
+            // Without its helper the download is gone; offer a fresh check, not a retry.
+            updateController.downloadLost(macSession.failureMessage);
+            throw error;
+          }
+          app.quit();
+        }
+      : () => autoUpdater.quitAndInstall(),
     open: (url) => shell.openExternal(url),
     emit: (status) => {
-      if (status.state === 'downloaded' && status.installing === false) updateInstallPending = false;
+      if (status.state === 'error' || (status.state === 'downloaded' && status.installing === false))
+        updateInstallPending = false;
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed())
         mainWindow.webContents.send('update:status', status);
     },

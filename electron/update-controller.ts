@@ -11,21 +11,11 @@ interface Operations {
   download: () => Promise<unknown>;
   install: () => void | Promise<void>;
   open: (url: string) => Promise<unknown>;
-  prepareTerminal?: (release: ReleaseCandidate) => Promise<{ command: string; run: () => Promise<void> }>;
   emit: (status: UpdateStatus) => void;
 }
 
-function terminalUpdateCacheKey(release: ReleaseCandidate, selectedChannel: UpdateChannel) {
-  return JSON.stringify({
-    selectedChannel,
-    sourceChannel: release.sourceChannel ?? selectedChannel,
-    version: release.version,
-    url: release.url,
-    feedUrl: release.feedUrl,
-    assetUrls: release.assetUrls,
-    checksumUrl: release.checksumUrl,
-  });
-}
+/** A failure whose message is safe and useful to show the user. */
+export class UpdateFailure extends Error {}
 
 /** One update operation at a time: a selected release can never cross channels. */
 export class UpdateController {
@@ -34,9 +24,6 @@ export class UpdateController {
   private pending: Promise<void> | null = null;
   private pendingIsBackground = false;
   private switching = false;
-  private terminalUpdate: { command: string; run: () => Promise<void> } | null = null;
-  private terminalUpdateKey: string | null = null;
-  private launchingTerminal = false;
   constructor(
     private channel: UpdateChannel,
     private readonly ops: Operations,
@@ -62,8 +49,6 @@ export class UpdateController {
       await afterFileCommit(persist, () => {
         this.channel = channel;
         this.candidate = null;
-        this.terminalUpdate = null;
-        this.terminalUpdateKey = null;
         this.send({ state: 'idle' });
       });
     } finally {
@@ -76,7 +61,7 @@ export class UpdateController {
    * hourly) stay silent: they never flash a "checking" state over an already
    * discovered update and a discovery failure keeps the previous status. A
    * failed preparation must invalidate the previous candidate because a
-   * native updater or terminal helper may already target the new release.
+   * native updater may already target the new release.
    */
   check(options: { background?: boolean } = {}): Promise<void> {
     if (this.pending) {
@@ -92,12 +77,7 @@ export class UpdateController {
         this.send({ state: 'idle', message: 'Update checks are available in installed release builds.' });
       return Promise.resolve();
     }
-    const previous = {
-      status: this.getStatus(),
-      candidate: this.candidate,
-      terminal: this.terminalUpdate,
-      terminalKey: this.terminalUpdateKey,
-    };
+    const previous = { status: this.getStatus(), candidate: this.candidate };
     let preparationStarted = false;
     this.candidate = null;
     this.pendingIsBackground = options.background === true;
@@ -108,8 +88,6 @@ export class UpdateController {
       .catch(() => {
         if (this.pendingIsBackground && !preparationStarted) {
           this.candidate = previous.candidate;
-          this.terminalUpdate = previous.terminal;
-          this.terminalUpdateKey = previous.terminalKey;
           this.status = previous.status;
           return;
         }
@@ -157,16 +135,6 @@ export class UpdateController {
       onPreparationStart();
       await this.ops.prepare(candidate, candidate.sourceChannel ?? this.channel);
     }
-    const terminalKey = terminalUpdateCacheKey(candidate, this.channel);
-    if (
-      this.ops.manual &&
-      this.ops.prepareTerminal &&
-      (!this.terminalUpdate || this.terminalUpdateKey !== terminalKey)
-    ) {
-      onPreparationStart();
-      this.terminalUpdate = await this.ops.prepareTerminal(candidate);
-      this.terminalUpdateKey = terminalKey;
-    }
     this.candidate = candidate;
     this.send({
       state: 'available',
@@ -175,7 +143,6 @@ export class UpdateController {
       releaseNotes: candidate.releaseNotes,
       sourceChannel: candidate.sourceChannel,
       manualDownload: this.ops.manual,
-      terminalCommand: this.terminalUpdateKey === terminalKey ? this.terminalUpdate?.command : undefined,
       message: stableFallback
         ? `Stable ${candidate.version} is newer than the latest nightly. Nightly remains selected for future checks.`
         : undefined,
@@ -190,20 +157,6 @@ export class UpdateController {
     if (this.pending) await this.check();
     if (!this.candidate) throw new Error('No update is available to download.');
     if (this.status.manualDownload) {
-      if (
-        this.terminalUpdate &&
-        this.terminalUpdateKey === terminalUpdateCacheKey(this.candidate, this.channel) &&
-        this.status.state === 'available'
-      ) {
-        if (this.launchingTerminal) return;
-        this.launchingTerminal = true;
-        try {
-          await this.terminalUpdate.run();
-        } finally {
-          this.launchingTerminal = false;
-        }
-        return;
-      }
       await this.ops.open(this.candidate.url);
       return;
     }
@@ -212,11 +165,11 @@ export class UpdateController {
     try {
       await this.ops.download();
       this.send({ ...this.status, state: 'downloaded', percent: 100, message: undefined });
-    } catch {
+    } catch (error) {
       this.candidate = null;
       this.send({
         state: 'error',
-        message: 'The download failed. Check for updates to retry. Your projects are unchanged.',
+        message: `${error instanceof UpdateFailure ? `${error.message} ` : 'The download failed. '}Check for updates to retry. Your projects are unchanged.`,
       });
     }
   }
@@ -230,6 +183,15 @@ export class UpdateController {
       this.installationFailed();
       throw new Error('The update could not be installed. Your current app is still available.');
     }
+  }
+  /** The downloaded update was discarded outside the controller, e.g. its helper stopped. */
+  downloadLost(message: string) {
+    if (this.status.state !== 'downloaded') return;
+    this.candidate = null;
+    this.send({
+      state: 'error',
+      message: `${message} Check for updates to retry. Your projects are unchanged.`,
+    });
   }
   installationFailed() {
     if (!this.status.installing) return;
