@@ -16,7 +16,9 @@ Current builds migrate schema 1/2 projects to schema 3 when opened. Adding a dra
 
 ## Build a nightly after merge
 
-The **Build nightly prerelease** workflow is manual only. There is no nightly schedule yet, and a normal main push does not publish a release.
+The **Build nightly prerelease** workflow runs daily at 02:17 UTC (04:17 in Zurich during summer time, 03:17 during winter time) and accepts manual dispatches. Scheduled runs skip publication when the latest published nightly already contains the current `main` commit. A normal main push does not publish a release.
+
+After each scheduled or manual attempt, the workflow checks for staleness. If `main` differs from the latest published nightly and that nightly is more than 48 hours old, it opens or comments on the **Nightly is stale** issue. This check depends on the workflow running; it cannot detect GitHub disabling a schedule after prolonged repository inactivity.
 
 Current branch protection enforces an up-to-date `quality` check, but does not enforce approving reviews or every platform job. For this release process, the release owner must also obtain an independent review and verify all PR platform package and security checks for the exact head before merging. Do not use an administrator bypass. The nightly workflow separately gates publication on quality and all three platform builds. Stronger remote enforcement is a separate repository-policy change, not part of publishing a nightly.
 
@@ -54,4 +56,4 @@ Stable tags must point to a commit in main's history. Assets are validated befor
 
 Local tests cover channel validation, version comparison, missing/invalid releases, pagination, network failure, confirmation/cancellation, settings persistence, download-state locking, exact asset URLs, native rejection and no automatic downgrade. The real Electron smoke includes Settings interaction and a persisted channel readback. The [September 21 nightly run](https://github.com/Dytschgo/imnota/actions/runs/35645731983) published `v0.2.9-nightly.20260921.35645731983` for `bf8d24e664778a4d643a295350af6e5561a09ace` after its Windows/macOS/Linux package checks. Its manifests, assets, and installed application version matched that candidate; stable v0.2.8 remained Latest.
 
-A normal merge does not publish a nightly, change branch protection, enable a schedule or configure signing. Each intended publication needs a fresh workflow run on an accepted SHA and public-download verification. Broader clean-machine update/install and receiving-editor checks remain separate from CI. The former [channel plan](history/stable-nightly-release-plan.md) records the original decisions.
+A normal merge does not immediately publish a nightly, change branch protection or configure signing. The next scheduled run selects current `main`; manual dispatches select an exact accepted SHA. Each publication needs a fresh workflow run and public-download verification. Broader clean-machine update/install and receiving-editor checks remain separate from CI. The former [channel plan](history/stable-nightly-release-plan.md) records the original decisions.
