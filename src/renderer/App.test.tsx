@@ -283,6 +283,55 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
   });
 
+  it('shows archived projects and archived collections as two groups under the Archived filter', async () => {
+    const openCollection = (id: string, name: string, archived: boolean) => ({
+      ...snapshot.project.collections[0],
+      id,
+      name,
+      archived,
+    });
+    renderApp({
+      listProjects: async () => [
+        {
+          ...snapshot.project,
+          projectPath: snapshot.projectPath,
+          name: 'Active project',
+          collections: [
+            openCollection('live', 'Live review', false),
+            openCollection('done', 'Old review', true),
+          ],
+        },
+        {
+          ...snapshot.project,
+          id: 'old',
+          projectPath: '/workspace/old',
+          name: 'Old',
+          status: 'archived' as const,
+          collections: [openCollection('inside', 'Inside archived project', true)],
+        },
+      ],
+    });
+    // Archived collections stay out of the active views.
+    await screen.findByRole('group', { name: 'Show projects' });
+    expect(screen.queryByRole('heading', { name: 'Archived collections' })).not.toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Show projects' })).getByRole('button', { name: 'Archived' }),
+    );
+    const projectsGroup = within(
+      await screen
+        .findByRole('heading', { name: 'Archived projects' })
+        .then(() => screen.getByLabelText('Archived projects')),
+    );
+    expect(projectsGroup.getByRole('button', { name: /^Old/ })).toBeInTheDocument();
+    expect(projectsGroup.queryByText('Active project')).not.toBeInTheDocument();
+    const collectionsGroup = within(screen.getByLabelText('Archived collections'));
+    const row = collectionsGroup.getByRole('button', { name: /Old review/ });
+    expect(row).toHaveTextContent('Active project');
+    expect(collectionsGroup.queryByText('Live review')).not.toBeInTheDocument();
+    // A collection of an archived project is covered by its project row, not listed twice.
+    expect(collectionsGroup.queryByText('Inside archived project')).not.toBeInTheDocument();
+  });
+
   it('resumes the most recent project when no session page is saved', async () => {
     localStorage.removeItem('imnota:last-session');
     const loadProject = vi.fn(async () => snapshot);
@@ -3610,7 +3659,7 @@ describe('feedback controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
-    await screen.findByRole('heading', { name: 'Archived projects' });
+    await screen.findByRole('heading', { name: 'Archived', level: 1 });
     fireEvent.click(screen.getByTestId('library-full-search'));
     await screen.findByTestId('global-search-input');
     await waitFor(() =>

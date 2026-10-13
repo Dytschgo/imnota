@@ -586,6 +586,39 @@ export async function exerciseUiFeedback(
   await driver.click({ selector: '.library-filter button', text: 'Archived', exact: true });
   await driver.click({ selector: `[data-testid="project-restore-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
+  const archivedRow = {
+    selector: `[aria-labelledby="archived-collections-heading"] [data-testid="archived-collection-${fixture.projectId}-${archived.id}"]`,
+    text: 'Archived feedback',
+  };
+  await driver.waitFor(archivedRow);
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-archived-collections.png'));
+  await driver.click(archivedRow);
+  await driver.waitFor({
+    selector: '[data-testid="collection-picker"] span',
+    text: 'Archived feedback',
+    exact: true,
+  });
+  await driver.waitFor({
+    selector: '[data-testid="collection-picker"][aria-description="Current collection is archived"]',
+  });
+  await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.click({ selector: '[role="menuitem"]', text: 'Restore Archived feedback', exact: true });
+  await driver.waitFor({
+    selector: '[data-testid="collection-picker"][aria-description="Current collection is active"]',
+  });
+  await driver.evaluate(`(async () => {
+    const snapshot = await window.imnota.loadProject(${JSON.stringify(projectPath)});
+    if (snapshot.project.collections.find(collection => collection.id === ${JSON.stringify(archived.id)})?.archived !== false)
+      throw new Error('Restoring the collection opened from the Archived filter did not persist.');
+  })()`);
+  // Retain the preceding fixture's archived collection for later picker checks.
+  if (!(await driver.exists({ selector: '[role="menu"][aria-label="Collections"]' })))
+    await driver.click({ selector: '[data-testid="collection-picker"]' });
+  await driver.click({ selector: '[role="menuitem"]', text: 'Archive Archived feedback', exact: true });
+  await driver.waitFor({
+    selector: '[data-testid="collection-picker"][aria-description="Current collection is archived"]',
+  });
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
   if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-projects.png'));
