@@ -20,6 +20,7 @@ export interface UsePromptBundleControllerOptions {
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
   getIncludeRecognisedText?(): boolean;
+  getIncludeSourceContext?(): boolean;
 }
 
 export interface PromptBundleController {
@@ -76,14 +77,17 @@ function browserBridge(): PromptBundleControllerBridge {
 export function usePromptBundleController(options: UsePromptBundleControllerOptions): PromptBundleController {
   const getSavedContextRef = useRef(options.getSavedContext);
   const getIncludeRecognisedTextRef = useRef(options.getIncludeRecognisedText);
+  const getIncludeSourceContextRef = useRef(options.getIncludeSourceContext);
   const disposalGeneration = useRef(0);
   getSavedContextRef.current = options.getSavedContext;
   getIncludeRecognisedTextRef.current = options.getIncludeRecognisedText;
+  getIncludeSourceContextRef.current = options.getIncludeSourceContext;
   const engineRef = useRef<PromptBundleControllerEngine | undefined>(undefined);
   if (!engineRef.current) {
     engineRef.current = new PromptBundleControllerEngine({
       getSavedContext: () => getSavedContextRef.current(),
       getIncludeRecognisedText: () => getIncludeRecognisedTextRef.current?.() ?? true,
+      getIncludeSourceContext: () => getIncludeSourceContextRef.current?.() ?? false,
       bridge: options.bridge ?? browserBridge(),
       rendering: options.rendering,
       includeMasterOverview: options.includeMasterOverview,

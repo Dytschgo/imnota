@@ -21,6 +21,7 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Separate Markdown/image copy, generated-file access and file-path fallbacks
 - Manual local snapshots, optional automatic history and validated restore with safety copies
 - Area, window and display capture on Windows and macOS, saved as PNG screenshots
+- Optional source info, off by default (app, window title, time, display), recorded locally at capture or import, editable per screenshot and written into exported Markdown
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings
 - Editable local drawing sources with rendered PNG output
 - Editable Konva annotation layer with arrows, lines, shapes, highlights, text, callouts, steps and sensitive-area masks
@@ -163,7 +164,7 @@ Combined clipboard copy offers the matching Markdown and PNG together, but the r
 
 ## Privacy and security
 
-Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Imnota does not require internet access for its core workflow. It has no account, cloud sync or built-in AI provider connection. Imported project files are treated as untrusted data. Source info (window titles, app names, times) stays in your project and is exported only in bundles you share; turn it off under Settings → Features. IPC calls validate and constrain paths to the selected workspace. Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 Hosted links are accessible to anyone who has the URL until revoked or expired. Review the upload manifest before sharing sensitive content. The service receives the approved PNG/Markdown artifacts; it does not receive the editable project folder. See [sharing instructions](docs/user-guide.md#share-a-hosted-link) and the [service operations guide](share-service/docs/hostinger-deployment.md).
 

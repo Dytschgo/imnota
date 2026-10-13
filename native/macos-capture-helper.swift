@@ -51,6 +51,8 @@ for window in windows {
     result.append([
         "id": "window:\(id)",
         "title": String(title.prefix(120)),
+        // The owning app's name, for the screenshot's source info. Empty when WindowServer omits it.
+        "app": String(((window[kCGWindowOwnerName as String] as? String) ?? "").prefix(120)),
         "bounds": ["x": bounds.origin.x, "y": bounds.origin.y,
                    "width": bounds.width, "height": bounds.height],
     ])

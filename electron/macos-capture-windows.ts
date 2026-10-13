@@ -75,6 +75,9 @@ export function parseMacCaptureWindows(
     natives.push({
       id: candidate.id,
       title: candidate.title,
+      ...(typeof candidate.app === 'string' && candidate.app.trim() && candidate.app.length <= 120
+        ? { app: candidate.app }
+        : {}),
       bounds,
       className: '',
       visible: true,

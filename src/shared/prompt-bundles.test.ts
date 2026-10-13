@@ -193,6 +193,28 @@ describe('prompt bundle planning', () => {
     expect(result.bundles[0].markdown).not.toContain('Source size: 1600×1200');
   });
 
+  it('writes recorded source info under the picture heading only when present', () => {
+    const input = collection([
+      screenshot('captured', 0, {
+        source: {
+          via: 'capture',
+          capturedAt: '2026-10-10T10:15:00.000Z',
+          app: 'Google Chrome',
+          windowTitle: 'Checkout - Google Chrome',
+        },
+      }),
+      screenshot('plain', 1),
+    ]);
+    const result = planPromptBundles(input, [rendered('captured'), rendered('plain')]);
+    expect(result.kind).toBe('ready');
+    if (result.kind !== 'ready') return;
+    const markdown = result.bundles[0].markdown;
+    expect(markdown).toContain(
+      'Source size: 100×100\n\nSource:\n- App: Google Chrome\n- Window: Checkout - Google Chrome\n- Captured: ',
+    );
+    expect(markdown.match(/^Source:$/gm)).toHaveLength(1);
+  });
+
   it('preserves meaningful Markdown indentation in context, descriptions, and text notes', () => {
     const input = collection([
       screenshot('one', 0, {
