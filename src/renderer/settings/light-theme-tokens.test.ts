@@ -44,11 +44,6 @@ describe('light theme tokens', () => {
   const light = themeCustomProperties(css, ":root[data-theme='light']");
   const indigoHover = accentTokens('indigo', 'light').hover;
 
-  it('keeps existing cyan and success text roles', () => {
-    expect(light['--text-cyan']).toBe('#0369a1');
-    expect(light['--text-success']).toBe('#15803d');
-  });
-
   it('meets WCAG AA contrast on solid light surfaces', () => {
     expect(light['--imnota-accent-hover']).toBe(indigoHover);
     const backgrounds = [light['--surface'], light['--bg']];

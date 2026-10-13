@@ -186,8 +186,10 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: ${{ matrix.command }}
         if: env.RUN_APPLICATION == 'true'
+      # Linux runs the full unit and script suites in the quality job, and the platform
+      # suite is a subset of that, so only Windows and macOS run it here.
       - name: Test platform-specific behavior
-        if: env.RUN_APPLICATION == 'true'
+        if: env.RUN_APPLICATION == 'true' && matrix.os != 'ubuntu-latest'
         run: pnpm test:platform
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false

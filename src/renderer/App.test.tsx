@@ -3027,11 +3027,19 @@ describe('feedback controls', () => {
     const file = new File(['slow'], 'slow.png', { type: 'image/png' });
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
     await waitFor(() => expect(importImageFiles).toHaveBeenCalledOnce());
-    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
-      target: { value: 'Typed during slow import' },
-    });
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 800)));
-    expect(saveMetadata).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+        target: { value: 'Typed during slow import' },
+      });
+      // Run past the 700 ms metadata autosave debounce without waiting in real time.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(saveMetadata).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
 
     const original = editingSnapshot.project.screenshots[0]!;
     importedRef.current = {

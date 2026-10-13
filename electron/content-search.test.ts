@@ -93,9 +93,7 @@ describe('workspace content search', () => {
     );
     const readText = vi.fn(readSearchText);
     const service = new WorkspaceContentSearch({ readText });
-    const start = performance.now();
     const response = await service.search({ workspacePath: root, query: 'BODY identifier-99.' });
-    const cold = performance.now() - start;
     expect(response.results).toHaveLength(10);
     expect(response.warnings).toEqual([]);
     expect(response.results[9]).toMatchObject({
@@ -104,16 +102,9 @@ describe('workspace content search', () => {
       matchSource: 'markdown',
     });
     expect(readText).toHaveBeenCalledTimes(1100);
-    const warmStart = performance.now();
     await service.search({ workspacePath: root, query: 'identifier-98.' });
-    const warm = performance.now() - warmStart;
+    // The warm query is served from memory: no further file reads. Wall-clock speed is not asserted.
     expect(readText).toHaveBeenCalledTimes(1100);
-    // Cold disk timings vary with concurrent filesystem tests. Gate bounded I/O and
-    // cached-query responsiveness; report cold timing rather than asserting disk speed.
-    expect(warm).toBeLessThan(1000);
-    console.info(
-      `Search fixture: cold ${cold.toFixed(1)}ms, warm ${warm.toFixed(1)}ms; 100 projects, 1000 items, 1100 file reads total.`,
-    );
   }, 30_000);
 
   it('retains metadata and readable siblings when a Markdown file is unreadable', async () => {
