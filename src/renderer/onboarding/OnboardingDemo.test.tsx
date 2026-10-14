@@ -228,35 +228,31 @@ describe('OnboardingDemo', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Generated files opened.');
   });
 
-  it('does not claim Markdown + image when Windows keeps only the image', async () => {
-    const onCopyHandoff = vi.fn(async () => ({
-      text: false,
-      html: false,
-      image: true,
-      files: false,
-    }));
-    await reachCopyStep({
-      defaultCopyVariant: 'rich',
-      onCopyHandoff,
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Image copied');
-    expect(screen.queryByText(/markdown \+ image prepared/i)).not.toBeInTheDocument();
-    expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(
-      /Markdown was not confirmed.*Copy Markdown only or Open files/i,
-    );
-    expect(screen.getByRole('button', { name: 'Copy Markdown only' })).toBeEnabled();
-  });
-
-  it('does not claim combined copy when read-back cannot confirm a format', async () => {
-    const onCopyHandoff = vi.fn(async () => undefined);
+  it.each([
+    {
+      name: 'Windows keeps only the image',
+      placed: { text: false, html: false, image: true, files: false },
+      status: /Image copied/,
+      warning: /Markdown was not confirmed.*Copy Markdown only or Open files/i,
+    },
+    {
+      name: 'read-back cannot confirm a format',
+      placed: undefined,
+      status: /could not be confirmed/i,
+      warning: /Copy Markdown only, Copy image only, or Open files/,
+    },
+  ])('does not claim Markdown + image when $name', async ({ placed, status, warning }) => {
+    const onCopyHandoff = vi.fn(async () => placed);
     await reachCopyStep({ defaultCopyVariant: 'rich', onCopyHandoff });
     fireEvent.click(screen.getByRole('button', { name: 'Rich copy' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/could not be confirmed/i);
+    expect(await screen.findByRole('status')).toHaveTextContent(status);
     expect(screen.queryByText(/markdown \+ image prepared/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(
-      /Copy Markdown only, Copy image only, or Open files/,
-    );
+    if (placed) {
+      expect(screen.getByTestId('onboarding-copy-warning')).toHaveTextContent(warning);
+      expect(screen.getByRole('button', { name: 'Copy Markdown only' })).toBeEnabled();
+    } else {
+      expect(screen.getByRole('status')).toHaveTextContent(warning);
+    }
   });
 
   it('keeps onboarding rich copy available when native file clipboard support is absent', async () => {

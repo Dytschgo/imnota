@@ -232,26 +232,14 @@ describe('recently deleted', () => {
 describe('delete journal retention', () => {
   it('expires at the exact 30-day boundary, never one millisecond before it', async () => {
     const { projectPath } = await fixture();
-    const token = await deleteScreenshot(projectPath, 'shot_a');
+    const tokens = [await deleteScreenshot(projectPath, 'shot_a'), await deleteText(projectPath)];
     const deletedAt = '2026-01-01T00:00:00.000Z';
-    await patchManifest(projectPath, token, { deletedAt });
+    for (const token of tokens) await patchManifest(projectPath, token, { deletedAt });
     const deadline = Date.parse(deletedAt) + DELETED_ITEM_RETENTION_MS;
     expect(await pruneExpiredDeletes(projectPath, {}, deadline - 1)).toEqual({ pruned: 0, failures: [] });
-    expect(await exists(journal(projectPath, token))).toBe(true);
-    expect(await pruneExpiredDeletes(projectPath, {}, deadline)).toEqual({ pruned: 1, failures: [] });
-    expect(await exists(journal(projectPath, token))).toBe(false);
-  });
-
-  it('keeps journals inside the retention window', async () => {
-    const { projectPath } = await fixture();
-    const shotToken = await deleteScreenshot(projectPath, 'shot_a');
-    const textToken = await deleteText(projectPath);
-
-    expect(
-      await pruneExpiredDeletes(projectPath, {}, Date.now() + DELETED_ITEM_RETENTION_MS - 60_000),
-    ).toEqual({ pruned: 0, failures: [] });
-    expect(await exists(journal(projectPath, shotToken))).toBe(true);
-    expect(await exists(journal(projectPath, textToken))).toBe(true);
+    for (const token of tokens) expect(await exists(journal(projectPath, token))).toBe(true);
+    expect(await pruneExpiredDeletes(projectPath, {}, deadline)).toEqual({ pruned: 2, failures: [] });
+    for (const token of tokens) expect(await exists(journal(projectPath, token))).toBe(false);
   });
 
   it('prunes committed deletes older than the retention window and leaves the project openable', async () => {

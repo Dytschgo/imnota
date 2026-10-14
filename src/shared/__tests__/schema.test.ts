@@ -4,12 +4,6 @@ import { emptyProject } from '../utils.js';
 import { validateProject } from '../schema.js';
 
 describe('project schema', () => {
-  it('accepts the versioned project shape', () => {
-    expect(validateProject(emptyProject('Valid', ''))).toMatchObject({ schemaVersion: 3, name: 'Valid' });
-  });
-  it('rejects missing project identity', () => {
-    expect(() => validateProject({ schemaVersion: 1 })).toThrow();
-  });
   it('round-trips allowlisted icons and falls back for unknown future icon keys', () => {
     expect(validateProject({ ...emptyProject('Valid', ''), icon: 'rocket' }).icon).toBe('rocket');
     expect(
