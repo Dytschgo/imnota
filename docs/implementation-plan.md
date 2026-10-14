@@ -31,6 +31,8 @@ The former plan's ban on all server work was superseded by its later hosted-stat
 
 Adding content to an archived collection restores it with the successful native add. Cancelled or failed additions leave it archived. Multi-image imports commit one image at a time; if a later image fails, the open project reloads the earlier additions and reports the error.
 
+Screenshot import and duplicate remove only their newly written image and sidecars on failure before `project.json` commits. Cleanup is best-effort and preserves the original error; an occupied destination is refused. If metadata replacement committed but directory durability could not be confirmed, the referenced files remain and the original warning is reported. These operations do not add journals or a startup cleanup sweep; interrupted processes and failed cleanup can still leave files for manual inspection.
+
 ## Remaining acceptance and operational work
 
 The released Collection 10 update includes green **Copy Bundle** split buttons, separate format options, **Bundle 1** labels, one-day default links, automatic pairing, optional sender names, matching per-bundle Markdown, persistent dismissal of individual recovery warnings, and an owner-only dashboard with aggregate usage and revocation. Owner access uses a privately provisioned high-entropy key and short-lived secure sessions; it does not add general user accounts. Structured Markdown and sender metadata count toward service storage quota.
