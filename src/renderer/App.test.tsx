@@ -3394,6 +3394,74 @@ describe('feedback controls', () => {
     });
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
   });
+  it.each(['failure', 'success'] as const)(
+    'reports a closed-project unpin outcome after opening it mid-request (%s)',
+    async (outcome) => {
+      let disk = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      let rejectUpdate!: (reason: Error) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveUpdate = resolve;
+            rejectUpdate = reject;
+          }),
+      );
+      const listProjects = vi.fn(async () => [{ ...disk.project, projectPath: disk.projectPath }]);
+      renderApp({
+        listProjects,
+        loadProject: async () => disk,
+        updateProjectMetadata,
+        reloadWatchedProject: async () => ({
+          ok: true,
+          value: { snapshot: disk, projectRevision: disk.projectRevision },
+        }),
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+      const pinned = within(document.getElementById('pinned-projects')!);
+      fireEvent.click(pinned.getByRole('button', { name: `${snapshot.project.name} 1 collection` }));
+      await screen.findByRole('textbox', { name: 'Overall context' });
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(true);
+      const listCallsBeforeCompletion = listProjects.mock.calls.length;
+
+      await act(async () => {
+        if (outcome === 'failure')
+          rejectUpdate(
+            new Error(
+              "Error invoking remote method 'project:update-metadata': Error: Project metadata is unavailable.",
+            ),
+          );
+        else {
+          disk = {
+            ...disk,
+            projectRevision: 'project-2',
+            project: { ...disk.project, favourite: false },
+          };
+          resolveUpdate(disk);
+        }
+      });
+
+      if (outcome === 'failure') {
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'The project could not be unpinned. Project metadata is unavailable.',
+        );
+        expect(pinned.getByRole('button', { name: `Unpin ${snapshot.project.name}` })).toBeInTheDocument();
+      } else {
+        expect(await pinned.findByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      }
+      await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(listCallsBeforeCompletion + 1));
+      expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath);
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(disk.project.favourite);
+      expect(screen.getByRole('textbox', { name: 'Overall context' })).toBeInTheDocument();
+    },
+  );
+
   it('finishes an in-flight editor save before starting a closed-project pin mutation', async () => {
     const closed = {
       ...snapshot,

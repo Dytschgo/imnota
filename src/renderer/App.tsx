@@ -1806,8 +1806,15 @@ export default function App() {
         }
         await refreshProjects();
       } catch (reason) {
-        if (identity === navigationIdentity.current)
-          setError(reason instanceof Error ? reason.message : 'The project could not be pinned.');
+        const message = `The project could not be ${pinned ? 'pinned' : 'unpinned'}.${
+          reason instanceof Error && reason.message ? ` ${userFacingErrorMessage(reason.message)}` : ''
+        }`;
+        setError(message);
+        try {
+          await refreshProjects();
+        } catch {
+          setError(`${message} The project list could not be refreshed.`);
+        }
       } finally {
         if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
       }
