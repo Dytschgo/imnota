@@ -842,8 +842,13 @@ async function uniqueStoredName(projectPath: string, original: string): Promise<
   const existing = new Set(project.screenshots.map((s) => s.storedFilename));
   const occupied = (candidate: string) =>
     existing.has(candidate) ||
-    project.collections.some((collection) =>
-      existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)),
+    project.collections.some(
+      (collection) =>
+        existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)) ||
+        existsSync(
+          path.join(projectPath, 'collections', collection.id, 'annotations', `${candidate}.json`),
+        ) ||
+        existsSync(path.join(projectPath, 'collections', collection.id, 'descriptions', `${candidate}.md`)),
     );
   let candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`;
   let n = 2;
