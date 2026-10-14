@@ -28,7 +28,7 @@ export function mcpVerificationProfile(
   const same = (left: string, right: string) => comparable(left) === comparable(right);
   const directory = (target: string) => {
     const stat = lstatSync(target);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || !same(realpathSync(target), target)) fail();
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !same(realpathSync.native(target), target)) fail();
   };
   const file = (target: string, maxBytes: number) => {
     const stat = lstatSync(target);
@@ -37,14 +37,14 @@ export function mcpVerificationProfile(
       stat.isSymbolicLink() ||
       stat.nlink !== 1 ||
       stat.size > maxBytes ||
-      !same(realpathSync(target), target)
+      !same(realpathSync.native(target), target)
     )
       fail();
     return readFileSync(target, 'utf8');
   };
   // Canonical tmpdir permits the OS's /var -> /private/var alias on macOS, but not fixture aliases.
   if (
-    !same(path.dirname(root), realpathSync(tmpdir())) ||
+    !same(path.dirname(root), realpathSync.native(tmpdir())) ||
     !/^imnota-smoke-result-[a-z0-9_-]+$/i.test(path.basename(root)) ||
     !/^mcp-(enabled|disabled)$/.test(path.basename(resolved))
   )

@@ -93,6 +93,7 @@ export interface ContentPersistenceDependencies {
   transactionOperations?: ScreenshotTransactionOperations;
   trashOperations?: ContentTrashOperations;
   ownsRestoreRevision?(projectPath: string, revision: string): boolean;
+  restoreVerificationReadHooks?(projectPath: string): import('./files.js').StableReadHooks | undefined;
   trashItem(target: string): Promise<void>;
   randomId?: () => string;
   now?: () => Date;
@@ -869,6 +870,7 @@ export class ContentPersistenceService {
       this.dependencies.trashOperations?.write ?? atomicWrite,
       this.dependencies.snapshot,
       this.dependencies.ownsRestoreRevision,
+      this.dependencies.restoreVerificationReadHooks?.(input.projectPath),
     );
     const result = await undoContentItemDelete(
       input.projectPath,

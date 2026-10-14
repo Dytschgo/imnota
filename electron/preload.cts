@@ -1,6 +1,27 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImnotaBridge } from '../src/shared/types.js';
 
+// Sandbox preload receives this argument only after main validates the runner proof.
+const faultArguments = process.argv.filter((value) => value.startsWith('--imnota-native-fault='));
+if (faultArguments.length === 1) {
+  const nonce = faultArguments[0].slice('--imnota-native-fault='.length);
+  if (!/^[a-f0-9-]{36}$/.test(nonce)) throw new Error('Invalid native fault nonce.');
+  contextBridge.exposeInMainWorld('imnotaNativeFault', {
+    nonce,
+    onCommand(callback: (command: unknown) => void) {
+      const listener = (_event: Electron.IpcRendererEvent, command: { nonce?: string }) => {
+        if (command?.nonce !== nonce) throw new Error('Fault command nonce mismatch.');
+        callback(command);
+      };
+      ipcRenderer.on('smoke:fault-command', listener);
+      return () => ipcRenderer.removeListener('smoke:fault-command', listener);
+    },
+    report(observation: unknown) {
+      ipcRenderer.send('smoke:fault-observation', observation);
+    },
+  });
+}
+
 const onDeviceOcrAvailable = process.platform === 'win32';
 
 const bridge: ImnotaBridge = {

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
+  createRunDirectory,
   isStrictChild,
   normalizeNativeVerificationMode,
   nativeVerificationEnvironment,
@@ -12,7 +13,7 @@ import {
 } from './smoke-process.mjs';
 
 const temporary = [];
-const temporaryRoot = realpathSync(tmpdir());
+const temporaryRoot = realpathSync.native(tmpdir());
 afterEach(() => {
   for (const target of temporary.splice(0)) rmSync(target, { recursive: true, force: true });
 });
@@ -90,4 +91,14 @@ describe('native smoke process safety', () => {
     assert.throws(() => removeRunDirectory(matchingButUnowned), /ownership marker/);
     assert.doesNotThrow(() => removeRunDirectory(resolve(temporaryRoot, 'imnota-smoke-result-not-created')));
   });
+});
+
+it('creates a canonical owned run matching native realpath even with a Windows short TEMP path', () => {
+  const run = createRunDirectory();
+  try {
+    assert.equal(run, realpathSync.native(run));
+    assert.equal(resolve(run, '..'), realpathSync.native(tmpdir()));
+  } finally {
+    removeRunDirectory(run);
+  }
 });

@@ -282,6 +282,7 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
       host.projectWatchManager
         ? (projectPath, revision) => host.projectWatchManager!.hasSelfProjectRevision(projectPath, revision)
         : undefined,
+      host.restoreVerificationReadHooks?.(safePath),
     );
     const undo = await undoScreenshotDelete(
       safePath,

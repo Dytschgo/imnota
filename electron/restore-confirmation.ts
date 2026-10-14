@@ -2,7 +2,13 @@ import { RESTORE_CONFIRMATION_FAILURE } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectData, ProjectSnapshot } from '../src/shared/types.js';
-import { atomicWrite, assertNoLinks, CommittedWriteError, readStableRegularFile } from './files.js';
+import {
+  atomicWrite,
+  assertNoLinks,
+  CommittedWriteError,
+  readStableRegularFile,
+  type StableReadHooks,
+} from './files.js';
 import { projectRevisionForSource } from './project-watch.js';
 
 /** Confirmation failures keep the committed restore journal; they must never trigger rollback. */
@@ -14,6 +20,7 @@ export function restoreConfirmation(
   write: typeof atomicWrite,
   loadSnapshot: (projectPath: string) => Promise<ProjectSnapshot>,
   ownsRevision?: (projectPath: string, revision: string) => boolean,
+  verificationReadHooks?: StableReadHooks,
 ) {
   const metadata = path.join(projectPath, 'project.json');
   const committed = new Map<string, string>();
@@ -42,7 +49,7 @@ export function restoreConfirmation(
         )
           throw new Error('The restored metadata has no matching own-write confirmation.');
         const read = async () => {
-          const source = await readStableRegularFile(metadata, 20_000_000);
+          const source = await readStableRegularFile(metadata, 20_000_000, verificationReadHooks);
           if (!source || projectRevisionForSource(source.text) !== expected)
             throw new Error('The project changed again on disk.');
         };

@@ -16,6 +16,7 @@ export interface IpcRouterOptions {
   /** Argument contracts by channel. Channels without one accept a single project path. */
   contracts: Readonly<Record<string, z.ZodType<unknown[]>>>;
   defaultContract: z.ZodType<unknown[]>;
+  verificationInvocation?<T>(channel: string, args: unknown[], actual: () => T | Promise<T>): Promise<T>;
   tracesChannel(channel: string): boolean;
   trace<T>(channel: string, run: () => T | Promise<T>): Promise<T>;
 }
@@ -87,7 +88,13 @@ export class IpcRouter {
       // Search is read-only and owns a single cancellable scan. Do not queue obsolete queries
       // behind mutations or block saves while the workspace text is being indexed.
       if (channel === 'projects:search-content') return listener(event, ...validated);
-      return this.enqueue(this.traced(channel, () => listener(event, ...validated)));
+      return this.enqueue(
+        this.traced(channel, () =>
+          this.options.verificationInvocation
+            ? this.options.verificationInvocation(channel, validated, () => listener(event, ...validated))
+            : listener(event, ...validated),
+        ),
+      );
     });
   };
 
@@ -107,7 +114,11 @@ export class IpcRouter {
       workflowOutcome(async () => {
         this.assertTrusted(event);
         if (this.options.updateInstallPending()) throw new Error(UPDATE_PENDING);
-        const invoke = this.traced(channel, () => listener(event, ...args));
+        const invoke = this.traced(channel, () =>
+          this.options.verificationInvocation
+            ? this.options.verificationInvocation(channel, args, () => listener(event, ...args))
+            : listener(event, ...args),
+        );
         return queued ? this.enqueue(invoke) : invoke();
       }),
     );
