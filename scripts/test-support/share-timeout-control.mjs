@@ -13,13 +13,13 @@ export async function timeoutControl(source) {
   const report = path.join(directory, 'trace.json');
   const resultsFile = path.join(directory, 'vitest-results.json');
   await fs.symlink(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
-  source ??= await fs.readFile(path.join(root, 'electron/hosted-share-contract.test.ts'), 'utf8');
+  source ??= await fs.readFile(path.join(root, 'scripts/test-support/share-timeout-contract.mjs'), 'utf8');
   source = source.replace(/^import .*share-fixture-regressions.mjs.*;\r?\n/m, '');
   source = source.replace('{ afterEach, expect, it, vi }', '{ afterEach, expect, it as originalIt, vi }');
   source = source.replace(
     /(['"])(\.\.?\/[^'"]+)\1/g,
     (_match, quote, relative) =>
-      quote + path.resolve(root, 'electron', relative).replaceAll('\\', '/') + quote,
+      quote + path.resolve(root, 'scripts/test-support', relative).replaceAll('\\', '/') + quote,
   );
   const helper = path.join(root, 'scripts/test-support/share-fixture.mjs').replaceAll('\\', '/');
   const app = path.join(root, 'share-service/src/app.js').replaceAll('\\', '/');
@@ -33,6 +33,8 @@ const services = [];
 const servers = new Set();
 const fixtures = [];
 let settled = false;
+let releaseUpload;
+const uploadBarrier = new Promise(resolve => { releaseUpload = resolve; });
 const mark = (event, extra = {}) => events.push({event, at: performance.now(), ...extra});
 const state = () => ({ bodySettled: settled, openDatabases: services.filter(s => s.db.isOpen).length,
   listening: [...servers].filter(s => s.listening).length,
@@ -40,7 +42,10 @@ const state = () => ({ bodySettled: settled, openDatabases: services.filter(s =>
 function it(name, body) {
   originalIt(name, context => {
     mark('body.begin');
-    context.signal.addEventListener('abort', () => mark('context.abort'));
+    context.signal.addEventListener('abort', () => {
+      mark('context.abort');
+      releaseUpload();
+    }, { once: true });
     const promise = Promise.resolve().then(body);
     bodies.push(promise.then(() => { settled = true; mark('body.settled'); },
       () => { settled = true; mark('body.settled'); }));
@@ -75,7 +80,7 @@ vi.mock(${JSON.stringify(app)}, async importOriginal => {
         if (delayed) return next();
         delayed = true;
         mark('upload.barrier');
-        return new Promise(resolve => setTimeout(resolve, 5500)).then(() => {
+        return uploadBarrier.then(() => {
           mark('upload.release'); next();
         });
       }
@@ -96,7 +101,8 @@ afterAll(async () => {
   }
 });
 `;
-  // Use the same test source and default 5000ms/10000ms test/hook limits.
+  // Keep Vitest's real default 5000ms/10000ms limits. Release the HTTP handler
+  // only on timeout, rather than racing two wall-clock timers and a large upload.
   const testFile = path.join(directory, 'contract.test.ts');
   await fs.writeFile(testFile, prelude + source);
   const config = path.join(directory, 'vitest.config.mjs');
@@ -138,7 +144,7 @@ setTimeout(() => { for (const child of children) child.kill(); process.exit(97);
     '1',
     '--no-cache',
     '--testNamePattern',
-    'publishes and downloads every byte',
+    'settles a real upload after the test timeout',
   ];
   const child = spawn(process.execPath, args, {
     cwd: root,
@@ -174,17 +180,14 @@ export function assertTimeoutLifecycle(result) {
   assert.equal(result.signal, null);
   assert.match(output, /Test timed out in 5000ms/);
   assert.equal(result.results.success, false);
-  assert.equal(result.results.numTotalTests, 3);
+  assert.equal(result.results.numTotalTests, 1);
   assert.equal(result.results.numFailedTests, 1);
-  assert.equal(result.results.numPendingTests, 2);
+  assert.equal(result.results.numPendingTests, 0);
   assert.equal(result.results.numPassedTests, 0);
   assert.equal(result.results.testResults.length, 1);
   const failed = result.results.testResults[0].assertionResults.filter((test) => test.status === 'failed');
   assert.equal(failed.length, 1);
-  assert.equal(
-    failed[0].title,
-    'publishes and downloads every byte of oversized Unicode Markdown through split links',
-  );
+  assert.equal(failed[0].title, 'settles a real upload after the test timeout');
   assert.equal(failed[0].failureMessages.length, 1);
   // Vitest JSON emits e.stack (STACK_TRACE_ERROR for timeout registration),
   // so the exact timeout message is asserted against its verbose report above.

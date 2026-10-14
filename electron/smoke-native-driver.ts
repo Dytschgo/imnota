@@ -24,6 +24,28 @@ export const SMOKE_CAPTURE_PREPARATION = `(async () => {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 })()`;
 
+// Konva decodes an off-DOM Image: document.images and stable placeholder pixels
+// cannot establish that the selected screenshot has rendered. Apply this to
+// every artifact, including remounts caused by collapsing the navigation.
+export const SMOKE_CANVAS_CAPTURE_PREPARATION = `new Promise((resolve, reject) => {
+  const observer = new MutationObserver(check);
+  function finish(error) {
+    observer.disconnect();
+    if (error) reject(new Error(error)); else resolve();
+  }
+  function check() {
+    for (const canvas of document.querySelectorAll('[data-testid="annotation-canvas"]')) {
+      const state = canvas.querySelector('[data-testid="canvas-load-state"]');
+      if (state?.dataset.state === 'failed') return finish('Cannot capture: selected screenshot failed to load.');
+      const rendered = canvas.querySelector('.konvajs-content canvas');
+      if (state || !rendered || rendered.width <= 0 || rendered.height <= 0) return;
+    }
+    finish();
+  }
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+  check();
+})`;
+
 export async function withSmokeDeadline<T>(
   operation: () => Promise<T>,
   timeoutMs: number,
@@ -202,6 +224,39 @@ function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
   })()`;
 }
 
+export function locatorWaitScript(
+  locator: SmokeLocator,
+  options: { absent?: boolean; enabled?: boolean },
+): string {
+  // Observe DOM/focus changes in the renderer instead of issuing repeated IPC
+  // probes from the main process. Frames also cover layout-only changes, but
+  // cannot be the sole signal: an unpresented window may not receive frames.
+  // The driver retains one deadline, including a blocked evaluation.
+  return `new Promise(resolve => {
+    let finished = false;
+    let frame;
+    const observer = new MutationObserver(check);
+    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    document.addEventListener('focusin', check, true);
+    document.addEventListener('focusout', check, true);
+    function check() {
+      if (finished) return;
+      const found = ${locatorScript(locator)};
+      if (${Boolean(options.absent)} ? !found : found && (!${Boolean(options.enabled)} || !found.disabled)) {
+        finished = true;
+        observer.disconnect();
+        document.removeEventListener('focusin', check, true);
+        document.removeEventListener('focusout', check, true);
+        if (frame !== undefined) cancelAnimationFrame(frame);
+        resolve(found ?? { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false });
+        return;
+      }
+      if (frame === undefined) frame = requestAnimationFrame(() => { frame = undefined; check(); });
+    }
+    check();
+  })`;
+}
+
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function isTransientLocatorExecutionError(error: unknown): boolean {
@@ -284,18 +339,14 @@ export class NativeUiDriver {
     options: { timeoutMs?: number; absent?: boolean; enabled?: boolean } = {},
   ): Promise<Rectangle & { text: string; disabled: boolean }> {
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
-    const started = Date.now();
-    do {
-      const found = await this.bounds(locator, Math.max(1, timeout - (Date.now() - started)));
-      if (options.absent ? !found : found && (!options.enabled || !found.disabled)) {
-        if (options.absent) return { x: 0, y: 0, width: 0, height: 0, text: '', disabled: false };
-        return found!;
-      }
-      await wait(50);
-    } while (Date.now() - started < timeout);
-    throw new Error(
-      `Timed out waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)}.`,
-    );
+    try {
+      return await this.evaluate(locatorWaitScript(locator, options), timeout);
+    } catch (error) {
+      throw new Error(
+        `Failed waiting for ${options.absent ? 'absence of ' : options.enabled ? 'enabled ' : ''}${JSON.stringify(locator)} within ${timeout}ms: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   async exists(locator: SmokeLocator): Promise<boolean> {
@@ -485,6 +536,11 @@ export class NativeUiDriver {
 
   async capture(directory: string, filename: string): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
+    try {
+      await this.evaluate(SMOKE_CANVAS_CAPTURE_PREPARATION);
+    } catch (error) {
+      throw new Error(`Canvas readiness failed for ${filename}.`, { cause: error });
+    }
     // DOM assertions and animation frames can precede Chromium's compositor update.
     // Decode assets first, then require a stable sequence of actual captured pixels.
     await this.evaluate(SMOKE_CAPTURE_PREPARATION);
