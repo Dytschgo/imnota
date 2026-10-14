@@ -47,7 +47,13 @@ import type {
   ProjectWatchEvent,
   WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
-import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
+import {
+  DEFAULT_EXPORT_PREFERENCES,
+  nowIso,
+  portableFilename,
+  sanitizeFilename,
+  slugify,
+} from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
 import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
@@ -812,7 +818,7 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
-  const base = slugify(name);
+  const base = portableFilename(slugify(name));
   let folder = path.join(workspace, base);
   let n = 2;
   while (existsSync(folder)) folder = path.join(workspace, `${base}-${n++}`);
@@ -836,7 +842,7 @@ async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promi
 
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
-  const base = sanitizeFilename(path.basename(original, ext), 'screenshot');
+  const base = sanitizeFilename(portableFilename(path.basename(original, ext)), 'screenshot');
   const project = await readProject(projectPath);
   const existing = new Set(project.screenshots.map((s) => s.storedFilename));
   const occupied = (candidate: string) =>
@@ -844,10 +850,10 @@ async function uniqueStoredName(projectPath: string, original: string): Promise<
     project.collections.some((collection) =>
       existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)),
     );
-  let candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`;
+  let candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`);
   let n = 2;
   while (occupied(candidate))
-    candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`;
+    candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`);
   return candidate;
 }
 

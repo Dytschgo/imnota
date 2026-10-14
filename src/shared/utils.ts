@@ -46,6 +46,21 @@ export function createId(prefix = 'id'): string {
   return `${prefix}_${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
 }
 
+/** For newly generated disk names only; never rewrite stored references while loading. */
+export function portableFilename(value: string): string {
+  const cleaned = [...value]
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && (code < 127 || code > 159);
+    })
+    .join('')
+    .replace(/[\\/<>:"|?*]/g, '-')
+    .slice(0, 254)
+    .replace(/[. ]+$/g, '');
+  const name = cleaned || 'untitled';
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(name.split('.')[0].trimEnd()) ? `_${name}` : name;
+}
+
 export function sanitizeFilename(value: string, fallback = 'untitled'): string {
   const cleaned = value
     .normalize('NFKD')
