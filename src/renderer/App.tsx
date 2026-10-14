@@ -1757,6 +1757,33 @@ export default function App() {
       setDialogBusy(false);
     }
   }
+  async function setProjectPinned(projectPath: string, pinned: boolean) {
+    const open = useAppStore.getState().snapshot;
+    if (open?.projectPath === projectPath) {
+      // The open project saves through its editor queue, like the toolbar heart.
+      if (open.project.favourite !== pinned) await toggleFavourite();
+      return;
+    }
+    const identity = ++navigationIdentity.current;
+    let nativeMutationToken: number | null = persistence.beginNativeMutation();
+    try {
+      const loaded = await window.imnota.loadProject(projectPath);
+      if (!loaded.projectRevision) throw new Error('Project revision is unavailable.');
+      await window.imnota.updateProjectMetadata({
+        projectPath,
+        expectedRevision: loaded.projectRevision,
+        patch: { favourite: pinned },
+      });
+      await persistence.cancelNativeMutation(nativeMutationToken);
+      nativeMutationToken = null;
+      if (identity !== navigationIdentity.current) return;
+      await refreshProjects();
+    } catch (reason) {
+      if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
+      if (identity === navigationIdentity.current)
+        setError(reason instanceof Error ? reason.message : 'The project could not be pinned.');
+    }
+  }
   async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
     const identity = ++navigationIdentity.current;
     if (!(await flushAll())) {
@@ -2111,6 +2138,8 @@ export default function App() {
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
+        onSelectProject={openProject}
+        onSetProjectPinned={setProjectPinned}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
         onDropFiles={(files) =>

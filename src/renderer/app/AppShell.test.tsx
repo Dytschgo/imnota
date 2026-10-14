@@ -317,4 +317,118 @@ describe('AppShell navigation', () => {
     fireEvent.click(about);
     expect(onAbout).toHaveBeenCalledOnce();
   });
+  describe('pinned projects', () => {
+    const pinFixtures: ProjectListItem[] = [
+      { ...projects[0], favourite: false },
+      {
+        ...projects[0],
+        projectPath: '/workspace/zephyr',
+        id: 'zephyr',
+        name: 'Zephyr',
+        favourite: true,
+        collections: [],
+      },
+      {
+        ...projects[0],
+        projectPath: '/workspace/beacon',
+        id: 'beacon',
+        name: 'beacon',
+        favourite: true,
+      },
+      {
+        ...projects[0],
+        projectPath: '/workspace/old',
+        id: 'old',
+        name: 'Archived pin',
+        favourite: true,
+        status: 'archived',
+      },
+    ];
+    const renderPinned = (overrides: Partial<Parameters<typeof SideNav>[0]> = {}) => {
+      const props = {
+        activeCollectionId: 'atlas-recent',
+        activeProjectPath: '/workspace/beacon',
+        navigationOpen: true,
+        projects: pinFixtures,
+        recentCollections: [
+          {
+            projectPath: '/workspace/atlas',
+            collectionId: 'atlas-recent',
+            openedAt: '2026-09-03T00:00:00.000Z',
+          },
+        ],
+        view: 'workspace' as const,
+        onAbout: vi.fn(),
+        onNavigate: vi.fn(),
+        onNewProject: vi.fn(),
+        onOpenCollection: vi.fn(),
+        onSelectProject: vi.fn(),
+        onSetProjectPinned: vi.fn(),
+        onSetNavigationOpen: vi.fn(),
+        ...overrides,
+      };
+      render(<SideNav {...props} />);
+      return props;
+    };
+    const pinnedList = () => document.getElementById('pinned-projects')!;
+
+    it('lists active pinned projects alphabetically and opens the selected project', () => {
+      const props = renderPinned();
+      const rows = within(pinnedList())
+        .getAllByRole('button')
+        .filter((button) => !button.classList.contains('side-nav-row-action'));
+      expect(rows.map((row) => row.getAttribute('title'))).toEqual(['beacon', 'Zephyr']);
+      expect(within(pinnedList()).queryByText('Archived pin')).toBeNull();
+      expect(rows[0]).toHaveAttribute('aria-current', 'location');
+      expect(rows[0]).toHaveTextContent('1 collection');
+      expect(rows[1]).toHaveTextContent('0 collections');
+
+      fireEvent.click(rows[1]);
+      expect(props.onSelectProject).toHaveBeenCalledWith('/workspace/zephyr');
+    });
+
+    it('pins a project from Recent and unpins it from either list', () => {
+      const props = renderPinned();
+      const recent = document.getElementById('quick-access-collections')!;
+      const pin = within(recent).getByRole('button', { name: 'Pin Atlas' });
+      expect(pin).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(pin);
+      expect(props.onSetProjectPinned).toHaveBeenCalledWith('/workspace/atlas', true);
+      expect(props.onOpenCollection).not.toHaveBeenCalled();
+
+      fireEvent.click(within(pinnedList()).getByRole('button', { name: 'Unpin Zephyr' }));
+      expect(props.onSetProjectPinned).toHaveBeenLastCalledWith('/workspace/zephyr', false);
+      expect(props.onSelectProject).not.toHaveBeenCalled();
+    });
+
+    it('marks a Recent row whose project is already pinned', () => {
+      renderPinned({ projects: pinFixtures.map((project) => ({ ...project, favourite: true })) });
+      const recent = document.getElementById('quick-access-collections')!;
+      expect(within(recent).getByRole('button', { name: 'Unpin Atlas' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it('explains how to pin when nothing is pinned and remembers the collapsed state', () => {
+      renderPinned({ projects: [projects[0]].map((project) => ({ ...project, favourite: false })) });
+      expect(within(pinnedList()).getByText(/Pin a project from Recent/)).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse pinned projects' }));
+      expect(pinnedList()).toHaveAttribute('hidden');
+      expect(JSON.parse(localStorage.getItem('imnota:sidenav-disclosures')!)).toMatchObject({
+        pinned: false,
+        quickAccess: true,
+      });
+    });
+
+    it('moves arrow-key focus between destinations, not row pin buttons', () => {
+      renderPinned();
+      const rows = within(pinnedList())
+        .getAllByRole('button')
+        .filter((button) => !button.classList.contains('side-nav-row-action'));
+      rows[0].focus();
+      fireEvent.keyDown(rows[0], { key: 'ArrowDown' });
+      expect(rows[1]).toHaveFocus();
+    });
+  });
 });

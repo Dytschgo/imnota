@@ -1,8 +1,19 @@
-import { ChevronDown, ChevronRight, Info, Layers3, PanelLeft, Plus, Settings2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Layers3,
+  PanelLeft,
+  Pin,
+  PinOff,
+  Plus,
+  Settings2,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ProjectListItem } from '../../shared/types';
 import { Logo } from '../components/Logo';
 import { collectionDisplayName } from '../collection/collection-display-name';
+import { ProjectIcon } from '../components/ProjectIcon';
 import { IconButton } from '../components/ui';
 import type { AppView } from '../store';
 import { relativeOpenedTime, resolveRecentCollections } from '../navigation-history';
@@ -15,6 +26,7 @@ type RecentCollectionHistory = {
 };
 
 interface DisclosureState {
+  pinned: boolean;
   quickAccess: boolean;
 }
 
@@ -30,6 +42,10 @@ export interface SideNavProps {
   onNavigate(view: AppView): void | Promise<void>;
   onNewProject(): void;
   onOpenCollection(projectPath: string, collectionId: string): void | Promise<void>;
+  /** Opens a project; the Pinned section is omitted when this is not provided. */
+  onSelectProject?(projectPath: string): void | Promise<void>;
+  /** Pins are stored as the project's favourite flag. */
+  onSetProjectPinned?(projectPath: string, pinned: boolean): void | Promise<void>;
   onSetNavigationOpen(open: boolean): void;
   /** Update indicator rendered beside About; null while no update needs attention. */
   updateControl?: ReactNode;
@@ -40,13 +56,21 @@ const disclosureKey = 'imnota:sidenav-disclosures';
 function getStoredDisclosures(): DisclosureState {
   try {
     const stored = localStorage.getItem(disclosureKey);
-    if (!stored) return { quickAccess: true };
-    // Older builds also stored favourite-section state; only Recent remains.
+    if (!stored) return { pinned: true, quickAccess: true };
+    // Older builds stored a `favourites` flag for a removed section; it is ignored.
     const value = JSON.parse(stored) as Partial<DisclosureState>;
-    return { quickAccess: typeof value.quickAccess === 'boolean' ? value.quickAccess : true };
+    return {
+      pinned: typeof value.pinned === 'boolean' ? value.pinned : true,
+      quickAccess: typeof value.quickAccess === 'boolean' ? value.quickAccess : true,
+    };
   } catch {
-    return { quickAccess: true };
+    return { pinned: true, quickAccess: true };
   }
+}
+
+function collectionCount(project: ProjectListItem) {
+  const count = project.collections.filter((collection) => !collection.archived).length;
+  return `${count} collection${count === 1 ? '' : 's'}`;
 }
 
 function rememberDisclosures(value: DisclosureState) {
@@ -69,6 +93,8 @@ export function SideNav({
   onNavigate,
   onNewProject,
   onOpenCollection,
+  onSelectProject,
+  onSetProjectPinned,
   onSetNavigationOpen,
   updateControl,
 }: SideNavProps) {
@@ -76,6 +102,17 @@ export function SideNav({
   const recentCollections = useMemo(
     () => resolveRecentCollections(projects, recentHistory).slice(0, 6),
     [projects, recentHistory],
+  );
+  const pinnedProjects = useMemo(
+    () =>
+      projects
+        .filter((project) => project.favourite && project.status !== 'archived')
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    [projects],
+  );
+  const pinnedPaths = useMemo(
+    () => new Set(pinnedProjects.map((project) => project.projectPath)),
+    [pinnedProjects],
   );
   const lastActiveIdentity = useRef<string | null>(null);
   const revealedActiveIdentity = useRef<string | null>(null);
@@ -106,7 +143,10 @@ export function SideNav({
   const moveShortcutFocus = (event: KeyboardEvent<HTMLElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     const buttons = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+      // Row pin buttons stay in Tab order; arrow keys move between destinations.
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+        'button:not(:disabled):not(.side-nav-row-action)',
+      ),
     ).filter((button) => !button.closest('[hidden]'));
     const index = buttons.indexOf(event.target as HTMLButtonElement);
     if (index < 0 || !buttons.length) return;
@@ -163,6 +203,63 @@ export function SideNav({
           </div>
         </nav>
 
+        {onSelectProject && (
+          <section className="side-nav-section" aria-labelledby="pinned-projects-heading">
+            <div className="side-nav-section-heading">
+              <h2 className="nav-label" id="pinned-projects-heading">
+                Pinned
+              </h2>
+              <button
+                type="button"
+                className="nav-disclosure"
+                aria-label={`${disclosures.pinned ? 'Collapse' : 'Expand'} pinned projects`}
+                aria-controls="pinned-projects"
+                aria-expanded={disclosures.pinned}
+                onClick={() => updateDisclosures((current) => ({ ...current, pinned: !current.pinned }))}
+              >
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
+            </div>
+            <div id="pinned-projects" className="side-nav-list" hidden={!disclosures.pinned}>
+              {pinnedProjects.length ? (
+                pinnedProjects.map((project) => {
+                  const active = view === 'workspace' && activeProjectPath === project.projectPath;
+                  return (
+                    <div className="side-nav-row" key={project.projectPath}>
+                      <button
+                        type="button"
+                        className={`side-nav-collection side-nav-project ${active ? 'active' : ''}`}
+                        aria-current={active ? 'location' : undefined}
+                        title={project.name}
+                        onClick={() => void onSelectProject(project.projectPath)}
+                      >
+                        <span className="side-nav-project-icon">
+                          <ProjectIcon icon={project.icon} size={14} />
+                        </span>
+                        <span className="side-nav-project-copy">
+                          <span className="side-nav-collection-name">{project.name}</span>
+                          <small>{collectionCount(project)}</small>
+                        </span>
+                      </button>
+                      {onSetProjectPinned && (
+                        <IconButton
+                          className="side-nav-row-action"
+                          label={`Unpin ${project.name}`}
+                          onClick={() => void onSetProjectPinned(project.projectPath, false)}
+                        >
+                          <PinOff size={14} aria-hidden="true" />
+                        </IconButton>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="side-nav-empty">Pin a project from Recent to keep it here.</p>
+              )}
+            </div>
+          </section>
+        )}
+
         <section className="side-nav-section" aria-labelledby="quick-access-heading">
           <div className="side-nav-section-heading">
             <h2 className="nav-label" id="quick-access-heading">
@@ -185,33 +282,53 @@ export function SideNav({
             {recentCollections.length ? (
               <>
                 {recentCollections.map((collection) => (
-                  <button
-                    type="button"
-                    className={`side-nav-collection ${
-                      isActiveCollection(collection.projectPath, collection.id) ? 'active' : ''
-                    }`}
-                    key={`${collection.projectPath}:${collection.id}`}
-                    aria-current={
-                      isActiveCollection(collection.projectPath, collection.id) ? 'location' : undefined
-                    }
-                    title={collectionDisplayName(
-                      collection.name,
-                      collection.projectPath,
-                      collection.otherCollectionNames,
-                    )}
-                    onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
-                  >
-                    <span className="side-nav-collection-name">
-                      {collectionDisplayName(
+                  <div className="side-nav-row" key={`${collection.projectPath}:${collection.id}`}>
+                    <button
+                      type="button"
+                      className={`side-nav-collection ${
+                        isActiveCollection(collection.projectPath, collection.id) ? 'active' : ''
+                      }`}
+                      aria-current={
+                        isActiveCollection(collection.projectPath, collection.id) ? 'location' : undefined
+                      }
+                      title={collectionDisplayName(
                         collection.name,
                         collection.projectPath,
                         collection.otherCollectionNames,
                       )}
-                    </span>
-                    <small>
-                      {collection.projectName} · {relativeOpenedTime(collection.openedAt)}
-                    </small>
-                  </button>
+                      onClick={() => void onOpenCollection(collection.projectPath, collection.id)}
+                    >
+                      <span className="side-nav-collection-name">
+                        {collectionDisplayName(
+                          collection.name,
+                          collection.projectPath,
+                          collection.otherCollectionNames,
+                        )}
+                      </span>
+                      <small>
+                        {collection.projectName} · {relativeOpenedTime(collection.openedAt)}
+                      </small>
+                    </button>
+                    {onSetProjectPinned && (
+                      <IconButton
+                        className={`side-nav-row-action ${pinnedPaths.has(collection.projectPath) ? 'pinned' : ''}`}
+                        label={`${pinnedPaths.has(collection.projectPath) ? 'Unpin' : 'Pin'} ${collection.projectName}`}
+                        aria-pressed={pinnedPaths.has(collection.projectPath)}
+                        onClick={() =>
+                          void onSetProjectPinned(
+                            collection.projectPath,
+                            !pinnedPaths.has(collection.projectPath),
+                          )
+                        }
+                      >
+                        <Pin
+                          size={14}
+                          fill={pinnedPaths.has(collection.projectPath) ? 'currentColor' : 'none'}
+                          aria-hidden="true"
+                        />
+                      </IconButton>
+                    )}
+                  </div>
                 ))}
               </>
             ) : (

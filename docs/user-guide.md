@@ -8,7 +8,7 @@ Choose a workspace folder, then create or open a project. Collections replace th
 
 Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
 
-The sidebar holds Projects and the Recent quick list. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+The sidebar holds Projects, your **Pinned** projects and the Recent quick list. Pin a project with the pin on any Recent row; pinned projects are the same as favourites. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.

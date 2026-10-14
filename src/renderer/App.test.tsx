@@ -279,8 +279,9 @@ describe('feedback controls', () => {
       }),
     );
     expect(await screen.findByRole('heading', { name: 'Favourite projects' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
+    const library = within(document.querySelector<HTMLElement>('.library')!);
+    expect(library.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
+    expect(library.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
   });
 
   it('resumes the most recent project when no session page is saved', async () => {
@@ -384,7 +385,8 @@ describe('feedback controls', () => {
       expect(document.querySelector('.crumb-current')).toHaveTextContent(label);
       expect(screen.getByTestId('collection-picker')).toHaveTextContent(label);
       const recent = within(document.getElementById('quick-access-collections')!);
-      expect(recent.getByRole('button', { name: /Imnota Feedback/ })).toHaveAttribute('title', label);
+      // The row's pin button also names the project, so match the collection row by its label.
+      expect(recent.getByTitle(label)).toHaveAccessibleName(expect.stringContaining('Imnota Feedback'));
       fireEvent.click(screen.getByTestId('collection-picker'));
       expect(
         within(screen.getByRole('menu', { name: 'Collections' })).getByRole('menuitemradio', {
@@ -3368,6 +3370,30 @@ describe('feedback controls', () => {
     expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument();
   });
 
+  it('unpins a project that is not open through a revision-checked metadata update', async () => {
+    let favourite = true;
+    const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async (input) => {
+      favourite = input.patch.favourite ?? favourite;
+      return { ...snapshot, projectRevision: 'project-2', project: { ...snapshot.project, favourite } };
+    });
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, favourite }],
+      loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+      updateProjectMetadata,
+    });
+    const unpin = await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` });
+    const pinned = within(document.getElementById('pinned-projects')!);
+    expect(pinned.getByRole('button', { name: `Unpin ${snapshot.project.name}` })).toBe(unpin);
+    fireEvent.click(unpin);
+
+    expect(await pinned.findByText(/Pin a project from Recent/)).toBeInTheDocument();
+    expect(updateProjectMetadata).toHaveBeenCalledExactlyOnceWith({
+      projectPath: snapshot.projectPath,
+      expectedRevision: 'project-1',
+      patch: { favourite: false },
+    });
+    expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+  });
   it('archives a project and restores it from the Undo action with the returned revision', async () => {
     let archived = false;
     const listProjects = vi.fn(async () => [
