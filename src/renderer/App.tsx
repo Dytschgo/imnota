@@ -2681,18 +2681,26 @@ export default function App() {
 }
 
 function projectPinErrorMessage(reason: unknown, pinned: boolean): string {
-  const message = reason instanceof Error ? reason.message : '';
+  const message =
+    reason instanceof Error
+      ? reason.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+      : '';
+  const code =
+    reason instanceof Error && 'code' in reason && typeof reason.code === 'string'
+      ? reason.code.toUpperCase()
+      : /^([A-Z][A-Z0-9_]*):/i.exec(message)?.[1].toUpperCase();
   // Classify IPC-wrapped failures, but never display their paths or system details.
-  if (/\b(?:EACCES|EPERM|EROFS)\b/i.test(message))
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS')
     return "The project folder can't be written. Check its permissions.";
-  if (/\bENOSPC\b/i.test(message)) return 'The disk is full. Free up space and try again.';
+  if (code === 'ENOSPC') return 'The disk is full. Free up space and try again.';
   if (
-    /\brevision[- ]conflict\b|\bproject changed (?:before this update|while the save was prepared)\b/i.test(
+    /^(?:revision[- ]conflict\b|(?:the )?project changed (?:before this update|while the save was prepared)\.)/i.test(
       message,
     )
   )
     return 'The project changed. Try again.';
-  if (isMissingNavigationTargetError(reason)) return 'The project is no longer available.';
+  if (code === 'ENOENT' || /^The selected project folder is unavailable\./i.test(message))
+    return 'The project is no longer available.';
   return `The project could not be ${pinned ? 'pinned' : 'unpinned'}. Try again.`;
 }
 

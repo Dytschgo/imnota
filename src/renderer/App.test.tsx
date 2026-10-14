@@ -3396,7 +3396,7 @@ describe('feedback controls', () => {
   });
   describe.each([true, false])('safe closed-project pin errors (initially pinned: %s)', (favourite) => {
     const privatePath = 'C:\\Users\\PrivateName\\PrivateWorkspace\\project\\project.json';
-    it.each([
+    it.each<[string, string, string, string?]>([
       [
         'EACCES',
         `EACCES: permission denied, open '${privatePath}'`,
@@ -3423,6 +3423,33 @@ describe('feedback controls', () => {
         'The disk is full. Free up space and try again.',
       ],
       [
+        'ENOSPC with EACCES in the path',
+        `ENOSPC: no space left on device, write '${privatePath}\\EACCES\\project.json'`,
+        'The disk is full. Free up space and try again.',
+      ],
+      [
+        'EACCES with ENOSPC in the path',
+        `EACCES: permission denied, open '${privatePath}\\ENOSPC\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EACCES with ENOENT in the path',
+        `EACCES: permission denied, open '${privatePath}\\ENOENT\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'structured ENOSPC with EACCES in the path',
+        `Storage failure at '${privatePath}\\EACCES\\project.json'`,
+        'The disk is full. Free up space and try again.',
+        'ENOSPC',
+      ],
+      [
+        'structured EACCES with ENOSPC in the path',
+        `Storage failure at '${privatePath}\\ENOSPC\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+        'EACCES',
+      ],
+      [
         'ENOENT',
         `ENOENT: no such file or directory, open '${privatePath}'`,
         'The project is no longer available.',
@@ -3433,9 +3460,27 @@ describe('feedback controls', () => {
         `Unexpected storage failure at '${privatePath}'`,
         `The project could not be ${favourite ? 'unpinned' : 'pinned'}. Try again.`,
       ],
-    ])('shows safe, actionable feedback for %s', async (_kind, detail, expectedMessage) => {
+      ...[
+        'EACCES',
+        'ENOENT',
+        'not found',
+        'missing',
+        'no such file',
+        'revision-conflict',
+        'The project changed before this update',
+        'The project changed while the save was prepared',
+        'The selected project folder is unavailable',
+      ].map<[string, string, string]>((pathToken) => [
+        `unknown with ${pathToken} only in the path`,
+        `Unexpected storage failure at '${privatePath}\\${pathToken}\\project.json'`,
+        `The project could not be ${favourite ? 'unpinned' : 'pinned'}. Try again.`,
+      ]),
+    ])('shows safe, actionable feedback for %s', async (_kind, detail, expectedMessage, code) => {
       const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async () => {
-        throw new Error(`Error invoking remote method 'project:update-metadata': Error: ${detail}`);
+        throw Object.assign(
+          new Error(`Error invoking remote method 'project:update-metadata': Error: ${detail}`),
+          code ? { code } : {},
+        );
       });
       if (!favourite)
         useAppStore.setState({
