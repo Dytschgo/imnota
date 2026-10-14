@@ -2269,6 +2269,7 @@ async function exercisePromptWorkflow(
 ): Promise<{ bundleCount: number; renderMs: number; latestSet: PromptSet }> {
   const renderStarted = performance.now();
   const existingNames = new Set((await promptSets(host, projectPath)).map((set) => set.name));
+  const namesBeforeWorkflow = new Set(existingNames);
   if (!(await existsAny(driver, SMOKE_UI_CONTRACT.shareBundles)))
     await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
   await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
@@ -2435,6 +2436,14 @@ async function exercisePromptWorkflow(
       );
   }
   if (!latestSet) throw new Error('Prompt workflow did not publish its first export set.');
+  // One content version must produce exactly one timestamped bundle folder, whatever actions ran.
+  const newFolders = (await promptSets(host, projectPath)).filter(
+    (set) => !namesBeforeWorkflow.has(set.name),
+  );
+  if (newFolders.length !== 1)
+    throw new Error(
+      `One content version produced ${newFolders.length} export folders: ${newFolders.map((set) => set.name).join(', ')}.`,
+    );
   if (!latestRichClipboard)
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
   if (process.platform === 'win32') {
