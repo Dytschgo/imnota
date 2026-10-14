@@ -277,7 +277,12 @@ verify_signature() {
 }
 
 verify_universal_binary() {
-  /usr/bin/lipo "$1" -verify_arch x86_64 arm64
+  # Current lipo consumes one arch after -verify_arch and reads a second as
+  # another input file, so verify each architecture in its own call.
+  local arch
+  for arch in x86_64 arm64; do
+    /usr/bin/lipo "$1" -verify_arch "$arch" || return 1
+  done
 }
 
 extract_archive() {
