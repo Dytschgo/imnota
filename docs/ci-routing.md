@@ -30,7 +30,7 @@ Quality runs `scripts/secret-scan.mjs` on every PR, including documentation-only
 
 ## Parallel application verification
 
-The three-OS `platform` matrix runs `test:platform` (platform Vitest discovery plus every script test), installs the share service, and runs `test:share-contract`. These checks run alongside packaging instead of serially between packaging and the native walkthrough. The contract suite uses real HTTP, SQLite and filesystem fixtures, so all three OS executions remain. Quality checks retain their own contract run.
+The three-OS `platform` matrix runs every script test followed by Vitest with `vitest.platform.config.ts` (the same discovery as `test:platform`), installs the share service, and runs `test:share-contract`. Scripts run first so their existing Windows PowerShell checks exercise the native runtime before Vitest's timed file-lock reader on a fresh runner. Test timeouts remain unchanged; no retries are added. These checks run alongside packaging instead of serially between packaging and the native walkthrough. The contract suite uses real HTTP, SQLite and filesystem fixtures, so all three OS executions remain. Quality checks retain their own contract run.
 
 The macOS updater script has one native case that requires the actual universal packaged ZIP. The macOS package job therefore also runs `node --test scripts/update-macos.test.mjs` with `IMNOTA_REQUIRE_MAC_UPDATE_TEST=1`, which rejects a missing package instead of silently skipping that case. The source-only platform job exercises the remaining script cases. No test discovery policy or test file changes as part of this workflow change.
 

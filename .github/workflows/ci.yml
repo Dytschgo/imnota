@@ -182,9 +182,13 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm exec install-electron
         if: env.RUN_APPLICATION == 'true'
+      # Script tests exercise Windows PowerShell before Vitest's native lock test
+      # starts its timed reader. A fresh test runner no longer has packaging setup.
+      - run: pnpm test:scripts
+        if: env.RUN_APPLICATION == 'true'
       - name: Test platform-specific behavior
         if: env.RUN_APPLICATION == 'true'
-        run: pnpm test:platform
+        run: pnpm exec vitest run --config vitest.platform.config.ts
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - run: npm ci --prefix share-service
