@@ -1806,9 +1806,7 @@ export default function App() {
         }
         await refreshProjects();
       } catch (reason) {
-        const message = `The project could not be ${pinned ? 'pinned' : 'unpinned'}.${
-          reason instanceof Error && reason.message ? ` ${userFacingErrorMessage(reason.message)}` : ''
-        }`;
+        const message = projectPinErrorMessage(reason, pinned);
         setError(message);
         try {
           await refreshProjects();
@@ -2680,6 +2678,22 @@ export default function App() {
       )}
     </>
   );
+}
+
+function projectPinErrorMessage(reason: unknown, pinned: boolean): string {
+  const message = reason instanceof Error ? reason.message : '';
+  // Classify IPC-wrapped failures, but never display their paths or system details.
+  if (/\b(?:EACCES|EPERM|EROFS)\b/i.test(message))
+    return "The project folder can't be written. Check its permissions.";
+  if (/\bENOSPC\b/i.test(message)) return 'The disk is full. Free up space and try again.';
+  if (
+    /\brevision[- ]conflict\b|\bproject changed (?:before this update|while the save was prepared)\b/i.test(
+      message,
+    )
+  )
+    return 'The project changed. Try again.';
+  if (isMissingNavigationTargetError(reason)) return 'The project is no longer available.';
+  return `The project could not be ${pinned ? 'pinned' : 'unpinned'}. Try again.`;
 }
 
 function isMissingNavigationTargetError(reason: unknown): boolean {

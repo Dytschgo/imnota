@@ -3394,6 +3394,80 @@ describe('feedback controls', () => {
     });
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
   });
+  describe.each([true, false])('safe closed-project pin errors (initially pinned: %s)', (favourite) => {
+    const privatePath = 'C:\\Users\\PrivateName\\PrivateWorkspace\\project\\project.json';
+    it.each([
+      [
+        'EACCES',
+        `EACCES: permission denied, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EPERM',
+        `EPERM: operation not permitted, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EROFS',
+        `EROFS: read-only file system, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'revision conflict',
+        'The project changed before this update. Reload it and try again.',
+        'The project changed. Try again.',
+      ],
+      [
+        'ENOSPC',
+        `ENOSPC: no space left on device, write '${privatePath}'`,
+        'The disk is full. Free up space and try again.',
+      ],
+      [
+        'ENOENT',
+        `ENOENT: no such file or directory, open '${privatePath}'`,
+        'The project is no longer available.',
+      ],
+      ['project gone', 'The selected project folder is unavailable.', 'The project is no longer available.'],
+      [
+        'unknown',
+        `Unexpected storage failure at '${privatePath}'`,
+        `The project could not be ${favourite ? 'unpinned' : 'pinned'}. Try again.`,
+      ],
+    ])('shows safe, actionable feedback for %s', async (_kind, detail, expectedMessage) => {
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async () => {
+        throw new Error(`Error invoking remote method 'project:update-metadata': Error: ${detail}`);
+      });
+      if (!favourite)
+        useAppStore.setState({
+          recentCollections: [
+            { projectPath: snapshot.projectPath, collectionId: '001-collection', openedAt: '2026-01-01' },
+          ],
+        });
+      renderApp({
+        listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, favourite }],
+        loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+        updateProjectMetadata,
+      });
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: `${favourite ? 'Unpin' : 'Pin'} ${snapshot.project.name}`,
+        }),
+      );
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(expectedMessage);
+      expect(alert).not.toHaveTextContent(
+        /PrivateName|PrivateWorkspace|project\.json|[A-Z]:\\|EACCES|EPERM|EROFS|ENOSPC|ENOENT/,
+      );
+      expect(document.body).not.toHaveTextContent(detail);
+      expect(updateProjectMetadata).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        expectedRevision: 'project-1',
+        patch: { favourite: !favourite },
+      });
+    });
+  });
+
   it.each(['failure', 'success'] as const)(
     'reports a closed-project unpin outcome after opening it mid-request (%s)',
     async (outcome) => {
@@ -3448,7 +3522,7 @@ describe('feedback controls', () => {
 
       if (outcome === 'failure') {
         expect(await screen.findByRole('alert')).toHaveTextContent(
-          'The project could not be unpinned. Project metadata is unavailable.',
+          'The project could not be unpinned. Try again.',
         );
         expect(pinned.getByRole('button', { name: `Unpin ${snapshot.project.name}` })).toBeInTheDocument();
       } else {
@@ -3664,7 +3738,9 @@ describe('feedback controls', () => {
         expect(useAppStore.getState().snapshot).toBeNull();
       }
       if (outcome === 'error')
-        expect(await screen.findByRole('alert')).toHaveTextContent('Pin update failed');
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'The project could not be unpinned. Try again.',
+        );
       if (outcome === 'success') expect(listProjects).toHaveBeenCalledTimes(2);
       fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
       const context = await screen.findByRole('textbox', { name: 'Overall context' });
