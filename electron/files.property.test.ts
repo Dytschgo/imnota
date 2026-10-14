@@ -4,6 +4,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { filenameSchema, screenshotSchema } from '../src/shared/schema.js';
 import { isPathWithin } from '../src/shared/security.js';
+import { portableFilename } from '../src/shared/utils.js';
 import { WINDOWS_RESERVED_NAME } from '../src/test/project-arbitraries.js';
 import { runs } from '../src/test/property.js';
 import { contracts } from './ipc-contracts.js';
@@ -27,7 +28,14 @@ const controlCharacter = fc.integer({ min: 0, max: 31 }).map((code) => String.fr
 
 const reservedName = fc
   .tuple(
-    fc.constantFrom('CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM9', 'LPT1', 'LPT9'),
+    fc.constantFrom(
+      'CON',
+      'PRN',
+      'AUX',
+      'NUL',
+      ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+      ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+    ),
     fc.boolean(),
     fc.constantFrom('', '.txt', '.png', '.tar.gz'),
   )
@@ -122,33 +130,45 @@ describe('filename validation properties', () => {
     );
   });
 
-  // FINDING (not fixed here): `filenameSchema` accepts Windows reserved device names. On Windows
-  // `collections\NUL\...` or a stored file called `CON.png` addresses a device, not a file, so a
-  // write can vanish or fail. Identifiers the app generates itself never take this shape, but the
-  // schema is also the IPC boundary for `collectionId`, export filenames and undo tokens, and the
-  // validator for project.json content written by other tools.
-  // Assert the known bug directly: unexpected setup/validation errors must fail this test.
-  // Invert these acceptance expectations when the separately scoped product fix lands.
-  it('records known acceptance of Windows reserved device names', () => {
-    for (const value of ['NUL', 'CON.txt', 'COM1']) expect(accepts(value)).toBe(true);
+  // Reads retain legacy names; only newly generated disk names are made portable.
+  it('preserves device names on reads and prefixes them when generating filenames', () => {
+    for (const value of ['NUL', 'CON.txt', 'COM1', 'con.png', 'cOn.tar.gz']) {
+      expect(accepts(value)).toBe(true);
+      expect(portableFilename(value)).toBe(`_${value}`);
+    }
   });
 
-  it('records known acceptance of every Windows reserved device name, with or without an extension', () => {
+  it('generates portable filenames from arbitrary text, reserved devices and forbidden characters', () => {
     fc.assert(
-      fc.property(reservedName, (value) => {
-        expect(WINDOWS_RESERVED_NAME.test(value)).toBe(true);
-        expect(accepts(value)).toBe(true);
-      }),
-      runs(50),
+      fc.property(
+        fc.oneof(
+          anyText,
+          reservedName,
+          containing(fc.constantFrom('<', '>', '"', '|', '?', '*', '\u007f', '\u0085')).map(
+            ({ text }) => text,
+          ),
+        ),
+        (value) => {
+          const generated = portableFilename(value);
+          expect(accepts(generated)).toBe(true);
+          expect(WINDOWS_RESERVED_NAME.test(generated)).toBe(false);
+          expect(/[\\/<>:"|?*]/.test(generated)).toBe(false);
+          expect(
+            [...generated].every(
+              (char) => char.charCodeAt(0) >= 32 && (char.charCodeAt(0) < 127 || char.charCodeAt(0) > 159),
+            ),
+          ).toBe(true);
+        },
+      ),
+      runs(300),
     );
   });
 
-  // FINDING (not fixed here): only C0 controls are rejected. DEL and the C1 range pass, as do the
-  // characters Windows forbids in names (`< > " | ? *`). Windows rejects such a write with an
-  // error rather than corrupting data, so this is a portability gap, not data loss.
-  it('records known acceptance of DEL, C1 controls and Windows-forbidden filename characters', () => {
-    for (const value of ['a\u007fb', 'a\u0085b', 'a?b', 'a*b', 'a<b', 'a>b', 'a|b', 'a"b'])
+  it('tolerates legacy forbidden characters on reads and removes them from generated names', () => {
+    for (const value of ['a\u007fb', 'a\u0085b', 'a?b', 'a*b', 'a<b', 'a>b', 'a|b', 'a"b']) {
       expect(accepts(value)).toBe(true);
+      expect(portableFilename(value)).toBe(value === 'a\u007fb' || value === 'a\u0085b' ? 'ab' : 'a-b');
+    }
   });
 
   it('applies the same rule to stored content references and IPC filename inputs', () => {

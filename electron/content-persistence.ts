@@ -11,6 +11,7 @@ import type {
 } from '../src/shared/content-items.js';
 import type { ImagePayload, ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import { filenameSchema, validateProject } from '../src/shared/schema.js';
+import { portableFilename } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import {
   screenshotTransactionBaseline,
@@ -461,8 +462,8 @@ export class ContentPersistenceService {
         updatedAt: timestamp,
         title: `Drawing ${drawingNumber}`,
         description: '',
-        sourceFilename: `${identifier}.json`,
-        imageFilename: `${identifier}.png`,
+        sourceFilename: portableFilename(`${identifier}.json`),
+        imageFilename: portableFilename(`${identifier}.png`),
         originalWidth: 160,
         originalHeight: 120,
       };
@@ -489,7 +490,7 @@ export class ContentPersistenceService {
         includeInExport: true,
         createdAt: timestamp,
         updatedAt: timestamp,
-        markdownFilename: `${identifier}.md`,
+        markdownFilename: portableFilename(`${identifier}.md`),
       };
       contentWrites = [
         {
@@ -660,8 +661,8 @@ export class ContentPersistenceService {
               ...trusted,
               id: identifier,
               title: `${trusted.title} — Copy conflict`,
-              sourceFilename: `${identifier}.json`,
-              imageFilename: `${identifier}.png`,
+              sourceFilename: portableFilename(`${identifier}.json`),
+              imageFilename: portableFilename(`${identifier}.png`),
               originalWidth: prepared.width!,
               originalHeight: prepared.height!,
               includeInExport: false,
@@ -671,7 +672,7 @@ export class ContentPersistenceService {
           : {
               ...trusted,
               id: identifier,
-              markdownFilename: `${identifier}.md`,
+              markdownFilename: portableFilename(`${identifier}.md`),
               preview: textPreview(input.markdown!),
               includeInExport: false,
               createdAt: timestamp,
@@ -785,8 +786,8 @@ export class ContentPersistenceService {
             ...source,
             id: identifier,
             title: `${source.title} copy`,
-            sourceFilename: `${identifier}.json`,
-            imageFilename: `${identifier}.png`,
+            sourceFilename: portableFilename(`${identifier}.json`),
+            imageFilename: portableFilename(`${identifier}.png`),
             includeInExport: true,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -794,7 +795,7 @@ export class ContentPersistenceService {
         : {
             ...source,
             id: identifier,
-            markdownFilename: `${identifier}.md`,
+            markdownFilename: portableFilename(`${identifier}.md`),
             includeInExport: true,
             createdAt: timestamp,
             updatedAt: timestamp,
