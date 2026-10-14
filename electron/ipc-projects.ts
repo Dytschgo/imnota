@@ -2,7 +2,7 @@ import type { ContentSearchRequest } from '../src/shared/content-search.js';
 import type { ProjectIconKey } from '../src/shared/project-icons.js';
 import { validateProject } from '../src/shared/schema.js';
 import type { ProjectData } from '../src/shared/types.js';
-import { emptyProject, nowIso, portableFilename } from '../src/shared/utils.js';
+import { emptyProject, nowIso } from '../src/shared/utils.js';
 import { addEmptyCollection, ensureCollection } from './collections.js';
 import { preserveMixedProjectMetadata } from './content-project-metadata.js';
 import { projectInput } from './ipc-contracts.js';
@@ -140,9 +140,7 @@ export function registerProjectIpc(router: IpcRouter, host: IpcHost): void {
     } else {
       const number = project.collections.length + 1;
       const workspaceName = path.basename(workspaceOrThrow());
-      const id = portableFilename(
-        `${String(number).padStart(3, '0')}-collection-${crypto.randomUUID().slice(0, 8)}`,
-      );
+      const id = `${String(number).padStart(3, '0')}-collection-${crypto.randomUUID().slice(0, 8)}`;
       await ensureCollection(safePath, id);
       Object.assign(project, addEmptyCollection(project, workspaceName, id, timestamp));
     }

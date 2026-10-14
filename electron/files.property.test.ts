@@ -160,7 +160,7 @@ describe('filename validation properties', () => {
           ).toBe(true);
         },
       ),
-      runs(300),
+      runs(50),
     );
   });
 

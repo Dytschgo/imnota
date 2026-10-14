@@ -53,7 +53,7 @@ async function pathExistsOrIsLinked(target: string): Promise<boolean> {
 }
 
 async function availableProjectFolder(workspace: string, name: string): Promise<string> {
-  const base = portableFilename(slugify(portableFilename(name)));
+  const base = portableFilename(slugify(name));
   let candidate = path.join(workspace, base);
   let suffix = 2;
   while (await pathExistsOrIsLinked(candidate)) candidate = path.join(workspace, `${base}-${suffix++}`);
@@ -161,7 +161,7 @@ export async function createTemplateProject(
           includeInExport: true,
           createdAt: timestamp,
           updatedAt: timestamp,
-          markdownFilename: portableFilename(`${id}.md`),
+          markdownFilename: `${id}.md`,
           preview: preview(block.markdown),
         };
       });
@@ -176,7 +176,7 @@ export async function createTemplateProject(
       });
       for (const [index, block] of template.textBlocks.entries())
         await write(
-          path.join(temporary, 'collections', COLLECTION_ID, 'text', contentItems[index].markdownFilename),
+          path.join(temporary, 'collections', COLLECTION_ID, 'text', `template-text-${index + 1}.md`),
           block.markdown,
         );
       await write(path.join(temporary, 'project.json'), JSON.stringify(next, null, 2));
