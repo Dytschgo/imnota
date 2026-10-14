@@ -180,7 +180,7 @@
       "sourceArtifactId": 11923694655,
       "sha256": "3067640c966fc1c8bca0d2ea11b979a3a629460d78f8a673cd9e3a99a396eb8b",
       "bytes": 87212,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 206, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1280x800-workspace-light.png": {
       "reviewedAt": "2026-10-14",
@@ -213,7 +213,7 @@
       "sourceArtifactId": 11923694655,
       "sha256": "03e5f074dd0d8b696497c5722312c1aa05c383967bb6405a435ebf6d1cae1510",
       "bytes": 95896,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 206, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1440x900-workspace-light.png": {
       "reviewedAt": "2026-10-14",
@@ -237,7 +237,7 @@
       "sourceArtifactId": 11923694655,
       "sha256": "ab0b20f819ac9e4aca3964c9b3d1f9680b6d4e384499938e1e777057464c3fd5",
       "bytes": 108309,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 206, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1920x1080-workspace-light.png": {
       "reviewedAt": "2026-10-14",
@@ -285,7 +285,7 @@
       "sourceArtifactId": 11923694655,
       "sha256": "7eb02a664e5f3d51f7a45be5327a6c5556c316357d48c96db4352cdb3a1f73f3",
       "bytes": 368311,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 206, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     }
   }
 }

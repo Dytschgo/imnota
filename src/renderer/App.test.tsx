@@ -3394,6 +3394,221 @@ describe('feedback controls', () => {
     });
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
   });
+  it('finishes an in-flight editor save before starting a closed-project pin mutation', async () => {
+    const closed = {
+      ...snapshot,
+      projectPath: '/workspace/closed',
+      projectRevision: 'closed-1',
+      project: { ...snapshot.project, id: 'closed', name: 'Closed project', favourite: true },
+    };
+    let resolveSave!: (value: Awaited<ReturnType<ImnotaBridge['saveProjectCompareAndSwap']>>) => void;
+    const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const loadProject = vi.fn(async () => closed);
+    const updateProjectMetadata = vi.fn(async () => ({
+      ...closed,
+      projectRevision: 'closed-2',
+      project: { ...closed.project, favourite: false },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      listProjects: async () => [{ ...closed.project, projectPath: closed.projectPath }],
+      loadProject,
+      updateProjectMetadata,
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+      target: { value: 'Already saving' },
+    });
+    fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Unpin Closed project' })));
+    expect(loadProject).not.toHaveBeenCalled();
+    expect(updateProjectMetadata).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveSave({
+        ok: true,
+        value: {
+          snapshot: { ...editingSnapshot, project: saveMetadata.mock.calls[0]![0].project },
+          projectRevision: 'project-saved',
+        },
+      }),
+    );
+    await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+    expect(useAppStore.getState().snapshot?.projectPath).toBe(editingSnapshot.projectPath);
+    expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe('Already saving');
+  });
+
+  it.each(['before', 'after', 'toolbar repin', 'sidebar unpin', 'navigation during reload'] as const)(
+    'reconciles a closed-project unpin with an open editor (%s)',
+    async (editTiming) => {
+      const pinnedSnapshot = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let disk = {
+        ...pinnedSnapshot,
+        projectRevision: 'project-2',
+        project: { ...snapshot.project, favourite: false },
+      };
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve) => {
+            resolveUpdate = resolve;
+          }),
+      );
+      const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(async (input) => {
+        expect(input.expectedRevision).toBe(disk.projectRevision);
+        disk = { ...disk, project: input.project, projectRevision: 'project-3' };
+        return { ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } };
+      });
+      let resolveReload!: (value: Awaited<ReturnType<WorkflowBridge['reloadWatchedProject']>>) => void;
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>(async () => {
+        if (editTiming === 'navigation during reload')
+          return new Promise((resolve) => {
+            resolveReload = resolve;
+          });
+        return { ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } };
+      });
+      renderApp({
+        listProjects: async () => [{ ...pinnedSnapshot.project, projectPath: snapshot.projectPath }],
+        loadProject: async () => pinnedSnapshot,
+        updateProjectMetadata,
+        startProjectWatch: async ({ projectPath }) => ({
+          ok: true,
+          value: { watchId: 'watch', projectPath, projectRevision: 'project-2' },
+        }),
+        reloadWatchedProject,
+        openProjectDialog: async () => disk,
+        saveProjectCompareAndSwap: saveMetadata,
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+      fireEvent.click(
+        within(document.getElementById('pinned-projects')!).getByRole('button', {
+          name: `${snapshot.project.name} 1 collection`,
+        }),
+      );
+      let context = await screen.findByRole('textbox', { name: 'Overall context' });
+      if (editTiming === 'before') fireEvent.change(context, { target: { value: 'Context during unpin' } });
+      if (editTiming === 'toolbar repin')
+        fireEvent.click(screen.getByRole('button', { name: 'Remove from favourites' }));
+      if (editTiming === 'sidebar unpin')
+        fireEvent.click(
+          within(document.getElementById('pinned-projects')!).getByRole('button', {
+            name: `Unpin ${snapshot.project.name}`,
+          }),
+        );
+      await act(async () => resolveUpdate(disk));
+      if (editTiming === 'navigation during reload') {
+        await waitFor(() => expect(reloadWatchedProject).toHaveBeenCalledOnce());
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        await screen.findByTestId('settings-view');
+        await act(async () =>
+          resolveReload({ ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } }),
+        );
+        expect(useAppStore.getState().view).toBe('settings');
+        expect(useAppStore.getState().snapshot).toBeNull();
+        fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+        context = await screen.findByRole('textbox', { name: 'Overall context' });
+      }
+      if (editTiming !== 'before') fireEvent.change(context, { target: { value: 'Context during unpin' } });
+      fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+      await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+      expect(saveMetadata.mock.calls[0]![0].project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(disk.project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(disk.project.collections[0]?.overallContext).toBe('Context during unpin');
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(updateProjectMetadata).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['success', 'error', 'navigation during load', 'navigation during update'] as const)(
+    'releases the closed-project pin mutation so later editor saves can complete (%s)',
+    async (outcome) => {
+      const pinnedSnapshot = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let resolveLoad!: (value: ProjectSnapshot) => void;
+      const loadProject = vi.fn<ImnotaBridge['loadProject']>(
+        () =>
+          new Promise((resolve) => {
+            resolveLoad = resolve;
+          }),
+      );
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      let rejectUpdate!: (reason: Error) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveUpdate = resolve;
+            rejectUpdate = reject;
+          }),
+      );
+      const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(async ({ project }) => ({
+        ok: true,
+        value: { snapshot: { ...pinnedSnapshot, project }, projectRevision: 'project-saved' },
+      }));
+      const listProjects = vi.fn(async () => [
+        { ...pinnedSnapshot.project, projectPath: snapshot.projectPath },
+      ]);
+      renderApp({
+        listProjects,
+        loadProject,
+        updateProjectMetadata,
+        saveProjectCompareAndSwap: saveMetadata,
+        openProjectDialog: async () => pinnedSnapshot,
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(loadProject).toHaveBeenCalledOnce());
+      if (outcome === 'navigation during load') {
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        await screen.findByTestId('settings-view');
+      }
+      await act(async () => resolveLoad(pinnedSnapshot));
+      if (outcome === 'navigation during load') {
+        expect(updateProjectMetadata).not.toHaveBeenCalled();
+      } else {
+        await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+        if (outcome === 'navigation during update') {
+          fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+          await screen.findByTestId('settings-view');
+        }
+        await act(async () => {
+          if (outcome === 'error') rejectUpdate(new Error('Pin update failed'));
+          else
+            resolveUpdate({
+              ...pinnedSnapshot,
+              projectRevision: 'project-2',
+              project: { ...pinnedSnapshot.project, favourite: false },
+            });
+        });
+      }
+      if (outcome.startsWith('navigation')) {
+        expect(useAppStore.getState().view).toBe('settings');
+        expect(useAppStore.getState().snapshot).toBeNull();
+      }
+      if (outcome === 'error')
+        expect(await screen.findByRole('alert')).toHaveTextContent('Pin update failed');
+      if (outcome === 'success') expect(listProjects).toHaveBeenCalledTimes(2);
+      fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+      const context = await screen.findByRole('textbox', { name: 'Overall context' });
+      fireEvent.change(context, { target: { value: 'Save after pin operation' } });
+      fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+      await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+      expect(saveMetadata.mock.calls[0]![0].project.collections[0]?.overallContext).toBe(
+        'Save after pin operation',
+      );
+    },
+  );
+
   it('archives a project and restores it from the Undo action with the returned revision', async () => {
     let archived = false;
     const listProjects = vi.fn(async () => [
