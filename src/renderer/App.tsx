@@ -3,6 +3,7 @@ import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { CircleAlert, Check, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -33,6 +34,7 @@ import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
 import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
+import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -105,7 +107,20 @@ export function userFacingErrorMessage(message: string): string {
 }
 
 export default function App() {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      settings: state.settings,
+      projects: state.projects,
+      snapshot: state.snapshot,
+      activeScreenshotId: state.activeScreenshotId,
+      activeCollectionId: state.activeCollectionId,
+      view: state.view,
+      leftPanelOpen: state.leftPanelOpen,
+      rightPanelOpen: state.rightPanelOpen,
+      set: state.set,
+      activeScreenshot: state.activeScreenshot,
+    })),
+  );
   const preferences = usePreferences();
   const appearance = useAppearance(preferences.settings.appearance, {
     performanceConstrained: preferences.performance.reducedEffectsRecommended,
@@ -608,7 +623,7 @@ export default function App() {
   const changeAnnotations = useCallback(
     (next: Annotation[], options?: AnnotationChangeOptions) => {
       if (!continuesUndoStep(annotationUndoKey.current, options))
-        setHistory((items) => [...items, persistence.annotations]);
+        setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
       annotationUndoKey.current = options?.coalesce ?? null;
       setRedo([]);
       persistence.changeAnnotations(next);
@@ -627,7 +642,7 @@ export default function App() {
     annotationUndoKey.current = null;
     const next = redo.at(-1);
     if (!next) return;
-    setHistory((items) => [...items, persistence.annotations]);
+    setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
     persistence.changeAnnotations(next);
     setRedo((items) => items.slice(0, -1));
   }, [persistence, redo]);
