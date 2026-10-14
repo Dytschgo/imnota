@@ -165,7 +165,7 @@ jobs:
       - run: pnpm test:scripts
         if: env.RUN_APPLICATION == 'true'
       - name: Retain application coverage report
-        if: ${{ always() && !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
+        if: ${{ !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -232,7 +232,7 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: pnpm exec install-electron
         if: env.RUN_APPLICATION == 'true'
-      - run: ${{ matrix.command }}
+      - run: ${{ matrix.command }}${{ matrix.os == 'ubuntu-latest' && ' --config.deb.compression=gz' || '' }}
         if: env.RUN_APPLICATION == 'true'
       # This script's native updater case needs the actual universal ZIP. All other
       # platform/script tests run concurrently in platform, without a package dependency.
@@ -249,7 +249,7 @@ jobs:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Retain Mac walkthrough evidence
-        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'macos-latest')
+        if: env.RUN_APPLICATION == 'true' && (!cancelled() && matrix.os == 'macos-latest')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mac-walkthrough-evidence-ci
@@ -279,7 +279,7 @@ jobs:
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
-        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'windows-latest')
+        if: env.RUN_APPLICATION == 'true' && (!cancelled() && matrix.os == 'windows-latest')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-visual-evidence
@@ -296,7 +296,7 @@ jobs:
           IMNOTA_SMOKE_MODE: clipboard
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
       - name: Retain bundle copy evidence
-        if: env.RUN_APPLICATION == 'true' && always()
+        if: env.RUN_APPLICATION == 'true' && !cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: clipboard-evidence-${{ matrix.os }}
@@ -320,7 +320,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
       - name: Retain packaged MCP evidence
-        if: env.RUN_APPLICATION == 'true' && always()
+        if: env.RUN_APPLICATION == 'true' && !cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mcp-evidence-${{ matrix.os }}

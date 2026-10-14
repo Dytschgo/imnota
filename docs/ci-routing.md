@@ -40,6 +40,8 @@ This adds only a small aggregate job. Platform checks reuse the existing service
 
 The Mac verifier and the Windows and Linux packaged verifiers still run twice per job in different modes: the full walkthrough, then bundle copy and paste. Merging those launches would need script changes and a new coverage review, not a workflow edit. Nightly and stable workflows retain their existing test arrangement.
 
+Validate uses `pnpm package:linux --config.deb.compression=gz` for PRs and main pushes. The matrix command stays `pnpm package:linux` to preserve its check name; only the build step appends the override. Windows and macOS retain their normal package commands, including the compressed Windows installer and macOS DMG. Nightly and stable packaging are unchanged; nightly exercises the shipped deb compression. Validate artifact and evidence uploads use `!cancelled()` so failures retain diagnostics while cancelled runs skip uploads.
+
 ## Hosted verification
 
 The first results revision in [PR #39](https://github.com/Dytschgo/imnota/pull/39), `0ec531c463615a93017daed9ee96c31218635da0`, passed [Validate 34280717233](https://github.com/Dytschgo/imnota/actions/runs/34280717233) and [CodeQL 34280717328](https://github.com/Dytschgo/imnota/actions/runs/34280717328) on attempt 1. All six original platform/service matrix jobs reported success through their documentation step; application steps were explicitly skipped. Quality installed dependencies and passed formatting, while CodeQL and dependency review executed normally. Every original check context reported success.
