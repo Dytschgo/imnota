@@ -2,6 +2,12 @@
 
 Imnota turns screenshots, Markdown text blocks and drawings in one collection into local Markdown + PNG prompt bundles. Local copy/export works offline. Optional hosted links upload approved final artifacts; Imnota does not synchronize editable projects or call an AI provider.
 
+## Installing and updating
+
+On macOS, the quick installer and **Run update in Terminal** keep the previous app only during replacement. On copy, final signature check or open-command failure, both attempt to restore it. The rollback copy is retired only after verification and a successful open command. A successful installation removes the temporary rollback copy and recognized older app backups in the same installation folder (`Imnota-backup-<timestamp>.app`, `Imnota Backup <version> <timestamp> <number>.app`, and managed Imnota bundles under `.imnota-backups.noindex`). Cleanup requires the Imnota bundle identifier; unrelated folders and project snapshots are preserved. Cleanup failures report a warning without undoing a successful installation. If automatic restore fails, the terminal reports the preserved recovery path so you can move the previous app back before reopening it.
+
+Windows installers and Linux AppImage updates replace the app without creating a history of app backup folders. Native updates can retain download metadata and a reusable installer cache; these are separate from project backups. See the [installer audit](development.md#installer-and-updater-storage-audit) for paths and native verification limits. To return to an older release after a successful installation, download its installer and check [project migration compatibility](data-format.md).
+
 ## Start a project and collection
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.

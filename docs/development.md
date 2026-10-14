@@ -121,8 +121,13 @@ Linux replacement uses GNU `mv -fT` to replace the destination entry without
 following a file or directory symlink; a hardlink peer keeps its previous bytes.
 A directory occupying the destination causes refusal and staging cleanup. After
 replacement, a desktop-file write failure leaves the verified binary installed;
-there is no automatic Linux rollback. macOS retains its existing backup behavior
-if copying a verified bundle fails.
+there is no automatic Linux rollback. macOS stages its previous app in a private
+same-volume `.imnota-install.*` directory. Copy, installed-bundle verification or open-command
+failure attempts to restore the app to `~/Applications/Imnota.app`; successful verification
+and an accepted open command commit the replacement and remove the temporary rollback. If restoration itself
+fails, staging is preserved and the recovery path is reported. Both Mac install
+paths use `.imnota-update.lock` to avoid retiring another live transaction's backup.
+An interrupted lock is left for manual removal after confirming no installer is running.
 
 Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
 and download failures. The suite executes the real scripts with network and app
@@ -135,12 +140,47 @@ Linux replacement, symlink and hardlink fixtures run only on native Linux, where
 GNU replacement semantics apply; they are excluded on BSD macOS and Git Bash.
 Native macOS fixtures use `ditto` and `PlistBuddy` with generated bundles to check
 successful installation, extraction/executable/signature/version refusal, and
-backup preservation after copy failure. Signature results and app launches are
+automatic restoration after copy failure. Portable synthetic bundle fixtures also
+cover final signature/executable failure, interrupted replacement, failed restoration,
+repeat installs, legacy cleanup and unrelated-bundle preservation. Signature results and app launches are
 stubbed; these fixtures do not prove real signing or Gatekeeper acceptance.
 PowerShell fixtures check the actual exception message separately from the
 no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
 temporary junction cleanup without traversing its target. The existing Linux,
 macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
+
+### Native macOS installer transactions
+
+The macOS package CI job runs `scripts/install.native-mac.test.mjs` after verifying the built archive and before uploading artifacts. To repeat locally, close Imnota first, then run:
+
+```bash
+IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-$(node -p "require('./package.json').version")-universal-mac.zip" node --test scripts/install.native-mac.test.mjs
+```
+
+The archive path must be absolute. Without that variable, or outside macOS, this suite skips. It uses system `/bin/bash` 3.2 and a temporary physical HOME, generates SHA256SUMS for the local ZIP, and sources the real installer/updater with only their download transport redirected to fixture files. There is no production environment override and no GitHub release access. `ditto`, `PlistBuddy`, `codesign`, `lipo` and filesystem commands run natively. Copy/rename failures are injected after or instead of the selected operation; installed-signature failures corrupt the replacement and use real codesign rejection. Only the final `open` is stubbed, including an injected open-command failure; GUI launch, Gatekeeper and architecture-specific machine acceptance remain manual checks.
+
+Assertions cover scratch/repeat installs, verified legacy and managed backup retirement, unidentified apps and unrelated look-alikes, symlinked parents/candidates/managed roots, copy/verification/open failure restoration, stale rollback collisions, interruption immediately after rename, failed restoration diagnostics, and overlapping live install/update processes in both directions. The harness refuses to run while an Imnota process is running so it cannot ask a personal app to quit.
+
+### Installer and updater storage audit
+
+Source audit against `electron-updater` 6.8.9 and `electron-builder` 26.15.3; packaged outcomes still require the native walkthrough below. `package.json` publishes to GitHub with macOS DMG/zip, Windows NSIS/portable and Linux AppImage/deb targets. `electron/main.ts:configureAutoUpdates` disables automatic downloads and installation on quit. macOS uses the bundled Terminal helper, Windows portable and Linux non-AppImage builds use manual downloads; only Windows NSIS and Linux AppImage use `prepareNativeUpdate` and electron-updater installation.
+
+| OS/path                        | Before this change, after success                                                                                                   | After this change, after success                                                                            | Source evidence                                                                                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS quick installer          | One new timestamped `~/Applications/Imnota-backup-*.app` per replacement; download temp removed                                     | Installed app only, with transaction staging removed; identified legacy and managed backups retired         | `scripts/install.sh` Darwin branch, `cleanup`, `cleanup_previous_backups`                                                                                               |
+| macOS Terminal update          | One hidden managed rollback retained; legacy backups retired                                                                        | Rollback bundles removed after final signature check and successful `open`; empty managed directory removed | `scripts/update-macos.sh:swap_and_launch`, `cleanup_rollback_backups`, `cleanup_legacy_backups`, `cleanup`                                                              |
+| Windows quick installer / NSIS | Download temp removed; NSIS stores one reusable `installer.exe` in `%LOCALAPPDATA%/imnota-updater`                                  | Unchanged; no timestamped app backup history                                                                | `scripts/install.ps1` finally block; builder `templates/nsis/include/installer.nsh:installApplicationFiles` and `APP_INSTALLER_STORE_FILE`                              |
+| Windows native update          | That reusable installer plus `pending/<installer>`, `pending/update-info.json` and differential `current.blockmap` files can remain | Unchanged; intentional cache, not one app copy per version                                                  | updater `NsisUpdater.doInstall`, `AppUpdater.executeDownload`; `DownloadedUpdateHelper.getValidCachedUpdateFile` empties pending when the next release checksum differs |
+| Linux quick installer          | One `~/.local/bin/imnota`, a desktop entry; download and same-folder staging removed                                                | Unchanged; no app backup history                                                                            | `scripts/install.sh` Linux branch (`mv -fT`) and `cleanup`                                                                                                              |
+| Linux native AppImage update   | Old AppImage unlinked, downloaded file moved into place; pending metadata can remain                                                | Unchanged; no app backup history                                                                            | updater `AppImageUpdater.doInstall`; `DownloadedUpdateHelper.getValidCachedUpdateFile`                                                                                  |
+
+Updater `AppAdapter.getAppCacheDir`, `AppUpdater.getOrCreateDownloadHelper`, and builder `appInfo.updaterCacheDirName` select `%LOCALAPPDATA%/imnota-updater`, `~/Library/Caches/imnota-updater`, or `${XDG_CACHE_HOME:-~/.cache}/imnota-updater`. The current macOS path does not call `MacUpdater` or create its `update.zip` cache. Legacy native-Mac caches are not inspected or deleted. Windows cache storage uses fixed names plus one pending generation, rather than accumulating versioned app backups; retain it for differential download/retry behavior. Failed cleanup, interrupted downloads, or older versions may leave extra files; their installed state is unverified here.
+
+Separately, `electron/terminal-update.ts:prepareTerminalUpdate` leaves small helper/launcher directories named `imnota-update-*` under `app.getPath('temp')` when preparing a command. These are not app bundles or rollback storage and remain outside this app-backup fix. Manually downloaded installers/DMGs, package-manager caches, project snapshots and OS-managed caches also have separate ownership.
+
+Mac backup retirement requires both a recognized name and `CFBundleIdentifier=com.dytschgo.imnota`. Symlink bundles/managed roots, unknown names, unreadable identifiers and other bundle identifiers are preserved. An occupied managed root is removed only if empty. Cleanup is best effort after commit; it cannot trigger rollback of the verified app. Before commit, failures leave existing legacy backups untouched and attempt to restore only the transaction's previous app. A failed restore preserves that app at the reported path; it may require a manual move back before use. SIGKILL/power loss cannot run traps: preserve any transaction directory and recover its previous bundle before removing the stale lock.
+
+Before shipping, obtain independent review and run native walkthroughs: repeat the quick Mac installation and Terminal update with a real packaged candidate, verify signatures/launch, inject copy/final-verification/launch failures, and inspect the installation folder and unrelated look-alikes. Run the packaged-zip updater test and the native transaction harness on macOS. On Windows repeat NSIS installation/native update and inspect `%LOCALAPPDATA%/imnota-updater`; on Linux repeat quick/AppImage updates and inspect the app directory and updater cache. Source inspection and Git Bash fixtures do not establish those packaged postconditions.
 
 ## Recently deleted integration verification
 

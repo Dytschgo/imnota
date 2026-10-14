@@ -11,6 +11,7 @@ lock_dir=""
 lock_owned=0
 app_path=""
 backup_path=""
+rollback_owned=0
 backup_root=""
 transaction_committed=0
 keep_staging=0
@@ -42,12 +43,12 @@ release_lock() {
 }
 
 restore_previous_version() {
-  [[ -n "$backup_path" && -d "$backup_path" ]] || return 0
+  [[ "$rollback_owned" -eq 1 && -n "$backup_path" && -d "$backup_path" && ! -L "$backup_path" ]] || return 0
 
   if [[ -e "$app_path" || -L "$app_path" ]]; then
     local failed_path="$stage_dir/failed-${APP_NAME}.app"
     if ! /bin/mv -- "$app_path" "$failed_path"; then
-      warn "Could not move the failed replacement aside."
+      warn "Could not move the failed replacement aside. Your previous app is preserved at: $backup_path"
       keep_staging=1
       rollback_failed=1
       return 1
@@ -62,6 +63,7 @@ restore_previous_version() {
   fi
 
   backup_path=""
+  rollback_owned=0
   return 0
 }
 
@@ -74,7 +76,10 @@ cleanup() {
   fi
 
   if [[ -n "$stage_dir" && -d "$stage_dir" && "$keep_staging" -eq 0 ]]; then
-    /bin/rm -rf -- "$stage_dir" 2>/dev/null || true
+    /bin/rm -rf -- "$stage_dir" 2>/dev/null || warn "Could not clean update staging at: $stage_dir"
+  fi
+  if [[ -n "$backup_root" && -d "$backup_root" && ! -L "$backup_root" ]]; then
+    /bin/rmdir -- "$backup_root" 2>/dev/null || true
   fi
   release_lock
 
@@ -134,7 +139,7 @@ validate_app_path() {
   canonical_parent="$(cd -- "$supplied_parent" && pwd -P)" || die "The app folder could not be resolved."
   app_path="${canonical_parent}/${APP_NAME}.app"
   [[ "$app_path" == "$supplied_path" ]] || die "The current app path must be canonical and cannot contain symlinked folders."
-  [[ -w "$canonical_parent" && -x "$canonical_parent" ]] ||
+  [[ -O "$canonical_parent" && -w "$canonical_parent" && -x "$canonical_parent" ]] ||
     die "The app folder is not writable. Move Imnota to a folder you own, then try again."
 
   local current_id
@@ -225,13 +230,26 @@ is_legacy_backup_name() {
     [[ "$name" =~ ^${APP_NAME}-backup-[0-9]{8}-[0-9]{6}(\.[0-9A-Za-z-]+)?\.app$ ]]
 }
 
+safe_physical_directory() {
+  [[ -d "$1" && ! -L "$1" && -O "$1" && -w "$1" && -x "$1" ]] || return 1
+  [[ "$(cd -- "$1" && pwd -P)" == "$1" ]]
+}
+
+bundle_is_direct_child() {
+  local candidate=$1 parent=$2
+  [[ "${candidate%/*}" == "$parent" && -d "$candidate" && ! -L "$candidate" ]] || return 1
+  [[ "$(cd -- "$candidate" && pwd -P)" == "$candidate" ]]
+}
+
 cleanup_legacy_backups() {
   local parent=$1 candidate name
+  safe_physical_directory "$parent" || return 0
   while IFS= read -r -d '' candidate; do
     name="${candidate##*/}"
     is_legacy_backup_name "$name" || continue
+    bundle_is_direct_child "$candidate" "$parent" || continue
     is_imnota_bundle "$candidate" || continue
-    if ! /bin/mv -- "$candidate" "$stage_dir/retired-${name}"; then
+    if ! /bin/rm -rf -- "$candidate"; then
       warn "Could not retire an old Imnota rollback backup: $candidate"
     fi
   done < <(
@@ -240,36 +258,17 @@ cleanup_legacy_backups() {
   )
 }
 
-retain_latest_rollback_backup() {
-  local active_backup="$backup_root/${APP_NAME}.app"
-  [[ -n "$backup_path" && -d "$backup_path" ]] || return 0
-
-  if [[ -e "$active_backup" || -L "$active_backup" ]]; then
-    if ! is_imnota_bundle "$active_backup"; then
-      warn "The managed rollback location contains an unexpected item; preserving the newest rollback at: $backup_path"
-      return 0
-    fi
-    if ! /bin/mv -- "$active_backup" "$stage_dir/retired-rollback.app"; then
-      warn "Could not retire the previous rollback backup; preserving the newest rollback at: $backup_path"
-      return 0
-    fi
-  fi
-
-  if /bin/mv -- "$backup_path" "$active_backup"; then
-    backup_path="$active_backup"
-  else
-    warn "Could not place the rollback backup in its managed location; it was preserved at: $backup_path"
-  fi
-}
-
-cleanup_stale_rollback_backups() {
+cleanup_rollback_backups() {
   local candidate
+  safe_physical_directory "$backup_root" || return 0
   while IFS= read -r -d '' candidate; do
-    [[ "$candidate" != "$backup_path" ]] || continue
+    [[ "${candidate##*/}" == "$APP_NAME.app" || "${candidate##*/}" =~ ^\.rollback-[0-9]+\.app$ ]] || continue
+    bundle_is_direct_child "$candidate" "$backup_root" || continue
     is_imnota_bundle "$candidate" || continue
-    /bin/mv -- "$candidate" "$stage_dir/retired-${candidate##*/}" ||
+    /bin/rm -rf -- "$candidate" ||
       warn "Could not retire a stale Imnota rollback backup: $candidate"
-  done < <(/usr/bin/find "$backup_root" -maxdepth 1 -type d -name '.rollback-*.app' -print0)
+  done < <(/usr/bin/find "$backup_root" -maxdepth 1 -type d \( -name '.rollback-*.app' -o -name "${APP_NAME}.app" \) -print0)
+  /bin/rmdir -- "$backup_root" 2>/dev/null || true
 }
 
 verify_signature() {
@@ -460,20 +459,40 @@ swap_and_launch() {
   else
     /bin/mkdir -- "$backup_root" || die "The managed rollback folder could not be created."
   fi
+  safe_physical_directory "$backup_root" || die "The managed rollback folder is not a physical directory owned by you."
   /bin/chmod 700 "$backup_root" || die "The managed rollback folder could not be secured."
-  backup_path="$backup_root/.rollback-$$.app"
-  [[ ! -e "$backup_path" && ! -L "$backup_path" ]] || die "A backup path collision prevented the update."
+  local rollback_target="$backup_root/.rollback-$$.app" interrupted=0 previous_identity
+  previous_identity="$(stat_identity "$app_path")" || die "The existing app identity could not be recorded before replacement."
+  [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
-  /bin/mv -- "$app_path" "$backup_path" || die "The existing app could not be moved into the rollback area."
+  # Defer catchable interruption until the rename's result and ownership are
+  # recorded. A pre-existing path must never become transaction rollback state.
+  trap 'interrupted=1' HUP INT TERM
+  if /bin/mv -- "$app_path" "$rollback_target"; then
+    backup_path="$rollback_target"
+    rollback_owned=1
+  else
+    # mv can be interrupted after rename but before reporting success. Claim
+    # only the original inode, never a stale or substituted rollback directory.
+    if [[ ! -e "$app_path" && ! -L "$app_path" && -d "$rollback_target" && ! -L "$rollback_target" ]] &&
+      [[ "$(stat_identity "$rollback_target")" == "$previous_identity" ]]; then
+      backup_path="$rollback_target"
+      rollback_owned=1
+    fi
+    trap 'exit 130' HUP INT TERM
+    (( interrupted == 0 )) || exit 130
+    die "The existing app could not be moved into the rollback area."
+  fi
+  trap 'exit 130' HUP INT TERM
+  (( interrupted == 0 )) || exit 130
   /bin/mv -- "$replacement" "$app_path" || die "The verified update could not be moved into place."
   verify_signature "$app_path" || die "The installed replacement failed its final signature check."
   launch_app "$app_path" || die "The updated app could not be opened; restoring the previous version."
 
   transaction_committed=1
-  retain_latest_rollback_backup
-  cleanup_stale_rollback_backups
+  cleanup_rollback_backups
   cleanup_legacy_backups "${app_path%/*}"
-  printf 'The rollback copy is kept in Imnota-managed support storage.\n'
+  printf 'Transaction rollback and verified old Imnota backups were retired.\n'
 }
 
 main() {
