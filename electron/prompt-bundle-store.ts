@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { portableFilename } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 
 export const MAX_PROMPT_BUNDLE_PNG_BYTES = 100_000_000;
@@ -15,7 +16,6 @@ const MAX_RECOVERY_ENTRIES = 10_000;
 const OWNERSHIP_RECORD_FILENAME = '.imnota-prompt-export.json';
 const OWNERSHIP_RECORD_KIND = 'imnota-prompt-export-session';
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
-const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 export interface StartPromptBundleSessionInput {
   /** Main integration must first authorize project membership and collection ownership. */
@@ -143,12 +143,11 @@ export function sanitizePromptCollectionName(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/^[. ]+|[. ]+$/g, '');
   if (!clean) clean = 'Untitled collection';
-  if (WINDOWS_RESERVED_NAME.test(clean)) clean = `_${clean}`;
   clean = Array.from(clean)
     .slice(0, 120)
     .join('')
     .replace(/[. ]+$/g, '');
-  return clean || 'Untitled collection';
+  return portableFilename(clean || 'Untitled collection');
 }
 
 function maximumPublishedPath(exportsDirectory: string, setName: string): string {

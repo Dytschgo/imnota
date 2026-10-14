@@ -5,6 +5,7 @@ import path from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 import { parseProjectFile, validateLegacyProject, validateProject } from '../src/shared/schema.js';
+import { emptyProject } from '../src/shared/utils.js';
 import {
   currentProject,
   legacyFixture,
@@ -60,6 +61,35 @@ async function writeLegacy(directory: string, fixture: LegacyFixture) {
 }
 
 describe('persisted project properties', () => {
+  it('loads an existing schema 3 project with CON.png without rewriting its stored references', async () => {
+    await isolated(async (directory) => {
+      const project = emptyProject('Legacy device name', '');
+      const collectionId = project.collections[0].id;
+      project.screenshots = [
+        {
+          id: 'legacy-shot',
+          collectionId,
+          originalFilename: 'CON.png',
+          storedFilename: 'CON.png',
+          title: 'Original title',
+          description: '',
+          position: 0,
+          createdAt: '',
+          updatedAt: '',
+          priority: 'medium',
+          includeInExport: true,
+          originalWidth: 1,
+          originalHeight: 1,
+          annotationFile: `collections/${collectionId}/annotations/CON.png.json`,
+          descriptionFile: `collections/${collectionId}/descriptions/CON.png.md`,
+        },
+      ];
+      // Windows cannot materialize this device filename; loading metadata must still succeed.
+      await fs.writeFile(path.join(directory, 'project.json'), JSON.stringify(project));
+      expect(await read(directory)).toEqual(project);
+    });
+  });
+
   it('preserves generated mixed content and IDs through metadata save and disk reopen', async () => {
     await fc.assert(
       fc.asyncProperty(persistedProject, storedText, async (project, description) => {

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -238,6 +239,13 @@ export function AnnotationCanvas({
   const { imageObj, decodeFailed, retryDecode } = useDecodedImage(image?.dataUrl);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
+  const wheelFrame = useRef<number | null>(null);
+  const pendingWheel = useRef<{
+    x: number;
+    y: number;
+    factor: number;
+    pointer: { x: number; y: number } | null;
+  } | null>(null);
   /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
   const userAdjustedViewport = useRef(false);
   const viewportLayout = useRef<{ filename: string; dataUrl: string; size: ViewportSize } | null>(null);
@@ -289,6 +297,9 @@ export function AnnotationCanvas({
     onSelect(null);
   }
 
+  const finishCropRef = useRef(finishCrop);
+  finishCropRef.current = finishCrop;
+
   useEffect(() => {
     if (!cropping) return;
     const key = (event: KeyboardEvent) => {
@@ -300,12 +311,12 @@ export function AnnotationCanvas({
       if (event.key === 'Enter' || event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        finishCrop(event.key === 'Enter');
+        finishCropRef.current(event.key === 'Enter');
       }
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
-  });
+  }, [cropping]);
 
   useEffect(() => {
     const transformer = cropTransformerRef.current;
@@ -317,6 +328,15 @@ export function AnnotationCanvas({
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  useLayoutEffect(
+    () => () => {
+      if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
+      wheelFrame.current = null;
+      pendingWheel.current = null;
+    },
+    [image?.filename, image?.dataUrl],
+  );
 
   const stopEdgePan = useCallback(() => {
     if (edgePanFrame.current !== null) cancelAnimationFrame(edgePanFrame.current);
@@ -1178,18 +1198,28 @@ export function AnnotationCanvas({
           }}
           onWheel={(event) => {
             event.evt.preventDefault();
+            const pending = (pendingWheel.current ??= { x: 0, y: 0, factor: 1, pointer: null });
             if (event.evt.ctrlKey || event.evt.metaKey) {
               const pointer = event.target.getStage()?.getPointerPosition();
               if (!pointer) return;
-              userAdjustedViewport.current = true;
-              setViewport((current) => zoomAt(current, pointer, Math.exp(-event.evt.deltaY * 0.01)));
+              pending.factor *= Math.exp(-event.evt.deltaY * 0.01);
+              pending.pointer = pointer;
             } else {
-              userAdjustedViewport.current = true;
-              setViewport((current) => ({
-                ...current,
-                x: current.x - event.evt.deltaX,
-                y: current.y - event.evt.deltaY,
-              }));
+              pending.x -= event.evt.deltaX;
+              pending.y -= event.evt.deltaY;
+            }
+            userAdjustedViewport.current = true;
+            if (wheelFrame.current === null) {
+              wheelFrame.current = requestAnimationFrame(() => {
+                wheelFrame.current = null;
+                const input = pendingWheel.current;
+                pendingWheel.current = null;
+                if (!input) return;
+                setViewport((current) => {
+                  const panned = { ...current, x: current.x + input.x, y: current.y + input.y };
+                  return input.pointer ? zoomAt(panned, input.pointer, input.factor) : panned;
+                });
+              });
             }
           }}
           onPointerClick={(event) => {

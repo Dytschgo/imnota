@@ -583,6 +583,7 @@ describe('prompt export names', () => {
     expect(formatPromptTimestamp(new Date(2026, 8, 7, 18, 42, 5))).toBe('260907-184205');
     expect(sanitizePromptCollectionName('UX / Zürich: checkout. ')).toBe('UX - Zürich- checkout');
     expect(sanitizePromptCollectionName('CON')).toBe('_CON');
+    expect(sanitizePromptCollectionName('a\u007f\u0085b')).toBe('ab');
   });
 
   it('budgets duplicated set and file names against the actual exports path', () => {

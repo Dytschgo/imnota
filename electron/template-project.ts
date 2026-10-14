@@ -6,7 +6,7 @@ import type { ProjectData } from '../src/shared/types.js';
 import type { ProjectIconKey } from '../src/shared/project-icons.js';
 import { getWorkflowTemplate } from '../src/shared/workflow-templates.js';
 import { validateProject } from '../src/shared/schema.js';
-import { emptyProject, slugify } from '../src/shared/utils.js';
+import { emptyProject, portableFilename, slugify } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite } from './files.js';
 import { ensureCollection } from './collections.js';
 
@@ -53,7 +53,7 @@ async function pathExistsOrIsLinked(target: string): Promise<boolean> {
 }
 
 async function availableProjectFolder(workspace: string, name: string): Promise<string> {
-  const base = slugify(name);
+  const base = portableFilename(slugify(name));
   let candidate = path.join(workspace, base);
   let suffix = 2;
   while (await pathExistsOrIsLinked(candidate)) candidate = path.join(workspace, `${base}-${suffix++}`);
