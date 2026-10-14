@@ -88,6 +88,7 @@ import { registerPromptExportIpc } from './ipc-prompt-export.js';
 import { registerPreferenceIpc } from './ipc-preferences.js';
 import { registerSystemIpc } from './ipc-system.js';
 import { registerContentIpc } from './ipc-content.js';
+import { importScreenshot } from './screenshot-import.js';
 import { registerScreenshotIpc } from './ipc-screenshots.js';
 import { registerProjectIpc } from './ipc-projects.js';
 import { registerSettingsIpc } from './ipc-settings.js';
@@ -906,46 +907,13 @@ async function importOne(
   originalFilename = path.basename(sourcePath),
   collectionId?: string,
 ): Promise<void> {
-  const ext = path.extname(originalFilename).toLowerCase();
-  if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext))
-    throw new Error(`Unsupported screenshot format: ${originalFilename}. Use PNG, JPEG or WebP.`);
-  const image = nativeImage.createFromPath(sourcePath);
-  if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
-  const project = await readProject(projectPath);
-  const collection = project.collections.find(
-    (item) => item.id === (collectionId ?? project.collections.find((candidate) => !candidate.archived)?.id),
-  );
-  if (!collection) throw new Error('Choose a collection before importing.');
-  await ensureCollection(projectPath, collection.id);
-  const storedFilename = await uniqueStoredName(projectPath, originalFilename);
-  await atomicWrite(
-    path.join(projectPath, 'collections', collection.id, 'screenshots', storedFilename),
-    await fs.readFile(sourcePath),
-  );
-  const timestamp = nowIso();
-  project.screenshots.push({
-    collectionId: collection.id,
-    id: `shot_${crypto.randomUUID()}`,
+  await importScreenshot(
+    { atomicWrite, readProject, uniqueStoredName, nextScreenshotPosition },
+    projectPath,
+    sourcePath,
     originalFilename,
-    storedFilename,
-    title: originalFilename,
-    description: '',
-    position: nextScreenshotPosition(project, collection.id),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    priority: 'medium',
-    annotationFile: `collections/${collection.id}/annotations/${storedFilename}.json`,
-    descriptionFile: `collections/${collection.id}/descriptions/${storedFilename}.md`,
-    originalWidth: image.getSize().width,
-    originalHeight: image.getSize().height,
-    includeInExport: true,
-  });
-  const added = project.screenshots.at(-1)!;
-  await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
-  await atomicWrite(path.join(projectPath, added.descriptionFile), '');
-  project.updatedAt = timestamp;
-  collection.archived = false;
-  await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));
+    collectionId,
+  );
 }
 
 async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Promise<ImagePayload> {
