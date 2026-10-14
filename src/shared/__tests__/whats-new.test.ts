@@ -8,16 +8,13 @@ import {
 } from '../whats-new';
 
 describe('what’s new releases', () => {
-  it('describes direct capture only in builds after the previous published release', () => {
+  it('gates release content at the nightly boundary and preserves stable releases', () => {
     expect(findWhatsNewRelease('0.2.9-nightly.20260924.36070290089')?.features.at(-1)?.id).toBe(
       'capture-choose-display',
     );
     expect(findWhatsNewRelease('0.2.9-nightly.20260925.1')?.features[0]?.id).toBe('capture-all-displays');
     expect(findWhatsNewRelease('0.2.8')?.features.at(-1)?.id).toBe('capture-display');
     expect(findWhatsNewRelease('0.2.9')?.features[0]?.id).toBe('capture-all-displays');
-  });
-
-  it('introduces the 0.3.0 stable capture, Markdown and agent features', () => {
     const release = findWhatsNewRelease('0.3.0');
     expect(release?.channel).toBe('stable');
     expect(release?.preview).toBe(false);
@@ -26,6 +23,14 @@ describe('what’s new releases', () => {
       'readable-marks',
       'agent-access',
     ]);
+    expect(findWhatsNewRelease('0.2.8-nightly.20260919.35412472439')?.features[0]?.id).toBe('updates');
+    const next = findWhatsNewRelease('0.2.8-nightly.20260919.35412472440');
+    expect(next?.features.map((feature) => feature.id)).toEqual([
+      'update-hover',
+      'copy-variants',
+      'capture-choose-display',
+    ]);
+    expect(findWhatsNewRelease('0.2.8')?.features[0]?.id).toBe('updates');
   });
 
   it('orders Imnota stable and nightly versions without using lexical comparison', () => {
@@ -63,16 +68,5 @@ describe('what’s new releases', () => {
     expect(shouldShowWhatsNew('0.2.8', 'not-a-version', release)).toBe(true);
     expect(shouldShowWhatsNew('0.2.8', undefined, undefined)).toBe(false);
     expect(shouldShowWhatsNew(undefined, undefined, release)).toBe(false);
-  });
-
-  it('keeps the published nightly content until the comparison nightly is installed', () => {
-    expect(findWhatsNewRelease('0.2.8-nightly.20260919.35412472439')?.features[0]?.id).toBe('updates');
-    const next = findWhatsNewRelease('0.2.8-nightly.20260919.35412472440');
-    expect(next?.features.map((feature) => feature.id)).toEqual([
-      'update-hover',
-      'copy-variants',
-      'capture-choose-display',
-    ]);
-    expect(findWhatsNewRelease('0.2.8')?.features[0]?.id).toBe('updates');
   });
 });

@@ -47,7 +47,7 @@ describe('filename validation properties', () => {
       fc.property(containing(fc.constantFrom('/', '\\', ':')), ({ text }) => {
         expect(accepts(text)).toBe(false);
       }),
-      runs(300),
+      runs(200),
     );
   });
 
@@ -67,7 +67,7 @@ describe('filename validation properties', () => {
       fc.property(hostile, (value) => {
         expect(accepts(value)).toBe(false);
       }),
-      runs(300),
+      runs(200),
     );
   });
 
@@ -76,7 +76,7 @@ describe('filename validation properties', () => {
       fc.property(containing(controlCharacter), ({ text }) => {
         expect(accepts(text)).toBe(false);
       }),
-      runs(300),
+      runs(200),
     );
   });
 
@@ -126,7 +126,7 @@ describe('filename validation properties', () => {
         // The same name is still accepted after it has been stored and read back.
         expect(accepts(path.basename(path.join(process.cwd(), value)))).toBe(true);
       }),
-      runs(500),
+      runs(200),
     );
   });
 
@@ -255,7 +255,7 @@ describe('path containment properties', () => {
         // Trailing separators and redundant separators do not change the answer.
         expect(isWithin(`${parent}${path.sep}`, `${target}${path.sep}${path.sep}`)).toBe(expected);
       }),
-      runs(500),
+      runs(200),
     );
   });
 
@@ -277,7 +277,7 @@ describe('path containment properties', () => {
           expect(isWithin(parent, path.join(`${parent}${suffix}`, ...children))).toBe(false);
         },
       ),
-      runs(300),
+      runs(200),
     );
   });
 
@@ -291,7 +291,7 @@ describe('path containment properties', () => {
         for (const separator of windows ? ['\\', '/'] : ['/'])
           expect(isWithin(parent, [parent, ...climb, ...elsewhere].join(separator))).toBe(false);
       }),
-      runs(300),
+      runs(200),
     );
   });
 

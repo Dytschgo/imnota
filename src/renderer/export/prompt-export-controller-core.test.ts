@@ -1497,31 +1497,31 @@ describe('prompt export controller orchestration', () => {
     expect(native.starts).toHaveLength(2);
   });
 
-  test('reports image-only Windows retention without claiming Markdown + image', async () => {
-    const native = fakeBridge({ placed: { text: false, html: false, image: true, files: false } });
-    const renderer = fakeRendering();
-    const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
-    const copy = await controller.copyFresh(1);
-    expect(copy.ok).toBe(true);
-    expect(controller.getState().cards[0]).toMatchObject({
+  test.each([
+    {
+      name: 'image-only Windows retention',
+      placed: { text: false, html: false, image: true, files: false },
       state: 'copied',
       outcome: 'image',
-      warning: expect.stringMatching(/Markdown was not confirmed.*Copy Markdown only or Open files/),
-    });
-  });
-
-  test('reports an unverified clipboard read-back without claiming Markdown + image', async () => {
-    const native = fakeBridge({ placed: { text: false, html: false, image: false, files: false } });
+      warning: /Markdown was not confirmed.*Copy Markdown only or Open files/,
+    },
+    {
+      name: 'an unverified clipboard read-back',
+      placed: { text: false, html: false, image: false, files: false },
+      state: 'idle',
+      outcome: undefined,
+      warning: /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
+    },
+  ])('reports $name without claiming Markdown + image', async ({ placed, state, outcome, warning }) => {
+    const native = fakeBridge({ placed });
     const renderer = fakeRendering();
     const controller = engine(async () => savedContext([screenshot(0)]), native.bridge, renderer.rendering);
     const copy = await controller.copyFresh(1);
     expect(copy.ok).toBe(true);
-    expect(controller.getState().cards[0].outcome).toBeUndefined();
+    expect(controller.getState().cards[0].outcome).toBe(outcome);
     expect(controller.getState().cards[0]).toMatchObject({
-      state: 'idle',
-      warning: expect.stringMatching(
-        /Markdown and image were not confirmed.*Copy Markdown only, Copy image only, or Open files/,
-      ),
+      state,
+      warning: expect.stringMatching(warning),
     });
   });
 

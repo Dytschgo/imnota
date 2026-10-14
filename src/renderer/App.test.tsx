@@ -2161,7 +2161,7 @@ describe('feedback controls', () => {
     await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledOnce());
   });
 
-  it('starts a cancellable 3s capture delay from the Add menu', async () => {
+  it.each([3, 5] as const)('starts a cancellable %ss capture delay from the Add menu', async (seconds) => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
       ok: false as const,
@@ -2181,46 +2181,16 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
     await screen.findByTestId('add-screenshot');
-    takeDelayedScreenshot(3);
+    takeDelayedScreenshot(seconds);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
         collectionId: '001-collection',
-        delaySeconds: 3,
+        delaySeconds: seconds,
         overlayMode: 'region',
       }),
     );
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
-  });
-
-  it('starts a 5s capture delay from the Add menu', async () => {
-    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({
-      ok: false as const,
-      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
-    }));
-    await renderEditingProject({
-      getPreferenceSettings: async () => ({
-        ok: true,
-        value: {
-          settings: {
-            ...DEFAULT_PREFERENCE_SETTINGS,
-            capture: { experimentalRegionCapture: true },
-          },
-          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
-        },
-      }),
-      startRegionCapture,
-    });
-    takeDelayedScreenshot(5);
-    await waitFor(() =>
-      expect(startRegionCapture).toHaveBeenCalledWith({
-        projectPath: '/workspace/project',
-        collectionId: '001-collection',
-        delaySeconds: 5,
-        overlayMode: 'region',
-      }),
-    );
   });
 
   it('starts capture from the global hotkey IPC', async () => {
