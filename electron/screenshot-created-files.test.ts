@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { emptyProject } from '../src/shared/utils.js';
 import type { ProjectData, ScreenshotRecord } from '../src/shared/types.js';
 import { ensureCollection, screenshotPath } from './collections.js';
+import { withCreatedFileCleanup } from './created-file-cleanup.js';
 import { atomicWrite } from './files.js';
 import { registerScreenshotIpc } from './ipc-screenshots.js';
 import type { IpcRouter } from './ipc-router.js';
@@ -81,6 +82,22 @@ async function fixture() {
   };
   return { projectPath, source, host, originalError, expectUnchanged };
 }
+
+it('preserves a file created by another writer after the absence check and the original error', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-created-files-'));
+  directories.push(directory);
+  const target = path.join(directory, 'foreign.png');
+  const originalError = new Error('Injected write failure');
+  await expect(
+    withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+      await create(target, async () => {
+        await fs.writeFile(target, 'foreign content');
+        throw originalError;
+      });
+    }),
+  ).rejects.toBe(originalError);
+  expect(await fs.readFile(target, 'utf8')).toBe('foreign content');
+});
 
 it('removes imported files and preserves the original error when the project save fails', async () => {
   const { projectPath, source, host, originalError, expectUnchanged } = await fixture();
