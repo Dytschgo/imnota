@@ -1,5 +1,12 @@
 import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen } from 'lucide-react';
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../components/ui';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
@@ -72,6 +79,25 @@ export interface PromptBundleCardProps {
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
+const busyStates: readonly PromptBundleCardState[] = ['preparing', 'writing', 'copying'];
+/** Long enough for the success ring to finish one lap and fade. */
+export const COPY_CELEBRATION_MS = 2200;
+
+/** True only while a copy that just finished in this card is being acknowledged. */
+function useCopyCelebration(state: PromptBundleCardState, failed: boolean) {
+  const [celebrating, setCelebrating] = useState(false);
+  const previous = useRef(state);
+  useEffect(() => {
+    const wasBusy = busyStates.includes(previous.current);
+    previous.current = state;
+    if (!wasBusy || state !== 'copied' || failed) return;
+    setCelebrating(true);
+    const timer = window.setTimeout(() => setCelebrating(false), COPY_CELEBRATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [failed, state]);
+  return celebrating && state === 'copied';
+}
+
 function requestFor(bundle: PromptBundleCardModel): PromptBundleActionRequest {
   return {
     planId: bundle.planId,
@@ -115,8 +141,14 @@ export function PromptBundleCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const restoreFocusAfterOption = useRef(false);
   const optionsMenuId = useId().replace(/:/g, '');
-  const busy = ['preparing', 'writing', 'copying'].includes(bundle.state);
+  const busy = busyStates.includes(bundle.state);
   const copied = bundle.state === 'copied' && !bundle.error;
+  const celebrating = useCopyCelebration(bundle.state, Boolean(bundle.error));
+  const tone = bundle.error
+    ? 'error'
+    : bundle.warning || bundle.delivery === 'file-only'
+      ? 'warning'
+      : undefined;
   const savedLocally = Boolean(bundle.artifactSessionId || bundle.filenames?.length);
   const request = requestFor(bundle);
   const supportsFileVariants = fileClipboardAvailable && bundle.pictureNumbers.length > 0;
@@ -257,6 +289,9 @@ export function PromptBundleCard({
     <article
       data-testid="prompt-bundle-card"
       data-bundle-number={bundle.bundleNumber}
+      data-state={bundle.state}
+      data-tone={tone}
+      data-celebrate={celebrating || undefined}
       className="prompt-bundle-card"
       aria-labelledby={`prompt-bundle-${bundle.bundleNumber}`}
       aria-busy={busy}
@@ -275,16 +310,6 @@ export function PromptBundleCard({
         ) : (
           <FileText size={22} aria-hidden="true" />
         )}
-        {bundle.pictureNumbers.length > 0 && (
-          <span className="prompt-bundle-preview-caption" aria-hidden="true">
-            First picture
-            <br />
-            Preview bundle
-          </span>
-        )}
-        <span className="prompt-bundle-index" aria-hidden="true">
-          {String(bundle.bundleNumber).padStart(2, '0')}
-        </span>
       </button>
       <div className="prompt-bundle-body">
         <div className="prompt-bundle-heading">

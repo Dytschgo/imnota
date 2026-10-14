@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
-import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COPY_CELEBRATION_MS, PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
 const initialShowPopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'showPopover');
 const initialHidePopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hidePopover');
@@ -493,4 +493,66 @@ it('leaves an error to the dialog when the dialog already reports it', () => {
     />,
   );
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+describe('row highlight states', () => {
+  const card = () => screen.getByTestId('prompt-bundle-card');
+  const renderCard = (bundle: PromptBundleCardModel) =>
+    render(<PromptBundleCard bundle={bundle} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />);
+
+  it.each([
+    [
+      'an error',
+      model({ state: 'error', error: 'No requested format was confirmed on the clipboard.' }),
+      'error',
+    ],
+    ['a warning', model({ warning: 'A text block was intentionally excluded from this export.' }), 'warning'],
+    ['file-only delivery', model({ delivery: 'file-only' }), 'warning'],
+  ] as const)('marks %s with a steady tone', (_label, bundle, tone) => {
+    renderCard(bundle);
+    expect(card()).toHaveAttribute('data-tone', tone);
+  });
+
+  it('keeps a healthy bundle untoned and marks work in progress as busy', () => {
+    const { rerender } = renderCard(model());
+    expect(card()).not.toHaveAttribute('data-tone');
+    expect(card()).toHaveAttribute('aria-busy', 'false');
+    rerender(
+      <PromptBundleCard
+        bundle={model({ state: 'copying' })}
+        onCopyFresh={vi.fn()}
+        onPrepareFreshFiles={vi.fn()}
+      />,
+    );
+    expect(card()).toHaveAttribute('aria-busy', 'true');
+    expect(card()).toHaveAttribute('data-state', 'copying');
+  });
+
+  it('acknowledges a copy that finishes in this card once, then settles', () => {
+    vi.useFakeTimers();
+    try {
+      const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+      const { rerender } = render(<PromptBundleCard bundle={model({ state: 'copying' })} {...props} />);
+      expect(card()).not.toHaveAttribute('data-celebrate');
+      rerender(<PromptBundleCard bundle={model({ state: 'copied', outcome: 'combined' })} {...props} />);
+      expect(card()).toHaveAttribute('data-celebrate');
+      act(() => vi.advanceTimersByTime(COPY_CELEBRATION_MS));
+      expect(card()).not.toHaveAttribute('data-celebrate');
+      expect(card()).toHaveAttribute('data-state', 'copied');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not celebrate an already copied bundle or a copy that failed', () => {
+    const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+    const reopened = render(<PromptBundleCard bundle={model({ state: 'copied' })} {...props} />);
+    expect(card()).not.toHaveAttribute('data-celebrate');
+    reopened.unmount();
+    const failed = render(<PromptBundleCard bundle={model({ state: 'copying' })} {...props} />);
+    failed.rerender(
+      <PromptBundleCard bundle={model({ state: 'copied', error: 'Copy failed' })} {...props} />,
+    );
+    expect(card()).not.toHaveAttribute('data-celebrate');
+  });
 });

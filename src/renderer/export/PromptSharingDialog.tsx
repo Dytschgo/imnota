@@ -93,6 +93,14 @@ export function PromptSharingDialog({
   const showProgressBar =
     progress && ['planning', 'rendering', 'writing', 'complete'].includes(progress.phase);
   const rebuildBundle = bundles.find((bundle) => bundle.state === 'error') ?? bundles[0];
+  // The hairline mirrors the status below it; it never shows a measured amount.
+  const hairlineTone = busy
+    ? 'busy'
+    : error || progress?.phase === 'error'
+      ? 'error'
+      : progress?.phase === 'complete'
+        ? 'complete'
+        : 'idle';
   return (
     <Modal
       hidden={hidden}
@@ -102,6 +110,9 @@ export function PromptSharingDialog({
       closeTestId="prompt-sharing-close"
     >
       <section className="prompt-sharing-dialog" aria-busy={busy} data-testid="prompt-sharing-dialog">
+        <div className="prompt-sharing-hairline" data-tone={hairlineTone} aria-hidden="true">
+          <span />
+        </div>
         {progress && !(error && progress.phase === 'error') && (
           <div className={`prompt-sharing-progress prompt-sharing-progress-${progress.phase}`} role="status">
             <div>

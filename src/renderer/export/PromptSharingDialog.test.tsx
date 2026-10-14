@@ -248,3 +248,18 @@ it('shows a failure once, with technical details and a Rebuild bundles action', 
     bundleNumber: 1,
   });
 });
+
+it.each([
+  ['busy', { phase: 'rendering', bundleNumber: 1, totalBundles: 3 }, undefined],
+  ['busy', { phase: 'copying', bundleNumber: 1, totalBundles: 3, message: 'Copying Bundle 1' }, undefined],
+  ['complete', { phase: 'complete', bundleNumber: 3, totalBundles: 3 }, undefined],
+  ['error', { phase: 'error', message: 'Export failed' }, { message: 'Export failed' }],
+  ['idle', undefined, undefined],
+] as const)('shows a decorative %s hairline that mirrors the status', (tone, progress, error) => {
+  render(<PromptSharingDialog {...baseProps} bundles={[]} progress={progress} error={error} />);
+  const hairline = document.querySelector('.prompt-sharing-hairline');
+  expect(hairline).toHaveAttribute('data-tone', tone);
+  expect(hairline).toHaveAttribute('aria-hidden', 'true');
+  // The hairline is presentation only; it never carries a number of its own.
+  expect(hairline).toHaveTextContent('');
+});
