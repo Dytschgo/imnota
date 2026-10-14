@@ -15,6 +15,107 @@ const baseProps = {
   onPrepareFreshFiles: vi.fn(),
 };
 
+function bundleRow(overrides: Partial<PromptBundleCardModel> = {}): PromptBundleCardModel {
+  return {
+    planId: 'plan-before-split',
+    bundleNumber: 1,
+    pictureNumbers: [1, 2, 3, 4],
+    screenshotCount: 4,
+    excludedCount: 0,
+    width: 800,
+    height: 2400,
+    delivery: 'clipboard',
+    state: 'idle',
+    ...overrides,
+  };
+}
+
+it.each([
+  ['missing row after split', 2, 2],
+  ['matching number in an outdated plan', 1, 2],
+  ['missing row without a total', 2, undefined],
+] as const)(
+  'keeps activity visible with an explicit plan-update note: %s',
+  (_label, bundleNumber, totalBundles) => {
+    render(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={[bundleRow()]}
+        progress={{ phase: 'rendering', bundleNumber, totalBundles }}
+      />,
+    );
+    expect(screen.getByTestId('prompt-bundle-card')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Updating bundle rows; activity is shown on the last row.',
+    );
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('value');
+  },
+);
+
+it('uses the last row as a continuation indicator only until the split rows arrive', () => {
+  const bundles = [bundleRow(), bundleRow({ bundleNumber: 2, pictureNumbers: [5] })];
+  const progress = { phase: 'rendering' as const, bundleNumber: 1, totalBundles: 3 };
+  const { rerender } = render(<PromptSharingDialog {...baseProps} bundles={bundles} progress={progress} />);
+  expect(screen.getAllByTestId('prompt-bundle-card').map((row) => row.hasAttribute('data-active'))).toEqual([
+    false,
+    true,
+  ]);
+  rerender(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[...bundles, bundleRow({ bundleNumber: 3 })]}
+      progress={progress}
+    />,
+  );
+  expect(screen.getAllByTestId('prompt-bundle-card').map((row) => row.hasAttribute('data-active'))).toEqual([
+    true,
+    false,
+    false,
+  ]);
+  expect(screen.getByRole('status')).not.toHaveTextContent('Updating bundle rows');
+});
+
+it.each(['error', 'cancelled', 'complete'] as const)(
+  'stops the halo on terminal %s even when the first write leaves a stale writing card',
+  (phase) => {
+    const bundles = [bundleRow({ state: 'writing' })];
+    const { rerender } = render(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={bundles}
+        progress={{ phase: 'writing', bundleNumber: 1 }}
+      />,
+    );
+    expect(screen.getByTestId('prompt-bundle-card')).toHaveAttribute('data-active', 'true');
+    rerender(<PromptSharingDialog {...baseProps} bundles={bundles} progress={{ phase, bundleNumber: 1 }} />);
+    expect(screen.getByTestId('prompt-bundle-card')).not.toHaveAttribute('data-active');
+    expect(screen.getByTestId('prompt-bundle-card')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('prompt-sharing-dialog')).toHaveAttribute('aria-busy', 'false');
+  },
+);
+
+it('celebrates direct Markdown copy across replacement plans without replaying on Open files', () => {
+  const { rerender } = render(<PromptSharingDialog {...baseProps} bundles={[bundleRow()]} />);
+  for (const planId of ['markdown-plan-1', 'markdown-plan-2']) {
+    rerender(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={[bundleRow({ planId, state: 'idle', outcome: 'markdown' })]}
+        progress={{ phase: 'complete' }}
+      />,
+    );
+    expect(screen.getByTestId('prompt-bundle-card')).toHaveAttribute('data-celebrate');
+    rerender(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={[bundleRow({ planId, state: 'idle', outcome: 'markdown', opened: 'files' })]}
+        progress={{ phase: 'complete' }}
+      />,
+    );
+    expect(screen.getByTestId('prompt-bundle-card')).not.toHaveAttribute('data-celebrate');
+  }
+});
+
 it.each(['checking', 'planning', 'rendering', 'writing', 'copying'] as const)(
   'highlights only the idle row named by %s progress without changing card busy semantics',
   (phase) => {

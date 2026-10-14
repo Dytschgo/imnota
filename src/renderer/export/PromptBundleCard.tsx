@@ -86,21 +86,32 @@ const busyStates: readonly PromptBundleCardState[] = ['preparing', 'writing', 'c
 export const COPY_CELEBRATION_MS = 2200;
 
 /** True only while a copy that just finished in this card is being acknowledged. */
-function useCopyCelebration({ state, outcome, opened, error }: PromptBundleCardModel) {
+function useCopyCelebration({ state, outcome, opened, error, planId }: PromptBundleCardModel) {
   const failed = Boolean(error);
   const [celebrating, setCelebrating] = useState(false);
-  const previous = useRef(state);
+  const previous = useRef({ state, outcome, planId });
   useEffect(() => {
-    const wasBusy = busyStates.includes(previous.current);
-    previous.current = state;
+    const wasBusy = busyStates.includes(previous.current.state);
+    const newOutcome = outcome !== previous.current.outcome || planId !== previous.current.planId;
+    previous.current = { state, outcome, planId };
     setCelebrating(false);
     // Open retains the last clipboard outcome; copy completion clears `opened`.
-    if (!wasBusy || state !== 'copied' || failed || opened || !outcome || outcome === 'opened') return;
+    // Fallback copies finish idle; direct Markdown can also replace the plan
+    // without making this card busy. A new outcome on that plan is completion.
+    if (
+      (!wasBusy && !newOutcome) ||
+      !['idle', 'copied'].includes(state) ||
+      failed ||
+      opened ||
+      !outcome ||
+      outcome === 'opened'
+    )
+      return;
     setCelebrating(true);
     const timer = window.setTimeout(() => setCelebrating(false), COPY_CELEBRATION_MS);
     return () => window.clearTimeout(timer);
-  }, [failed, opened, outcome, state]);
-  return celebrating && state === 'copied' && !failed && !opened;
+  }, [failed, opened, outcome, planId, state]);
+  return celebrating && ['idle', 'copied'].includes(state) && !failed && !opened;
 }
 
 function requestFor(bundle: PromptBundleCardModel): PromptBundleActionRequest {
@@ -164,6 +175,14 @@ export function PromptBundleCard({
   const variantLabels = copyVariantLabels(platform);
   const dialog = optionsRef.current?.closest<HTMLElement>('[role="dialog"]');
   const menuPortal = dialog ?? (typeof document === 'undefined' ? undefined : document.body);
+
+  // Keep the row mounted to observe direct-copy outcomes across plan replacement,
+  // but discard the old plan's transient menu just as a remount used to do.
+  useLayoutEffect(() => {
+    if (menuRef.current?.contains(document.activeElement)) restoreFocusAfterOption.current = true;
+    setOptionsOpen(false);
+    setMenuPosition(undefined);
+  }, [bundle.planId]);
 
   useLayoutEffect(() => {
     if (!optionsOpen) return;
