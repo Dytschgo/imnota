@@ -1,11 +1,15 @@
-import { spawnSync } from 'node:child_process';
+import { runWalkthroughChild } from './walkthrough-child.mjs';
 import { access, lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: 'inherit', ...options });
-  if (result.status !== 0) throw new Error(`${command} failed with exit code ${result.status ?? 'unknown'}.`);
+async function run(command, args, options = {}) {
+  const result = await runWalkthroughChild(command, args, {
+    cancellationGraceMs: 5_000,
+    forwardToGroup: false,
+    ...options,
+  });
+  if (result.code !== 0) throw new Error(`${command} failed with exit code ${result.code ?? 'unknown'}.`);
 }
 
 function contained(root, candidate) {
@@ -48,18 +52,18 @@ async function smokeLinuxAppImage(target) {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'imnota-appimage-'));
   const root = ownedTemporaryDirectory(temporaryDirectory);
   try {
-    run(target, ['--appimage-extract'], { cwd: root });
+    await run(target, ['--appimage-extract'], { cwd: root });
     const extractedRoot = contained(root, join(root, 'squashfs-root'));
     const sandboxHelper = await regularFileWithin(extractedRoot, join(extractedRoot, 'chrome-sandbox'));
     const executable = await regularFileWithin(extractedRoot, join(extractedRoot, 'imnota'));
     if (!(await lstat(extractedRoot)).isDirectory())
       throw new Error('AppImage extraction did not create squashfs-root.');
     // Match the existing CI Electron helper policy without disabling the sandbox or changing host AppArmor.
-    run('sudo', ['chown', 'root:root', sandboxHelper]);
-    run('sudo', ['chmod', '4755', sandboxHelper]);
+    await run('sudo', ['chown', 'root:root', sandboxHelper]);
+    await run('sudo', ['chmod', '4755', sandboxHelper]);
     if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
-      run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
-    run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
+      await run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
+    await run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -84,7 +88,7 @@ async function main() {
     // The portable launcher extracts a child; use the same build's direct packaged exe for owned stdio.
     // The portable distributable still receives the existing full UI/clipboard walkthroughs.
     if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
-      run(
+      await run(
         process.execPath,
         ['scripts/verify-mcp.mjs', resolve(process.argv[3] ?? 'release', 'win-unpacked/Imnota.exe'), target],
         { env: process.env },
