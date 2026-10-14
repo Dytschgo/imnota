@@ -3,6 +3,7 @@ import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { CircleAlert, Check, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -105,7 +106,20 @@ export function userFacingErrorMessage(message: string): string {
 }
 
 export default function App() {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      settings: state.settings,
+      projects: state.projects,
+      snapshot: state.snapshot,
+      activeScreenshotId: state.activeScreenshotId,
+      activeCollectionId: state.activeCollectionId,
+      view: state.view,
+      leftPanelOpen: state.leftPanelOpen,
+      rightPanelOpen: state.rightPanelOpen,
+      set: state.set,
+      activeScreenshot: state.activeScreenshot,
+    })),
+  );
   const preferences = usePreferences();
   const appearance = useAppearance(preferences.settings.appearance, {
     performanceConstrained: preferences.performance.reducedEffectsRecommended,
