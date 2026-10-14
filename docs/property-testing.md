@@ -53,12 +53,14 @@ Run `corepack pnpm test:coverage` for text, HTML and JSON summary reports in ign
 sources, excluding test fixtures and declarations. Script tests and the separate
 sharing service are outside this application coverage report. Test failures still
 fail the local command; there are no coverage percentage thresholds or baseline
-updates. The existing CI test step remains required. A separate diagnostic step
-retains the report as `application-coverage` for 14 days and cannot change the
-required tests' result. Counts and percentages describe instrumented execution,
+updates. Validate runs this command as its required application test execution,
+then runs `pnpm test:scripts` separately; it no longer runs Vitest twice. Coverage
+generation or test failures fail quality checks. A diagnostic upload retains the
+report as `application-coverage` for 14 days, including reports from failed tests.
+Counts and percentages describe instrumented execution,
 not native receiver acceptance or release readiness.
 
-The CI coverage addition is integrated alongside PR #193's workflow pins and
-timeout/secret-scan changes. The ordinary `pnpm test` step remains fail-closed;
-only coverage reporting and retention are diagnostic. Validate the combined
-workflow after any further integration.
+Nightly and stable retain their ordinary fail-closed `pnpm test` execution and
+separate diagnostic coverage run. Coverage percentages and report retention are
+diagnostic in all workflows. Validate the combined workflow after any further
+integration.
