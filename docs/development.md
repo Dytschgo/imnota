@@ -50,7 +50,7 @@ Project-watch regression checks run with `corepack pnpm exec vitest run electron
 
 The separate `corepack pnpm test:share-contract` command keeps its 5-second contract-test deadline. Its test-only fixture owns directories, SQLite connections and HTTP servers, retains the actual async body independently of Vitest's timeout wrapper, and observes service-handler promises. Teardown has one 8-second bound within the existing 10-second hook limit; it removes fixture directories only after the body and service work settle and HTTP/SQLite close. An unresolved lifetime or close error fails teardown and retains remaining files for diagnosis. Do not retry deletion against a live database.
 
-That command also runs lifecycle controls, including a bounded child with a deterministic 5.5-second upload barrier. The child must still **fail** at 5 seconds; the parent checks that cleanup introduces no early removal, EBUSY, ENOENT or unhandled failure, and that resources reach a closed terminal state. Child logs and synthetic retained fixtures use `imnota-share-lifetime-*` temporary paths. These controls cover the proven timeout-cleanup race; they do not identify the original hosted Windows timeout trigger. No production sharing behavior, fixture size, integrity assertion or CI routing is relaxed.
+That command also runs lifecycle controls, including a bounded child whose real HTTP upload is held until Vitest signals its actual 5-second timeout. The child must still **fail** at 5 seconds; the parent checks that the upload then completes before fixture removal, cleanup introduces no EBUSY, ENOENT or unhandled failure, and resources reach a closed terminal state. This control uses one small real HTTP/SQLite upload so large split-upload processing cannot consume the teardown deadline; the separate oversized Unicode contract retains its full workload and byte assertions. Child logs and synthetic retained fixtures use `imnota-share-lifetime-*` temporary paths. These controls cover the proven timeout-cleanup race; they do not identify the original hosted Windows timeout trigger. No production sharing behavior, integrity assertion or CI routing is relaxed.
 
 ## Worktree maintenance
 
@@ -66,6 +66,8 @@ Keep local cleanup inventories and preserved evidence outside tracked source, fo
 ## Isolated native verification
 
 Build first, then run the native workflow against disposable fixtures:
+
+Native locator waits observe renderer DOM and focus changes, with animation frames covering layout-only changes, under one unchanged operation deadline that includes renderer execution. DOM/focus observation also works when an unpresented window does not receive frames. They do not repeat failed evaluations. Artifact capture separately waits for annotation-canvas loading state to clear and a decoded Konva canvas to exist before the existing font/image decoding and compositor pixel-stability checks. An image-load failure or stalled renderer fails verification with the locator or artifact name; stable loading-placeholder pixels cannot satisfy capture readiness.
 
 ```powershell
 corepack pnpm build

@@ -11,6 +11,8 @@ import {
   boundedSmokeDiagnostic,
   withSmokeDeadline,
   SMOKE_CAPTURE_PREPARATION,
+  SMOKE_CANVAS_CAPTURE_PREPARATION,
+  locatorWaitScript,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -487,18 +489,209 @@ describe('native smoke driver', () => {
     expect(executeJavaScript).toHaveBeenCalledWith(expect.stringContaining('window.innerWidth'), true);
   });
 
-  it('retries locator polling when navigation replaces the renderer execution context', async () => {
+  it('reports a replaced renderer execution context without retrying the failed wait', async () => {
     const executeJavaScript = vi
       .fn()
       .mockRejectedValueOnce(new Error('Script failed to execute'))
       .mockResolvedValueOnce({ x: 4, y: 8, width: 20, height: 10, text: 'Ready', disabled: false });
     const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
 
-    await expect(new NativeUiDriver(window, 200).waitFor({ text: 'Ready' })).resolves.toEqual(
-      expect.objectContaining({ text: 'Ready' }),
+    await expect(new NativeUiDriver(window, 200).waitFor({ text: 'Ready' })).rejects.toThrow(
+      'Script failed to execute',
     );
-    expect(executeJavaScript).toHaveBeenCalledTimes(2);
+    expect(executeJavaScript).toHaveBeenCalledTimes(1);
   });
+
+  it('waits through startup in one renderer evaluation and resolves the first ready frame', async () => {
+    let frame: (() => void) | undefined;
+    let mounted = false;
+    const element = {
+      getAttribute: () => null,
+      textContent: 'Projects',
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      matches: () => false,
+    };
+    const executeJavaScript = vi.fn((source: string) =>
+      runInNewContext(source, {
+        document: {
+          querySelectorAll: () => (mounted ? [element] : []),
+          addEventListener() {},
+          removeEventListener() {},
+        },
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+        getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+        HTMLLabelElement: class {},
+        requestAnimationFrame: (callback: () => void) => {
+          frame = callback;
+        },
+      }),
+    );
+    const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+    const ready = new NativeUiDriver(window).waitFor({ selector: '.library' });
+    await Promise.resolve();
+    expect(frame).toBeTypeOf('function');
+    frame!(); // Healthy startup has not mounted the library yet.
+    mounted = true;
+    frame!();
+    await expect(ready).resolves.toMatchObject({ text: 'Projects', width: 800 });
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+  });
+
+  it('keeps absent and enabled locator conditions in the renderer wait', async () => {
+    const disabled = {
+      getAttribute: () => null,
+      textContent: 'Saving',
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 20, height: 20 }),
+      matches: () => true,
+    };
+    let elements = [disabled];
+    let frame!: () => void;
+    const context = {
+      document: { querySelectorAll: () => elements, addEventListener() {}, removeEventListener() {} },
+      MutationObserver: class {
+        observe() {}
+        disconnect() {}
+      },
+      getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+      HTMLLabelElement: class {},
+      requestAnimationFrame: (callback: () => void) => {
+        frame = callback;
+      },
+    };
+    const absent = runInNewContext(locatorWaitScript({ selector: '.saving' }, { absent: true }), context);
+    elements = [];
+    frame();
+    await expect(absent).resolves.toMatchObject({ width: 0 });
+    elements = [disabled];
+    const enabled = runInNewContext(locatorWaitScript({ text: 'Saving' }, { enabled: true }), context);
+    frame(); // A present but disabled control is not ready.
+    disabled.matches = () => false;
+    frame();
+    await expect(enabled).resolves.toMatchObject({ disabled: false });
+  });
+
+  it.each(['mutation', 'focus'])(
+    'observes %s readiness even when the window receives no animation frame',
+    async (signal) => {
+      let ready = false;
+      let mutation!: () => void;
+      const listeners = new Map<string, () => void>();
+      const disconnect = vi.fn();
+      const cancelFrame = vi.fn();
+      const element = {
+        getAttribute: () => null,
+        textContent: 'Ready',
+        getBoundingClientRect: () => ({ x: 0, y: 0, width: 200, height: 100 }),
+        matches: () => false,
+      };
+      const result = runInNewContext(
+        locatorWaitScript({ selector: signal === 'focus' ? 'summary:focus' : '.library' }, {}),
+        {
+          document: {
+            querySelectorAll: () => (ready ? [element] : []),
+            addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+            removeEventListener: (name: string) => listeners.delete(name),
+          },
+          MutationObserver: class {
+            constructor(callback: () => void) {
+              mutation = callback;
+            }
+            observe() {}
+            disconnect = disconnect;
+          },
+          getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+          HTMLLabelElement: class {},
+          requestAnimationFrame: () => 1,
+          cancelAnimationFrame: cancelFrame,
+        },
+      );
+      ready = true;
+      if (signal === 'mutation') mutation();
+      else listeners.get('focusin')!();
+      await expect(result).resolves.toMatchObject({ text: 'Ready' });
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(cancelFrame).toHaveBeenCalledWith(1);
+      expect(listeners.size).toBe(0);
+    },
+  );
+
+  it('fails a never-ready startup at the unchanged deadline with the locator and no evaluation retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const executeJavaScript = vi.fn((source: string) =>
+        runInNewContext(source, {
+          document: { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} },
+          MutationObserver: class {
+            observe() {}
+            disconnect() {}
+          },
+          requestAnimationFrame: () => {},
+        }),
+      );
+      const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+      const failure = expect(new NativeUiDriver(window).waitFor({ selector: '.library' })).rejects.toThrow(
+        'Failed waiting for {"selector":".library"} within 15000ms',
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      await failure;
+      expect(executeJavaScript).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['loading', 'failed', 'ready', 'no-canvas'])(
+    'checks off-DOM canvas readiness before capturing: %s',
+    async (state) => {
+      let check!: () => void;
+      const disconnect = vi.fn();
+      let loading = state === 'loading' || state === 'failed';
+      const canvas = {
+        querySelector: (selector: string) =>
+          selector.includes('canvas-load-state')
+            ? loading
+              ? { dataset: { state } }
+              : null
+            : loading
+              ? null
+              : { width: 1920, height: 1080 },
+      };
+      let settled = false;
+      const ready = runInNewContext(SMOKE_CANVAS_CAPTURE_PREPARATION, {
+        document: { body: {}, querySelectorAll: () => (state === 'no-canvas' ? [] : [canvas]) },
+        MutationObserver: class {
+          constructor(callback: () => void) {
+            check = callback;
+          }
+          observe() {}
+          disconnect = disconnect;
+        },
+      });
+      void ready.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      if (state === 'failed') {
+        await expect(ready).rejects.toThrow('selected screenshot failed to load');
+      } else {
+        if (state === 'loading') {
+          await Promise.resolve();
+          expect(settled).toBe(false);
+          loading = false;
+          check();
+        }
+        await ready;
+      }
+      expect(disconnect).toHaveBeenCalledOnce();
+    },
+  );
 
   it('fails a viewport matrix entry when the OS clamps its content size', async () => {
     const window = {
@@ -543,6 +736,12 @@ describe('native smoke driver', () => {
     });
     expect(await fs.readFile(capture.path)).toEqual(png);
     expect(window.webContents.capturePage).toHaveBeenCalledTimes(3);
+    expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(
+      1,
+      SMOKE_CANVAS_CAPTURE_PREPARATION,
+      true,
+    );
+    expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(2, SMOKE_CAPTURE_PREPARATION, true);
   });
 
   it('discards partial compositor frames and requires three consecutive settled captures', async () => {
