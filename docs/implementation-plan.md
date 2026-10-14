@@ -31,7 +31,7 @@ The former plan's ban on all server work was superseded by its later hosted-stat
 
 Adding content to an archived collection restores it with the successful native add. Cancelled or failed additions leave it archived. Multi-image imports commit one image at a time; if a later image fails, the open project reloads the earlier additions and reports the error.
 
-Screenshot import and duplicate remove only their newly written image and sidecars on failure before `project.json` commits. Cleanup is best-effort and preserves the original error; an occupied destination is refused. If metadata replacement committed but directory durability could not be confirmed, the referenced files remain and the original warning is reported. These operations do not add journals or a startup cleanup sweep; interrupted processes and failed cleanup can still leave files for manual inspection.
+Screenshot import and duplicate remove their successfully written image and sidecars on failure before `project.json` commits only when device, inode, size and modification time still match the identity recorded after each write. Cleanup is best-effort and preserves the original error; an occupied destination is refused, and rejected writes leave any file in place. If metadata replacement committed but directory durability could not be confirmed, the referenced files remain and the original warning is reported. These operations do not add journals or a startup cleanup sweep; interrupted processes and failed cleanup can still leave files for manual inspection.
 
 ## Remaining acceptance and operational work
 
