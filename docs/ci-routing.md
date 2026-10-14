@@ -6,11 +6,11 @@ The classifier accepts only ordinary non-executable files at `README.md`, `AGENT
 
 The classifier compares the exact PR base and head commits using NUL-delimited raw Git output, with rename detection disabled. Moving source into a document therefore still exposes the source deletion. A base branch that has advanced can cause extra full validation; the classifier deliberately tolerates this conservative result. Empty diffs, invalid hashes, absent history, Git errors, unexpected modes/statuses, and excessive diff output all select full validation.
 
-Every existing quality, platform-package, and share-service matrix job still reports its original check name. For prose-only PRs, package/service jobs report an explicit documentation-only step. Quality installs the pinned dependencies and runs the existing complete formatting check. CodeQL and dependency review continue unchanged. Application/native steps run when the classifier reports anything except successful `docs_only=true`, including a failed classifier job. Cancellation still cancels dependent work.
+Every existing quality, platform-package, and share-service matrix check still reports its original name. `quality-checks` runs the existing quality checks; `quality` is the required aggregate of `quality-checks` and the three-OS `platform` matrix. Failed or skipped dependencies fail the aggregate. For prose-only PRs, package/service/platform jobs report an explicit documentation-only step. Quality checks install the pinned dependencies and run the existing complete formatting check. CodeQL and dependency review continue unchanged. Application/native steps run when the classifier reports anything except successful `docs_only=true`, including a failed classifier job. Cancellation still cancels dependent work.
 
 Formatting cannot establish whether prose, links, commands, or agent instructions are correct. Review those under [AGENTS.md](../AGENTS.md); the shortcut changes application CI work, not documentation review responsibilities.
 
-`scripts/ci-changes.test.mjs` runs through the shared script-test command in full quality, every platform package test run, and release suites. Its real Git fixture exercises CLI output and source-to-document renames; focused cases cover malformed, mixed, missing, and non-regular input. A configuration PR must pass full hosted checks. Verify a subsequent useful prose-only PR before claiming hosted routing savings, including the original required `quality` context and every matrix check result.
+`scripts/ci-changes.test.mjs` runs through the shared script-test command in full quality checks, every platform test job, and release suites. Its real Git fixture exercises CLI output and source-to-document renames; focused cases cover malformed, mixed, missing, and non-regular input. A configuration PR must pass full hosted checks. Verify a subsequent useful prose-only PR before claiming hosted routing savings, including the original required `quality` context and every matrix check result.
 
 To restore full PR validation, remove the classifier conditions from Validate. No branch protection or release setting needs to change.
 
@@ -28,7 +28,17 @@ Every job has a `timeout-minutes` limit so a hung step fails within minutes inst
 
 Quality runs `scripts/secret-scan.mjs` on every PR, including documentation-only ones, because prose can carry a pasted credential. Dependency review keeps only `contents: read`; it posts no PR comment, so `pull-requests: write` was unnecessary. Dependabot now also opens version updates for `share-service/`, whose separate lockfile previously received only security updates.
 
-Some repeated work is deliberate and stays. Each package job installs the share service and runs `test:share-contract` so the hosted contract is exercised on every OS, and quality repeats it because `quality` is the check branch protection requires. The Mac verifier and the Windows and Linux packaged verifiers run twice per job in different modes: the full walkthrough, then bundle copy and paste. Merging those launches would need script changes and a new coverage review, not a workflow edit.
+## Parallel application verification
+
+The three-OS `platform` matrix runs `test:platform` (platform Vitest discovery plus every script test), installs the share service, and runs `test:share-contract`. These checks run alongside packaging instead of serially between packaging and the native walkthrough. The contract suite uses real HTTP, SQLite and filesystem fixtures, so all three OS executions remain. Quality checks retain their own contract run.
+
+The macOS updater script has one native case that requires the actual universal packaged ZIP. The macOS package job therefore also runs `node --test scripts/update-macos.test.mjs` with `IMNOTA_REQUIRE_MAC_UPDATE_TEST=1`, which rejects a missing package instead of silently skipping that case. The source-only platform job exercises the remaining script cases. No test discovery policy or test file changes as part of this workflow change.
+
+Quality checks run the full application suite once with coverage, then the existing script-test command. Both fail on test failures. Coverage percentages have no thresholds; report retention stays diagnostic. The `quality` aggregate fails unless both quality checks and every platform job succeed, so moving the platform tests cannot bypass the strict branch-protection context. Existing package and service check names, conditions and evidence uploads remain.
+
+This adds three runner setups and a small aggregate job in exchange for removing platform tests and service installation/contract execution from the package critical path. Existing lockfile-keyed pnpm caches remain. The [Electron archive-cache experiment](history/build-cache-experiment.md) found no Windows/Linux savings and restore costs exceeding observed download times; no additional download caches are introduced without new evidence.
+
+The Mac verifier and the Windows and Linux packaged verifiers still run twice per job in different modes: the full walkthrough, then bundle copy and paste. Merging those launches would need script changes and a new coverage review, not a workflow edit. Nightly and stable workflows retain their existing test arrangement.
 
 ## Hosted verification
 
