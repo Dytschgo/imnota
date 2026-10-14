@@ -33,6 +33,7 @@ import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
 import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
+import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -608,7 +609,7 @@ export default function App() {
   const changeAnnotations = useCallback(
     (next: Annotation[], options?: AnnotationChangeOptions) => {
       if (!continuesUndoStep(annotationUndoKey.current, options))
-        setHistory((items) => [...items, persistence.annotations]);
+        setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
       annotationUndoKey.current = options?.coalesce ?? null;
       setRedo([]);
       persistence.changeAnnotations(next);
@@ -627,7 +628,7 @@ export default function App() {
     annotationUndoKey.current = null;
     const next = redo.at(-1);
     if (!next) return;
-    setHistory((items) => [...items, persistence.annotations]);
+    setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
     persistence.changeAnnotations(next);
     setRedo((items) => items.slice(0, -1));
   }, [persistence, redo]);
