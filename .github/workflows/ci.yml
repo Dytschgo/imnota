@@ -46,7 +46,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: share-service
@@ -70,11 +70,44 @@ jobs:
         if: env.RUN_APPLICATION == 'true'
       - run: npm audit --omit=dev --audit-level=high
         if: env.RUN_APPLICATION == 'true'
+      # Reuse this per-OS runner and the installed service for source verification.
+      # Service security keeps Node 24; application/platform checks keep Node 22.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: env.RUN_APPLICATION == 'true'
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: env.RUN_APPLICATION == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: env.RUN_APPLICATION == 'true'
+        working-directory: .
+      - run: pnpm exec install-electron
+        if: env.RUN_APPLICATION == 'true'
+        working-directory: .
+      # Script tests exercise Windows PowerShell before Vitest's native lock test
+      # starts its timed reader. A fresh test runner no longer has packaging setup.
+      - run: pnpm test:scripts
+        if: env.RUN_APPLICATION == 'true'
+        working-directory: .
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Test platform-specific behavior
+        if: env.RUN_APPLICATION == 'true'
+        working-directory: .
+        run: pnpm exec vitest run --config vitest.platform.config.ts
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - run: pnpm test:share-contract
+        if: env.RUN_APPLICATION == 'true'
+        working-directory: .
 
   quality:
     # Keep the strict branch-protection context, including the tests moved off the
     # packaging critical path. A failed/skipped dependency must not turn this green.
-    needs: [quality-checks, platform]
+    needs: [quality-checks, share-service]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -82,7 +115,7 @@ jobs:
       - name: Require all quality and platform checks
         env:
           QUALITY_RESULT: ${{ needs.quality-checks.result }}
-          PLATFORM_RESULT: ${{ needs.platform.result }}
+          PLATFORM_RESULT: ${{ needs.share-service.result }}
         run: test "$QUALITY_RESULT" = success && test "$PLATFORM_RESULT" = success
 
   quality-checks:
@@ -149,51 +182,6 @@ jobs:
       # Each package job builds and runs the native walkthrough against its distributable.
       # Keep quality focused on static, unit, script, and share-contract checks.
       - run: bash -n scripts/install.sh
-        if: env.RUN_APPLICATION == 'true'
-
-  platform:
-    needs: changes
-    if: ${{ always() && !cancelled() }}
-    env:
-      RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - name: Documentation-only PR
-        if: env.RUN_APPLICATION != 'true'
-        shell: bash
-        run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.RUN_APPLICATION == 'true'
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: env.RUN_APPLICATION == 'true'
-        with:
-          version: 11.25.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: env.RUN_APPLICATION == 'true'
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-        if: env.RUN_APPLICATION == 'true'
-      - run: pnpm exec install-electron
-        if: env.RUN_APPLICATION == 'true'
-      # Script tests exercise Windows PowerShell before Vitest's native lock test
-      # starts its timed reader. A fresh test runner no longer has packaging setup.
-      - run: pnpm test:scripts
-        if: env.RUN_APPLICATION == 'true'
-      - name: Test platform-specific behavior
-        if: env.RUN_APPLICATION == 'true'
-        run: pnpm exec vitest run --config vitest.platform.config.ts
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-      - run: npm ci --prefix share-service
-        if: env.RUN_APPLICATION == 'true'
-      - run: pnpm test:share-contract
         if: env.RUN_APPLICATION == 'true'
 
   package:
