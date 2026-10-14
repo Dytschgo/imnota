@@ -165,7 +165,7 @@ jobs:
       - run: pnpm test:scripts
         if: env.RUN_APPLICATION == 'true'
       - name: Retain application coverage report
-        if: ${{ always() && !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
+        if: ${{ !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -187,145 +187,14 @@ jobs:
   package:
     needs: changes
     if: ${{ always() && !cancelled() }}
-    env:
-      RUN_APPLICATION: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            command: pnpm package:linux
-          - os: windows-latest
-            command: pnpm package:win
-          - os: macos-latest
-            command: pnpm package:mac
-    runs-on: ${{ matrix.os }}
-    # Covers two packaged walkthroughs per OS, each with its own six-minute launcher deadline.
-    timeout-minutes: 45
-    steps:
-      - name: Documentation-only PR
-        if: env.RUN_APPLICATION != 'true'
-        working-directory: .
-        shell: bash
-        run: echo 'Application checks are unchanged for code and main-branch changes; this PR only changes reviewed prose paths.'
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.RUN_APPLICATION == 'true'
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: env.RUN_APPLICATION == 'true' && matrix.os == 'windows-latest'
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Capture MCP client Node
-        if: env.RUN_APPLICATION == 'true' && matrix.os == 'windows-latest'
-        shell: pwsh
-        run: '"IMNOTA_MCP_CLIENT_NODE=$((Get-Command node).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: env.RUN_APPLICATION == 'true'
-        with:
-          version: 11.25.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: env.RUN_APPLICATION == 'true'
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-        if: env.RUN_APPLICATION == 'true'
-      - run: pnpm exec install-electron
-        if: env.RUN_APPLICATION == 'true'
-      - run: ${{ matrix.command }}
-        if: env.RUN_APPLICATION == 'true'
-      # This script's native updater case needs the actual universal ZIP. All other
-      # platform/script tests run concurrently in platform, without a package dependency.
-      - name: Test packaged Mac updater and rollback
-        if: env.RUN_APPLICATION == 'true' && matrix.os == 'macos-latest'
-        run: node --test scripts/update-macos.test.mjs
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          IMNOTA_REQUIRE_MAC_UPDATE_TEST: '1'
-      - name: Verify packaged Mac application
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
-        run: bash scripts/verify-mac.sh
-        env:
-          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Retain Mac walkthrough evidence
-        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'macos-latest')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mac-walkthrough-evidence-ci
-          path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
-          if-no-files-found: ignore
-
-      # Exports every bundle through the real workspace action, copies each with Rich copy and
-      # natively pastes it, so a change to bundle export or copy cannot merge silently.
-      - name: Verify packaged Mac bundle copy and paste
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'macos-latest')
-        run: bash scripts/verify-mac.sh
-        env:
-          IMNOTA_SMOKE_MODE: clipboard
-          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
-      - name: Smoke packaged Windows application
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
-        run: node scripts/verify-packaged.mjs windows
-        env:
-          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-windows
-      - name: Verify packaged Windows bundle copy and paste
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
-        run: node scripts/verify-packaged.mjs windows
-        env:
-          IMNOTA_SMOKE_MODE: clipboard
-          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
-      - name: Compare approved Windows visuals
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'windows-latest')
-        run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
-      - name: Retain Windows visual evidence
-        if: env.RUN_APPLICATION == 'true' && (always() && matrix.os == 'windows-latest')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: windows-visual-evidence
-          path: |
-            ${{ runner.temp }}/imnota-verification-artifacts-windows/
-            ${{ runner.temp }}/imnota-visual-differences/
-      - name: Smoke packaged Linux application
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
-        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
-      - name: Verify packaged Linux bundle copy and paste
-        if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
-        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
-        env:
-          IMNOTA_SMOKE_MODE: clipboard
-          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
-      - name: Retain bundle copy evidence
-        if: env.RUN_APPLICATION == 'true' && always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: clipboard-evidence-${{ matrix.os }}
-          path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
-          if-no-files-found: ignore
-      - name: Retain review installers and build diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: env.RUN_APPLICATION == 'true'
-        with:
-          name: imnota-${{ matrix.os }}
-          path: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
-            release/*.deb
-            release/*.blockmap
-            release/latest*.yml
-            release/builder-debug.yml
-            release/builder-effective-config.yaml
-          if-no-files-found: error
-          compression-level: 0
-      - name: Retain packaged MCP evidence
-        if: env.RUN_APPLICATION == 'true' && always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mcp-evidence-${{ matrix.os }}
-          path: release/imnota-verification-artifacts-mcp/
-          if-no-files-found: ignore
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    uses: ./.github/workflows/validate-package.yml
+    with:
+      os: ${{ matrix.os }}
+      run_application: ${{ needs.changes.result != 'success' || needs.changes.outputs.docs_only != 'true' }}
 
   dependency-review:
     if: github.event_name == 'pull_request'
