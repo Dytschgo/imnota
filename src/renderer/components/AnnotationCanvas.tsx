@@ -240,12 +240,13 @@ export function AnnotationCanvas({
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = useRef(viewport);
   const wheelFrame = useRef<number | null>(null);
-  const pendingWheel = useRef<{
-    x: number;
-    y: number;
-    factor: number;
-    pointer: { x: number; y: number } | null;
-  } | null>(null);
+  const pendingWheel = useRef<
+    | (
+        | { kind: 'pan'; dx: number; dy: number }
+        | { kind: 'zoom'; pointer: { x: number; y: number }; factor: number }
+      )[]
+    | null
+  >(null);
   /** True once the user pans or zooms; a resize then preserves their view instead of refitting. */
   const userAdjustedViewport = useRef(false);
   const viewportLayout = useRef<{ filename: string; dataUrl: string; size: ViewportSize } | null>(null);
@@ -1198,15 +1199,13 @@ export function AnnotationCanvas({
           }}
           onWheel={(event) => {
             event.evt.preventDefault();
-            const pending = (pendingWheel.current ??= { x: 0, y: 0, factor: 1, pointer: null });
+            const pending = (pendingWheel.current ??= []);
             if (event.evt.ctrlKey || event.evt.metaKey) {
               const pointer = event.target.getStage()?.getPointerPosition();
               if (!pointer) return;
-              pending.factor *= Math.exp(-event.evt.deltaY * 0.01);
-              pending.pointer = pointer;
+              pending.push({ kind: 'zoom', pointer, factor: Math.exp(-event.evt.deltaY * 0.01) });
             } else {
-              pending.x -= event.evt.deltaX;
-              pending.y -= event.evt.deltaY;
+              pending.push({ kind: 'pan', dx: event.evt.deltaX, dy: event.evt.deltaY });
             }
             userAdjustedViewport.current = true;
             if (wheelFrame.current === null) {
@@ -1215,10 +1214,15 @@ export function AnnotationCanvas({
                 const input = pendingWheel.current;
                 pendingWheel.current = null;
                 if (!input) return;
-                setViewport((current) => {
-                  const panned = { ...current, x: current.x + input.x, y: current.y + input.y };
-                  return input.pointer ? zoomAt(panned, input.pointer, input.factor) : panned;
-                });
+                setViewport((current) =>
+                  input.reduce(
+                    (viewport, operation) =>
+                      operation.kind === 'pan'
+                        ? { ...viewport, x: viewport.x - operation.dx, y: viewport.y - operation.dy }
+                        : zoomAt(viewport, operation.pointer, operation.factor),
+                    current,
+                  ),
+                );
               });
             }
           }}
