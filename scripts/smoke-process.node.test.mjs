@@ -1,5 +1,8 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { URL } from 'node:url';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,6 +21,61 @@ afterEach(() => {
 });
 
 describe('native smoke process safety', () => {
+  it('fails promptly and kills a signal-resistant child on SIGTERM', { timeout: 10_000 }, async (t) => {
+    const helper = new URL('./walkthrough-child.mjs', import.meta.url).href;
+    const childCode = `
+      process.on('SIGTERM', () => {});
+      process.on('SIGINT', () => {});
+      console.log(process.pid);
+      setInterval(() => {}, 60_000);
+    `;
+    const launcher = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+      import { runWalkthroughChild } from ${JSON.stringify(helper)};
+      process.on('message', signal => process.emit(signal));
+      try {
+        await runWalkthroughChild(process.execPath, ['--eval', ${JSON.stringify(childCode)}]);
+      } catch (error) {
+        console.error(error.message);
+        process.exitCode = 1;
+      } finally {
+        process.disconnect();
+      }
+    `,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
+    );
+    let childPid;
+    t.after(() => {
+      launcher.kill();
+      if (childPid) {
+        try {
+          process.kill(childPid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+    });
+    let stderr = '';
+    launcher.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    const exit = once(launcher, 'exit');
+    const [ready] = await once(launcher.stdout, 'data');
+    childPid = Number(ready.toString().trim());
+    assert.ok(Number.isInteger(childPid) && childPid > 0);
+    // Windows cannot deliver POSIX signals with process.kill; IPC emits the
+    // launcher's actual SIGTERM event on every OS after its child is ready.
+    launcher.send('SIGTERM');
+    const [code] = await exit;
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /cancelled by SIGTERM/);
+    assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' });
+  });
   it('selects the focused clipboard workflow explicitly', () => {
     assert.equal(normalizeNativeVerificationMode(), 'smoke');
     assert.equal(normalizeNativeVerificationMode('clipboard'), 'clipboard');
