@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleDialogHost, type PromptBundleUiController } from './PromptBundleDialogHost';
 import { PromptSharingDialog } from './PromptSharingDialog';
+import type { PromptBundleCardModel } from './PromptBundleCard';
 
 afterEach(cleanup);
 
@@ -10,8 +11,47 @@ const baseProps = {
   fileClipboardAvailable: true,
   onClose: vi.fn(),
   onCopyFresh: vi.fn(),
+  onCopyVariant: vi.fn(),
   onPrepareFreshFiles: vi.fn(),
 };
+
+it.each(['checking', 'planning', 'rendering', 'writing', 'copying'] as const)(
+  'highlights only the idle row named by %s progress without changing card busy semantics',
+  (phase) => {
+    const bundles: PromptBundleCardModel[] = [1, 2, 3].map((bundleNumber) => ({
+      planId: 'plan-current',
+      bundleNumber,
+      pictureNumbers: [bundleNumber],
+      screenshotCount: 1,
+      excludedCount: 0,
+      width: 800,
+      height: 600,
+      delivery: 'clipboard',
+      state: 'idle',
+    }));
+    const { rerender } = render(
+      <PromptSharingDialog {...baseProps} bundles={bundles} progress={{ phase, bundleNumber: 2 }} />,
+    );
+    const rows = screen.getAllByTestId('prompt-bundle-card');
+    rows.forEach((row, index) => {
+      if (index === 1) expect(row).toHaveAttribute('data-active', 'true');
+      else expect(row).not.toHaveAttribute('data-active');
+      expect(row).toHaveAttribute('aria-busy', 'false');
+    });
+    expect(screen.getByTestId('copy-bundle-2')).toBeDisabled();
+    rerender(<PromptSharingDialog {...baseProps} bundles={bundles} progress={{ phase: 'planning' }} />);
+    rows.forEach((row) => expect(row).not.toHaveAttribute('data-active'));
+    rerender(
+      <PromptSharingDialog
+        {...baseProps}
+        bundles={bundles}
+        progress={{ phase: 'complete', bundleNumber: 2 }}
+      />,
+    );
+    rows.forEach((row) => expect(row).not.toHaveAttribute('data-active'));
+    expect(screen.getByTestId('copy-bundle-2')).toBeEnabled();
+  },
+);
 
 it('shows a useful empty state without offering a misleading copy action', () => {
   render(

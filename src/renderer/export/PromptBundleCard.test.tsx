@@ -555,4 +555,43 @@ describe('row highlight states', () => {
     );
     expect(card()).not.toHaveAttribute('data-celebrate');
   });
+
+  it('does not replay a copy celebration after Open files, but celebrates a new copy of the same format', () => {
+    const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+    const copied = model({ state: 'copied', outcome: 'combined' });
+    const { rerender } = render(<PromptBundleCard bundle={copied} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying' }} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, opened: 'files' }} {...props} />);
+    expect(card()).not.toHaveAttribute('data-celebrate');
+    expect(screen.getByText('Files opened')).toBeInTheDocument();
+    expect(screen.getByText('Last copied: Text + image')).toBeInTheDocument();
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying', opened: 'files' }} {...props} />);
+    rerender(<PromptBundleCard bundle={copied} {...props} />);
+    expect(card()).toHaveAttribute('data-celebrate');
+    // Interrupting the lap with another Open must not revive its old timer/state.
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying' }} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, opened: 'files' }} {...props} />);
+    expect(card()).not.toHaveAttribute('data-celebrate');
+  });
+
+  it.each([
+    ['file-only', model({ delivery: 'file-only' })],
+    ['warned', model({ warning: 'Use saved files.' })],
+  ] as const)('preserves the %s tone during and after a fallback copy celebration', (_label, bundle) => {
+    vi.useFakeTimers();
+    try {
+      const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+      const { rerender } = render(<PromptBundleCard bundle={{ ...bundle, state: 'copying' }} {...props} />);
+      rerender(<PromptBundleCard bundle={{ ...bundle, state: 'copied', outcome: 'markdown' }} {...props} />);
+      expect(card()).toHaveAttribute('data-celebrate');
+      expect(card()).toHaveAttribute('data-tone', 'warning');
+      expect(card()).toHaveClass('prompt-bundle-card');
+      act(() => vi.advanceTimersByTime(COPY_CELEBRATION_MS));
+      expect(card()).not.toHaveAttribute('data-celebrate');
+      expect(card()).toHaveAttribute('data-tone', 'warning');
+      // jsdom verifies the state hooks, not the animated CSS ring; inspect it in a browser.
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

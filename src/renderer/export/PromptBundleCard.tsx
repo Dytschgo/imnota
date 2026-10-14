@@ -60,6 +60,8 @@ export interface PromptBundleActionRequest {
 export interface PromptBundleCardProps {
   bundle: PromptBundleCardModel;
   disabled?: boolean;
+  /** Visual activity from dialog progress; does not change action availability. */
+  active?: boolean;
   /** The dialog already shows this failure, so the card does not repeat it. */
   errorReported?: boolean;
   fileClipboardAvailable?: boolean;
@@ -84,18 +86,21 @@ const busyStates: readonly PromptBundleCardState[] = ['preparing', 'writing', 'c
 export const COPY_CELEBRATION_MS = 2200;
 
 /** True only while a copy that just finished in this card is being acknowledged. */
-function useCopyCelebration(state: PromptBundleCardState, failed: boolean) {
+function useCopyCelebration({ state, outcome, opened, error }: PromptBundleCardModel) {
+  const failed = Boolean(error);
   const [celebrating, setCelebrating] = useState(false);
   const previous = useRef(state);
   useEffect(() => {
     const wasBusy = busyStates.includes(previous.current);
     previous.current = state;
-    if (!wasBusy || state !== 'copied' || failed) return;
+    setCelebrating(false);
+    // Open retains the last clipboard outcome; copy completion clears `opened`.
+    if (!wasBusy || state !== 'copied' || failed || opened || !outcome || outcome === 'opened') return;
     setCelebrating(true);
     const timer = window.setTimeout(() => setCelebrating(false), COPY_CELEBRATION_MS);
     return () => window.clearTimeout(timer);
-  }, [failed, state]);
-  return celebrating && state === 'copied';
+  }, [failed, opened, outcome, state]);
+  return celebrating && state === 'copied' && !failed && !opened;
 }
 
 function requestFor(bundle: PromptBundleCardModel): PromptBundleActionRequest {
@@ -121,6 +126,7 @@ function pictureLabel(numbers: readonly number[]): string {
 export function PromptBundleCard({
   bundle,
   disabled = false,
+  active = false,
   errorReported = false,
   fileClipboardAvailable = false,
   platform = 'windows',
@@ -143,7 +149,7 @@ export function PromptBundleCard({
   const optionsMenuId = useId().replace(/:/g, '');
   const busy = busyStates.includes(bundle.state);
   const copied = bundle.state === 'copied' && !bundle.error;
-  const celebrating = useCopyCelebration(bundle.state, Boolean(bundle.error));
+  const celebrating = useCopyCelebration(bundle);
   const tone = bundle.error
     ? 'error'
     : bundle.warning || bundle.delivery === 'file-only'
@@ -290,6 +296,7 @@ export function PromptBundleCard({
       data-testid="prompt-bundle-card"
       data-bundle-number={bundle.bundleNumber}
       data-state={bundle.state}
+      data-active={active || undefined}
       data-tone={tone}
       data-celebrate={celebrating || undefined}
       className="prompt-bundle-card"

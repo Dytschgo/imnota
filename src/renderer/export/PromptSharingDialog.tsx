@@ -183,6 +183,7 @@ export function PromptSharingDialog({
               <PromptBundleCard
                 key={`${bundle.planId}:${bundle.bundleNumber}`}
                 bundle={bundle}
+                active={busy && progress?.bundleNumber === bundle.bundleNumber}
                 disabled={busy}
                 fileClipboardAvailable={fileClipboardAvailable}
                 platform={platform}

@@ -142,13 +142,14 @@
 }
 
 /* Highlighted rows carry their own edge, so the dividers beside them step aside. */
-.prompt-bundle-card:is([aria-busy='true'], [data-tone], [data-celebrate])::after,
-.prompt-bundle-card:is([aria-busy='true'], [data-tone], [data-celebrate]) + .prompt-bundle-card::after {
+.prompt-bundle-card:is([aria-busy='true'], [data-active], [data-tone], [data-celebrate])::after,
+.prompt-bundle-card:is([aria-busy='true'], [data-active], [data-tone], [data-celebrate])
+  + .prompt-bundle-card::after {
   opacity: 0;
 }
 
-/* Halo: the comet traces the row that is being prepared, written or copied. */
-.prompt-bundle-card:is([aria-busy='true'], [data-celebrate])::before {
+/* Halo: the comet traces the row being checked, planned, rendered, written or copied. */
+.prompt-bundle-card:is([aria-busy='true'], [data-active], [data-celebrate])::before {
   position: absolute;
   inset: 0;
   padding: 1.5px;
@@ -162,12 +163,12 @@
   mask-composite: exclude;
 }
 
-.prompt-bundle-card[aria-busy='true'] {
+.prompt-bundle-card:is([aria-busy='true'], [data-active]) {
   background: color-mix(in srgb, var(--imnota-accent) 7%, transparent);
   box-shadow: 0 0 22px -6px color-mix(in srgb, var(--imnota-accent-hover) 55%, transparent);
 }
 
-.prompt-bundle-card[aria-busy='true']::before {
+.prompt-bundle-card:is([aria-busy='true'], [data-active])::before {
   background: conic-gradient(
     from var(--prompt-halo-angle),
     transparent 0 62%,
@@ -179,7 +180,8 @@
 }
 
 /* A finished copy gets one green lap that settles and fades. */
-.prompt-bundle-card[data-celebrate] {
+/* Toned rows keep their steady ring underneath the lap on ::before. */
+.prompt-bundle-card[data-celebrate]:not([data-tone]) {
   animation: prompt-halo-settle 2.2s ease-out forwards;
 }
 
@@ -756,8 +758,8 @@
 
   /* Keep the colours and a still ring; drop the travelling comet and the lap. */
   .prompt-sharing-hairline[data-tone='busy']::before,
-  .prompt-bundle-card[aria-busy='true']::before,
-  .prompt-bundle-card[data-celebrate] {
+  .prompt-bundle-card:is([aria-busy='true'], [data-active])::before,
+  .prompt-bundle-card[data-celebrate]:not([data-tone]) {
     animation: none;
   }
 
@@ -766,7 +768,7 @@
     display: none;
   }
 
-  .prompt-bundle-card[aria-busy='true']::before {
+  .prompt-bundle-card:is([aria-busy='true'], [data-active])::before {
     background: color-mix(in srgb, var(--imnota-accent-hover) 70%, transparent);
   }
 }
