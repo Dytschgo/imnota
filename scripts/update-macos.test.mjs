@@ -275,6 +275,47 @@ test('compares macOS versions numerically and rejects unreadable versions', { sk
   }
 });
 
+test('verifies each architecture in its own lipo call for current lipo', { skip: !bash }, () => {
+  // Current lipo consumes one arch after -verify_arch and reads a second as
+  // another input file; the stub reproduces that parsing so the real
+  // verify_universal_binary body runs against it.
+  const result = runBash(`
+stub_dir=$(mktemp -d)
+cat > "$stub_dir/lipo" <<'STUB'
+#!/bin/bash
+verify=0
+arch=""
+inputs=0
+for a in "$@"; do
+  if [[ "$a" == -verify_arch ]]; then verify=1; continue; fi
+  if (( verify )) && [[ -z "$arch" ]]; then arch="$a"; continue; fi
+  inputs=$((inputs + 1))
+done
+if (( verify )) && [[ "$inputs" -ne 1 ]]; then
+  printf 'lipo: -verify_arch requires exactly one input file\\n' >&2
+  exit 1
+fi
+case " $STUB_ARCHS " in
+  *" $arch "*) exit 0 ;;
+  *) exit 1 ;;
+esac
+STUB
+touch "$stub_dir/Imnota"
+declare -f verify_universal_binary | sed "s|/usr/bin/lipo|bash $stub_dir/lipo|g" > "$stub_dir/fn.sh"
+source "$stub_dir/fn.sh"
+export STUB_ARCHS="x86_64 arm64"
+verify_universal_binary "$stub_dir/Imnota"
+set +e
+export STUB_ARCHS="arm64"
+verify_universal_binary "$stub_dir/Imnota"
+status=$?
+set -e
+[[ "$status" -ne 0 ]]
+rm -rf "$stub_dir"
+`);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test(
   'rejects an incompatible downloaded bundle before asking the installed app to quit or replacing it',
   { skip: !bash },
