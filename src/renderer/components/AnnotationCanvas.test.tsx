@@ -41,7 +41,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: Annotation[] = []) {
+function mountCanvas(
+  initialTool: ToolChoice = 'rectangle',
+  initialAnnotations: Annotation[] = [],
+  revealAnnotationId?: string,
+) {
   const image = document.createElement('img');
   vi.spyOn(window, 'Image').mockImplementation(function () {
     return image;
@@ -69,6 +73,7 @@ function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: 
         }}
         onTool={setTool}
         stageRef={stageRef}
+        revealAnnotationId={revealAnnotationId}
         theme="dark"
       />
     );
@@ -108,6 +113,30 @@ function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: 
   }
   return { stage, canvas, pointer, touch, captured, saved: () => saved, selected: () => selection };
 }
+
+test('a search target that appears on a later frame is revealed in the viewport', () => {
+  let frame: FrameRequestCallback | undefined;
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frame = callback;
+    return 42;
+  });
+  const { stage } = mountCanvas('select', [{ ...existingRectangle, x: 1800 }], existingRectangle.id);
+  const node = stage.findOne(`#${existingRectangle.id}`) as Konva.Shape;
+  const parent = node.getParent()!;
+  expect(node.getClientRect().x).toBeGreaterThan(stage.width());
+  node.remove();
+  const firstFrame = frame!;
+  frame = undefined;
+  act(() => firstFrame(0));
+  expect(frame).toBeDefined();
+  parent.add(node);
+  act(() => frame!(16));
+  const rect = node.getClientRect();
+  expect(rect.x).toBeGreaterThanOrEqual(0);
+  expect(rect.y).toBeGreaterThanOrEqual(0);
+  expect(rect.x + rect.width).toBeLessThanOrEqual(stage.width());
+  expect(rect.y + rect.height).toBeLessThanOrEqual(stage.height());
+});
 
 test('wheel input waits for one frame and replays pan and zoom in order with per-event clamps', () => {
   const { stage, canvas } = mountCanvas();
