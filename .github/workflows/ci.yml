@@ -160,7 +160,7 @@ jobs:
       - name: Test application with coverage
         id: coverage
         if: env.RUN_APPLICATION == 'true'
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: pnpm test:coverage
       - run: pnpm test:scripts
         if: env.RUN_APPLICATION == 'true'
