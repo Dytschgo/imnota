@@ -108,6 +108,38 @@ function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: 
   return { stage, canvas, pointer, touch, captured, saved: () => saved, selected: () => selection };
 }
 
+test('wheel input waits for one frame and combines pan and zoom at the latest pointer', () => {
+  const { stage, canvas } = mountCanvas();
+  let frame: FrameRequestCallback | undefined;
+  const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frame = callback;
+    return 42;
+  });
+  const initial = {
+    x: Number(canvas.dataset.imageX),
+    y: Number(canvas.dataset.imageY),
+    scale: Number(canvas.dataset.imageScale),
+  };
+  const wheel = (options: WheelEventInit) => {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...options });
+    act(() => stage.content.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+  };
+  wheel({ deltaX: 5, deltaY: 10 });
+  wheel({ deltaX: 7, deltaY: 20 });
+  wheel({ ctrlKey: true, deltaY: -10, clientX: 100, clientY: 150 });
+  wheel({ metaKey: true, deltaY: -20, clientX: 300, clientY: 250 });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(Number(canvas.dataset.imageX)).toBe(initial.x);
+  expect(Number(canvas.dataset.imageY)).toBe(initial.y);
+  expect(Number(canvas.dataset.imageScale)).toBe(initial.scale);
+  act(() => frame!(0));
+  const factor = Math.exp(0.3);
+  expect(Number(canvas.dataset.imageScale)).toBeCloseTo(initial.scale * factor);
+  expect(Number(canvas.dataset.imageX)).toBeCloseTo(300 - (300 - (initial.x - 12)) * factor);
+  expect(Number(canvas.dataset.imageY)).toBeCloseTo(250 - (250 - (initial.y - 30)) * factor);
+});
+
 test('a real Konva stage click following React pointerup keeps the new square selected for immediate nudges', () => {
   const { stage, canvas, pointer, saved } = mountCanvas();
   const events: { type: string; event: Event; target: Konva.Node }[] = [];
