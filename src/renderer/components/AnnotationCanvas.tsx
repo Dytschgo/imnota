@@ -512,10 +512,16 @@ export function AnnotationCanvas({
     if (!image || !imageObj) return;
     const key = `${image.filename}:${revealAnnotationId}:${size.width}:${size.height}`;
     if (revealedMatch.current === key) return;
-    const frame = requestAnimationFrame(() => {
+    let frame: number;
+    let attempts = 0;
+    const reveal = () => {
+      attempts++;
       const stage = stageRef.current;
       const node = stage?.findOne((candidate: Konva.Node) => candidate.id() === revealAnnotationId);
-      if (!stage || !node) return;
+      if (!stage || !node) {
+        if (attempts < 120) frame = requestAnimationFrame(reveal);
+        return;
+      }
       const rect = node.getClientRect({ relativeTo: stage });
       const current = viewportRef.current;
       const next = viewportToReveal(
@@ -530,7 +536,8 @@ export function AnnotationCanvas({
       revealedMatch.current = key;
       viewportRef.current = next;
       setViewport(next);
-    });
+    };
+    frame = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(frame);
   }, [revealAnnotationId, annotations, image, imageObj, size, stageRef]);
 
