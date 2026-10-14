@@ -86,7 +86,7 @@ export function runWalkthroughChild(
         if (cancelled) return;
         cancelled = signal;
         clearTimeout(timeout);
-        clearTimeout(forceKill);
+        if (!stopping) clearTimeout(forceKill);
         stop(signal, cancellationGraceMs);
       };
       handlers.set(signal, handler);
