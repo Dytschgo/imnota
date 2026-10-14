@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 repository="Dytschgo/imnota"
 stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -67,6 +67,74 @@ is_imnota_bundle() {
   [[ -d "$bundle" && ! -L "$bundle" ]] || return 1
   bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Info.plist" 2>/dev/null)" || return 1
   [[ "$bundle_id" == "com.dytschgo.imnota" ]]
+}
+
+is_app_running() {
+  /usr/bin/pgrep -x Imnota >/dev/null 2>&1
+}
+
+request_quit() {
+  /usr/bin/osascript -e 'tell application id "com.dytschgo.imnota" to quit'
+}
+
+wait_for_app_to_quit() {
+  local timeout=60 deadline=$((SECONDS + 60)) next_quit_request=$((SECONDS + 10))
+  is_app_running || return 0
+  if ! request_quit && is_app_running; then
+    fail "Imnota could not be asked to quit. No installed app was changed."
+  fi
+  while is_app_running; do
+    (( SECONDS < deadline )) || fail "Imnota did not quit within $timeout seconds. Save your work, close it, and try again. No installed app was changed."
+    /bin/sleep 1
+    if (( SECONDS < deadline && SECONDS >= next_quit_request )) && is_app_running; then
+      if ! request_quit && is_app_running; then
+        fail "Imnota could not be asked to finish quitting. No installed app was changed."
+      fi
+      next_quit_request=$((SECONDS + 10))
+    fi
+  done
+}
+
+# Keep replacement observation in sync with the other standalone Mac installer.
+# open only acknowledges a launch request; require the same live replacement PID
+# on two polls at least one second apart. This is process readiness, not UI health.
+replacement_pid_is_running() {
+  local pid=$1 bundle=$2 executable state physical_parent
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  executable="$(/usr/bin/ps -ww -o comm= -p "$pid" 2>/dev/null)" || return 1
+  [[ "$executable" == "$bundle/Contents/MacOS/Imnota" && -x "$executable" && ! -L "$executable" ]] || return 1
+  physical_parent="$(cd -- "${executable%/*}" && pwd -P)" || return 1
+  [[ "$physical_parent/Imnota" == "$executable" ]] || return 1
+  state="$(/usr/bin/ps -o stat= -p "$pid" 2>/dev/null)" || return 1
+  [[ -n "$state" && "$state" != *Z* ]]
+}
+
+wait_for_replacement() {
+  local bundle=$1 timeout=30 deadline=$((SECONDS + 30)) pid pids observed_pid="" observed_at=0
+  while (( SECONDS < deadline )); do
+    if [[ -n "$observed_pid" ]]; then
+      replacement_pid_is_running "$observed_pid" "$bundle" || {
+        echo "The replacement exited before reopening could be confirmed; restoring the previous version." >&2
+        return 1
+      }
+      if (( SECONDS > observed_at )); then
+        printf 'Observed running Imnota replacement (PID %s) from %s.\n' "$observed_pid" "$bundle"
+        return 0
+      fi
+    else
+      pids="$(/usr/bin/pgrep -x Imnota 2>/dev/null)" || pids=""
+      for pid in $pids; do
+        if replacement_pid_is_running "$pid" "$bundle"; then
+          observed_pid=$pid
+          observed_at=$SECONDS
+          break
+        fi
+      done
+    fi
+    /bin/sleep 1
+  done
+  echo "The replacement was not observed running from $bundle within $timeout seconds; restoring the previous version." >&2
+  return 1
 }
 
 is_legacy_backup_name() {
@@ -224,6 +292,11 @@ case "$(uname -s)" in
     staging_directory="$(mktemp -d "$installation_parent/.imnota-install.XXXXXXXX")"
     if [ -e "$application_path" ]; then
       is_imnota_bundle "$application_path" || fail "The existing Imnota.app is not an identified Imnota bundle. No installed app was changed."
+    fi
+    wait_for_app_to_quit
+    [[ ! -L "$application_path" ]] || fail "The installation path became a symlink while waiting for Imnota to quit. No installed app was changed."
+    if [ -e "$application_path" ]; then
+      is_imnota_bundle "$application_path" || fail "The existing app changed while waiting for Imnota to quit. No installed app was changed."
       rollback_path="$staging_directory/previous-Imnota.app"
       mv -- "$application_path" "$rollback_path"
     fi
@@ -236,6 +309,7 @@ case "$(uname -s)" in
     codesign --verify --deep --strict "$application_path" ||
       fail "The installed replacement failed its final signature check."
     open "$application_path" || fail "The installed app could not be opened; restoring the previous version."
+    wait_for_replacement "$application_path" || fail "The installed app did not successfully reopen."
     transaction_committed=1
     cleanup_previous_backups "$installation_parent"
     echo "Imnota installed to ~/Applications/Imnota.app"

@@ -20,14 +20,39 @@ const skip =
     ? 'Requires native macOS'
     : !archive && 'Set IMNOTA_NATIVE_MAC_ARCHIVE to the built universal ZIP';
 
-// Only transport and the final GUI launch are substituted. Production scripts
-// gain no fixture environment override. All copies, extraction, plist reads,
-// signature/architecture checks, renames and removals use real macOS commands.
+// Transport and GUI launch are substituted without production fixture hooks.
+// All extraction, plist/signature/architecture checks and filesystem operations
+// are native. After the final signature check, fake open replaces the fixture's
+// executable with /bin/sleep named Imnota and starts it from the installed path.
+// pgrep/ps and the readiness deadline are real; Electron/GUI health is simulated.
 const common = String.raw`
+start_fixture_process() {
+  local bundle=$1 duration=$2
+  # Substitute only after the production installed-signature check has passed.
+  command /bin/cp /bin/sleep "$bundle/Contents/MacOS/Imnota" || return 1
+  "$bundle/Contents/MacOS/Imnota" "$duration" >/dev/null 2>&1 &
+  fixture_pid=$!
+  printf '%s\n' "$fixture_pid" >> "$FIXTURE_ROOT/processes"
+}
 open() {
   printf 'open\n' >> "$FIXTURE_ROOT/launches"
   if [[ "$FAULT" == open ]]; then return 1; fi
   if [[ "$FAULT" == hold ]]; then printf 'ready\n'; read -r release; fi
+  if [[ "$FAULT" == no-process ]]; then return 0; fi
+  if [[ "$FAULT" == exits ]]; then
+    start_fixture_process "$1" 0 || return 1
+    wait "$fixture_pid"
+    return 0
+  fi
+  start_fixture_process "$1" 120 || return 1
+}
+/usr/bin/osascript() {
+  # Only the fixture PID can be asked to quit; never a personal app.
+  [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]] || return 1
+  printf 'quit\n' >> "$FIXTURE_ROOT/launches"
+  if [[ "$FAULT" == refuses-quit ]]; then return 0; fi
+  kill "$fixture_pid" || return 1
+  wait "$fixture_pid" 2>/dev/null || true
 }
 /usr/bin/open() { open "$@"; }
 ditto() {
@@ -75,6 +100,14 @@ curl() {
     *) printf 'Unexpected network request: %s\n' "$url" >&2; return 1 ;;
   esac
 }
+if [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]]; then
+  start_fixture_process "$HOME/Applications/Imnota.app" 120
+  deadline=$((SECONDS + 10))
+  while [[ "$(command /usr/bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
+    (( SECONDS < deadline )) || exit 1
+    /bin/sleep 0.1
+  done
+fi
 source "$1"
 `;
 
@@ -101,6 +134,14 @@ fi
 if [[ "$FAULT" == restore || "$FAULT" == move-aside ]]; then
   launch_app() { return 1; }
 fi
+if [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]]; then
+  start_fixture_process "$HOME/Applications/Imnota.app" 120
+  deadline=$((SECONDS + 10))
+  while [[ "$(command /usr/bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
+    (( SECONDS < deadline )) || exit 1
+    /bin/sleep 0.1
+  done
+fi
 main "$FIXTURE_TAG" "$FIXTURE_RELEASE/$FIXTURE_ARCHIVE_NAME" "$FIXTURE_RELEASE/SHA256SUMS.txt" "$HOME/Applications/Imnota.app" "$FIXTURE_VERSION"
 `;
 
@@ -114,7 +155,10 @@ let archiveDigest;
 
 function fixture(t) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'imnota-native-install-')));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => {
+    stopFixtureProcesses(root);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   const home = path.join(root, 'home');
   const parent = path.join(home, 'Applications');
   const app = path.join(parent, 'Imnota.app');
@@ -171,16 +215,51 @@ function invocation(kind) {
   ];
 }
 
+function stopFixtureProcesses(root) {
+  const list = path.join(root, 'processes');
+  if (!fs.existsSync(list)) return;
+  for (const pid of fs.readFileSync(list, 'utf8').trim().split('\n').filter(Boolean)) {
+    // Check ownership again; an exited process's PID must not target another app.
+    const executable = spawnSync('/usr/bin/ps', ['-ww', '-o', 'comm=', '-p', pid], { encoding: 'utf8' });
+    if (executable.status === 0 && executable.stdout.trim().startsWith(root + '/')) {
+      const stopped = spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          String.raw`
+kill -TERM "$2" 2>/dev/null || true
+deadline=$((SECONDS + 5))
+while [[ "$(/usr/bin/ps -ww -o comm= -p "$2" 2>/dev/null)" == "$1/"* ]]; do
+  (( SECONDS < deadline )) || exit 1
+  /bin/sleep 0.1
+done
+`,
+          'fixture-cleanup',
+          root,
+          pid,
+        ],
+        { encoding: 'utf8' },
+      );
+      assert.equal(stopped.status, 0, `Fixture process ${pid} did not exit: ${stopped.stderr}`);
+    }
+  }
+}
+
 function run(f, kind, fault = '') {
-  return spawnSync('/bin/bash', invocation(kind), {
-    env: environment(f, fault),
-    encoding: 'utf8',
-    timeout: 120000,
-  });
+  try {
+    return spawnSync('/bin/bash', invocation(kind), {
+      env: environment(f, fault),
+      encoding: 'utf8',
+      timeout: 120000,
+    });
+  } finally {
+    stopFixtureProcesses(f.root);
+  }
 }
 
 function success(result) {
   assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Observed running Imnota replacement/);
 }
 
 function restored(f, inode, result) {
@@ -252,7 +331,7 @@ test(
         },
       );
 
-      for (const fault of ['copy', 'verification', 'open']) {
+      for (const fault of ['copy', 'verification', 'open', 'no-process', 'exits']) {
         await t.test(`${kind}: ${fault} failure restores the previous bundle`, (t) => {
           const f = fixture(t);
           const inode = seedOld(f);
@@ -304,6 +383,27 @@ test(
       assert.deepEqual(fs.readdirSync(f.app), ['personal-file']);
       assert.equal(fs.readFileSync(path.join(f.app, 'personal-file'), 'utf8'), 'preserve');
     });
+
+    for (const fault of ['quit', 'refuses-quit']) {
+      await t.test(`install: running fixture ${fault} before replacement`, (t) => {
+        const f = fixture(t);
+        const inode = seedOld(f);
+        const result = run(f, 'install', fault);
+        const launches = fs.readFileSync(path.join(f.root, 'launches'), 'utf8');
+        assert.match(launches, /^quit/m);
+        if (fault === 'refuses-quit') {
+          assert.equal(result.status, 1, result.stderr);
+          assert.match(result.stderr, /did not quit within 60 seconds.*No installed app was changed/);
+          assert.doesNotMatch(launches, /^open/m);
+          restored(f, inode, result);
+        } else {
+          success(result);
+          assert.ok(launches.indexOf('quit') < launches.indexOf('open'));
+          assert.equal(fs.existsSync(path.join(f.app, 'previous-installation')), false);
+          assert.deepEqual(fs.readdirSync(f.parent), ['Imnota.app']);
+        }
+      });
+    }
 
     for (const fault of ['collision', 'collision-symlink']) {
       await t.test(`update: ${fault} leaves the current app and stale rollback untouched`, (t) => {
@@ -358,6 +458,7 @@ test(
         t.after(async () => {
           if (!holder.stdin.destroyed) holder.stdin.end('release\n');
           await completion;
+          stopFixtureProcesses(f.root);
         });
         let output = '';
         let errors = '';
@@ -402,6 +503,7 @@ test(
         assert.ok(fs.existsSync(path.join(f.parent, '.imnota-update.lock', 'pid')));
         holder.stdin.end('release\n');
         assert.equal(await completion, 0, errors);
+        stopFixtureProcesses(f.root);
         assert.deepEqual(fs.readdirSync(f.parent), ['Imnota.app']);
       });
     }

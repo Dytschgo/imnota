@@ -137,7 +137,28 @@ mv() {
   command mv "$@" || return $?
   if [[ "\${3:-}" == */previous-Imnota.app ]] && [ "\${FAKE_MAC_INTERRUPT:-}" = 1 ]; then kill -TERM "$$"; fi
 }
-open() { printf 'open\n' >> "$FAKE_LOG"; [ "\${FAKE_MAC_OPEN_FAILURE:-}" != 1 ]; }
+/usr/bin/pgrep() {
+  if [ "\${FAKE_OLD_RUNNING:-0}" = 1 ]; then printf '100\n'; return 0; fi
+  [ "\${FAKE_LAUNCHED:-0}" = 1 ] || return 1
+  [ "\${FAKE_MAC_READINESS:-}" != missing ] || return 1
+  if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
+  printf '200\n'
+}
+/usr/bin/ps() {
+  if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
+  if [ "$2" = stat= ]; then
+    if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z\n'; else printf 'S\n'; fi
+    return 0
+  fi
+  if [ "\${FAKE_MAC_READINESS:-}" = wrong-path ]; then printf '/other/Imnota.app/Contents/MacOS/Imnota\n'; return 0; fi
+  printf '%s/Imnota\n' "$(cd "$HOME/Applications/Imnota.app/Contents/MacOS" && pwd -P)"
+}
+/usr/bin/osascript() {
+  printf 'quit\n' >> "$FAKE_LOG"
+  if [ "\${FAKE_MAC_QUIT_REFUSED:-}" != 1 ]; then FAKE_OLD_RUNNING=0; fi
+}
+/bin/sleep() { SECONDS=$((SECONDS + $1)); FAKE_POLL=$((\${FAKE_POLL:-0} + 1)); }
+open() { FAKE_LAUNCHED=1; FAKE_POLL=0; printf 'open\n' >> "$FAKE_LOG"; [ "\${FAKE_MAC_OPEN_FAILURE:-}" != 1 ]; }
 # Never execute even the synthetic AppImage.
 nohup() { :; }
 install() {
@@ -164,6 +185,9 @@ function runShellInstaller(
     macRestoreFailure = false,
     macInterrupt = false,
     macOpenFailure = false,
+    macRunning = false,
+    macQuitRefused = false,
+    macReadiness = '',
   } = {},
 ) {
   assert.ok(bash, 'Bash is required for this test');
@@ -184,6 +208,9 @@ function runShellInstaller(
     FAKE_MAC_RESTORE_FAILURE: macRestoreFailure ? '1' : '',
     FAKE_MAC_INTERRUPT: macInterrupt ? '1' : '',
     FAKE_MAC_OPEN_FAILURE: macOpenFailure ? '1' : '',
+    FAKE_OLD_RUNNING: macRunning ? '1' : '',
+    FAKE_MAC_QUIT_REFUSED: macQuitRefused ? '1' : '',
+    FAKE_MAC_READINESS: macReadiness,
     FAKE_LOG: slashes(directories.log),
     FAKE_RELEASES: slashes(directories.releases),
     FAKE_LATEST_URL: latest ?? '',
@@ -1224,3 +1251,51 @@ for (const shell of powershells) {
     },
   );
 }
+
+for (const readiness of ['missing', 'exits', 'wrong-path', 'zombie']) {
+  test(`macOS accepted open with replacement ${readiness} restores rollback`, { skip: !bash }, (t) => {
+    const directories = sandbox(t);
+    const app = keepExistingMacApp(directories);
+    const legacy = macBackup(path.dirname(app), 'Imnota-backup-20260101-010101.app');
+    publishPortableMacBundle(directories);
+    const result = runShellInstaller(directories, { ...portableMacOptions, macReadiness: readiness });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /replacement.*(running|exited)|reopened/i);
+    assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+    assert.equal(fs.readFileSync(path.join(legacy, 'marker'), 'utf8'), 'preserve');
+    assertNoTemporaryFiles(directories);
+  });
+}
+
+test('macOS running app refusing to quit aborts before replacement', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  const inode = fs.statSync(app).ino;
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, {
+    ...portableMacOptions,
+    macRunning: true,
+    macQuitRefused: true,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /did not quit.*60 seconds/);
+  assert.match(result.stderr, /No installed app was changed/);
+  assert.equal(fs.statSync(app).ino, inode);
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'previous installation');
+  assert.equal(requests(directories).includes('open'), false);
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+  assertNoTemporaryFiles(directories);
+});
+
+test('macOS running app quits before observed replacement retires rollback', { skip: !bash }, (t) => {
+  const directories = sandbox(t);
+  const app = keepExistingMacApp(directories);
+  publishPortableMacBundle(directories);
+  const result = runShellInstaller(directories, { ...portableMacOptions, macRunning: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(requests(directories).includes('quit'));
+  assert.ok(requests(directories).indexOf('quit') < requests(directories).indexOf('open'));
+  assert.match(result.stdout, /Observed.*replacement/);
+  assert.equal(fs.readFileSync(path.join(app, 'marker'), 'utf8'), 'verified bundle');
+  assert.deepEqual(fs.readdirSync(path.dirname(app)), ['Imnota.app']);
+});

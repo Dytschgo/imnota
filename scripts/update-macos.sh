@@ -300,6 +300,48 @@ launch_app() {
   /usr/bin/open "$1"
 }
 
+# Keep replacement observation in sync with the other standalone Mac installer.
+# open only acknowledges a launch request; require the same live replacement PID
+# on two polls at least one second apart. This is process readiness, not UI health.
+replacement_pid_is_running() {
+  local pid=$1 bundle=$2 executable state physical_parent
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  executable="$(/usr/bin/ps -ww -o comm= -p "$pid" 2>/dev/null)" || return 1
+  [[ "$executable" == "$bundle/Contents/MacOS/Imnota" && -x "$executable" && ! -L "$executable" ]] || return 1
+  physical_parent="$(cd -- "${executable%/*}" && pwd -P)" || return 1
+  [[ "$physical_parent/Imnota" == "$executable" ]] || return 1
+  state="$(/usr/bin/ps -o stat= -p "$pid" 2>/dev/null)" || return 1
+  [[ -n "$state" && "$state" != *Z* ]]
+}
+
+wait_for_replacement() {
+  local bundle=$1 timeout=30 deadline=$((SECONDS + 30)) pid pids observed_pid="" observed_at=0
+  while (( SECONDS < deadline )); do
+    if [[ -n "$observed_pid" ]]; then
+      replacement_pid_is_running "$observed_pid" "$bundle" || {
+        echo "The replacement exited before reopening could be confirmed; restoring the previous version." >&2
+        return 1
+      }
+      if (( SECONDS > observed_at )); then
+        printf 'Observed running Imnota replacement (PID %s) from %s.\n' "$observed_pid" "$bundle"
+        return 0
+      fi
+    else
+      pids="$(/usr/bin/pgrep -x Imnota 2>/dev/null)" || pids=""
+      for pid in $pids; do
+        if replacement_pid_is_running "$pid" "$bundle"; then
+          observed_pid=$pid
+          observed_at=$SECONDS
+          break
+        fi
+      done
+    fi
+    /bin/sleep 1
+  done
+  echo "The replacement was not observed running from $bundle within $timeout seconds; restoring the previous version." >&2
+  return 1
+}
+
 read_expected_checksum() {
   local sums_file=$1
   local archive_name=$2
@@ -488,6 +530,8 @@ swap_and_launch() {
   /bin/mv -- "$replacement" "$app_path" || die "The verified update could not be moved into place."
   verify_signature "$app_path" || die "The installed replacement failed its final signature check."
   launch_app "$app_path" || die "The updated app could not be opened; restoring the previous version."
+
+  wait_for_replacement "$app_path" || die "The updated app did not successfully reopen."
 
   transaction_committed=1
   cleanup_rollback_backups

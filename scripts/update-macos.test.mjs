@@ -186,6 +186,7 @@ printf new > "$stage_dir/new/Imnota.app/version"
 plist_value() { printf com.dytschgo.imnota; }
 verify_signature() { return 0; }
 launch_app() { return 0; }
+wait_for_replacement() { return 0; }
 ( trap cleanup EXIT; swap_and_launch "$stage_dir/new/Imnota.app" )
 [[ "$(cat "$app_path/version")" == new ]]
 [[ ! -e "$root/.imnota-backups.noindex" && ! -e "$stage_dir" ]]
@@ -228,6 +229,7 @@ plist_value() {
 }
 verify_signature() { return 0; }
 launch_app() { return 0; }
+wait_for_replacement() { return 0; }
 CURRENT_VERSION=1.2.2
 swap_and_launch "$stage_dir/new/Imnota.app"
 [[ "$(cat "$app_path/version")" == new ]]
@@ -462,6 +464,7 @@ download_file() {
 }
 is_app_running() { return 1; }
 launch_app() { return 0; }
+wait_for_replacement() { return 0; }
 main "v$version" \
   "https://github.com/Dytschgo/imnota/releases/download/v$version/Imnota-$version-universal-mac.zip" \
   "https://github.com/Dytschgo/imnota/releases/download/v$version/SHA256SUMS.txt" \
@@ -638,3 +641,61 @@ cleanup_rollback_backups
     assert.equal(fs.readFileSync(path.join(outside, 'Imnota.app', 'marker'), 'utf8'), 'personal');
   },
 );
+
+for (const readiness of ['missing', 'exits', 'wrong-path', 'zombie', 'observed']) {
+  test(
+    `accepted update open with replacement ${readiness} ${readiness === 'observed' ? 'retires' : 'restores'} rollback`,
+    { skip: !bash },
+    () => {
+      const result = runBash(
+        `
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+app_path="$root/Imnota.app"
+stage_dir="$root/.imnota-update.test"
+mkdir -p "$app_path/Contents/MacOS" "$stage_dir/new/Imnota.app/Contents/MacOS"
+printf old > "$app_path/version"
+printf new > "$stage_dir/new/Imnota.app/version"
+printf '#!/bin/sh\\nexit 0\\n' > "$stage_dir/new/Imnota.app/Contents/MacOS/Imnota"
+chmod +x "$stage_dir/new/Imnota.app/Contents/MacOS/Imnota"
+verify_signature() { return 0; }
+plist_value() { if [[ "$2" == CFBundleIdentifier ]]; then printf com.dytschgo.imnota; else printf 1.2.3; fi; }
+launch_app() { return 0; }
+poll=0
+# The real wait/predicate sees synthetic process observations and a virtual clock.
+/usr/bin/pgrep() {
+  [[ "$readiness" != missing ]] || return 1
+  if [[ "$readiness" == exits && "$poll" -gt 0 ]]; then return 1; fi
+  printf '200\\n'
+}
+/usr/bin/ps() {
+  if [[ "$readiness" == exits && "$poll" -gt 0 ]]; then return 1; fi
+  if [[ "$2" == stat= ]]; then
+    if [[ "$readiness" == zombie ]]; then printf Z; else printf S; fi
+    return 0
+  fi
+  if [[ "$readiness" == wrong-path ]]; then printf '/other/Imnota.app/Contents/MacOS/Imnota'; else printf '%s' "$app_path/Contents/MacOS/Imnota"; fi
+}
+/bin/sleep() { SECONDS=$((SECONDS + $1)); poll=$((poll + 1)); }
+readiness=$2
+set +e
+output=$( ( trap cleanup EXIT; swap_and_launch "$stage_dir/new/Imnota.app" ) 2>&1 )
+status=$?
+set -e
+printf '%s\\n' "$output" >&2
+if [[ "$readiness" == observed ]]; then
+  [[ "$status" -eq 0 && "$(cat "$app_path/version")" == new ]]
+  [[ "$output" == *Observed*replacement* ]]
+else
+  [[ "$status" -ne 0 && "$(cat "$app_path/version")" == old ]]
+  [[ "$output" == *replacement* ]]
+fi
+[[ ! -e "$root/.imnota-backups.noindex" && ! -e "$stage_dir" ]]
+`,
+        [readiness],
+      );
+      assert.equal(result.status, 0, result.stderr);
+    },
+  );
+}
