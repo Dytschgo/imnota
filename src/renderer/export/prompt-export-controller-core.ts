@@ -1,3 +1,4 @@
+import type { ExportRecovery } from './export-failure-catalog';
 import type { CollectionContentItem } from '../../shared/markdown';
 import {
   applyPromptBundleMarkdownIdentity,
@@ -78,7 +79,7 @@ export interface PromptExportBundleManifestInput {
 }
 
 export interface PromptBundleControllerBridge {
-  copyText?(text: string): Promise<void>;
+  copyPromptExportMarkdown?(text: string): Promise<WorkflowResult<void>>;
   loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
     image: ImagePayload;
     annotations: Annotation[];
@@ -167,6 +168,9 @@ export type PromptBundleControllerErrorCode =
   | 'no-content'
   | 'render-limit'
   | 'save-failed'
+  | 'composition-unavailable'
+  | 'encode-failed'
+  | 'export-incomplete'
   | 'unexpected';
 
 export interface PromptBundleControllerError {
@@ -174,8 +178,11 @@ export interface PromptBundleControllerError {
   message: string;
   retryable: boolean;
   fallbackAvailable: boolean;
+  recovery: ExportRecovery;
   nativeCode?: WorkflowError['code'];
   technicalDetails?: string;
+  /** Selection that published this failure; only matching current cards may use it. */
+  bundle?: PromptBundleActionRequest;
 }
 
 export type PromptBundleControllerActionResult =
@@ -187,6 +194,9 @@ export interface HostedShareArtifacts {
   bundleNumbers: readonly number[];
   imageBundleNumbers: readonly number[];
 }
+
+export type PromptBundleRetryResult =
+  PromptBundleControllerActionResult | { ok: true; value: HostedShareArtifacts };
 
 export interface PromptBundleLargePreview {
   bundleNumber: number;
@@ -238,6 +248,7 @@ export class PromptBundleControllerEngine {
   private runSequence = 0;
   private previewSequence = 0;
   private previewAbort?: AbortController;
+  private previewFailure?: PromptBundleControllerError;
   private pendingCleanup?: ActiveRun;
   private disposed = false;
 
@@ -329,8 +340,27 @@ export class PromptBundleControllerEngine {
     });
   }
 
-  private resultError(error: unknown, run?: ActiveRun): PromptBundleControllerActionResult {
-    const detail = publicError(error);
+  private bundleRequest(selection: PromptBundleSelection | undefined): PromptBundleActionRequest | undefined {
+    const card =
+      typeof selection === 'number'
+        ? this.state.cards.find((item) => item.bundleNumber === selection)
+        : selection;
+    return (
+      card && {
+        planId: card.planId,
+        artifactSessionId: card.artifactSessionId,
+        bundleNumber: card.bundleNumber,
+      }
+    );
+  }
+
+  private resultError(
+    error: unknown,
+    run?: ActiveRun,
+    selection?: PromptBundleSelection,
+  ): PromptBundleControllerActionResult {
+    const bundle = this.bundleRequest(selection);
+    const detail = bundle ? { ...publicError(error), bundle } : publicError(error);
     if (!run || this.activeRun === run) {
       this.emit({
         error: detail,
@@ -648,7 +678,8 @@ export class PromptBundleControllerEngine {
       run.finalized = finalized;
       if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
         this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
-        throw cancelledFailure();
+        if (run.terminalKind === 'cancel' || run.controller.signal.aborted) throw cancelledFailure();
+        throw failure('export-incomplete', 'Prompt export did not complete.', true);
       }
       this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
       return { prepared, session, finalized };
@@ -823,6 +854,8 @@ export class PromptBundleControllerEngine {
             'These files belong to an older export session. Use the latest prompt card.',
             true,
           ),
+          undefined,
+          selection,
         );
     }
     const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
@@ -834,11 +867,15 @@ export class PromptBundleControllerEngine {
     if (!matchesCurrentCard)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     const selectedIdentity = this.selectedBundleIdentity(selection);
     if (typeof selection !== 'number' && !selectedIdentity)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     if (
       this.pendingCleanup ||
@@ -893,7 +930,7 @@ export class PromptBundleControllerEngine {
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
       if (bundleNumber !== undefined) this.setCardState(bundleNumber, 'error', publicError(error).message);
-      return this.resultError(error, run);
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1077,7 +1114,7 @@ export class PromptBundleControllerEngine {
           reportedError = cleanupError;
         }
       }
-      return this.resultError(reportedError, run);
+      return this.resultError(reportedError, run, requestedBundleNumber);
     }
   }
 
@@ -1182,7 +1219,7 @@ export class PromptBundleControllerEngine {
       const number = selectionNumber(selection);
       if (number !== undefined)
         this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
-      return this.resultError(error, run);
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1192,7 +1229,7 @@ export class PromptBundleControllerEngine {
       typeof selection === 'number'
         ? this.latestArtifact?.grants.has(selection)
         : Boolean(selection.artifactSessionId);
-    if (!hasGrant && this.bridge.copyText) {
+    if (!hasGrant && this.bridge.copyPromptExportMarkdown) {
       let run: ActiveRun | undefined;
       try {
         if (
@@ -1243,7 +1280,7 @@ export class PromptBundleControllerEngine {
             );
         }
         this.assertActive(run);
-        await this.bridge.copyText(bundle.markdown);
+        unwrap(await this.bridge.copyPromptExportMarkdown(bundle.markdown));
         this.assertActive(run);
         // Do not orphan a finalized artifact for the same content: replacing latestPlan
         // gives it a new random planId, which makes open()/copy treat it as stale.
@@ -1256,7 +1293,7 @@ export class PromptBundleControllerEngine {
         this.activeRun = undefined;
         return { ok: true, bundleNumber: bundle.number };
       } catch (error) {
-        return this.resultError(error, run);
+        return this.resultError(error, run, selection);
       }
     }
     return this.nativeArtifactAction(
@@ -1335,6 +1372,7 @@ export class PromptBundleControllerEngine {
     const bundleNumber = selectionNumber(selection);
     if (bundleNumber === undefined)
       return this.resultError(failure('invalid-bundle', 'Choose a prompt to preview.', true));
+    const requestedBundle = this.bundleRequest(selection);
     const sequence = ++this.previewSequence;
     this.previewAbort?.abort();
     const controller = new AbortController();
@@ -1362,6 +1400,9 @@ export class PromptBundleControllerEngine {
         await this.validateArtifactContext(artifact, controller.signal);
         if (sequence !== this.previewSequence) throw cancelledFailure();
         this.emit({
+          ...(this.previewFailure && this.state.error === this.previewFailure
+            ? { error: undefined, progress: undefined }
+            : {}),
           preview: {
             bundleNumber,
             dataUrl:
@@ -1389,6 +1430,9 @@ export class PromptBundleControllerEngine {
         );
       if (sequence !== this.previewSequence) throw cancelledFailure();
       this.emit({
+        ...(this.previewFailure && this.state.error === this.previewFailure
+          ? { error: undefined, progress: undefined }
+          : {}),
         preview: {
           bundleNumber,
           dataUrl:
@@ -1404,7 +1448,9 @@ export class PromptBundleControllerEngine {
     } catch (error) {
       if (sequence !== this.previewSequence || controller.signal.aborted)
         return { ok: false, error: cancelledFailure().detail };
-      return this.resultError(error);
+      const result = this.resultError(error, undefined, requestedBundle);
+      if (!result.ok) this.previewFailure = result.error;
+      return result;
     } finally {
       if (sequence === this.previewSequence) this.previewAbort = undefined;
     }

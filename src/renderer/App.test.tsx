@@ -374,6 +374,37 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
+  it('shows prompt-open failures once in the sharing dialog without an App error toast', async () => {
+    const loadScreenshotContent = vi.fn<ImnotaBridge['loadScreenshotContent']>(async () => ({
+      image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+      annotations: [],
+      description: 'Original note',
+      contentRevision: 'a'.repeat(64),
+    }));
+    await renderEditingProject({ loadScreenshotContent });
+    loadScreenshotContent.mockRejectedValue(new Error('IPC rejected D:/private/screenshot.png'));
+    fireEvent.click(screen.getByTestId('share-prompt-bundles'));
+    const dialog = await screen.findByRole('dialog', { name: 'Share bundles' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Rebuild bundles');
+    expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Rebuild bundles' })).toBeEnabled();
+  });
+
+  it('keeps prompt shortcut failures in the App toast when the sharing dialog is closed', async () => {
+    const loadScreenshotContent = vi.fn<ImnotaBridge['loadScreenshotContent']>(async () => ({
+      image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+      annotations: [],
+      description: 'Original note',
+      contentRevision: 'a'.repeat(64),
+    }));
+    await renderEditingProject({ loadScreenshotContent });
+    loadScreenshotContent.mockRejectedValue(new Error('IPC rejected D:/private/screenshot.png'));
+    fireEvent.keyDown(window, { key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('Rebuild bundles');
+    expect(screen.queryByRole('dialog', { name: 'Share bundles' })).not.toBeInTheDocument();
+  });
+
   it('switches between all, favourite and archived projects from the Library filter', async () => {
     renderApp({
       listProjects: async () => [

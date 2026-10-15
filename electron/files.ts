@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { NativeWorkflowError } from './workflow-errors.js';
 
 export function isWithin(parent: string, target: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
@@ -21,7 +22,10 @@ export async function assertNoLinks(target: string): Promise<void> {
       throw error;
     });
     if (stat?.isSymbolicLink())
-      throw new Error('Linked workspace paths are not supported. Choose a regular folder.');
+      throw new NativeWorkflowError(
+        'linked-path',
+        'Linked workspace paths are not supported. Choose a regular folder.',
+      );
     const parent = path.dirname(current);
     if (parent === current) return;
     current = parent;
