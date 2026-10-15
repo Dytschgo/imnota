@@ -522,6 +522,11 @@
   overscroll-behavior: contain;
 }
 
+/* The dialog clips overflow, so draw the focus ring inside the scroll area. */
+.prompt-large-preview:focus-visible {
+  outline-offset: -2px;
+}
+
 .prompt-large-preview img {
   display: block;
   max-width: none;
