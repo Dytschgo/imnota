@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import test from 'node:test';
+import { dump, load } from 'js-yaml';
 import { QUALITY_GATE_JOBS, qualityGateErrors } from './ci-quality-gate.mjs';
 
 function successfulNeeds(docsOnly = 'false') {
@@ -94,21 +95,54 @@ test('CLI exits unsuccessfully for package failure, cancellation and malformed i
   assert.match(malformed.stderr, /Cannot evaluate Validate dependencies/);
 });
 
+function assertWorkflowJobCoverage(workflow) {
+  const { jobs } = load(workflow);
+  assert.ok(jobs, 'workflow must define jobs');
+  const aggregate = jobs.quality;
+  assert.ok(aggregate, 'quality job must retain its required check name');
+  const requiredJobs = Object.keys(jobs)
+    .filter((job) => job !== 'quality')
+    .sort();
+  const needs = typeof aggregate.needs === 'string' ? [aggregate.needs] : aggregate.needs;
+  assert.deepEqual(
+    needs?.slice().sort(),
+    requiredJobs,
+    'quality.needs must include every other workflow job',
+  );
+  assert.deepEqual(
+    [...QUALITY_GATE_JOBS].sort(),
+    requiredJobs,
+    'every workflow job must have a quality gate policy entry',
+  );
+  return aggregate;
+}
+
+test('a commented job missing from quality.needs and the policy fails workflow coverage', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const withFutureJob = `${workflow}\n  future-required-gate: # required security scan
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+`;
+  assert.throws(
+    () => assertWorkflowJobCoverage(withFutureJob),
+    /quality.needs must include every other workflow job/,
+  );
+
+  const withDependency = load(withFutureJob);
+  withDependency.jobs.quality.needs.push('future-required-gate');
+  assert.throws(
+    () => assertWorkflowJobCoverage(dump(withDependency)),
+    /every workflow job must have a quality gate policy entry/,
+  );
+});
+
 test('required quality context always waits for every workflow job and passes classifier outputs', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const jobGraph = workflow.split(/^jobs:\r?$/m)[1];
-  assert.ok(jobGraph, 'workflow must define jobs');
-  const jobs = [...jobGraph.matchAll(/^  ([\w-]+):\r?$/gm)].map((match) => match[1]);
-  assert.deepEqual(jobs.filter((job) => job !== 'quality').sort(), [...QUALITY_GATE_JOBS].sort());
-  const aggregate = /^  quality:\r?\n([\s\S]*?)(?=^  [\w-]+:)/m.exec(workflow)?.[1];
-  assert.ok(aggregate, 'quality job must retain its required check name');
-  assert.doesNotMatch(aggregate, /^    name:/m, 'do not rename the required context');
-  const needs = /^    needs: \[([^\]]+)\]/m
-    .exec(aggregate)?.[1]
-    .split(',')
-    .map((job) => job.trim());
-  assert.deepEqual(needs?.sort(), [...QUALITY_GATE_JOBS].sort());
-  assert.match(aggregate, /^    if: \$\{\{ always\(\) \}\}\r?$/m);
-  assert.match(aggregate, /IMNOTA_CI_NEEDS: \$\{\{ toJSON\(needs\) \}\}/);
-  assert.match(aggregate, /run: node scripts\/ci-quality-gate\.mjs/);
+  const aggregate = assertWorkflowJobCoverage(workflow);
+  assert.equal(Object.hasOwn(aggregate, 'name'), false, 'do not rename the required context');
+  assert.equal(aggregate.if, '${{ always() }}');
+  const gateStep = aggregate.steps.find((step) => step.run === 'node scripts/ci-quality-gate.mjs');
+  assert.ok(gateStep, 'quality must run the gate script');
+  assert.equal(gateStep.env?.IMNOTA_CI_NEEDS, '${{ toJSON(needs) }}');
 });
