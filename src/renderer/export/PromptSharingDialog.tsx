@@ -87,12 +87,35 @@ export function PromptSharingDialog({
   const busy = progress
     ? ['checking', 'planning', 'rendering', 'writing', 'copying'].includes(progress.phase)
     : false;
+  // Splitting can advance progress before the replacement cards arrive. Their
+  // numbers no longer identify the same content, so show continuation on the last
+  // row and explain it in the status rather than implying an exact bundle match.
+  const updatingRows = Boolean(
+    busy &&
+    progress?.bundleNumber &&
+    bundles.length &&
+    ((progress.totalBundles !== undefined && progress.totalBundles !== bundles.length) ||
+      !bundles.some((bundle) => bundle.bundleNumber === progress.bundleNumber)),
+  );
+  const activeBundleNumber = busy
+    ? updatingRows
+      ? bundles.at(-1)?.bundleNumber
+      : progress?.bundleNumber
+    : undefined;
   // bundleNumber is the item being processed, not completed work, and rendering can
   // split the plan again before writing starts, so it is not shown as a percentage.
   const progressValue = progress?.phase === 'complete' ? 100 : undefined;
   const showProgressBar =
     progress && ['planning', 'rendering', 'writing', 'complete'].includes(progress.phase);
   const rebuildBundle = bundles.find((bundle) => bundle.state === 'error') ?? bundles[0];
+  // The hairline mirrors the status below it; it never shows a measured amount.
+  const hairlineTone = busy
+    ? 'busy'
+    : error || progress?.phase === 'error'
+      ? 'error'
+      : progress?.phase === 'complete'
+        ? 'complete'
+        : 'idle';
   return (
     <Modal
       hidden={hidden}
@@ -102,12 +125,16 @@ export function PromptSharingDialog({
       closeTestId="prompt-sharing-close"
     >
       <section className="prompt-sharing-dialog" aria-busy={busy} data-testid="prompt-sharing-dialog">
+        <div className="prompt-sharing-hairline" data-tone={hairlineTone} aria-hidden="true">
+          <span />
+        </div>
         {progress && !(error && progress.phase === 'error') && (
           <div className={`prompt-sharing-progress prompt-sharing-progress-${progress.phase}`} role="status">
             <div>
               <span>{progressLabel(progress)}</span>
               {progressValue !== undefined && <strong>{progressValue}%</strong>}
             </div>
+            {updatingRows && <p>Updating bundle rows; activity is shown on the last row.</p>}
             {showProgressBar && (
               <progress value={progressValue} max={100} aria-label="Prompt export progress" />
             )}
@@ -170,8 +197,9 @@ export function PromptSharingDialog({
           <div className="prompt-bundle-list">
             {bundles.map((bundle) => (
               <PromptBundleCard
-                key={`${bundle.planId}:${bundle.bundleNumber}`}
+                key={bundle.bundleNumber}
                 bundle={bundle}
+                active={activeBundleNumber === bundle.bundleNumber}
                 disabled={busy}
                 fileClipboardAvailable={fileClipboardAvailable}
                 platform={platform}
