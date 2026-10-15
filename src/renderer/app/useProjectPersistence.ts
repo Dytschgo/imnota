@@ -379,6 +379,7 @@ export function useProjectPersistence({
   const nativeMutationTokens = useRef(new Set<number>());
   const suspendedMetadataWaiters = useRef<Array<(saved: boolean) => void>>([]);
   const pendingExternalChange = useRef<ExternalProjectChange | null>(null);
+  const pendingExternalWarnings = useRef<string[]>([]);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [error, setError] = useState('');
@@ -393,17 +394,34 @@ export function useProjectPersistence({
     setProjectRevision(revision);
   }, []);
 
-  const publishExternalChange = useCallback((change: ExternalProjectChange | null) => {
-    // Losing monitoring must never downgrade an already observed external edit/conflict.
-    if (
-      change?.kind === 'watch-error' &&
-      pendingExternalChange.current &&
-      pendingExternalChange.current.kind !== 'watch-error'
-    )
-      return;
-    pendingExternalChange.current = change;
-    setExternalChange(change);
-  }, []);
+  const publishExternalChange = useCallback(
+    (change: ExternalProjectChange | null, warnings: string[] = []) => {
+      // Warning evidence and recovery guidance survive either ordering of a native
+      // result and watcher notifications, independently of the notice's priority.
+      pendingExternalWarnings.current = change
+        ? [...new Set([...pendingExternalWarnings.current, ...warnings])]
+        : [];
+      // Losing monitoring must never downgrade an already observed external edit/conflict.
+      if (
+        change?.kind === 'watch-error' &&
+        pendingExternalChange.current &&
+        pendingExternalChange.current.kind !== 'watch-error'
+      ) {
+        if (!warnings.length) return;
+        change = pendingExternalChange.current;
+      }
+      pendingExternalChange.current = change;
+      setExternalChange(
+        change
+          ? {
+              ...change,
+              message: [...new Set([...pendingExternalWarnings.current, change.message])].join(' '),
+            }
+          : null,
+      );
+    },
+    [],
+  );
 
   // A native save may have read an external project.json before merging its own content.
   // Only an unbroken transaction chain can advance the pre-crash metadata CAS baseline.
@@ -1028,7 +1046,9 @@ export function useProjectPersistence({
     (token: number, unconfirmedRestore?: string): Promise<boolean> => {
       if (unconfirmedRestore) {
         publishAcceptedRevision(null);
-        publishExternalChange({ kind: 'metadata-conflict', message: unconfirmedRestore });
+        publishExternalChange({ kind: 'metadata-conflict', message: unconfirmedRestore }, [
+          unconfirmedRestore,
+        ]);
       }
       return finishNativeMutation(token, !unconfirmedRestore);
     },
@@ -1318,16 +1338,17 @@ export function useProjectPersistence({
       } catch (reason) {
         await finishNativeMutation(nativeMutationToken, false);
         publishAcceptedRevision(null);
-        publishExternalChange({
-          kind: 'watch-error',
-          message: [
-            ...(mutationSnapshot.warnings ?? []),
-            workflowMessage(
-              reason,
-              'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
-            ),
-          ].join(' '),
-        });
+        const message = [
+          ...(mutationSnapshot.warnings ?? []),
+          workflowMessage(
+            reason,
+            'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
+          ),
+        ].join(' ');
+        publishExternalChange(
+          { kind: 'watch-error', message },
+          mutationSnapshot.warnings?.length ? [message] : [],
+        );
         return false;
       }
     },

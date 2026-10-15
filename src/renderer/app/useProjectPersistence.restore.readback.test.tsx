@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { act } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
+import { projectRevisionForSource } from '../../../electron/project-watch';
 import {
   cases,
   kinds,
@@ -86,18 +87,31 @@ it.each(cases)(
   },
 );
 
-it.each(cases)(
-  'keeps later foreign $kind bytes out of adoption after warned $code Restore',
-  async ({ kind, code }) => {
-    const f = await fixture(kind);
+it.each(cases.flatMap((entry) => (['before', 'after'] as const).map((delivery) => ({ ...entry, delivery }))))(
+  'keeps later foreign $kind bytes out of adoption after warned $code Restore with watcher delivery $delivery rejection',
+  async ({ kind, code, delivery }) => {
+    const f = await fixture(kind, { holdWatchEvents: true });
     const assertFault = fault(f.projectFile, code);
     let foreign!: Buffer;
     await act(async () => {
       const token = f.hook.result.current.beginNativeMutation();
       f.hook.result.current.queueProjectMetadata({ ...f.source.project, name: 'Keep pending' });
       const result = await f.restore();
+      expect(result.warnings?.join(' ')).toContain(COMMITTED_WRITE_WARNING);
       foreign = Buffer.from(JSON.stringify({ ...(await f.readProject()), favourite: true }, null, 2));
       await fs.writeFile(f.projectFile, foreign);
+      // Observe the real watcher identifying these exact foreign bytes before choosing
+      // which side of the Restore-result handling receives the IPC notification.
+      await waitFor(() =>
+        expect(f.events).toContainEqual(
+          expect.objectContaining({
+            kind: 'external-change',
+            projectRevision: projectRevisionForSource(foreign),
+            changedPaths: expect.arrayContaining(['project.json']),
+          }),
+        ),
+      );
+      if (delivery === 'before') f.deliverWatchEvents();
       expect(
         await f.hook.result.current.acceptMutationSnapshot(
           result,
@@ -107,10 +121,13 @@ it.each(cases)(
           result.projectRevision,
         ),
       ).toBe(false);
+      if (delivery === 'after') f.deliverWatchEvents();
     });
     assertFault();
     expect(f.hook.result.current.externalChange?.message).toContain(COMMITTED_WRITE_WARNING);
     expect(f.hook.result.current.externalChange?.message).toContain('reload, compare');
+    expect(f.hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+    expect(f.hook.result.current.externalChange?.kind).toBe('external-change');
     expect(f.hook.result.current.hasPendingProjectMetadata()).toBe(true);
     expect(f.hook.result.current.projectRevision).toBeNull();
     expect(f.onSnapshot).not.toHaveBeenCalled();
@@ -120,6 +137,83 @@ it.each(cases)(
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
     expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
     expect(await fs.readFile(f.projectFile)).toEqual(foreign);
+  },
+);
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'retains an unconfirmed %s Restore warning through dismissal and failed reload, then clears it on successful reload',
+  async (code) => {
+    const f = await fixture('screenshot', { holdWatchEvents: true });
+    const assertFault = fault(f.projectFile, code);
+    f.snapshot.mockRejectedValueOnce(new Error('Readback unavailable'));
+    await act(async () => {
+      const token = f.hook.result.current.beginNativeMutation();
+      f.hook.result.current.queueProjectMetadata({ ...f.source.project, name: 'Keep pending' });
+      try {
+        await f.restore();
+        throw new Error('Unexpected success');
+      } catch (error) {
+        expect((error as Error).message).toContain(COMMITTED_WRITE_WARNING);
+        await f.hook.result.current.cancelNativeMutation(token, (error as Error).message);
+      }
+    });
+    assertFault();
+    const warning = f.hook.result.current.externalChange!.message;
+    act(() => f.hook.result.current.dismissExternalChange());
+    expect(f.hook.result.current.externalChange).toBeNull();
+    await act(async () => expect(await f.hook.result.current.flushProjectMetadata()).toBe(false));
+    expect(f.hook.result.current.hasPendingProjectMetadata()).toBe(true);
+    expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+
+    const changeFile = async (name: string) => {
+      const foreign = Buffer.from(JSON.stringify({ ...(await f.readProject()), name }, null, 2));
+      await fs.writeFile(f.projectFile, foreign);
+      await waitFor(() =>
+        expect(f.events).toContainEqual(
+          expect.objectContaining({
+            kind: 'external-change',
+            projectRevision: projectRevisionForSource(foreign),
+          }),
+        ),
+      );
+      act(() => f.deliverWatchEvents());
+      return foreign;
+    };
+    await changeFile('Foreign after dismissal');
+    expect(f.hook.result.current.externalChange?.message).toContain(warning);
+    expect(f.hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+    // Repeated notifications must not grow duplicate warning text.
+    const foreign = await changeFile('Another foreign edit');
+    expect(f.hook.result.current.externalChange!.message.split(COMMITTED_WRITE_WARNING)).toHaveLength(2);
+    expect(f.onSnapshot).not.toHaveBeenCalled();
+    f.bridge.reloadWatchedProject.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'io-failure', message: 'Reload unavailable', retryable: false },
+    });
+    await act(async () => {
+      expect(await f.hook.result.current.reloadExternal({ discardLocalChanges: true })).toBe(false);
+    });
+    expect(f.hook.result.current.externalChange?.message).toContain(warning);
+    expect(f.hook.result.current.projectRevision).toBeNull();
+    expect(f.onSnapshot).not.toHaveBeenCalled();
+    expect(await fs.readFile(f.projectFile)).toEqual(foreign);
+    await act(async () => {
+      expect(await f.hook.result.current.reloadExternal({ discardLocalChanges: true })).toBe(true);
+    });
+    expect(f.hook.result.current.externalChange).toBeNull();
+    expect(f.hook.result.current.projectRevision).toBe(
+      projectRevisionForSource(await fs.readFile(f.projectFile)),
+    );
+    expect(f.onSnapshot).toHaveBeenCalledOnce();
+    expect(f.onSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ project: JSON.parse(foreign.toString()) }),
+    );
+    const latestForeign = await changeFile('Foreign after successful reload');
+    expect(f.hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+    expect(f.hook.result.current.externalChange?.message).not.toContain(COMMITTED_WRITE_WARNING);
+    expect(await fs.readFile(f.projectFile)).toEqual(latestForeign);
+    expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
+    expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   },
 );
 
