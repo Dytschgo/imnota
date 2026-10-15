@@ -154,7 +154,7 @@ export async function exerciseLocalHistory(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
     await checkpoint('history: rendered frames ready; capturing history');
-    captures.push(await driver.capture(artifactDirectory, 'next-local-history.png'));
+    captures.push(await driver.capture(artifactDirectory, 'next-local-history.png', 'none'));
     await checkpoint('history: history capture completed');
   }
   // Closing and reopening must not depend on an in-memory backup grant.
@@ -199,7 +199,7 @@ export async function exerciseLocalHistory(
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, 'next-restored-project.png'));
+    captures.push(await driver.capture(artifactDirectory, 'next-restored-project.png', 'none'));
   }
 
   // Exercise the same path/ID with a newer image already loaded in the editor.
@@ -270,7 +270,8 @@ export async function exerciseLocalHistory(
     throw new Error('Editing after restore changed the restored source image.');
   const reopened = await driver.evaluate<string>('document.querySelector("[aria-label=Description]").value');
   if (reopened !== 'Edited after restoring') throw new Error('The post-restore edit was lost on reopen.');
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'next-in-place-restored.png'));
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'next-in-place-restored.png', 'none'));
   return captures;
 }
 

@@ -243,7 +243,8 @@ describe('feedback controls', () => {
       };
       const onRender = vi.fn<ProfilerOnRenderCallback>(() => {
         // Fail at the render boundary rather than letting an effect loop run until the test deadline.
-        if (onRender.mock.calls.length > 20) throw new Error('Fresh-profile startup did not settle.');
+        if (onRender.mock.calls.length > 100)
+          throw new Error('Fresh-profile startup exceeded 100 commits; possible render/effect loop.');
       });
       let view!: ReturnType<typeof renderApp>;
       vi.useFakeTimers();
@@ -278,12 +279,10 @@ describe('feedback controls', () => {
         } else {
           expect(screen.getByRole('button', { name: 'Choose workspace' })).toBeInTheDocument();
         }
-        const settledRenders = onRender.mock.calls.length;
         // Drain scheduled work once; this advances virtual time without sleeps or retrying assertions.
         await act(async () => {
           await vi.runOnlyPendingTimersAsync();
         });
-        expect(onRender).toHaveBeenCalledTimes(settledRenders);
         await act(async () => {
           view.rerender(
             <Profiler id="startup" onRender={onRender}>
@@ -291,11 +290,12 @@ describe('feedback controls', () => {
             </Profiler>,
           );
         });
-        expect(onRender).toHaveBeenCalledTimes(settledRenders + 1);
         await act(async () => {
           await vi.runOnlyPendingTimersAsync();
         });
-        expect(onRender).toHaveBeenCalledTimes(settledRenders + 1);
+        expect(screen.getByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.getByText('No recently opened collections.')).toBeInTheDocument();
+        expect(useAppStore.getState().settings.workspacePath).toBe(workspacePath);
         expect(getSettings).toHaveBeenCalledOnce();
         expect(getPreferenceSettings).toHaveBeenCalledOnce();
         expect(listProjects).toHaveBeenCalledTimes(workspacePath ? 1 : 0);

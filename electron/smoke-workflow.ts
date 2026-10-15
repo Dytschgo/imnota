@@ -303,7 +303,7 @@ async function exerciseOnboarding(
   await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png'));
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png', 'none'));
   await clickAny(driver, [
     { selector: '[data-testid="onboarding-use-sample"]' },
     { text: 'Use sample screenshot', exact: true },
@@ -352,7 +352,7 @@ async function exerciseOnboarding(
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png', 'none'));
   await driver.clickOnboardingCopy({ text: 'Rich copy', exact: true }, 'rich');
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown + image prepared', exact: true });
 
@@ -577,7 +577,8 @@ async function exerciseWhatsNew(
   const release = findWhatsNewRelease(version);
   if (!release) return;
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png'));
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png', 'none'));
   await driver.click({ text: 'Later', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
@@ -1455,7 +1456,7 @@ async function captureWorkspaceMatrix(
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await assertMacSettingsTitlebarClearance(driver);
   await driver.resize(SMOKE_VIEWPORTS[1]);
-  artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png'));
+  artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png', 'none'));
   for (const viewport of [{ width: 1080, height: 680 }, SMOKE_VIEWPORTS[1]]) {
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
@@ -1470,7 +1471,11 @@ async function captureWorkspaceMatrix(
         throw new Error('Capture shortcut help overlaps or overflows its section.');
     })()`);
     artifacts.push(
-      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-features.png`),
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-features.png`,
+        'none',
+      ),
     );
     await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
     await driver.waitFor({ selector: '#workspace-settings-title' });
@@ -1486,7 +1491,11 @@ async function captureWorkspaceMatrix(
       }
     })()`);
     artifacts.push(
-      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-workspace.png`),
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-workspace.png`,
+        'none',
+      ),
     );
   }
   await driver.click({ selector: '.settings-navigation button', text: 'Appearance', exact: true });
@@ -1588,7 +1597,7 @@ async function exercisePreferencesAndChannel(
         selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
-        artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
+        artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`, 'none'));
     }
   }
   await driver.evaluate(`(async () => {
@@ -1656,7 +1665,7 @@ async function exercisePreferencesAndChannel(
     await driver.evaluate(
       `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png', 'none'));
     await driver.click({ selector: '[aria-label="Back to workspace"]' });
     await driver.waitFor({ selector: '.workspace' });
     await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
@@ -1927,7 +1936,8 @@ async function exerciseSharingPreferences(
     if (Date.now() - started > 10_000) throw new Error('Sharing sender name was not persisted.');
     await delay(50);
   }
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'sharing-settings.png'));
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, 'sharing-settings.png', 'none'));
   driver.setWindow(await host.reopenWindow());
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.click({ text: 'Sharing', exact: true });

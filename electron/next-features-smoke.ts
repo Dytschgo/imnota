@@ -20,7 +20,7 @@ export async function exerciseNextFeatures(
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, filename));
+    captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   };
   await driver.resize({ width: 1280, height: 800 });
   if (await driver.exists({ selector: '.settings-view' }))
@@ -121,7 +121,7 @@ export async function captureNextFeatureLightViews(
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, filename));
+    captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   };
   driver.browserWindow.show();
   driver.browserWindow.focus();

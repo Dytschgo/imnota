@@ -89,7 +89,7 @@ async function captureCollectionPicker(
   })()`);
   if (!validPicker)
     throw new Error('Collection picker retained decorative status icons or overflowed its visible bounds.');
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename));
+  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   await driver.press('Escape');
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
 }
@@ -104,7 +104,7 @@ async function captureAgentAccess(
     document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'});
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   })()`);
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename));
+  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   const copyFits = await driver.evaluate<boolean>(`(() => {
     const section = document.querySelector('[aria-labelledby="agent-access-title"]');
     const copy = section?.querySelector('.settings-switch small');
@@ -181,7 +181,7 @@ export async function exerciseUiFeedback(
   })()`);
   if (!generatedLabels) throw new Error('Generated collection labels still expose the workspace prefix.');
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-generated-collection-name.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-generated-collection-name.png', 'none'));
   await driver.press('Escape');
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   const persistedName = await driver.evaluate<string>(`(async () => {
@@ -212,7 +212,7 @@ export async function exerciseUiFeedback(
   if (await driver.exists({ selector: '#favourite-projects' }))
     throw new Error('The retired Favourite projects section is still in the side navigation.');
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-quick-collections-restored.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-quick-collections-restored.png', 'none'));
   await driver.click({ selector: '.topbar [aria-label="Remove from favourites"]' });
   await driver.waitFor({ selector: '.topbar [aria-label="Add to favourites"]' });
   // The following fixture calls write directly through the bridge. Leave the open project first
@@ -431,7 +431,7 @@ export async function exerciseUiFeedback(
     }; check();
   })`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-keyboard-shortcuts.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-keyboard-shortcuts.png', 'none'));
   const templateProjectPath = await driver.evaluate<string>(`(async () => {
     const snapshot = await window.imnota.createProject({
       name: 'Feedback Template',
@@ -479,7 +479,7 @@ export async function exerciseUiFeedback(
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   })()`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, '1080x800-feedback-paste-error.png'));
+    captures.push(await driver.capture(artifactDirectory, '1080x800-feedback-paste-error.png', 'none'));
   const pasteError = await driver.evaluate<{
     passed: boolean;
     box?: { left: number; top: number; right: number; bottom: number; width: number };
@@ -515,7 +515,7 @@ export async function exerciseUiFeedback(
   if (artifactDirectory) {
     // Move focus off the input so its blinking caret cannot keep capture pixels changing.
     await driver.press('Tab');
-    captures.push(await driver.capture(artifactDirectory, 'feedback-search.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-search.png', 'none'));
   }
   await driver.click({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
   // The previous project's editor remains mounted while the search target loads.
@@ -550,7 +550,7 @@ export async function exerciseUiFeedback(
     };check();
   })`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png', 'none'));
 
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
@@ -588,7 +588,8 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' }, { absent: true });
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.project-row-main', text: 'Feedback Edited' });
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-projects.png'));
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-projects.png', 'none'));
   await driver.evaluate(`(async () => {
     const projectPath=${JSON.stringify(fixture.projectPath)};
     let snapshot=await window.imnota.loadProject(projectPath);
@@ -628,7 +629,7 @@ export async function exerciseUiFeedback(
   await driver.click({ selector: `[data-testid="project-delete-${fixture.projectId}"]` });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' });
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-project-delete-confirm.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-project-delete-confirm.png', 'none'));
   await host.approveNextProjectDeletion(fixture.projectPath);
   await driver.click({ text: 'Move to trash', exact: true });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Delete Feedback Renamed?' }, { absent: true });
@@ -646,7 +647,7 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ text: 'Open diagnostics folder', exact: true });
   await driver.evaluate(`document.querySelector('#diagnostics-title')?.scrollIntoView({ block: 'center' })`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'workspace-local-diagnostics.png'));
+    captures.push(await driver.capture(artifactDirectory, 'workspace-local-diagnostics.png', 'none'));
   await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
   await driver.resize({ width: 1080, height: 800 });
@@ -689,7 +690,8 @@ export async function exerciseUiFeedback(
   await driver.waitFor({
     selector: '[data-testid="backdrop-preset-emerald"][aria-pressed="true"]:not(:disabled)',
   });
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, 'feedback-dark-backdrop.png'));
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-dark-backdrop.png', 'none'));
   await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"]:not(:disabled))' });
   await driver.click({ selector: '[data-testid="backdrop-remove"]' });
   await driver.waitFor({ selector: ':root[data-background="none"][data-theme="light"]' });
@@ -703,6 +705,6 @@ export async function exerciseUiFeedback(
     document.querySelector('.settings-view > .settings-grid').scrollTop=0;
   })()`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-light-backdrop.png'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-light-backdrop.png', 'none'));
   return captures;
 }
