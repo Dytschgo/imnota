@@ -27,24 +27,40 @@ export const SMOKE_CAPTURE_PREPARATION = `(async () => {
 // Konva decodes an off-DOM Image: document.images and stable placeholder pixels
 // cannot establish that the selected screenshot has rendered. Apply this to
 // every artifact, including remounts caused by collapsing the navigation.
-export const SMOKE_CANVAS_CAPTURE_PREPARATION = `new Promise((resolve, reject) => {
+export const SMOKE_CANVAS_CAPTURE_PREPARATION = canvasReadinessScript();
+
+interface SmokeScreenshotCanvas {
+  id: string;
+  originalWidth: number;
+  originalHeight: number;
+}
+
+function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = false): string {
+  return `new Promise((resolve, reject) => {
+  const expected = ${JSON.stringify(expected ?? null)};
   const observer = new MutationObserver(check);
   function finish(error) {
     observer.disconnect();
     if (error) reject(new Error(error)); else resolve();
   }
   function check() {
-    for (const canvas of document.querySelectorAll('[data-testid="annotation-canvas"]')) {
+    const canvases = document.querySelectorAll('[data-testid="annotation-canvas"]');
+    if (${required} && !canvases.length) return;
+    if (expected && !document.querySelector('.shot-item.active [data-testid="screenshot-' + expected.id + '"]')) return;
+    for (const canvas of canvases) {
       const state = canvas.querySelector('[data-testid="canvas-load-state"]');
       if (state?.dataset.state === 'failed') return finish('Cannot capture: selected screenshot failed to load.');
       const rendered = canvas.querySelector('.konvajs-content canvas');
       if (state || !rendered || rendered.width <= 0 || rendered.height <= 0) return;
+      if (expected && canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim() !==
+          expected.originalWidth + ' × ' + expected.originalHeight) return;
     }
     finish();
   }
   observer.observe(document.body, { subtree: true, childList: true, attributes: true });
   check();
 })`;
+}
 
 export async function withSmokeDeadline<T>(
   operation: () => Promise<T>,
@@ -351,6 +367,17 @@ export class NativeUiDriver {
 
   async exists(locator: SmokeLocator): Promise<boolean> {
     return Boolean(await this.bounds(locator));
+  }
+
+  async waitForScreenshotCanvas(expected?: SmokeScreenshotCanvas): Promise<void> {
+    try {
+      await this.evaluate(canvasReadinessScript(expected, true));
+    } catch (error) {
+      throw new Error(
+        `Selected screenshot ${expected?.id ?? 'canvas'} did not render within ${this.defaultTimeoutMs}ms: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   async click(locator: SmokeLocator, clickCount = 1): Promise<SmokePoint> {
