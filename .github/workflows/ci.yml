@@ -248,6 +248,14 @@ jobs:
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Verify native Mac installer transactions
+        if: env.RUN_APPLICATION == 'true' && matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          export IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-${version}-universal-mac.zip"
+          node --test scripts/install.native-mac.test.mjs
+
       - name: Retain Mac walkthrough evidence
         if: env.RUN_APPLICATION == 'true' && (!cancelled() && matrix.os == 'macos-latest')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
