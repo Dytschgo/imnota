@@ -18,6 +18,9 @@ rollback_path=""
 installation_parent=""
 replacement_started=0
 transaction_committed=0
+replacement_launched=0
+replacement_pid=""
+replacement_pids=""
 keep_staging=0
 lock_directory=""
 lock_owned=0
@@ -25,6 +28,10 @@ cleanup() {
   local status=$?
   trap - EXIT
   if [ "$transaction_committed" -eq 0 ] && { [ "$replacement_started" -eq 1 ] || { [ -n "$rollback_path" ] && [ -d "$rollback_path" ] && [ ! -L "$rollback_path" ]; }; }; then
+    if ! quiesce_replacement "$application_path"; then
+      keep_staging=1
+      echo "Failed replacement preserved at: $staging_directory/failed-Imnota.app (or $application_path if moving it fails). Quit that process before reopening the restored app." >&2
+    fi
     # Move a partial copy aside before restoring; never delete the only old app.
     if { [ ! -e "$application_path" ] && [ ! -L "$application_path" ]; } ||
       mv -- "$application_path" "$staging_directory/failed-Imnota.app"; then
@@ -73,25 +80,153 @@ is_app_running() {
   /usr/bin/pgrep -x Imnota >/dev/null 2>&1
 }
 
+# These lifecycle helpers must stay identical in the two standalone Mac scripts.
+# Bound the AppleEvent AND its sender: a modal dialog must not outlive our deadline.
+bounded_quit_request() {
+  local deadline=$1 bundle=${2:-} sender status
+  if [[ -n "$bundle" ]]; then
+    /usr/bin/osascript -e 'on run argv
+with timeout of 5 seconds
+  tell application (item 1 of argv) to quit
+end timeout
+end run' "$bundle" &
+  else
+    /usr/bin/osascript -e 'with timeout of 5 seconds
+  tell application id "com.dytschgo.imnota" to quit
+end timeout' &
+  fi
+  sender=$!
+  while kill -0 "$sender" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      kill -TERM "$sender" 2>/dev/null || true
+      # This is our unreaped request sender, never an application process.
+      kill -KILL "$sender" 2>/dev/null || true
+      wait "$sender" 2>/dev/null || true
+      echo "Imnota quit request timed out." >&2
+      return 1
+    fi
+    /bin/sleep 1
+  done
+  wait "$sender" && return 0
+  status=$?
+  echo "Imnota quit request failed (status $status)." >&2
+  return 1
+}
+
 request_quit() {
-  /usr/bin/osascript -e 'tell application id "com.dytschgo.imnota" to quit'
+  bounded_quit_request "$1"
 }
 
 wait_for_app_to_quit() {
-  local timeout=60 deadline=$((SECONDS + 60)) next_quit_request=$((SECONDS + 10))
+  local timeout=60 deadline=$((SECONDS + 60))
   is_app_running || return 0
-  if ! request_quit && is_app_running; then
-    fail "Imnota could not be asked to quit. No installed app was changed."
+  if ! request_quit "$deadline"; then
+    echo "Imnota quit request failed or timed out. No installed app was changed." >&2
+    exit 1
   fi
   while is_app_running; do
-    (( SECONDS < deadline )) || fail "Imnota did not quit within $timeout seconds. Save your work, close it, and try again. No installed app was changed."
-    /bin/sleep 1
-    if (( SECONDS < deadline && SECONDS >= next_quit_request )) && is_app_running; then
-      if ! request_quit && is_app_running; then
-        fail "Imnota could not be asked to finish quitting. No installed app was changed."
-      fi
-      next_quit_request=$((SECONDS + 10))
+    if (( SECONDS >= deadline )); then
+      echo "Imnota did not quit within $timeout seconds. Save your work, close it, and try again. No installed app was changed." >&2
+      exit 1
     fi
+    /bin/sleep 1
+  done
+}
+
+require_process_inspection() {
+  /bin/ps -ww -o comm= -p "$$" >/dev/null || {
+    echo "Could not run /bin/ps; replacement process ownership cannot be verified." >&2
+    return 1
+  }
+}
+
+# 0 = live owned process, 1 = absent/unowned, 2 = inspection unavailable.
+replacement_pid_belongs_to_bundle() {
+  local pid=$1 bundle=$2 executable state physical_parent status
+  [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
+  if executable="$(/bin/ps -ww -o comm= -p "$pid")"; then :; else
+    status=$?
+    if (( status != 1 )); then
+      echo "Could not run /bin/ps for replacement PID $pid (status $status)." >&2
+      return 2
+    fi
+    require_process_inspection || return 2
+    return 1
+  fi
+  [[ "$executable" == "$bundle/"* ]] || return 1
+  if [[ ! -x "$executable" || -L "$executable" ]] ||
+    ! physical_parent="$(cd -- "${executable%/*}" && pwd -P)" ||
+    [[ "$physical_parent/${executable##*/}" != "$executable" ]]; then
+    echo "Could not verify physical replacement executable: $executable" >&2
+    return 2
+  fi
+  if state="$(/bin/ps -o stat= -p "$pid")"; then :; else
+    status=$?
+    if (( status != 1 )); then
+      echo "Could not run /bin/ps for replacement PID $pid (status $status)." >&2
+      return 2
+    fi
+    require_process_inspection || return 2
+    return 1
+  fi
+  [[ -n "$state" && "$state" != *Z* ]]
+}
+
+# Inspect every process, including Electron helpers, without matching by app name.
+# Keep the observed PID too, so a missing/incomplete listing cannot hide it.
+find_replacement_pids() {
+  local bundle=$1 listing pid executable status
+  replacement_pids=""
+  listing="$(/bin/ps -ww -axo pid=,comm=)" || {
+    echo "Could not run /bin/ps to enumerate replacement processes." >&2
+    return 1
+  }
+  if [[ -n "$replacement_pid" ]]; then
+    listing="$replacement_pid $bundle/Contents/MacOS/Imnota
+$listing"
+  fi
+  while read -r pid executable; do
+    [[ "$executable" == "$bundle/"* ]] || continue
+    if replacement_pid_belongs_to_bundle "$pid" "$bundle"; then
+      replacement_pids="$replacement_pids $pid"
+    else
+      status=$?
+      (( status != 2 )) || return 1
+    fi
+  done <<< "$listing"
+}
+
+quiesce_replacement() {
+  local bundle=$1 deadline=$((SECONDS + 10)) grace=$((SECONDS + 5)) pid status
+  (( replacement_launched != 0 )) || return 0
+  require_process_inspection || return 1
+  find_replacement_pids "$bundle" || return 1
+  [[ -n "$replacement_pids" ]] || return 0
+  # Only ask the exact replacement bundle to quit after confirming it owns a PID.
+  bounded_quit_request "$((SECONDS + 3))" "$bundle" || true
+  while (( SECONDS < grace )); do
+    find_replacement_pids "$bundle" || return 1
+    [[ -n "$replacement_pids" ]] || return 0
+    /bin/sleep 1
+  done
+  find_replacement_pids "$bundle" || return 1
+  for pid in $replacement_pids; do
+    # Recheck immediately before TERM; never signal a reused/unrelated PID.
+    if replacement_pid_belongs_to_bundle "$pid" "$bundle"; then
+      kill -TERM "$pid" 2>/dev/null || true
+    else
+      status=$?
+      (( status != 2 )) || return 1
+    fi
+  done
+  while :; do
+    find_replacement_pids "$bundle" || return 1
+    [[ -n "$replacement_pids" ]] || return 0
+    (( SECONDS < deadline )) || {
+      echo "The replacement could not be stopped; its bundle will be preserved." >&2
+      return 1
+    }
+    /bin/sleep 1
   done
 }
 
@@ -99,19 +234,17 @@ wait_for_app_to_quit() {
 # open only acknowledges a launch request; require the same live replacement PID
 # on two polls at least one second apart. This is process readiness, not UI health.
 replacement_pid_is_running() {
-  local pid=$1 bundle=$2 executable state physical_parent
-  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  executable="$(/usr/bin/ps -ww -o comm= -p "$pid" 2>/dev/null)" || return 1
-  [[ "$executable" == "$bundle/Contents/MacOS/Imnota" && -x "$executable" && ! -L "$executable" ]] || return 1
-  physical_parent="$(cd -- "${executable%/*}" && pwd -P)" || return 1
-  [[ "$physical_parent/Imnota" == "$executable" ]] || return 1
-  state="$(/usr/bin/ps -o stat= -p "$pid" 2>/dev/null)" || return 1
-  [[ -n "$state" && "$state" != *Z* ]]
+  local executable
+  replacement_pid_belongs_to_bundle "$1" "$2" || return $?
+  executable="$(/bin/ps -ww -o comm= -p "$1")" || return 1
+  [[ "$executable" == "$2/Contents/MacOS/Imnota" ]]
 }
 
 wait_for_replacement() {
   local bundle=$1 timeout=30 deadline=$((SECONDS + 30)) pid pids observed_pid="" observed_at=0
+  require_process_inspection || return 1
   while (( SECONDS < deadline )); do
+    require_process_inspection || return 1
     if [[ -n "$observed_pid" ]]; then
       replacement_pid_is_running "$observed_pid" "$bundle" || {
         echo "The replacement exited before reopening could be confirmed; restoring the previous version." >&2
@@ -126,6 +259,7 @@ wait_for_replacement() {
       for pid in $pids; do
         if replacement_pid_is_running "$pid" "$bundle"; then
           observed_pid=$pid
+          replacement_pid=$pid
           observed_at=$SECONDS
           break
         fi
@@ -308,6 +442,7 @@ case "$(uname -s)" in
       fail "The installed replacement is missing its executable."
     codesign --verify --deep --strict "$application_path" ||
       fail "The installed replacement failed its final signature check."
+    replacement_launched=1
     open "$application_path" || fail "The installed app could not be opened; restoring the previous version."
     wait_for_replacement "$application_path" || fail "The installed app did not successfully reopen."
     transaction_committed=1

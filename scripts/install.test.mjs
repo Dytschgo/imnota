@@ -138,13 +138,15 @@ mv() {
   if [[ "\${3:-}" == */previous-Imnota.app ]] && [ "\${FAKE_MAC_INTERRUPT:-}" = 1 ]; then kill -TERM "$$"; fi
 }
 /usr/bin/pgrep() {
-  if [ "\${FAKE_OLD_RUNNING:-0}" = 1 ]; then printf '100\n'; return 0; fi
+  if [ "\${FAKE_OLD_RUNNING:-0}" = 1 ] && [ ! -f "$FAKE_LOG.quit" ]; then printf '100\n'; return 0; fi
   [ "\${FAKE_LAUNCHED:-0}" = 1 ] || return 1
   [ "\${FAKE_MAC_READINESS:-}" != missing ] || return 1
   if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
   printf '200\n'
 }
-/usr/bin/ps() {
+/bin/ps() {
+  if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
+  if [[ "$*" == *-axo* ]]; then return 0; fi
   if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
   if [ "$2" = stat= ]; then
     if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z\n'; else printf 'S\n'; fi
@@ -155,9 +157,9 @@ mv() {
 }
 /usr/bin/osascript() {
   printf 'quit\n' >> "$FAKE_LOG"
-  if [ "\${FAKE_MAC_QUIT_REFUSED:-}" != 1 ]; then FAKE_OLD_RUNNING=0; fi
+  if [ "\${FAKE_MAC_QUIT_REFUSED:-}" != 1 ]; then touch "$FAKE_LOG.quit"; fi
 }
-/bin/sleep() { SECONDS=$((SECONDS + $1)); FAKE_POLL=$((\${FAKE_POLL:-0} + 1)); }
+/bin/sleep() { command /bin/sleep 0.01; SECONDS=$((SECONDS + $1)); FAKE_POLL=$((\${FAKE_POLL:-0} + 1)); }
 open() { FAKE_LAUNCHED=1; FAKE_POLL=0; printf 'open\n' >> "$FAKE_LOG"; [ "\${FAKE_MAC_OPEN_FAILURE:-}" != 1 ]; }
 # Never execute even the synthetic AppImage.
 nohup() { :; }

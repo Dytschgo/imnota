@@ -37,6 +37,15 @@ start_fixture_process() {
 open() {
   printf 'open\n' >> "$FIXTURE_ROOT/launches"
   if [[ "$FAULT" == open ]]; then return 1; fi
+  if [[ "$FAULT" == running-failure ]]; then
+    start_fixture_process "$1" 120 || return 1
+    local deadline=$((SECONDS + 10))
+    while [[ "$(command /bin/ps -ww -o comm= -p "$fixture_pid")" != "$1/Contents/MacOS/Imnota" ]]; do
+      (( SECONDS < deadline )) || return 1
+      /bin/sleep 0.1
+    done
+    return 1
+  fi
   if [[ "$FAULT" == hold ]]; then printf 'ready\n'; read -r release; fi
   if [[ "$FAULT" == no-process ]]; then return 0; fi
   if [[ "$FAULT" == exits ]]; then
@@ -44,11 +53,15 @@ open() {
     wait "$fixture_pid"
     return 0
   fi
+  # Verify the pristine installed signature before replacing its executable.
+  command /usr/bin/codesign --verify --deep --strict --all-architectures "$1" || return 1
+  printf 'signature-verified\n' >> "$FIXTURE_ROOT/signatures"
   start_fixture_process "$1" 120 || return 1
 }
 /usr/bin/osascript() {
+  if [[ "$FAULT" == blocked-quit ]]; then exec /bin/sleep 120; fi
   # Only the fixture PID can be asked to quit; never a personal app.
-  [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]] || return 1
+  [[ "$FAULT" == quit || "$FAULT" == refuses-quit || "$FAULT" == running-failure ]] || return 1
   printf 'quit\n' >> "$FIXTURE_ROOT/launches"
   if [[ "$FAULT" == refuses-quit ]]; then return 0; fi
   kill "$fixture_pid" || return 1
@@ -69,7 +82,17 @@ codesign() {
   command /usr/bin/codesign "$@"
 }
 /usr/bin/codesign() { codesign "$@"; }
+mv() { /bin/mv "$@"; }
 /bin/mv() {
+  if [[ "$FAULT" == running-failure && "$3" == */failed-Imnota.app ]]; then
+    local executable state
+    executable="$(command /bin/ps -ww -o comm= -p "$fixture_pid")" || executable=""
+    state="$(command /bin/ps -o stat= -p "$fixture_pid")" || state=""
+    [[ "$executable" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" || "$state" == *Z* ]] || {
+      echo 'Replacement still running at rollback rename' >&2
+      return 1
+    }
+  fi
   if [[ "$FAULT" == copy && "$2" == */extracted/Imnota.app ]]; then return 1; fi
   if [[ "$FAULT" == restore && "$2" == */.rollback-*.app ]]; then return 1; fi
   if [[ "$FAULT" == move-aside && "$3" == */failed-Imnota.app ]]; then return 1; fi
@@ -100,10 +123,10 @@ curl() {
     *) printf 'Unexpected network request: %s\n' "$url" >&2; return 1 ;;
   esac
 }
-if [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]]; then
+if [[ "$FAULT" == quit || "$FAULT" == refuses-quit || "$FAULT" == blocked-quit ]]; then
   start_fixture_process "$HOME/Applications/Imnota.app" 120
   deadline=$((SECONDS + 10))
-  while [[ "$(command /usr/bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
+  while [[ "$(command /bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
     (( SECONDS < deadline )) || exit 1
     /bin/sleep 0.1
   done
@@ -134,10 +157,10 @@ fi
 if [[ "$FAULT" == restore || "$FAULT" == move-aside ]]; then
   launch_app() { return 1; }
 fi
-if [[ "$FAULT" == quit || "$FAULT" == refuses-quit ]]; then
+if [[ "$FAULT" == quit || "$FAULT" == refuses-quit || "$FAULT" == blocked-quit ]]; then
   start_fixture_process "$HOME/Applications/Imnota.app" 120
   deadline=$((SECONDS + 10))
-  while [[ "$(command /usr/bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
+  while [[ "$(command /bin/ps -ww -o comm= -p "$fixture_pid")" != "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota" ]]; do
     (( SECONDS < deadline )) || exit 1
     /bin/sleep 0.1
   done
@@ -164,6 +187,7 @@ function fixture(t) {
   const app = path.join(parent, 'Imnota.app');
   fs.mkdirSync(parent, { recursive: true });
   fs.mkdirSync(path.join(root, 'tmp'));
+  fs.writeFileSync(path.join(root, 'launches'), '');
   const digest = (archiveDigest ??= createHash('sha256').update(fs.readFileSync(archive)).digest('hex'));
   fs.writeFileSync(
     path.join(root, 'SHA256SUMS.txt'),
@@ -218,29 +242,30 @@ function invocation(kind) {
 function stopFixtureProcesses(root) {
   const list = path.join(root, 'processes');
   if (!fs.existsSync(list)) return;
+  // Fail loudly if process inspection itself is unavailable.
+  command('/bin/ps', ['-ww', '-o', 'comm=', '-p', String(process.pid)]);
+  const owns = (pid) => {
+    const result = spawnSync('/bin/ps', ['-ww', '-o', 'comm=', '-p', pid], {
+      encoding: 'utf8',
+      timeout: 1000,
+    });
+    assert.ok(result.status === 0 || result.status === 1, `ps failed: ${result.error ?? result.stderr}`);
+    return result.status === 0 && result.stdout.trim().startsWith(root + '/');
+  };
   for (const pid of fs.readFileSync(list, 'utf8').trim().split('\n').filter(Boolean)) {
-    // Check ownership again; an exited process's PID must not target another app.
-    const executable = spawnSync('/usr/bin/ps', ['-ww', '-o', 'comm=', '-p', pid], { encoding: 'utf8' });
-    if (executable.status === 0 && executable.stdout.trim().startsWith(root + '/')) {
-      const stopped = spawnSync(
-        '/bin/bash',
-        [
-          '-c',
-          String.raw`
-kill -TERM "$2" 2>/dev/null || true
-deadline=$((SECONDS + 5))
-while [[ "$(/usr/bin/ps -ww -o comm= -p "$2" 2>/dev/null)" == "$1/"* ]]; do
-  (( SECONDS < deadline )) || exit 1
-  /bin/sleep 0.1
-done
-`,
-          'fixture-cleanup',
-          root,
-          pid,
-        ],
-        { encoding: 'utf8' },
-      );
-      assert.equal(stopped.status, 0, `Fixture process ${pid} did not exit: ${stopped.stderr}`);
+    assert.match(pid, /^[0-9]+$/);
+    assert.ok(Number.isSafeInteger(Number(pid)) && Number(pid) > 1, 'Invalid fixture PID');
+    // Check ownership immediately before signaling; never signal a reused PID.
+    if (!owns(pid)) continue;
+    try {
+      process.kill(Number(pid), 'SIGTERM');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+    const deadline = Date.now() + 5000;
+    while (owns(pid)) {
+      assert.ok(Date.now() < deadline, `Fixture process ${pid} did not exit`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
   }
 }
@@ -279,6 +304,11 @@ test(
       path.isAbsolute(archive) && fs.statSync(archive).isFile(),
       'Archive must be an existing absolute path',
     );
+    const toolSources = [installer, updater, fileURLToPath(import.meta.url)]
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n');
+    const tools = new Set(toolSources.match(/\/(?:usr\/(?:bin|libexec)|bin)\/[A-Za-z0-9_-]+/g));
+    for (const tool of tools) fs.accessSync(tool, fs.constants.X_OK);
     assert.match(command('/bin/bash', ['--version']), /version 3\.2\./, 'Exercise the system Bash 3.2');
     assert.equal(
       spawnSync('/usr/bin/pgrep', ['-x', 'Imnota']).status,
@@ -322,7 +352,11 @@ test(
           assert.deepEqual(fs.readdirSync(path.join(f.parent, '.imnota-backups.noindex')), [
             '.rollback-personal.app',
           ]);
-          command('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', f.app]);
+          assert.deepEqual(fs.readFileSync(path.join(f.root, 'signatures'), 'utf8').trim().split('\n'), [
+            'signature-verified',
+            'signature-verified',
+            'signature-verified',
+          ]);
           assert.deepEqual(fs.readFileSync(path.join(f.root, 'launches'), 'utf8').trim().split('\n'), [
             'open',
             'open',
@@ -331,7 +365,7 @@ test(
         },
       );
 
-      for (const fault of ['copy', 'verification', 'open', 'no-process', 'exits']) {
+      for (const fault of ['copy', 'verification', 'open', 'no-process', 'exits', 'running-failure']) {
         await t.test(`${kind}: ${fault} failure restores the previous bundle`, (t) => {
           const f = fixture(t);
           const inode = seedOld(f);
@@ -384,25 +418,31 @@ test(
       assert.equal(fs.readFileSync(path.join(f.app, 'personal-file'), 'utf8'), 'preserve');
     });
 
-    for (const fault of ['quit', 'refuses-quit']) {
-      await t.test(`install: running fixture ${fault} before replacement`, (t) => {
-        const f = fixture(t);
-        const inode = seedOld(f);
-        const result = run(f, 'install', fault);
-        const launches = fs.readFileSync(path.join(f.root, 'launches'), 'utf8');
-        assert.match(launches, /^quit/m);
-        if (fault === 'refuses-quit') {
-          assert.equal(result.status, 1, result.stderr);
-          assert.match(result.stderr, /did not quit within 60 seconds.*No installed app was changed/);
-          assert.doesNotMatch(launches, /^open/m);
-          restored(f, inode, result);
-        } else {
-          success(result);
-          assert.ok(launches.indexOf('quit') < launches.indexOf('open'));
-          assert.equal(fs.existsSync(path.join(f.app, 'previous-installation')), false);
-          assert.deepEqual(fs.readdirSync(f.parent), ['Imnota.app']);
-        }
-      });
+    for (const fault of ['quit', 'refuses-quit', 'blocked-quit']) {
+      for (const kind of ['install', 'update'])
+        await t.test(`${kind}: running fixture ${fault} before replacement`, (t) => {
+          const f = fixture(t);
+          const inode = seedOld(f);
+          const result = run(f, kind, fault);
+          const launches = fs.readFileSync(path.join(f.root, 'launches'), 'utf8');
+          if (fault !== 'blocked-quit') assert.match(launches, /^quit/m);
+          if (fault === 'refuses-quit' || fault === 'blocked-quit') {
+            assert.equal(result.status, 1, result.stderr);
+            assert.match(
+              result.stderr,
+              fault === 'blocked-quit'
+                ? /quit request.*timed out.*No installed app was changed/
+                : /did not quit within 60 seconds.*No installed app was changed/,
+            );
+            assert.doesNotMatch(launches, /^open/m);
+            restored(f, inode, result);
+          } else {
+            success(result);
+            assert.ok(launches.indexOf('quit') < launches.indexOf('open'));
+            assert.equal(fs.existsSync(path.join(f.app, 'previous-installation')), false);
+            assert.deepEqual(fs.readdirSync(f.parent), ['Imnota.app']);
+          }
+        });
     }
 
     for (const fault of ['collision', 'collision-symlink']) {

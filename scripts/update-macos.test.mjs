@@ -133,6 +133,8 @@ printf old > "$app_path/version"
 printf new > "$stage_dir/new/Imnota.app/version"
 verify_signature() { return 0; }
 launch_app() { return 1; }
+# No process was launched; Git Bash ps cannot emulate macOS process options.
+/bin/ps() { if [[ "$*" != *-axo* ]]; then printf shell; fi; }
 set +e
 ( trap cleanup EXIT; swap_and_launch "$stage_dir/new/Imnota.app" ) >/dev/null 2>&1
 status=$?
@@ -669,7 +671,9 @@ poll=0
   if [[ "$readiness" == exits && "$poll" -gt 0 ]]; then return 1; fi
   printf '200\\n'
 }
-/usr/bin/ps() {
+/bin/ps() {
+  if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
+  if [[ "$*" == *-axo* ]]; then return 0; fi
   if [[ "$readiness" == exits && "$poll" -gt 0 ]]; then return 1; fi
   if [[ "$2" == stat= ]]; then
     if [[ "$readiness" == zombie ]]; then printf Z; else printf S; fi

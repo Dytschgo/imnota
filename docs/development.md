@@ -123,19 +123,28 @@ A directory occupying the destination causes refusal and staging cleanup. After
 replacement, a desktop-file write failure leaves the verified binary installed;
 there is no automatic Linux rollback. macOS stages its previous app in a private
 same-volume `.imnota-install.*` directory. Both Mac paths ask a running Imnota to quit
-before replacement; the quick installer refuses without replacing anything if it
-remains running after 60 seconds. Copy, installed-bundle verification, open-command
+before replacement. Both use a single 60-second wall-clock deadline that includes
+the quit request. AppleScript has a five-second event timeout, and a separate
+watchdog terminates the request sender at the deadline; a blocked request aborts
+without replacing anything. Copy, installed-bundle verification, open-command
 or replacement-observation failure attempts to restore the previous app.
-Successful verification and bounded replacement observation commit the replacement
+Rollback first enumerates replacement-owned processes (including helpers) using
+`/bin/ps`, requests quit for that exact bundle, and waits before sending TERM only
+to PIDs whose executable is still verified inside its physical bundle. Shutdown
+has one 10-second deadline; failed process inspection or an unconfirmed stop keeps
+the failed replacement at the reported staging path while restoring the old app.
+Quit that remaining process before reopening the restored app. No unverified PID
+is signaled. Successful verification and bounded replacement observation commit the replacement
 and remove the temporary rollback. If restoration itself
 fails, staging is preserved and the recovery path is reported. Both Mac install
 paths use `.imnota-update.lock` to avoid retiring another live transaction's backup.
 An interrupted lock is left for manual removal after confirming no installer is running.
 
 Both standalone scripts use `wait_for_replacement`: for up to 30 seconds, poll
-`pgrep -x Imnota`, then `ps -o comm=` and `ps -o stat=` for each candidate. Require
+`/usr/bin/pgrep -x Imnota`, then `/bin/ps -o comm=` and `/bin/ps -o stat=` for each candidate. Require
 the executable to be exactly the installed physical bundle's `Contents/MacOS/Imnota`
-(with no executable or parent symlink), and require a non-zombie process. The same
+(with no executable or parent symlink), and require a non-zombie process.
+Process inspection failures report an explicit `/bin/ps` error. The same
 PID must satisfy those checks on two polls at least one second apart. If an observed
 PID exits before confirmation, fail immediately; if none qualifies by the deadline,
 fail and restore. The one-second sleep is a polling interval, not a success criterion.
@@ -160,6 +169,10 @@ repeat installs, legacy cleanup and unrelated-bundle preservation. Signature res
 stubbed; these fixtures do not prove real signing or Gatekeeper acceptance. The
 readiness regressions use a virtual clock, covering refused quit, successful quit,
 accepted launch without a replacement, early exit, wrong executable path and zombies.
+`node --test scripts/installer-lifecycle.test.mjs` additionally exercises both standalone
+scripts for missing/failing process inspection, blocked quit senders, graceful
+rollback shutdown, verified TERM, reused PIDs, and preservation when shutdown cannot
+be confirmed. Its process snapshots and deadlines are synthetic.
 PowerShell fixtures check the actual exception message separately from the
 no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
 temporary junction cleanup without traversing its target. The existing Linux,
@@ -173,9 +186,9 @@ The macOS package CI job runs `scripts/install.native-mac.test.mjs` after verify
 IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-$(node -p "require('./package.json').version")-universal-mac.zip" node --test scripts/install.native-mac.test.mjs
 ```
 
-The archive path must be absolute. Without that variable, or outside macOS, this suite skips. It uses system `/bin/bash` 3.2 and a temporary physical HOME, generates SHA256SUMS for the local ZIP, and sources the real installer/updater with only their download transport redirected to fixture files. There is no production environment override and no GitHub release access. `ditto`, `PlistBuddy`, `codesign`, `lipo` and filesystem commands run natively. Copy/rename failures are injected after or instead of the selected operation; installed-signature failures corrupt the replacement and use real codesign rejection. The final `open` is stubbed, including accepted launch without a process and an early-exiting process. After the real installed-signature check, this stub replaces only the disposable fixture's `Contents/MacOS/Imnota` with a copy of `/bin/sleep` and launches it from that new bundle path. Thus macOS `pgrep`, `ps`, process state/path observation and the production readiness deadline run for real, while Electron/GUI startup is simulated; the fixture's executable after launch is no longer the signed archive executable. Successful fixtures must report replacement observation. Running-app quit/refusal fixtures use the same synthetic executable in the old bundle, with `osascript` substituted to terminate only that exact fixture PID or refuse; no personal application receives a quit request. Teardown identifies fixture PIDs by their executable path and waits for their exit before the next case. GUI launch, Gatekeeper, runtime version and architecture-specific machine acceptance remain manual checks.
+The archive path must be absolute. The harness asserts that every referenced absolute macOS tool path exists and is executable, including `/bin/ps`. Without that variable, or outside macOS, this suite skips. It uses system `/bin/bash` 3.2 and a temporary physical HOME, generates SHA256SUMS for the local ZIP, and sources the real installer/updater with only their download transport redirected to fixture files. There is no production environment override and no GitHub release access. `ditto`, `PlistBuddy`, `codesign`, `lipo` and filesystem commands run natively. Copy/rename failures are injected after or instead of the selected operation; installed-signature failures corrupt the replacement and use real codesign rejection. The final `open` is stubbed, including accepted launch without a process and an early-exiting process. After the real installed-signature check, this stub replaces only the disposable fixture's `Contents/MacOS/Imnota` with a copy of `/bin/sleep` and launches it from that new bundle path. Thus macOS `pgrep`, `ps`, process state/path observation and the production readiness deadline run for real, while Electron/GUI startup is simulated; the fixture's executable after launch is no longer the signed archive executable. Successful fixtures must report replacement observation and a real installed-signature verification before each executable substitution; the mutated stand-in is never checked as a signed archive executable. Running-app quit/refusal fixtures use the same synthetic executable in the old bundle, with `osascript` substituted to terminate only that exact fixture PID, refuse, or block until the production watchdog terminates the sender; no personal application receives a quit request. Teardown validates numeric PIDs, checks their executable ownership with `/bin/ps`, sends TERM through `process.kill`, and polls for exit with argument-array `spawnSync` calls; it runs no cleanup shell. GUI launch, Gatekeeper, runtime version and architecture-specific machine acceptance remain manual checks.
 
-Assertions cover scratch/repeat installs, verified legacy and managed backup retirement, unidentified apps and unrelated look-alikes, symlinked parents/candidates/managed roots, copy/verification/open/readiness failure restoration, graceful quit and refusal before replacement, stale rollback collisions, interruption immediately after rename, failed restoration diagnostics, and overlapping live install/update processes in both directions. The harness refuses to run while an Imnota process is running so it cannot ask a personal app to quit.
+Assertions cover scratch/repeat installs, verified legacy and managed backup retirement, unidentified apps and unrelated look-alikes, symlinked parents/candidates/managed roots, copy/verification/open/readiness failure restoration, graceful quit, refusal and a blocked quit sender before replacement, rollback after a replacement has actually started, stale rollback collisions, interruption immediately after rename, failed restoration diagnostics, and overlapping live install/update processes in both directions. The harness refuses to run while an Imnota process is running so it cannot ask a personal app to quit.
 
 ### Installer and updater storage audit
 
