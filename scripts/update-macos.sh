@@ -48,7 +48,8 @@ release_lock() {
 restore_previous_version() {
   [[ "$rollback_owned" -eq 1 && -n "$backup_path" && -d "$backup_path" && ! -L "$backup_path" ]] || return 0
   if ! app_parent_status "${app_path%/*}" || ! safe_physical_directory "$backup_root" ||
-    ! safe_physical_directory "$stage_dir" || ! bundle_is_direct_child "$backup_path" "$backup_root"; then
+    ! safe_physical_directory "$stage_dir" || ! bundle_is_direct_child "$backup_path" "$backup_root" ||
+    ! existing_app_owner_is_allowed "$backup_path" "${app_path%/*}"; then
     warn "Rollback paths changed. Your previous app is preserved at: $backup_path"
     keep_staging=1
     rollback_failed=1
@@ -61,7 +62,7 @@ restore_previous_version() {
   fi
   if [[ -e "$app_path" || -L "$app_path" ]]; then
     local failed_path="$stage_dir/failed-${APP_NAME}.app"
-    if ! bundle_is_direct_child "$app_path" "${app_path%/*}" ||
+    if ! bundle_is_direct_child "$app_path" "${app_path%/*}" || ! bundle_is_user_owned "$app_path" ||
       [[ -e "$failed_path" || -L "$failed_path" ]] || ! /bin/mv -- "$app_path" "$failed_path"; then
       warn "Could not move the failed replacement aside. Your previous app is preserved at: $backup_path"
       keep_staging=1
@@ -71,7 +72,8 @@ restore_previous_version() {
   fi
 
   if ! app_parent_status "${app_path%/*}" || ! safe_physical_directory "$backup_root" ||
-    ! bundle_is_direct_child "$backup_path" "$backup_root" || [[ -e "$app_path" || -L "$app_path" ]] ||
+    ! bundle_is_direct_child "$backup_path" "$backup_root" ||
+    ! existing_app_owner_is_allowed "$backup_path" "${app_path%/*}" || [[ -e "$app_path" || -L "$app_path" ]] ||
     ! /bin/mv -- "$backup_path" "$app_path"; then
     warn "Automatic rollback failed. Your previous app is preserved at: $backup_path"
     keep_staging=1
@@ -157,7 +159,7 @@ validate_app_path() {
   app_path="${canonical_parent}/${APP_NAME}.app"
   [[ "$app_path" == "$supplied_path" ]] || die "The current app path must be canonical and cannot contain symlinked folders."
   validate_app_parent "$canonical_parent"
-  [[ -O "$app_path" ]] || die "The current Imnota app bundle is not owned by you. Reinstall Imnota as your user before updating."
+  validate_existing_app_owner "$app_path" "$canonical_parent"
 
   local current_id
   current_id="$(plist_value "$app_path/Contents/Info.plist" CFBundleIdentifier)" ||
@@ -258,37 +260,48 @@ directory_mode() {
   /usr/bin/stat -f '%OLp' "$1"
 }
 
+directory_acl_entries() {
+  /bin/ls -led "$1" | /usr/bin/awk '/^[[:space:]]*[0-9]+:/ { print }'
+}
+
 secure_private_directory() {
-  safe_physical_directory "$1" && /bin/chmod 700 "$1" &&
-    safe_physical_directory "$1" && [[ "$(directory_mode "$1")" == 700 ]]
+  local acl
+  safe_physical_directory "$1" && /bin/chmod -N "$1" && /bin/chmod 700 "$1" &&
+    safe_physical_directory "$1" && [[ "$(directory_mode "$1")" == 700 ]] &&
+    acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]]
 }
 
 # Pure policy; observations come only from app_parent_status, never CLI/env overrides.
 app_parent_policy() {
-  local parent=$1 physical=$2 owned=$3 writable=$4 searchable=$5 uid=$6 group=$7 mode=$8 admin=$9
+  local parent=$1 physical=$2 owned=$3 writable=$4 searchable=$5 uid=$6 group=$7 mode=$8 gid=$9 gids=${10} acl=${11} member admin=0
   [[ "$writable" == 1 && "$searchable" == 1 ]] || return 1
   [[ "$physical" == 1 ]] || return 2
   if [[ "$parent" != /Applications ]]; then
     [[ "$owned" == 1 ]] && return 0
     return 2
   fi
-  [[ "$parent" == /Applications && "$uid" == 0 && "$group" == admin && "$admin" == 1 && "$mode" =~ ^[0-7]{3,4}$ ]] || return 2
+  [[ "$gid" =~ ^[0-9]+$ ]] || return 2
+  for member in $gids; do
+    [[ "$member" != "$gid" ]] || admin=1
+  done
+  [[ "$uid" == 0 && "$group" == admin && "$admin" == 1 && "$mode" =~ ^[0-7]{3,4}$ ]] || return 2
   (( (8#$mode & 2) == 0 )) || return 2
+  [[ ! "$acl" =~ (^|[[:space:],])(file_inherit|directory_inherit)([[:space:],]|$) ]] || return 3
 }
 
 app_parent_status() {
-  local parent=$1 physical=0 owned=0 writable=0 searchable=0 uid="" group="" mode="" admin=0 groups metadata
+  local parent=$1 physical=0 owned=0 writable=0 searchable=0 uid="" group="" mode="" gid="" gids="" acl="" metadata
   if [[ -d "$parent" && ! -L "$parent" ]] && [[ "$(cd -- "$parent" && pwd -P)" == "$parent" ]]; then physical=1; fi
   [[ ! -O "$parent" ]] || owned=1
   [[ ! -w "$parent" ]] || writable=1
   [[ ! -x "$parent" ]] || searchable=1
   if [[ "$parent" == /Applications && "$physical" == 1 && "$writable" == 1 && "$searchable" == 1 ]]; then
-    metadata="$(/usr/bin/stat -f '%u:%Sg:%OLp' "$parent")" || return 2
-    IFS=: read -r uid group mode <<< "$metadata"
-    groups="$(/usr/bin/id -Gn)" || return 2
-    [[ " $groups " != *" admin "* ]] || admin=1
+    metadata="$(/usr/bin/stat -f '%u:%g:%Sg:%OLp' "$parent")" || return 2
+    IFS=: read -r uid gid group mode <<< "$metadata"
+    gids="$(/usr/bin/id -G)" || return 2
+    acl="$(directory_acl_entries "$parent")" || return 2
   fi
-  app_parent_policy "$parent" "$physical" "$owned" "$writable" "$searchable" "$uid" "$group" "$mode" "$admin"
+  app_parent_policy "$parent" "$physical" "$owned" "$writable" "$searchable" "$uid" "$group" "$mode" "$gid" "$gids" "$acl"
 }
 
 validate_app_parent() {
@@ -297,14 +310,37 @@ validate_app_parent() {
   case "$status" in
     0) return 0 ;;
     1) die "The app folder is not writable and searchable by you. Move Imnota to a writable folder you own, such as ~/Applications, then try again." ;;
+    3) die "The /Applications folder has inheritable access permissions. Move Imnota to ~/Applications, or ask an administrator to review that folder's ACL before updating." ;;
     *) die "The app folder does not meet the ownership requirements: it must be owned by you or be the standard /Applications folder available to an admin user. Move Imnota to ~/Applications, or ask an administrator to restore the standard /Applications ownership and permissions, then try again." ;;
   esac
 }
 
 bundle_is_direct_child() {
   local candidate=$1 parent=$2
-  [[ "${candidate%/*}" == "$parent" && -d "$candidate" && ! -L "$candidate" && -O "$candidate" ]] || return 1
+  [[ "${candidate%/*}" == "$parent" && -d "$candidate" && ! -L "$candidate" ]] || return 1
   [[ "$(cd -- "$candidate" && pwd -P)" == "$candidate" ]]
+}
+
+bundle_is_user_owned() {
+  [[ -O "$1" ]]
+}
+
+existing_app_owner_is_allowed() {
+  [[ "$2" != /Applications ]] || bundle_is_user_owned "$1"
+}
+
+validate_existing_app_owner() {
+  existing_app_owner_is_allowed "$1" "$2" ||
+    die "This Imnota copy in /Applications belongs to another account. Ask its installer to update it, or install your own copy in ~/Applications."
+}
+
+retire_backup() {
+  local candidate=$1 parent=$2 description=$3
+  if [[ "$parent" == /Applications ]] && ! bundle_is_user_owned "$candidate"; then
+    warn "Left an old Imnota rollback backup belonging to another account: $candidate"
+  elif ! /bin/rm -rf -- "$candidate"; then
+    warn "Could not retire $description Imnota rollback backup: $candidate"
+  fi
 }
 
 cleanup_legacy_backups() {
@@ -315,9 +351,7 @@ cleanup_legacy_backups() {
     is_legacy_backup_name "$name" || continue
     bundle_is_direct_child "$candidate" "$parent" || continue
     is_imnota_bundle "$candidate" || continue
-    if ! /bin/rm -rf -- "$candidate"; then
-      warn "Could not retire an old Imnota rollback backup: $candidate"
-    fi
+    retire_backup "$candidate" "$parent" "an old"
   done < <(
     /usr/bin/find "$parent" -maxdepth 1 -type d \
       \( -name "${APP_NAME} Backup *.app" -o -name "${APP_NAME}-backup-*.app" \) -print0
@@ -331,8 +365,7 @@ cleanup_rollback_backups() {
     [[ "${candidate##*/}" == "$APP_NAME.app" || "${candidate##*/}" =~ ^\.rollback-[0-9]+\.app$ ]] || continue
     bundle_is_direct_child "$candidate" "$backup_root" || continue
     is_imnota_bundle "$candidate" || continue
-    /bin/rm -rf -- "$candidate" ||
-      warn "Could not retire a stale Imnota rollback backup: $candidate"
+    retire_backup "$candidate" "${backup_root%/*}" "a stale"
   done < <(/usr/bin/find "$backup_root" -maxdepth 1 -type d \( -name '.rollback-*.app' -o -name "${APP_NAME}.app" \) -print0)
   /bin/rmdir -- "$backup_root" 2>/dev/null || true
 }
@@ -677,7 +710,8 @@ validate_extracted_bundle() {
 
 assert_original_app_unchanged() {
   local current_identity current_version
-  [[ -d "$app_path" && ! -L "$app_path" && -O "$app_path" ]] || die "The current app changed while the update was being prepared."
+  [[ -d "$app_path" && ! -L "$app_path" ]] || die "The current app changed while the update was being prepared."
+  validate_existing_app_owner "$app_path" "${app_path%/*}"
   current_identity="$(stat_identity "$app_path")" || die "The current app identity could not be checked."
   [[ "$current_identity" == "$ORIGINAL_APP_IDENTITY" ]] ||
     die "The current app was replaced while the update was being prepared. Run the update again."
@@ -691,8 +725,10 @@ swap_and_launch() {
   local replacement=$1
   validate_app_parent "${app_path%/*}"
   safe_physical_directory "$stage_dir" || die "The staging area is not a physical directory owned by you."
-  bundle_is_direct_child "$app_path" "${app_path%/*}" || die "The existing app is not a physical bundle owned by you."
-  bundle_is_direct_child "$replacement" "${replacement%/*}" || die "The replacement is not a physical bundle owned by you."
+  bundle_is_direct_child "$app_path" "${app_path%/*}" || die "The existing app is not a physical bundle."
+  validate_existing_app_owner "$app_path" "${app_path%/*}"
+  bundle_is_direct_child "$replacement" "${replacement%/*}" && bundle_is_user_owned "$replacement" ||
+    die "The replacement is not a physical bundle owned by you."
   backup_root="${app_path%/*}/.imnota-backups.noindex"
   if [[ -e "$backup_root" || -L "$backup_root" ]]; then
     [[ -d "$backup_root" && ! -L "$backup_root" ]] ||
@@ -706,12 +742,16 @@ swap_and_launch() {
   [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
   # Another local admin already controls /Applications and can race path operations.
-  # Accept that trust boundary; recheck the parent, user-owned physical bundles and
-  # private transaction directories before renames. No check makes rename atomic
-  # with validation, and symlinked paths must never be deliberately followed.
+  # Reject inheritable parent ACLs there before creating transaction directories;
+  # strip and verify directory ACLs before writing inside them. On user-owned
+  # parents an inherited ACL can expose a new directory until stripping completes;
+  # accept that creation window because the user controls their own folder's ACL.
+  # Recheck physical paths and the shared-parent app owner before renames. Checks
+  # cannot make rename atomic with validation; never deliberately follow symlinks.
   validate_app_parent "${app_path%/*}"
   safe_physical_directory "$backup_root" || die "The managed rollback folder changed before replacement."
   bundle_is_direct_child "$app_path" "${app_path%/*}" || die "The existing app changed before replacement."
+  validate_existing_app_owner "$app_path" "${app_path%/*}"
 
   # Defer catchable interruption until the rename's result and ownership are
   # recorded. A pre-existing path must never become transaction rollback state.
@@ -735,7 +775,8 @@ swap_and_launch() {
   (( interrupted == 0 )) || exit 130
   validate_app_parent "${app_path%/*}"
   safe_physical_directory "$stage_dir" || die "The staging area changed before installation."
-  bundle_is_direct_child "$replacement" "${replacement%/*}" || die "The replacement changed before installation."
+  bundle_is_direct_child "$replacement" "${replacement%/*}" && bundle_is_user_owned "$replacement" ||
+    die "The replacement changed before installation."
   [[ ! -e "$app_path" && ! -L "$app_path" ]] || die "The app path became occupied before installation."
   /bin/mv -- "$replacement" "$app_path" || die "The verified update could not be moved into place."
   verify_signature "$app_path" || die "The installed replacement failed its final signature check."
@@ -757,14 +798,14 @@ main() {
   trap 'exit 130' HUP INT TERM
 
   require_macos
-  umask 077
   local tag=$1 archive_url=$2 sums_url=$3 supplied_app_path=$4 expected_current_version=$5
   validate_release_contract "$tag" "$archive_url" "$sums_url"
   validate_app_path "$supplied_app_path" "$expected_current_version"
 
   local app_parent="${app_path%/*}"
   acquire_lock "$app_parent"
-  stage_dir="$(/usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
+  validate_app_parent "$app_parent"
+  stage_dir="$(umask 077; /usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
     die "A same-folder update staging area could not be created."
   secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you."
 
