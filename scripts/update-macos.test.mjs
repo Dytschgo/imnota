@@ -103,13 +103,28 @@ for (const [name, facts, status] of [
   });
 }
 
-test('ACL observation reads entries from ls and fails closed on inspection failure', { skip: !bash }, () => {
+test('ACL observation reads entries and propagates a nonzero ls exit', { skip: !bash }, () => {
   const result = runBash(
     `
 /bin/ls() { printf '%s\\n' 'drwxrwxr-x+ 2 root admin 64 Oct 16 /Applications' ' 0: group:everyone deny delete' ' 1: user:other allow list,file_inherit'; }
 [[ "$(directory_acl_entries /Applications)" == $' 0: group:everyone deny delete\\n 1: user:other allow list,file_inherit' ]]
 /bin/ls() { return 1; }
 if directory_acl_entries /Applications; then exit 1; fi
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('best-effort parent ACL guard accepts the silent ACL-read-failure shape', { skip: !bash }, () => {
+  const result = runBash(
+    `
+# macOS ls can succeed with only a header when its native ACL read fails.
+/bin/ls() { printf '%s\\n' 'drwxrwxr-x 2 root admin 64 Oct 16 /Applications'; }
+acl="$(directory_acl_entries /Applications)"
+[[ -z "$acl" ]]
+app_parent_policy /Applications 1 0 1 1 0 admin 775 80 '20 80' "$acl"
 `,
     [],
     { realAcl: true },
@@ -294,6 +309,91 @@ run_main() {
     "$root/Imnota.app" 1.2.3
 }
 `;
+
+for (const [directory, entry] of [
+  ['lock', 'pid'],
+  ['staging', '.unexpected'],
+  ['backup-root', 'unexpected'],
+]) {
+  test(
+    `main preserves an entry planted during ${directory} creation and aborts before use`,
+    { skip: !bash },
+    () => {
+      const result = runBash(
+        `${syntheticMainFixture}
+printf old > "$root/Imnota.app/marker"
+directory=$2
+entry=$3
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  case "$directory:$1" in
+    lock:*/.imnota-update.lock|staging:*/.imnota-update.*|backup-root:*/.imnota-backups.noindex)
+      # Model an entry created through an inherited ACL before it is stripped.
+      printf '%s' "$1" > "$root/planted-path"
+      printf planted > "$1/$entry"
+      ;;
+  esac
+  original_secure_private_directory "$1"
+}
+extract_archive() { mkdir "$2/Imnota.app"; printf new > "$2/Imnota.app/marker"; }
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+planted_path=$(cat "$root/planted-path")
+[[ "$output" == *'changed while it was being created'* && "$output" == *"Contents were preserved at: $planted_path"* ]]
+[[ "$(cat "$planted_path/$entry")" == planted ]]
+[[ "$(/usr/bin/find "$planted_path" -mindepth 1 -maxdepth 1 -print)" == "$planted_path/$entry" ]]
+[[ "$(cat "$root/Imnota.app/marker")" == old ]]
+`,
+        [directory, entry],
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    },
+  );
+}
+
+test('main preserves staging contents when the emptiness inspection fails', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then
+    printf '%s' "$1" > "$root/planted-path"
+    printf planted > "$1/.unexpected"
+  fi
+  original_secure_private_directory "$1"
+}
+/usr/bin/find() {
+  if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then return 1; fi
+  command /usr/bin/find "$@"
+}
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+planted_path=$(cat "$root/planted-path")
+[[ "$output" == *'could not be checked for unexpected contents'* && "$output" == *"Contents were preserved at: $planted_path"* ]]
+[[ "$(cat "$planted_path/.unexpected")" == planted ]]
+[[ "$(command /usr/bin/find "$planted_path" -mindepth 1 -maxdepth 1 -print)" == "$planted_path/.unexpected" ]]
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('main secures a pre-existing backup root without refusing its contents', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+mkdir "$root/.imnota-backups.noindex"
+printf retained > "$root/.imnota-backups.noindex/.unknown"
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  original_secure_private_directory "$1" || return $?
+  if [[ "$1" == */.imnota-backups.noindex ]]; then printf secured > "$root/backup-secured"; fi
+}
+extract_archive() { mkdir "$2/Imnota.app"; printf installed > "$2/Imnota.app/marker"; }
+( run_main )
+[[ "$(cat "$root/backup-secured")" == secured ]]
+[[ "$(cat "$root/.imnota-backups.noindex/.unknown")" == retained ]]
+[[ "$(cat "$root/Imnota.app/marker")" == installed ]]
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
 
 test('main preserves caller umask and secures all three directories before use', { skip: !bash }, () => {
   const result = runBash(`${syntheticMainFixture}

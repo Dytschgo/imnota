@@ -184,6 +184,7 @@ acquire_lock() {
 
   if (umask 077; /bin/mkdir -- "$lock_dir") 2>/dev/null; then
     secure_private_directory "$lock_dir" || die "The update lock is not a private physical directory owned by you."
+    require_empty_created_directory "$lock_dir" "update lock"
     lock_owned=1
     printf '%s\n' "$$" > "$lock_dir/pid" || die "The update lock could not be recorded."
     return 0
@@ -269,6 +270,17 @@ secure_private_directory() {
   safe_physical_directory "$1" && /bin/chmod -N "$1" && /bin/chmod 700 "$1" &&
     safe_physical_directory "$1" && [[ "$(directory_mode "$1")" == 700 ]] &&
     acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]]
+}
+
+require_empty_created_directory() {
+  local entry="" failure=""
+  entry="$(/usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ||
+    failure="could not be checked for unexpected contents"
+  if [[ -n "$entry" ]]; then failure="changed while it was being created"; fi
+  [[ -n "$failure" ]] || return 0
+  # Cleanup must not remove unexpected staging contents, even on inspection failure.
+  [[ "$1" != "$stage_dir" ]] || keep_staging=1
+  die "The $2 $failure. Contents were preserved at: $1"
 }
 
 # Pure policy; observations come only from app_parent_status, never CLI/env overrides.
@@ -722,7 +734,7 @@ assert_original_app_unchanged() {
 }
 
 swap_and_launch() {
-  local replacement=$1
+  local replacement=$1 backup_root_created=0
   validate_app_parent "${app_path%/*}"
   safe_physical_directory "$stage_dir" || die "The staging area is not a physical directory owned by you."
   bundle_is_direct_child "$app_path" "${app_path%/*}" || die "The existing app is not a physical bundle."
@@ -735,17 +747,24 @@ swap_and_launch() {
       die "The managed rollback folder is not a safe directory."
   else
     (umask 077; /bin/mkdir -- "$backup_root") || die "The managed rollback folder could not be created."
+    backup_root_created=1
   fi
   secure_private_directory "$backup_root" || die "The managed rollback folder is not a private physical directory owned by you."
+  # Earlier runs may have left legitimate backups; only a new root must be empty.
+  if (( backup_root_created != 0 )); then
+    require_empty_created_directory "$backup_root" "managed rollback folder"
+  fi
   local rollback_target="$backup_root/.rollback-$$.app" interrupted=0 previous_identity
   previous_identity="$(stat_identity "$app_path")" || die "The existing app identity could not be recorded before replacement."
   [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
   # Another local admin already controls /Applications and can race path operations.
-  # Reject inheritable parent ACLs there before creating transaction directories;
-  # strip and verify directory ACLs before writing inside them. On user-owned
-  # parents an inherited ACL can expose a new directory until stripping completes;
-  # accept that creation window because the user controls their own folder's ACL.
+  # Setting inheritable ACLs on root:admin /Applications requires admin rights,
+  # inside that trust boundary. Its ls ACL check is a best-effort misconfiguration
+  # guard: stock tools cannot distinguish a silent ACL-read failure from no ACL.
+  # Inherited ACLs can expose new directories until stripping completes, including
+  # under user-controlled parents. Strip ACLs, verify privacy and require new
+  # directories to be empty before use; preserve unexpected contents on refusal.
   # Recheck physical paths and the shared-parent app owner before renames. Checks
   # cannot make rename atomic with validation; never deliberately follow symlinks.
   validate_app_parent "${app_path%/*}"
@@ -808,6 +827,7 @@ main() {
   stage_dir="$(umask 077; /usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
     die "A same-folder update staging area could not be created."
   secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you."
+  require_empty_created_directory "$stage_dir" "staging area"
 
   local archive="$stage_dir/$ARCHIVE_NAME"
   local sums="$stage_dir/SHA256SUMS.txt"
