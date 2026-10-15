@@ -1,6 +1,6 @@
 import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -144,24 +144,66 @@ export async function afterFileCommit(
   if (warning) throw warning;
 }
 
-const writes = new Map<string, Promise<void>>();
-export async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
+export interface WrittenFileIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+export type CaptureWrittenFileIdentity = (identity: WrittenFileIdentity | undefined) => void;
+
+/** Missing/unsupported identity fields cannot authorize destructive cleanup. */
+export function writtenFileIdentity(stat: BigIntStats): WrittenFileIdentity | undefined {
+  const { dev, ino, size, mtimeNs, ctimeNs } = stat;
+  if (
+    !stat.isFile() ||
+    typeof dev !== 'bigint' ||
+    dev <= 0n ||
+    typeof ino !== 'bigint' ||
+    ino <= 0n ||
+    typeof size !== 'bigint' ||
+    size < 0n ||
+    typeof mtimeNs !== 'bigint' ||
+    mtimeNs <= 0n ||
+    typeof ctimeNs !== 'bigint' ||
+    ctimeNs <= 0n
+  )
+    return undefined;
+  return { dev, ino, size, mtimeNs, ctimeNs };
+}
+
+const writes = new Map<string, Promise<WrittenFileIdentity | undefined>>();
+export async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+): Promise<void> {
   const key = path.resolve(filePath);
   const operation = (writes.get(key) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => writeFileAtomically(key, content));
+    .then(() => writeFileAtomically(key, content, !!captureIdentity));
   writes.set(key, operation);
   try {
-    await operation;
+    const identity = await operation;
+    captureIdentity?.(identity);
   } finally {
     if (writes.get(key) === operation) writes.delete(key);
   }
 }
 
-async function writeFileAtomically(filePath: string, content: string | Uint8Array): Promise<void> {
+async function writeFileAtomically(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity: boolean,
+): Promise<WrittenFileIdentity | undefined> {
   await assertNoLinks(filePath);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
+  let witness: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let before: WrittenFileIdentity | undefined;
+  let identity: WrittenFileIdentity | undefined;
   try {
     // Flush the candidate before it replaces the destination. Without this a power loss
     // shortly after the rename can leave an empty or truncated file under the final name.
@@ -169,6 +211,15 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
     try {
       await handle.writeFile(content);
       await handle.sync();
+      if (captureIdentity) {
+        before = await handle
+          .stat({ bigint: true })
+          .then(writtenFileIdentity)
+          .catch(() => undefined);
+        // Keep a read-only witness across rename, while preserving the writer's
+        // close-before-rename and flush ordering (including Windows close errors).
+        if (before) witness = await fs.open(temporary, 'r').catch(() => undefined);
+      }
     } finally {
       await handle.close();
     }
@@ -190,7 +241,24 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
         await assertNoLinks(temporary);
       }
     }
+    if (before && witness) {
+      const after = await witness
+        .stat({ bigint: true })
+        .then(writtenFileIdentity)
+        .catch(() => undefined);
+      if (
+        after &&
+        before.dev === after.dev &&
+        before.ino === after.ino &&
+        before.size === after.size &&
+        before.mtimeNs === after.mtimeNs
+      )
+        identity = after;
+      // Rename can change ctime on POSIX. Capture its post-rename value from the
+      // verified candidate descriptor, never by adopting the destination's inode.
+    }
   } finally {
+    await witness?.close().catch(() => undefined);
     await fs.unlink(temporary).catch(() => undefined);
   }
   try {
@@ -206,6 +274,7 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
   } catch (error) {
     throw new CommittedWriteError(filePath, error);
   }
+  return identity;
 }
 
 /**

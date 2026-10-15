@@ -28,7 +28,6 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
     atomicWrite,
     commitFileTransaction,
     contentRevision,
-    copyFile,
     diagnostics,
     importOne,
     loadImage,
@@ -230,10 +229,11 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
             throw error;
           });
         const target = path.join(safePath, destination);
-        await create(target, () => atomicWrite(target, contents));
+        await create(target, (capture) => atomicWrite(target, contents, capture));
       }
       const imagePath = path.join(safePath, 'collections', source.collectionId, 'screenshots', name);
-      await create(imagePath, () => copyFile(screenshotPath(safePath, source), imagePath));
+      const imageSource = await fs.readFile(screenshotPath(safePath, source));
+      await create(imagePath, (capture) => atomicWrite(imagePath, imageSource, capture));
       const timestamp = nowIso();
       project.screenshots.push({
         ...source,

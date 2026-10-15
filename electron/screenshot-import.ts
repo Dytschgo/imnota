@@ -29,7 +29,7 @@ export async function importScreenshot(
   await withCreatedFileCleanup(path.join(projectPath, 'project.json'), async (create) => {
     const imagePath = path.join(projectPath, 'collections', collection.id, 'screenshots', storedFilename);
     const imageSource = await fs.readFile(sourcePath);
-    await create(imagePath, () => atomicWrite(imagePath, imageSource));
+    await create(imagePath, (capture) => atomicWrite(imagePath, imageSource, capture));
     const timestamp = nowIso();
     project.screenshots.push({
       collectionId: collection.id,
@@ -51,8 +51,8 @@ export async function importScreenshot(
     const added = project.screenshots.at(-1)!;
     const annotationPath = path.join(projectPath, added.annotationFile);
     const descriptionPath = path.join(projectPath, added.descriptionFile);
-    await create(annotationPath, () => atomicWrite(annotationPath, '[]'));
-    await create(descriptionPath, () => atomicWrite(descriptionPath, ''));
+    await create(annotationPath, (capture) => atomicWrite(annotationPath, '[]', capture));
+    await create(descriptionPath, (capture) => atomicWrite(descriptionPath, '', capture));
     project.updatedAt = timestamp;
     collection.archived = false;
     await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));

@@ -12,7 +12,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from '../src/shared/workspace-settings.js'
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
 import { emptyProject } from '../src/shared/utils.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
-import { CommittedWriteError, atomicWrite } from './files.js';
+import { CommittedWriteError, atomicWrite, writtenFileIdentity, type WrittenFileIdentity } from './files.js';
 import { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import { IpcRouter } from './ipc-router.js';
 import { registerSettingsIpc } from './ipc-settings.js';
@@ -41,6 +41,33 @@ afterEach(async () => {
   Object.defineProperty(process, 'platform', { value: platform });
   for (const close of stop.splice(0)) await close();
   await fs.rm(root, { recursive: true, force: true });
+});
+
+it('forwards descriptor evidence through the application write wrapper without changing publication', async () => {
+  const target = path.join(root, 'created.png');
+  const diagnostics = new PersistenceDiagnostics(() => path.join(root, 'diagnostics'), {
+    version: 'test',
+    platform: process.platform,
+  });
+  let identity: WrittenFileIdentity | undefined;
+  const published = vi.fn();
+  const invalidated = vi.fn();
+  await writeApplicationFile(
+    target,
+    'OURS',
+    {
+      diagnostics,
+      recordSelfWrite: published,
+      invalidate: invalidated,
+    },
+    (evidence) => {
+      identity = evidence;
+    },
+  );
+  expect(identity).toBeDefined();
+  expect(identity).toEqual(writtenFileIdentity(await fs.lstat(target, { bigint: true })));
+  expect(published).toHaveBeenCalledExactlyOnceWith(target, 'OURS');
+  expect(invalidated).toHaveBeenCalledExactlyOnceWith(target);
 });
 
 // POSIX uses real directory handles and fsync except the single injected failure.

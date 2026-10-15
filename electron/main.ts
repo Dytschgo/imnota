@@ -55,7 +55,7 @@ import {
   slugify,
 } from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
-import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
+import { assertNoLinks, CommittedWriteError, isWithin, type CaptureWrittenFileIdentity } from './files.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
@@ -335,15 +335,24 @@ function resolvedWindowBackground(
   return theme === 'light' ? '#eceef2' : '#0b0d12';
 }
 
-async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await writeApplicationFile(filePath, content, {
-    diagnostics,
-    recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
-    invalidate: (target) => {
-      projectSearchService?.invalidateForPath(target);
-      contentSearch.invalidatePath(target);
+async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+): Promise<void> {
+  await writeApplicationFile(
+    filePath,
+    content,
+    {
+      diagnostics,
+      recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
+      invalidate: (target) => {
+        projectSearchService?.invalidateForPath(target);
+        contentSearch.invalidatePath(target);
+      },
     },
-  });
+    captureIdentity,
+  );
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
