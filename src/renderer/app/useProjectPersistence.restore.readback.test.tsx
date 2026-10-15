@@ -1,33 +1,28 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { act, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { projectRevisionForSource } from '../../../electron/project-watch';
 import {
   cases,
+  ledger,
   kinds,
   platform,
-  roots,
-  stops,
+  session,
+  it,
   fault,
   fixture,
 } from './useProjectPersistence.restore.fixtures';
 
 vi.mock('electron', () => ({ app: {}, shell: { trashItem: (target: string) => fs.unlink(target) } }));
 vi.mock('../../../electron/native-clipboard', () => ({ nativeClipboard: {} }));
-afterEach(async () => {
-  vi.restoreAllMocks();
-  Object.defineProperty(process, 'platform', { value: platform });
-  for (const stop of stops.splice(0)) stop();
-  for (const root of roots.splice(0)) {
-    if (
-      path.dirname(root) !== (await fs.realpath(os.tmpdir())) ||
-      !path.basename(root).startsWith('imnota-restore-')
-    )
-      throw new Error('Unexpected fixture cleanup');
-    await fs.rm(root, { recursive: true, force: true });
+afterEach(async (context) => {
+  try {
+    await session.cleanup(context);
+  } finally {
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', { value: platform });
   }
 });
 
@@ -79,7 +74,9 @@ it.each(cases)(
     expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
     expect(f.onSnapshot).not.toHaveBeenCalled();
     await act(async () => {
-      expect(await f.hook.result.current.flushProjectMetadata()).toBe(false);
+      expect(await ledger().span('metadata flush', () => f.hook.result.current.flushProjectMetadata())).toBe(
+        false,
+      );
     });
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
     expect(f.restore).toHaveBeenCalledOnce();
@@ -132,7 +129,9 @@ it.each(cases.flatMap((entry) => (['before', 'after'] as const).map((delivery) =
     expect(f.hook.result.current.projectRevision).toBeNull();
     expect(f.onSnapshot).not.toHaveBeenCalled();
     await act(async () => {
-      expect(await f.hook.result.current.flushProjectMetadata()).toBe(false);
+      expect(await ledger().span('metadata flush', () => f.hook.result.current.flushProjectMetadata())).toBe(
+        false,
+      );
     });
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
     expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
@@ -161,7 +160,11 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
     const warning = f.hook.result.current.externalChange!.message;
     act(() => f.hook.result.current.dismissExternalChange());
     expect(f.hook.result.current.externalChange).toBeNull();
-    await act(async () => expect(await f.hook.result.current.flushProjectMetadata()).toBe(false));
+    await act(async () =>
+      expect(await ledger().span('metadata flush', () => f.hook.result.current.flushProjectMetadata())).toBe(
+        false,
+      ),
+    );
     expect(f.hook.result.current.hasPendingProjectMetadata()).toBe(true);
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
 
@@ -242,8 +245,10 @@ it.each(['text', 'drawing'] as const)(
     );
     const warning = f.hook.result.current.externalChange!.message;
     await act(async () => {
-      expect(await f.hook.result.current.flush()).toBe(true);
-      expect(await f.hook.result.current.flushProjectMetadata()).toBe(true);
+      expect(await ledger().span('flush', () => f.hook.result.current.flush())).toBe(true);
+      expect(await ledger().span('metadata flush', () => f.hook.result.current.flushProjectMetadata())).toBe(
+        true,
+      );
       const token = f.hook.result.current.beginNativeMutation();
       const created = await f.createContent(kind);
       expect(await f.hook.result.current.acceptMutationSnapshot(created, undefined, token)).toBe(true);
@@ -359,7 +364,9 @@ it.each(kinds)('retains the %s warning and pending edits when renderer readback 
   expect(f.onSnapshot).not.toHaveBeenCalled();
   expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
   await act(async () => {
-    expect(await f.hook.result.current.flushProjectMetadata()).toBe(false);
+    expect(await ledger().span('metadata flush', () => f.hook.result.current.flushProjectMetadata())).toBe(
+      false,
+    );
   });
   expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
 });
