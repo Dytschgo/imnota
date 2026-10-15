@@ -97,7 +97,15 @@ export function PromptSharingDialog({
   const progressValue = progress?.phase === 'complete' ? 100 : undefined;
   const showProgressBar =
     progress && ['planning', 'rendering', 'writing', 'complete'].includes(progress.phase);
-  const rebuildBundle = bundles.find((bundle) => bundle.state === 'error') ?? bundles[0];
+  const rebuildBundle =
+    bundles.find(
+      (bundle) =>
+        bundle.planId === error?.bundle?.planId &&
+        bundle.artifactSessionId === error.bundle.artifactSessionId &&
+        bundle.bundleNumber === error.bundle.bundleNumber,
+    ) ??
+    bundles.find((bundle) => bundle.state === 'error') ??
+    bundles[0];
   return (
     <Modal
       hidden={hidden}

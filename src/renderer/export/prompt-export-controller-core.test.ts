@@ -1,4 +1,6 @@
-import { act, renderHook } from '@testing-library/react';
+import { createElement } from 'react';
+import { act, fireEvent, render, renderHook, within } from '@testing-library/react';
+import { PromptSharingDialog } from './PromptSharingDialog';
 import { usePromptBundleController } from './usePromptBundleController';
 import { describe, expect, test, vi } from 'vitest';
 import type { Annotation, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
@@ -2281,6 +2283,69 @@ test('reports incomplete export rather than cancellation when native finish stop
   expect(native.cancellations).toEqual([]);
 });
 
+describe('bundle failure recovery targeting', () => {
+  test.each([
+    'copyFresh',
+    'copyVariant',
+    'copyMarkdown',
+    'copyImage',
+    'copyPaths',
+    'openFiles',
+    'loadPreview',
+  ] as const)('%s rebuilds the latest failed selection when an earlier card also failed', async (action) => {
+    const native = fakeBridge();
+    const missingFile = async (): Promise<WorkflowResult<never>> => ({
+      ok: false,
+      error: {
+        code: 'io-failure',
+        message: 'Missing export file',
+        retryable: true,
+        details: { errno: 'ENOENT' },
+      },
+    });
+    native.bridge.copyPromptExportBundle = missingFile;
+    native.bridge.openPromptExportBundle = missingFile;
+    native.bridge.readPromptExportBundle = missingFile;
+    const controller = engine(
+      async () => savedContext([screenshot(0), screenshot(1)]),
+      native.bridge,
+      fakeRendering({ preflightSize: { width: 100, height: 5000 } }).rendering,
+    );
+    await controller.open();
+    expect(controller.getState().cards).toHaveLength(2);
+    if (action === 'loadPreview') await controller.prepareFreshFiles();
+    for (const index of [0, 1]) {
+      const card = controller.getState().cards[index];
+      const result =
+        action === 'copyVariant'
+          ? await controller.copyVariant(card, 'files-rich')
+          : await controller[action](card);
+      expect(result).toMatchObject({ ok: false, error: { recovery: 'rebuild' } });
+    }
+    const selected = controller.getState().cards[1];
+    const onPrepareFreshFiles = vi.fn();
+    const dialog = render(
+      createElement(PromptSharingDialog, {
+        bundles: controller.getState().cards,
+        error: controller.getState().error,
+        onClose: vi.fn(),
+        onCopyFresh: vi.fn(),
+        onPrepareFreshFiles,
+      }),
+    );
+    try {
+      fireEvent.click(dialog.getByRole('button', { name: 'Rebuild bundles' }));
+      expect(onPrepareFreshFiles).toHaveBeenCalledWith({
+        planId: selected.planId,
+        artifactSessionId: selected.artifactSessionId,
+        bundleNumber: 2,
+      });
+    } finally {
+      dialog.unmount();
+    }
+  });
+});
+
 describe('Try again with the real export engine', () => {
   test.each(['too-large', 'rejected'] as const)(
     'direct Markdown-only copy reports the catalog clipboard %s failure before files exist',
@@ -2302,12 +2367,14 @@ describe('Try again with the real export engine', () => {
       }));
       Object.assign(native.bridge, { copyPromptExportMarkdown: copyMarkdown });
       const controller = engine(
-        async () => savedContext([screenshot(0)]),
+        async () => savedContext([screenshot(0), screenshot(1)]),
         native.bridge,
-        fakeRendering().rendering,
+        fakeRendering({ preflightSize: { width: 100, height: 5000 } }).rendering,
       );
       await controller.open();
-      const outcome = await controller.copyMarkdown(controller.getState().cards[0]);
+      expect(controller.getState().cards).toHaveLength(2);
+      const selected = controller.getState().cards[1];
+      const outcome = await controller.copyMarkdown(selected);
       expect(outcome).toMatchObject({
         ok: false,
         error: {
@@ -2324,6 +2391,29 @@ describe('Try again with the real export engine', () => {
       expect(legacyCopy).not.toHaveBeenCalled();
       expect(native.starts).toEqual([]);
       if (!outcome.ok) expect(outcome.error.message).not.toContain('Private Markdown');
+      const onOpenFiles = vi.fn();
+      const dialog = render(
+        createElement(PromptSharingDialog, {
+          bundles: controller.getState().cards,
+          error: controller.getState().error,
+          onClose: vi.fn(),
+          onCopyFresh: vi.fn(),
+          onPrepareFreshFiles: vi.fn(),
+          onOpenFiles,
+        }),
+      );
+      try {
+        const cards = dialog.getAllByTestId('prompt-bundle-card');
+        expect(cards[0].querySelector('.prompt-bundle-fallbacks')).toBeNull();
+        fireEvent.click(within(cards[1]).getByRole('button', { name: 'Open files' }));
+        expect(onOpenFiles).toHaveBeenCalledWith({
+          planId: selected.planId,
+          artifactSessionId: selected.artifactSessionId,
+          bundleNumber: 2,
+        });
+      } finally {
+        dialog.unmount();
+      }
     },
   );
   const failures = [

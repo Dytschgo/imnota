@@ -181,6 +181,8 @@ export interface PromptBundleControllerError {
   recovery: ExportRecovery;
   nativeCode?: WorkflowError['code'];
   technicalDetails?: string;
+  /** Selection that published this failure; only matching current cards may use it. */
+  bundle?: PromptBundleActionRequest;
 }
 
 export type PromptBundleControllerActionResult =
@@ -338,8 +340,27 @@ export class PromptBundleControllerEngine {
     });
   }
 
-  private resultError(error: unknown, run?: ActiveRun): PromptBundleControllerActionResult {
-    const detail = publicError(error);
+  private bundleRequest(selection: PromptBundleSelection | undefined): PromptBundleActionRequest | undefined {
+    const card =
+      typeof selection === 'number'
+        ? this.state.cards.find((item) => item.bundleNumber === selection)
+        : selection;
+    return (
+      card && {
+        planId: card.planId,
+        artifactSessionId: card.artifactSessionId,
+        bundleNumber: card.bundleNumber,
+      }
+    );
+  }
+
+  private resultError(
+    error: unknown,
+    run?: ActiveRun,
+    selection?: PromptBundleSelection,
+  ): PromptBundleControllerActionResult {
+    const bundle = this.bundleRequest(selection);
+    const detail = bundle ? { ...publicError(error), bundle } : publicError(error);
     if (!run || this.activeRun === run) {
       this.emit({
         error: detail,
@@ -833,6 +854,8 @@ export class PromptBundleControllerEngine {
             'These files belong to an older export session. Use the latest prompt card.',
             true,
           ),
+          undefined,
+          selection,
         );
     }
     const card = this.state.cards.find((item) => item.bundleNumber === bundleNumber);
@@ -844,11 +867,15 @@ export class PromptBundleControllerEngine {
     if (!matchesCurrentCard)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     const selectedIdentity = this.selectedBundleIdentity(selection);
     if (typeof selection !== 'number' && !selectedIdentity)
       return this.resultError(
         failure('invalid-bundle', 'Review the current prompt cards before copying.', true),
+        undefined,
+        selection,
       );
     if (
       this.pendingCleanup ||
@@ -903,7 +930,7 @@ export class PromptBundleControllerEngine {
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
       if (bundleNumber !== undefined) this.setCardState(bundleNumber, 'error', publicError(error).message);
-      return this.resultError(error, run);
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1087,7 +1114,7 @@ export class PromptBundleControllerEngine {
           reportedError = cleanupError;
         }
       }
-      return this.resultError(reportedError, run);
+      return this.resultError(reportedError, run, requestedBundleNumber);
     }
   }
 
@@ -1192,7 +1219,7 @@ export class PromptBundleControllerEngine {
       const number = selectionNumber(selection);
       if (number !== undefined)
         this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
-      return this.resultError(error, run);
+      return this.resultError(error, run, selection);
     }
   }
 
@@ -1266,7 +1293,7 @@ export class PromptBundleControllerEngine {
         this.activeRun = undefined;
         return { ok: true, bundleNumber: bundle.number };
       } catch (error) {
-        return this.resultError(error, run);
+        return this.resultError(error, run, selection);
       }
     }
     return this.nativeArtifactAction(
@@ -1345,6 +1372,7 @@ export class PromptBundleControllerEngine {
     const bundleNumber = selectionNumber(selection);
     if (bundleNumber === undefined)
       return this.resultError(failure('invalid-bundle', 'Choose a prompt to preview.', true));
+    const requestedBundle = this.bundleRequest(selection);
     const sequence = ++this.previewSequence;
     this.previewAbort?.abort();
     const controller = new AbortController();
@@ -1420,7 +1448,7 @@ export class PromptBundleControllerEngine {
     } catch (error) {
       if (sequence !== this.previewSequence || controller.signal.aborted)
         return { ok: false, error: cancelledFailure().detail };
-      const result = this.resultError(error);
+      const result = this.resultError(error, undefined, requestedBundle);
       if (!result.ok) this.previewFailure = result.error;
       return result;
     } finally {

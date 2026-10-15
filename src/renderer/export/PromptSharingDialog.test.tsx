@@ -326,6 +326,69 @@ it('shows card fallbacks without Rebuild for clipboard limits, even when the car
   expect(screen.getByRole('button', { name: 'Open files' })).toBeEnabled();
 });
 
+it('Rebuild requests the displayed failure bundle even when another card is already errored', () => {
+  const onPrepareFreshFiles = vi.fn();
+  const selected = { ...recoveryBundle, bundleNumber: 2 };
+  const error = { ...controllerExportFailure('unexpected'), bundle: selected };
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[{ ...recoveryBundle, state: 'error' }, selected]}
+      error={error}
+      onPrepareFreshFiles={onPrepareFreshFiles}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Rebuild bundles' }));
+  expect(onPrepareFreshFiles).toHaveBeenCalledWith({
+    planId: selected.planId,
+    artifactSessionId: undefined,
+    bundleNumber: 2,
+  });
+});
+
+it('a plan-level failure still rebuilds the first card', () => {
+  const onPrepareFreshFiles = vi.fn();
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[recoveryBundle, { ...recoveryBundle, bundleNumber: 2 }]}
+      error={controllerExportFailure('unexpected')}
+      onPrepareFreshFiles={onPrepareFreshFiles}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Rebuild bundles' }));
+  expect(onPrepareFreshFiles).toHaveBeenCalledWith({
+    planId: recoveryBundle.planId,
+    artifactSessionId: undefined,
+    bundleNumber: 1,
+  });
+});
+
+it.each(['replaced-plan', 'replaced-session', 'missing-bundle'] as const)(
+  'falls back to the first current card for a stale failure association (%s)',
+  (replacement) => {
+    const selected = { ...recoveryBundle, artifactSessionId: 'old-session', bundleNumber: 2 };
+    const error = { ...controllerExportFailure('unexpected'), fallbackAvailable: true, bundle: selected };
+    const onPrepareFreshFiles = vi.fn();
+    const onOpenFiles = vi.fn();
+    const props = { ...baseProps, error, onPrepareFreshFiles, onOpenFiles };
+    const { rerender } = render(<PromptSharingDialog {...props} bundles={[recoveryBundle, selected]} />);
+    const current = { ...recoveryBundle, planId: 'new-plan', artifactSessionId: 'new-session' };
+    const second = {
+      ...selected,
+      ...(replacement === 'replaced-plan' ? { planId: current.planId } : {}),
+      ...(replacement === 'replaced-session' ? { artifactSessionId: current.artifactSessionId } : {}),
+      ...(replacement === 'missing-bundle' ? { bundleNumber: 3 } : {}),
+    };
+    rerender(<PromptSharingDialog {...props} bundles={[current, second]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Rebuild bundles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open files' }));
+    const request = { planId: current.planId, artifactSessionId: current.artifactSessionId, bundleNumber: 1 };
+    expect(onPrepareFreshFiles).toHaveBeenCalledWith(request);
+    expect(onOpenFiles).toHaveBeenCalledWith(request);
+  },
+);
+
 it.each(['rebuild', 'retry'] as const)('offers %s recovery before any cards are available', (recovery) => {
   const onRecover = vi.fn();
   render(
