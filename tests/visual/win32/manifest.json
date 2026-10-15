@@ -135,55 +135,64 @@
       "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
     },
     "1280x800-onboarding-annotate.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "0766660254d184521b8d6e1aaa87488eee95b307dbda83a60cdd32aa241122bc",
+      "bytes": 116891,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 80, 352)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1280x800-onboarding-copy.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "cfb155d08fa66c547d560936559107b87f016f89eea5f3306aba05612d555776",
+      "bytes": 108085,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 80, 352)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1280x800-onboarding-intro.png": {
-      "reviewedAt": "2026-09-27",
-      "sourceRevision": "5cd026be5c4563875572d5737b63aeb4116cb233",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36337357454",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 156 (PRs 149-152, 154, 155). Intended changes: toolbar camera and delay removed so more annotation tools show directly; retired tools absent; rail Paste button removed; side navigation reduced to Projects and Recent; one Glass surfaces switch and no Desktop glass; onboarding caption removed and copy-format trigger restyled. Packaged smoke passed all 27 groups on the same run. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "f16812a6c2f70b2ccb820d22592a4cb3a48d31fa92c593b5a2e0c79eb2c4e88b",
+      "bytes": 95667,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 80, 352)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "2b7e246edb0b5c8de02b6f10d850290c9b03386671ad5c7879e447315ef39ff6",
-      "bytes": 85179,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "3067640c966fc1c8bca0d2ea11b979a3a629460d78f8a673cd9e3a99a396eb8b",
+      "bytes": 87212,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "1a8bdb495efae7f0fdadd169724504b46778ae6d91088d84818373449106f7b9",
-      "bytes": 86379,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "5348667cdd1b3e6ef300bbba5b346522faf9122f388e781249b7557507d1122b",
+      "bytes": 88445,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1440x900-settings.png": {
       "reviewedAt": "2026-09-28",
@@ -195,52 +204,52 @@
       "review": "Inspected the hosted packaged Windows capture from integration PR 162. Only the Backdrop description changed (glass off now keeps solid surfaces in every theme, PR 157). All 13 other approved captures matched. Packaged smoke passed all 27 groups. Strict tolerance unchanged."
     },
     "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "92b5fd30b5fd32c4339145c5d7a436df906fdf1130449caf15613b903d743b23",
-      "bytes": 93746,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "03e5f074dd0d8b696497c5722312c1aa05c383967bb6405a435ebf6d1cae1510",
+      "bytes": 95896,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "c4f0db5c7b88edc0e12e6d6394fa23212cc34c7403c9337b01fefb28d937bf49",
-      "bytes": 95460,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "bb6e38b92ac7c1686f6ee0d2023e5d43edabb0910116f00389beb8bf769aa3cd",
+      "bytes": 97588,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "8b02885b70ab342e589f20062357ace24ab85c284724ed43e50dfc03ab11c8a0",
-      "bytes": 106213,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "ab0b20f819ac9e4aca3964c9b3d1f9680b6d4e384499938e1e777057464c3fd5",
+      "bytes": 108309,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "18a22917b781d764a227e4c6d5747f943f84a26ef85644966180493b0b627243",
-      "bytes": 107953,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "6f223311ec5b790771adfbd3302961ccdbd8ef347b1035bf3526dfb2b195ebb0",
+      "bytes": 110054,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "3440x1440-workspace-dark.png": {
       "reviewedAt": "2026-10-03",
@@ -255,28 +264,28 @@
       "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
     },
     "3440x1440-workspace-light.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "7b4576a62bfc1ce3da7572b6ed0a67cd0b6ed338fa4ada56bf465ebdddc61ddf",
-      "bytes": 125077,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "1c40a536f5a08b27037feb6521c50487b2f157a61bf3e6cf4a3a6e006903338c",
+      "bytes": 127283,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
     "backdrop-workspace.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+      "reviewedAt": "2026-10-14",
+      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "3e41ddfbf939721dabc2d7ff0494744a4be6dc0ff46914f9255937b114ce9ab9",
-      "bytes": 365613,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
+      "sourceArtifactId": 11923694655,
+      "sha256": "7eb02a664e5f3d51f7a45be5327a6c5556c316357d48c96db4352cdb3a1f73f3",
+      "bytes": 368311,
+      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     }
   }
 }
