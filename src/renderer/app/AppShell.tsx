@@ -22,6 +22,8 @@ export interface AppShellProps {
   canGoForward?: boolean;
   onOpenPromptBundles(): void | Promise<void>;
   onToggleFavourite(): void | Promise<void>;
+  onSelectProject?(projectPath: string): void | Promise<void>;
+  onSetProjectPinned?(projectPath: string, pinned: boolean): void | Promise<void>;
   onAbout(): void;
   onDropFiles?(files: FileList): void | Promise<void>;
   navigationShortcuts?: Partial<
@@ -47,6 +49,8 @@ export function AppShell({
   canGoForward = false,
   onOpenPromptBundles,
   onToggleFavourite,
+  onSelectProject,
+  onSetProjectPinned,
   onAbout,
   onDropFiles,
   navigationShortcuts,
@@ -119,6 +123,8 @@ export function AppShell({
         onNavigate={onNavigate}
         onNewProject={onNewProject}
         onOpenCollection={onOpenCollection}
+        onSelectProject={onSelectProject}
+        onSetProjectPinned={onSetProjectPinned}
         onSetNavigationOpen={(navigationOpen) => store.set({ navigationOpen })}
         updateControl={store.navigationOpen ? renderUpdateControl?.('nav') : undefined}
       />

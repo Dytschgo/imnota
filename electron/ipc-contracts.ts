@@ -123,6 +123,7 @@ export const contracts: Record<string, z.ZodType<unknown[]>> = {
             name: z.string().trim().min(1).max(120).optional(),
             description: z.string().max(3000).optional(),
             icon: projectIcon.optional(),
+            favourite: z.boolean().optional(),
           })
           .strict()
           .refine((patch) => Object.keys(patch).length > 0, 'Enter a project change.'),

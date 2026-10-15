@@ -24,7 +24,9 @@ Choose a workspace folder, then create or open a project. Collections replace th
 
 Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
 
-The sidebar holds Projects and the Recent quick list. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+The sidebar holds Projects, your **Pinned** projects and the Recent quick list. Pin a project with the pin on any Recent row; pinned projects are the same as favourites. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+
+If a pin change to a closed project fails, Imnota shows an error even if you opened the project or navigated elsewhere while it was saving. The error gives a suggested next step without exposing private paths or system error details. It refreshes the project list to show the saved pin state; if that refresh also fails, the error tells you.
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
@@ -113,7 +115,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem. Select a card's preview to inspect the full-resolution image; it opens at **Fit width**, and **Fit image** or **Actual size** change the scale. While bundles are prepared or copied, a light travels along the top of the dialog and around the bundle in progress; a finished copy gets a brief green ring. Problems hold still: a red outline marks a failed bundle and an amber outline a file-only or warned one. With reduced motion turned on in your system settings, the colours stay and the movement stops.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
