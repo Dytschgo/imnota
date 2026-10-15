@@ -1363,8 +1363,10 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const token = await beginCurrentProjectMutation();
@@ -1589,8 +1591,10 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const nativeMutationToken = await beginCurrentProjectMutation();

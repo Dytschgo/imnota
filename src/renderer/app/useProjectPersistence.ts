@@ -48,9 +48,13 @@ interface MetadataMergeResult {
 }
 
 export interface ExternalProjectChange {
-  kind: 'external-change' | 'watch-error' | 'metadata-conflict';
+  kind: 'external-change' | 'watch-error' | 'metadata-conflict' | 'restore-warning';
   message: string;
 }
+
+type UnresolvedExternalProjectChange = ExternalProjectChange & {
+  kind: Exclude<ExternalProjectChange['kind'], 'restore-warning'>;
+};
 
 export interface ProjectPersistenceOptions {
   snapshot: ProjectSnapshot | null;
@@ -71,7 +75,10 @@ export interface ProjectPersistenceController {
   saveState: SaveState;
   error: string;
   warning: string;
+  /** Visible notice, including retained Restore warnings after a conflict is resolved. */
   externalChange: ExternalProjectChange | null;
+  /** Reads unresolved conflict/monitoring state even when its notice has been dismissed. */
+  hasUnresolvedExternalChange(): boolean;
   projectRevision: string | null;
   hasUnsavedChanges: boolean;
   hasPendingProjectMetadata(): boolean;
@@ -387,7 +394,7 @@ export function useProjectPersistence({
   const nativeMutationGeneration = useRef(0);
   const nativeMutationTokens = useRef(new Set<number>());
   const suspendedMetadataWaiters = useRef<Array<(saved: boolean) => void>>([]);
-  const pendingExternalChange = useRef<ExternalProjectChange | null>(null);
+  const pendingExternalChange = useRef<UnresolvedExternalProjectChange | null>(null);
   const pendingExternalWarnings = useRef<string[]>([]);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
@@ -405,7 +412,7 @@ export function useProjectPersistence({
 
   const publishExternalChange = useCallback(
     (
-      change: ExternalProjectChange | null,
+      change: UnresolvedExternalProjectChange | null,
       warnings: string[] = [],
       { clearWarnings = false }: { clearWarnings?: boolean } = {},
     ) => {
@@ -428,7 +435,7 @@ export function useProjectPersistence({
       // resolve a prior durability warning. A warning-only notice is display state.
       const notice =
         change ??
-        (pendingExternalWarnings.current.length ? { kind: 'watch-error' as const, message: '' } : null);
+        (pendingExternalWarnings.current.length ? { kind: 'restore-warning' as const, message: '' } : null);
       setExternalChange(
         notice
           ? {
@@ -1259,6 +1266,7 @@ export function useProjectPersistence({
     error,
     warning,
     externalChange,
+    hasUnresolvedExternalChange: () => pendingExternalChange.current !== null,
     projectRevision,
     hasUnsavedChanges: hasDirtyDrafts() || metadataDirty.current,
     hasPendingProjectMetadata: () => metadataDirty.current,

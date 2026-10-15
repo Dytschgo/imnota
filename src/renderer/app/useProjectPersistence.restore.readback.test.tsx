@@ -235,6 +235,7 @@ it.each(['text', 'drawing'] as const)(
     });
     assertFault();
     expect(f.hook.result.current.projectRevision).toBeNull();
+    expect(f.hook.result.current.hasUnresolvedExternalChange()).toBe(true);
     expect(f.hook.result.current.hasPendingProjectMetadata()).toBe(false);
     await expect(f.hook.result.current.getSavedContext(f.source.project.collections[0].id)).rejects.toThrow(
       'Reload and review',
@@ -253,6 +254,8 @@ it.each(['text', 'drawing'] as const)(
       projectRevisionForSource(await fs.readFile(f.projectFile)),
     );
     expect(f.hook.result.current.externalChange?.message).toBe(warning);
+    expect(f.hook.result.current.externalChange?.kind).toBe('restore-warning');
+    expect(f.hook.result.current.hasUnresolvedExternalChange()).toBe(false);
     await expect(f.hook.result.current.getSavedContext(f.source.project.collections[0].id)).resolves.toEqual({
       snapshot: expect.objectContaining({ project: adopted.project }),
       collectionId: f.source.project.collections[0].id,
@@ -286,7 +289,10 @@ it.each(['text', 'drawing'] as const)(
     };
     act(() => f.hook.result.current.dismissExternalChange());
     expect(f.hook.result.current.externalChange).toBeNull();
+    expect(f.hook.result.current.hasUnresolvedExternalChange()).toBe(false);
     await changeFile('Foreign after successful mutation');
+    expect(f.hook.result.current.externalChange?.kind).toBe('external-change');
+    expect(f.hook.result.current.hasUnresolvedExternalChange()).toBe(true);
     expect(f.hook.result.current.externalChange?.message).toContain(warning);
     expect(f.hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
     f.bridge.reloadWatchedProject.mockResolvedValueOnce({
