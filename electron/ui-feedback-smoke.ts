@@ -53,11 +53,8 @@ async function waitForEmptySearch(driver: NativeUiDriver): Promise<void> {
   })`);
 }
 
-async function captureCollectionPicker(
+async function openCollectionPicker(
   driver: NativeUiDriver,
-  artifactDirectory: string | undefined,
-  captures: SmokeCapture[],
-  filename: string,
   expectedStates: readonly string[] = ['Active'],
 ): Promise<void> {
   await driver.click({ selector: '[data-testid="collection-picker"]' });
@@ -89,16 +86,13 @@ async function captureCollectionPicker(
   })()`);
   if (!validPicker)
     throw new Error('Collection picker retained decorative status icons or overflowed its visible bounds.');
-  if (artifactDirectory) captures.push(await driver.capture(artifactDirectory, filename, 'none'));
-  await driver.press('Escape');
-  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
 }
 
 async function captureAgentAccess(
   driver: NativeUiDriver,
   artifactDirectory: string | undefined,
   captures: SmokeCapture[],
-  filename: string,
+  filename: 'agent-access-setup-prompt.png' | '900x800-110pct-feedback-agent-access.png',
 ): Promise<void> {
   await driver.evaluate(`(async () => {
     document.querySelector('[aria-labelledby="agent-access-title"]').scrollIntoView({block:'start'});
@@ -376,13 +370,13 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '[data-testid="workspace"]' });
   // Linux window decorations add 16px to the production minimum width.
   await driver.resize({ width: 1080, height: 800 });
-  await captureCollectionPicker(
-    driver,
-    artifactDirectory,
-    captures,
-    '1080x800-feedback-normal-collection-picker.png',
-    ['Active', 'Archived'],
-  );
+  await openCollectionPicker(driver, ['Active', 'Archived']);
+  if (artifactDirectory)
+    captures.push(
+      await driver.capture(artifactDirectory, '1080x800-feedback-normal-collection-picker.png', screenshot),
+    );
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   // Exercise trusted Chromium key input against this disposable screenshot.
   await driver.click({ selector: `[data-testid="screenshot-${screenshot.id}"]` });
   await driver.waitFor({ selector: '[data-testid="annotation-canvas"] canvas' });
@@ -431,7 +425,7 @@ export async function exerciseUiFeedback(
     }; check();
   })`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-keyboard-shortcuts.png', 'none'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-keyboard-shortcuts.png', screenshot));
   const templateProjectPath = await driver.evaluate<string>(`(async () => {
     const snapshot = await window.imnota.createProject({
       name: 'Feedback Template',
@@ -457,12 +451,13 @@ export async function exerciseUiFeedback(
     };
     check();
   })`);
-  await captureCollectionPicker(
-    driver,
-    artifactDirectory,
-    captures,
-    '1080x800-feedback-template-collection-picker.png',
-  );
+  await openCollectionPicker(driver);
+  if (artifactDirectory)
+    captures.push(
+      await driver.capture(artifactDirectory, '1080x800-feedback-template-collection-picker.png', 'none'),
+    );
+  await driver.press('Escape');
+  await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' }, { absent: true });
   const templateProjectExists = await driver.evaluate<boolean>(
     `(async () => (await window.imnota.loadProject(${JSON.stringify(templateProjectPath)})).project.name === 'Feedback Template')()`,
   );
@@ -550,7 +545,7 @@ export async function exerciseUiFeedback(
     };check();
   })`);
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png', 'none'));
+    captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png', screenshot));
 
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });

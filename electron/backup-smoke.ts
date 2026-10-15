@@ -271,7 +271,7 @@ export async function exerciseLocalHistory(
   const reopened = await driver.evaluate<string>('document.querySelector("[aria-label=Description]").value');
   if (reopened !== 'Edited after restoring') throw new Error('The post-restore edit was lost on reopen.');
   if (artifactDirectory)
-    captures.push(await driver.capture(artifactDirectory, 'next-in-place-restored.png', 'none'));
+    captures.push(await driver.capture(artifactDirectory, 'next-in-place-restored.png', shot));
   return captures;
 }
 
