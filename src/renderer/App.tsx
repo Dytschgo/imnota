@@ -175,6 +175,7 @@ export default function App() {
   const copiedAnnotation = useRef<Annotation | null>(null);
   const dismissedWhatsNewVersion = useRef<string | null>(null);
   const navigationIdentity = useRef(0);
+  const pendingProjectPin = useRef<Promise<void> | null>(null);
   const [searchTarget, setSearchTarget] = useState<{
     result: ContentSearchResult;
     identity: number;
@@ -1363,8 +1364,11 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const token = await beginCurrentProjectMutation();
@@ -1589,8 +1593,11 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const nativeMutationToken = await beginCurrentProjectMutation();
@@ -1757,6 +1764,72 @@ export default function App() {
       setDialogBusy(false);
     }
   }
+  async function setProjectPinned(projectPath: string, pinned: boolean) {
+    const previous = pendingProjectPin.current;
+    const operation = (async () => {
+      // Resolve the destination after earlier pin mutations have reconciled their snapshot.
+      if (previous) await previous;
+      const open = useAppStore.getState().snapshot;
+      if (open?.projectPath === projectPath) {
+        if (open.project.favourite !== pinned)
+          queueProjectSave({ ...open.project, favourite: pinned, updatedAt: nowIso() });
+        return;
+      }
+      const identity = ++navigationIdentity.current;
+      let nativeMutationToken: number | null = null;
+      try {
+        if (!(await flushAll())) {
+          if (identity === navigationIdentity.current)
+            setError('The project pin change was cancelled so your unsaved work stays open.');
+          return;
+        }
+        if (identity !== navigationIdentity.current) return;
+        nativeMutationToken = persistence.beginNativeMutation();
+        const loaded = await window.imnota.loadProject(projectPath);
+        if (identity !== navigationIdentity.current) return;
+        if (!loaded.projectRevision) throw new Error('Project revision is unavailable.');
+        const result = await window.imnota.updateProjectMetadata({
+          projectPath,
+          expectedRevision: loaded.projectRevision,
+          patch: { favourite: pinned },
+        });
+        // Opening this project can supersede the original navigation identity while IPC is pending.
+        // Reconcile before releasing queued editor saves, even when that navigation won.
+        if (useAppStore.getState().snapshot?.projectPath === projectPath) {
+          const completionIdentity = navigationIdentity.current;
+          const adopted = await persistence.adoptAuthoritativeSnapshot(
+            result,
+            nativeMutationToken,
+            () =>
+              completionIdentity === navigationIdentity.current &&
+              useAppStore.getState().snapshot?.projectPath === projectPath,
+          );
+          nativeMutationToken = null;
+          if (!adopted) return;
+        } else {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+        }
+        await refreshProjects();
+      } catch (reason) {
+        const message = projectPinErrorMessage(reason, pinned);
+        setError(message);
+        try {
+          await refreshProjects();
+        } catch {
+          setError(`${message} The project list could not be refreshed.`);
+        }
+      } finally {
+        if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
+      }
+    })();
+    pendingProjectPin.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (pendingProjectPin.current === operation) pendingProjectPin.current = null;
+    }
+  }
   async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
     const identity = ++navigationIdentity.current;
     if (!(await flushAll())) {
@@ -1861,12 +1934,12 @@ export default function App() {
     void navigate('settings');
   }
   async function toggleFavourite() {
-    if (!store.snapshot) return;
-    queueProjectSave({
-      ...store.snapshot.project,
-      favourite: !store.snapshot.project.favourite,
-      updatedAt: nowIso(),
-    });
+    const projectPath = useAppStore.getState().snapshot?.projectPath;
+    if (!projectPath) return;
+    if (pendingProjectPin.current) await pendingProjectPin.current;
+    const open = useAppStore.getState().snapshot;
+    if (open?.projectPath !== projectPath) return;
+    await setProjectPinned(projectPath, !open.project.favourite);
   }
   async function openProjectSearch() {
     if (!store.settings.workspacePath) {
@@ -2111,6 +2184,8 @@ export default function App() {
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
+        onSelectProject={openProject}
+        onSetProjectPinned={setProjectPinned}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
         onDropFiles={(files) =>
@@ -2609,6 +2684,30 @@ export default function App() {
       )}
     </>
   );
+}
+
+function projectPinErrorMessage(reason: unknown, pinned: boolean): string {
+  const message =
+    reason instanceof Error
+      ? reason.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+      : '';
+  const code =
+    reason instanceof Error && 'code' in reason && typeof reason.code === 'string'
+      ? reason.code.toUpperCase()
+      : /^([A-Z][A-Z0-9_]*):/i.exec(message)?.[1].toUpperCase();
+  // Classify IPC-wrapped failures, but never display their paths or system details.
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS')
+    return "The project folder can't be written. Check its permissions.";
+  if (code === 'ENOSPC') return 'The disk is full. Free up space and try again.';
+  if (
+    /^(?:revision[- ]conflict\b|(?:the )?project changed (?:before this update|while the save was prepared)\.)/i.test(
+      message,
+    )
+  )
+    return 'The project changed. Try again.';
+  if (code === 'ENOENT' || /^The selected project folder is unavailable\./i.test(message))
+    return 'The project is no longer available.';
+  return `The project could not be ${pinned ? 'pinned' : 'unpinned'}. Try again.`;
 }
 
 function isMissingNavigationTargetError(reason: unknown): boolean {

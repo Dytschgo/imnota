@@ -778,6 +778,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
       [{ projectPath: anyPath, expectedRevision: revision, patch: { id: 'project_other' } }],
     ],
     [
+      'projects:update-metadata',
+      'a non-boolean favourite',
+      [{ projectPath: anyPath, expectedRevision: revision, patch: { favourite: 'yes' } }],
+    ],
+    [
       'projects:set-archived',
       'a non-boolean flag',
       [{ projectPath: anyPath, expectedRevision: revision, archived: 'yes' }],

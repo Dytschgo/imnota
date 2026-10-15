@@ -69,7 +69,7 @@ Keep local cleanup inventories and preserved evidence outside tracked source, fo
 
 Build first, then run the native workflow against disposable fixtures:
 
-Native locator waits observe renderer DOM and focus changes, with animation frames covering layout-only changes, under one unchanged operation deadline that includes renderer execution. DOM/focus observation also works when an unpresented window does not receive frames. They do not repeat failed evaluations. Artifact capture separately waits for annotation-canvas loading state to clear and a decoded Konva canvas to exist before the existing font/image decoding and compositor pixel-stability checks. An image-load failure or stalled renderer fails verification with the locator or artifact name; stable loading-placeholder pixels cannot satisfy capture readiness.
+Native locator waits observe renderer DOM and focus changes, with animation frames covering layout-only changes, under one unchanged operation deadline that includes renderer execution. DOM/focus observation also works when an unpresented window does not receive frames. They do not repeat failed evaluations. Artifact capture separately waits for annotation-canvas loading state to clear and a decoded Konva canvas to exist before the existing font/image decoding and compositor pixel-stability checks. Capture keeps observing the selected screenshot and canvas stage while comparing frames. A loading state, missing canvas, changed screenshot/dimensions, or replacement stage discards the compared frames and waits for the original screenshot before starting a new sequence under the same capture deadline. Capture accepts an explicit screenshot expectation (identity and dimensions) or an `annotation-canvas` requirement that waits even when the canvas is initially absent; the latter supports onboarding without a rail entry and post-crop dimensions. Calls without either retain annotation-canvas inference, so selected text and drawing items keep their font/image and pixel-stability checks without requiring an annotation canvas. Every capture in `smoke-workflow.ts` must declare a requirement or appear in the tested canvas-free allowlist. Captures that settle after readiness restarts record the restart count and reasons in the report artifact; capture timeout errors include the same diagnostics. An image-load failure or stalled renderer fails verification with the locator or artifact name; stable loading-placeholder pixels cannot satisfy capture readiness.
 
 ```powershell
 corepack pnpm build
@@ -121,8 +121,49 @@ Linux replacement uses GNU `mv -fT` to replace the destination entry without
 following a file or directory symlink; a hardlink peer keeps its previous bytes.
 A directory occupying the destination causes refusal and staging cleanup. After
 replacement, a desktop-file write failure leaves the verified binary installed;
-there is no automatic Linux rollback. macOS retains its existing backup behavior
-if copying a verified bundle fails.
+there is no automatic Linux rollback. The macOS quick installer keeps its previous
+app at `.imnota-install.*/previous-Imnota.app` inside the installation folder.
+The Terminal updater instead keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`
+inside that folder, with separate `.imnota-update.*` staging. Both Mac paths ask a running Imnota to quit
+before replacement. Both use a single 60-second wall-clock deadline that includes
+the quit request. AppleScript has a five-second event timeout, and a separate
+watchdog signals the request sender only when one process snapshot confirms a
+live `/usr/bin/osascript` child of the installer, separately before TERM and KILL.
+Bash may reap that child before explicit `wait`, so its recorded PID alone is not
+ownership. An unverified sender is left alone; a blocked request aborts
+without replacing anything. Copy, installed-bundle verification, open-command
+or replacement-observation failure attempts to restore the previous app.
+Rollback first enumerates replacement-owned processes (including helpers) using
+`/bin/ps`, requests quit for that exact bundle, and waits before sending TERM only
+to PIDs whose executable and live state are verified together in one snapshot
+inside its physical bundle. macOS has no pidfds: a residual kernel-level race
+between the final check and signal remains; keep that window minimal. Shutdown
+has one 10-second deadline; failed process inspection or an unconfirmed stop keeps
+the failed replacement at the reported staging path while restoring the old app.
+Quit that remaining process before reopening the restored app. No unverified PID
+is signaled. Successful verification and bounded replacement observation commit the replacement
+and remove the temporary rollback. If restoration itself fails, the previous app
+is preserved at its rollback location above and the actual path is reported.
+If replacement shutdown cannot be confirmed, the quick installer preserves it at
+`.imnota-install.*/failed-Imnota.app`; the updater uses
+`.imnota-update.*/failed-Imnota.app`. If moving it aside fails, it remains at
+`Imnota.app` and the previous app stays at its reported rollback location. All
+these paths are relative to the verified physical installation folder. Both Mac install
+paths use `.imnota-update.lock` to avoid retiring another live transaction's backup.
+An interrupted lock is left for manual removal after confirming no installer is running.
+
+Both standalone scripts use `wait_for_replacement`: for up to 30 seconds, poll
+`/usr/bin/pgrep -x Imnota`, then a combined `/bin/ps -ww -o stat=,comm=`
+snapshot for each candidate, with an exact main-executable check. Require
+the executable to be exactly the installed physical bundle's `Contents/MacOS/Imnota`
+(with no executable or parent symlink), and require a non-zombie process.
+Process inspection failures report an explicit `/bin/ps` error. The same
+PID must satisfy those checks on two polls at least one second apart. If an observed
+PID exits before confirmation, fail immediately; if none qualifies by the deadline,
+fail and restore. The one-second sleep is a polling interval, not a success criterion.
+This establishes replacement-process readiness, not renderer/UI health or a runtime
+version handshake. The updater separately validates the installed release version;
+`ps` does not report the version running inside Electron.
 
 Run `node --test scripts/install.test.mjs` for synthetic releases, hostile metadata
 and download failures. The suite executes the real scripts with network and app
@@ -135,12 +176,53 @@ Linux replacement, symlink and hardlink fixtures run only on native Linux, where
 GNU replacement semantics apply; they are excluded on BSD macOS and Git Bash.
 Native macOS fixtures use `ditto` and `PlistBuddy` with generated bundles to check
 successful installation, extraction/executable/signature/version refusal, and
-backup preservation after copy failure. Signature results and app launches are
-stubbed; these fixtures do not prove real signing or Gatekeeper acceptance.
+automatic restoration after copy failure. Portable synthetic bundle fixtures also
+cover final signature/executable failure, interrupted replacement, failed restoration,
+repeat installs, legacy cleanup and unrelated-bundle preservation. Signature results, process observations and app launches are
+stubbed; these fixtures do not prove real signing or Gatekeeper acceptance. The
+readiness regressions use a virtual clock, covering refused quit, successful quit,
+accepted launch without a replacement, early exit, wrong executable path and zombies.
+`node --test scripts/installer-lifecycle.test.mjs` additionally exercises both standalone
+scripts for missing/failing process inspection, blocked quit senders, graceful
+rollback shutdown, verified TERM, reused PIDs, and preservation when shutdown cannot
+be confirmed. Its process snapshots and deadlines are synthetic.
 PowerShell fixtures check the actual exception message separately from the
 no-launch log, avoiding formatter-dependent wrapping. Windows also exercises
 temporary junction cleanup without traversing its target. The existing Linux,
 macOS and Windows CI jobs run these native boundaries; no workflow gate is removed.
+
+### Native macOS installer transactions
+
+The macOS package CI job runs `scripts/install.native-mac.test.mjs` after verifying the built archive and before uploading artifacts. To repeat locally, close Imnota first, then run:
+
+```bash
+IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-$(node -p "require('./package.json').version")-universal-mac.zip" node --test scripts/install.native-mac.test.mjs
+```
+
+The archive path must be absolute. The harness asserts that every referenced absolute macOS tool path exists and is executable, including `/bin/ps`. Without that variable, or outside macOS, this suite skips. It uses system `/bin/bash` 3.2 and a temporary physical HOME, generates SHA256SUMS for the local ZIP, and sources the real installer/updater with only their download transport redirected to fixture files. There is no production environment override and no GitHub release access. `ditto`, `PlistBuddy`, `codesign`, `lipo` and filesystem commands run natively. Copy/rename failures are injected after or instead of the selected operation; installed-signature failures corrupt the replacement and use real codesign rejection. The final `open` is stubbed, including accepted launch without a process and an early-exiting process. After the real installed-signature check, this stub replaces only the disposable fixture's `Contents/MacOS/Imnota` with a copy of `/bin/sleep` and launches it from that new bundle path. Thus macOS `pgrep`, `ps`, process state/path observation and the production readiness deadline run for real, while Electron/GUI startup is simulated; the fixture's executable after launch is no longer the signed archive executable. Successful fixtures must report replacement observation and a real installed-signature verification before each executable substitution; the mutated stand-in is never checked as a signed archive executable. Running-app quit/refusal fixtures use the same synthetic executable in the old bundle, with `osascript` substituted to terminate only that exact fixture PID, refuse, or block until the production watchdog terminates the sender; no personal application receives a quit request. Teardown validates numeric PIDs, checks their executable ownership with `/bin/ps`, sends TERM through `process.kill`, and polls for exit with argument-array `spawnSync` calls; it runs no cleanup shell. GUI launch, Gatekeeper, runtime version and architecture-specific machine acceptance remain manual checks.
+
+Assertions cover scratch/repeat installs, verified legacy and managed backup retirement, unidentified apps and unrelated look-alikes, symlinked parents/candidates/managed roots, copy/verification/open/readiness failure restoration, graceful quit, refusal and a blocked quit sender before replacement, rollback after a replacement has actually started, stale rollback collisions, interruption immediately after rename, failed restoration diagnostics, and overlapping live install/update processes in both directions. The harness refuses to run while an Imnota process is running so it cannot ask a personal app to quit.
+
+### Installer and updater storage audit
+
+Source audit against `electron-updater` 6.8.9 and `electron-builder` 26.15.3; packaged outcomes still require the native walkthrough below. `package.json` publishes to GitHub with macOS DMG/zip, Windows NSIS/portable and Linux AppImage/deb targets. `electron/main.ts:configureAutoUpdates` disables automatic downloads and installation on quit. macOS uses the bundled Terminal helper, Windows portable and Linux non-AppImage builds use manual downloads; only Windows NSIS and Linux AppImage use `prepareNativeUpdate` and electron-updater installation.
+
+| OS/path                        | Before this change, after success                                                                                                   | After this change, after success                                                                                          | Source evidence                                                                                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS quick installer          | One new timestamped `~/Applications/Imnota-backup-*.app` per replacement; download temp removed                                     | Installed app only, with transaction staging removed; identified legacy and managed backups retired                       | `scripts/install.sh` Darwin branch, `cleanup`, `cleanup_previous_backups`                                                                                               |
+| macOS Terminal update          | One hidden managed rollback retained; legacy backups retired                                                                        | Rollback bundles removed after final signature check and replacement-process observation; empty managed directory removed | `scripts/update-macos.sh:swap_and_launch`, `cleanup_rollback_backups`, `cleanup_legacy_backups`, `cleanup`                                                              |
+| Windows quick installer / NSIS | Download temp removed; NSIS stores one reusable `installer.exe` in `%LOCALAPPDATA%/imnota-updater`                                  | Unchanged; no timestamped app backup history                                                                              | `scripts/install.ps1` finally block; builder `templates/nsis/include/installer.nsh:installApplicationFiles` and `APP_INSTALLER_STORE_FILE`                              |
+| Windows native update          | That reusable installer plus `pending/<installer>`, `pending/update-info.json` and differential `current.blockmap` files can remain | Unchanged; intentional cache, not one app copy per version                                                                | updater `NsisUpdater.doInstall`, `AppUpdater.executeDownload`; `DownloadedUpdateHelper.getValidCachedUpdateFile` empties pending when the next release checksum differs |
+| Linux quick installer          | One `~/.local/bin/imnota`, a desktop entry; download and same-folder staging removed                                                | Unchanged; no app backup history                                                                                          | `scripts/install.sh` Linux branch (`mv -fT`) and `cleanup`                                                                                                              |
+| Linux native AppImage update   | Old AppImage unlinked, downloaded file moved into place; pending metadata can remain                                                | Unchanged; no app backup history                                                                                          | updater `AppImageUpdater.doInstall`; `DownloadedUpdateHelper.getValidCachedUpdateFile`                                                                                  |
+
+Updater `AppAdapter.getAppCacheDir`, `AppUpdater.getOrCreateDownloadHelper`, and builder `appInfo.updaterCacheDirName` select `%LOCALAPPDATA%/imnota-updater`, `~/Library/Caches/imnota-updater`, or `${XDG_CACHE_HOME:-~/.cache}/imnota-updater`. The current macOS path does not call `MacUpdater` or create its `update.zip` cache. Legacy native-Mac caches are not inspected or deleted. Windows cache storage uses fixed names plus one pending generation, rather than accumulating versioned app backups; retain it for differential download/retry behavior. Failed cleanup, interrupted downloads, or older versions may leave extra files; their installed state is unverified here.
+
+Separately, `electron/terminal-update.ts:prepareTerminalUpdate` leaves small helper/launcher directories named `imnota-update-*` under `app.getPath('temp')` when preparing a command. These are not app bundles or rollback storage and remain outside this app-backup fix. Manually downloaded installers/DMGs, package-manager caches, project snapshots and OS-managed caches also have separate ownership.
+
+Mac backup retirement requires both a recognized name and `CFBundleIdentifier=com.dytschgo.imnota`. Symlink bundles/managed roots, unknown names, unreadable identifiers and other bundle identifiers are preserved. An occupied managed root is removed only if empty. Cleanup is best effort after commit; it cannot trigger rollback of the verified app. Before commit, failures leave existing legacy backups untouched and attempt to restore only the transaction's previous app. A failed restore preserves that app at the reported path; it may require a manual move back before use. SIGKILL/power loss cannot run traps: preserve any transaction directory and recover its previous bundle before removing the stale lock.
+
+Before shipping, obtain independent review and run native walkthroughs: repeat the quick Mac installation and Terminal update with a real packaged candidate, verify signatures/launch, inject copy/final-verification/launch failures, and inspect the installation folder and unrelated look-alikes. Run the packaged-zip updater test and the native transaction harness on macOS. On Windows repeat NSIS installation/native update and inspect `%LOCALAPPDATA%/imnota-updater`; on Linux repeat quick/AppImage updates and inspect the app directory and updater cache. Source inspection and Git Bash fixtures do not establish those packaged postconditions.
 
 ## Recently deleted integration verification
 

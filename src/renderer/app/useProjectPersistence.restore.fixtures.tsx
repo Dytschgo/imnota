@@ -55,7 +55,10 @@ export function fault(target: string, code: string) {
   return () => expect(fired).toBe(true);
 }
 
-export async function fixture(kind: 'screenshot' | 'text' | 'drawing') {
+export async function fixture(
+  kind: 'screenshot' | 'text' | 'drawing',
+  options: { holdWatchEvents?: boolean } = {},
+) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-restore-')));
   roots.push(root);
   const projectPath = path.join(root, 'project');
@@ -177,7 +180,12 @@ export async function fixture(kind: 'screenshot' | 'text' | 'drawing') {
   );
   const source = await snapshot();
   const events: ProjectWatchEvent[] = [];
+  const heldEvents: ProjectWatchEvent[] = [];
   const listeners = new Set<(event: ProjectWatchEvent) => void>();
+  // Hold only renderer delivery: native watching, revision reads and writes stay real.
+  const deliverWatchEvents = () => {
+    for (const event of heldEvents.splice(0)) listeners.forEach((listener) => listener(event));
+  };
   const watchedReads = vi.fn(async (target: string) => fs.readFile(target).catch(() => null));
   manager = new ProjectWatchManager({
     readWatchedFile: watchedReads,
@@ -188,7 +196,8 @@ export async function fixture(kind: 'screenshot' | 'text' | 'drawing') {
     },
     emit: (event) => {
       events.push(event);
-      listeners.forEach((listener) => listener(event));
+      if (options.holdWatchEvents) heldEvents.push(event);
+      else listeners.forEach((listener) => listener(event));
     },
   });
   const watch = manager;
@@ -246,6 +255,7 @@ export async function fixture(kind: 'screenshot' | 'text' | 'drawing') {
     itemId,
     journal,
     events,
+    deliverWatchEvents,
     published,
     invalidated,
     bridge,
@@ -253,6 +263,8 @@ export async function fixture(kind: 'screenshot' | 'text' | 'drawing') {
     onSnapshot,
     selected,
     restore,
+    createContent: (contentKind: 'text' | 'drawing') =>
+      service.create({ projectPath, collectionId: shot.collectionId, kind: contentKind }),
   };
 }
 
