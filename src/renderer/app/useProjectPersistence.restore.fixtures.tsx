@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { renderHook, waitFor } from '@testing-library/react';
-import { expect, vi } from 'vitest';
+import { beforeEach, expect, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import type { ImnotaBridge, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type { WorkflowBridge, ProjectWatchEvent } from '../../shared/workflow-bridge';
@@ -17,50 +17,38 @@ import { WorkspaceContentSearch } from '../../../electron/content-search';
 import { workflowOutcome } from '../../../electron/workflow-errors';
 import type { IpcHost } from '../../../electron/main';
 import type { IpcRouter } from '../../../electron/ipc-router';
+import {
+  persistenceSession,
+  persistenceFault,
+  trackWatch,
+  type PersistenceLedger,
+} from '../../test/persistence-ledger';
 import { useProjectPersistence } from './useProjectPersistence';
 
 export const platform = process.platform;
-const realOpen = fs.open.bind(fs);
-const realRename = fs.rename.bind(fs);
-export const roots: string[] = [];
-export const stops: Array<() => void> = [];
+export const session = persistenceSession();
+export const { ledger, it } = session;
+beforeEach(session.start);
 // Real candidate writes, fsync and rename. Windows substitutes only POSIX directory handles.
 export function fault(target: string, code: string) {
-  if (platform === 'win32') Object.defineProperty(process, 'platform', { value: 'linux' });
-  let renamed = false;
-  let fired = false;
-  vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
-    await realRename(...args);
-    if (String(args[1]) === target) renamed = true;
-  });
-  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
-    const name = String(args[0]);
-    const directory = args[1] === 'r' && (await fs.stat(name)).isDirectory();
-    const handle =
-      directory && platform === 'win32'
-        ? ({ sync: async () => undefined, close: async () => undefined } as Awaited<
-            ReturnType<typeof fs.open>
-          >)
-        : await realOpen(...args);
-    const sync = handle.sync.bind(handle);
-    handle.sync = async () => {
-      if (!fired && renamed && directory && name === path.dirname(target)) {
-        fired = true;
-        throw Object.assign(new Error(code), { code });
-      }
-      await sync();
-    };
-    return handle;
-  });
-  return () => expect(fired).toBe(true);
+  return persistenceFault(ledger(), target, 'directory', code, { requireDirectory: true });
 }
 
-export async function fixture(
+export function fixture(
   kind: 'screenshot' | 'text' | 'drawing',
   options: { holdWatchEvents?: boolean } = {},
 ) {
+  const owner = ledger();
+  return owner.span('fixture construction', () => buildFixture(owner, kind, options));
+}
+
+async function buildFixture(
+  ledger: PersistenceLedger,
+  kind: 'screenshot' | 'text' | 'drawing',
+  options: { holdWatchEvents?: boolean },
+) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-restore-')));
-  roots.push(root);
+  ledger.own(root, 'imnota-restore-');
   const projectPath = path.join(root, 'project');
   await fs.mkdir(projectPath);
   const projectFile = path.join(projectPath, 'project.json');
@@ -84,15 +72,17 @@ export async function fixture(
   };
   initial.screenshots = [shot];
   const imagePath = `collections/${shot.collectionId}/screenshots/${shot.storedFilename}`;
-  for (const [file, source] of [
-    [imagePath, 'synthetic PNG bytes'],
-    [shot.annotationFile, '[]'],
-    [shot.descriptionFile, shot.description],
-  ]) {
-    await fs.mkdir(path.dirname(path.join(projectPath, file)), { recursive: true });
-    await fs.writeFile(path.join(projectPath, file), source);
-  }
-  await fs.writeFile(projectFile, JSON.stringify(initial, null, 2));
+  await ledger.span('initial files creation', async () => {
+    for (const [file, source] of [
+      [imagePath, 'synthetic PNG bytes'],
+      [shot.annotationFile, '[]'],
+      [shot.descriptionFile, shot.description],
+    ]) {
+      await fs.mkdir(path.dirname(path.join(projectPath, file)), { recursive: true });
+      await fs.writeFile(path.join(projectPath, file), source);
+    }
+    await fs.writeFile(projectFile, JSON.stringify(initial, null, 2));
+  });
   const readProject = async (): Promise<ProjectData> => JSON.parse(await fs.readFile(projectFile, 'utf8'));
   const snapshot = vi.fn(async (): Promise<ProjectSnapshot> => {
     const source = await fs.readFile(projectFile);
@@ -114,12 +104,15 @@ export async function fixture(
     version: 'test',
     platform,
   });
+  ledger.diagnostics(diagnostics);
   const write = vi.fn((file: string, source: string | Uint8Array) =>
-    writeApplicationFile(file, source, {
-      diagnostics,
-      recordSelfWrite: published,
-      invalidate: invalidated,
-    }),
+    ledger.span('write', () =>
+      writeApplicationFile(file, source, {
+        diagnostics,
+        recordSelfWrite: published,
+        invalidate: invalidated,
+      }),
+    ),
   );
   const operations = {
     write,
@@ -139,7 +132,9 @@ export async function fixture(
   let itemId = shot.id;
   let members = [imagePath, shot.annotationFile, shot.descriptionFile];
   if (kind !== 'screenshot') {
-    const created = await service.create({ projectPath, collectionId: shot.collectionId, kind });
+    const created = await ledger.span('initial content creation', () =>
+      service.create({ projectPath, collectionId: shot.collectionId, kind }),
+    );
     const item = created.project.contentItems![0];
     itemId = item.id;
     members = Object.values(contentItemRelativePaths(item));
@@ -166,13 +161,14 @@ export async function fixture(
   );
   const call = <T,>(name: string, input: unknown) =>
     handlers.get(name)!({} as IpcMainInvokeEvent, input as never) as Promise<T>;
-  const deleted =
+  const deleted = await ledger.span('initial content deletion', async () =>
     kind === 'screenshot'
       ? await call<Awaited<ReturnType<ImnotaBridge['deleteScreenshot']>>>('screenshots:delete', {
           projectPath,
           screenshotId: itemId,
         })
-      : await service.delete({ projectPath, itemId });
+      : await service.delete({ projectPath, itemId }),
+  );
   const journal = path.join(
     projectPath,
     kind === 'screenshot' ? '.imnota-undo' : '.imnota-content-undo',
@@ -186,7 +182,9 @@ export async function fixture(
   const deliverWatchEvents = () => {
     for (const event of heldEvents.splice(0)) listeners.forEach((listener) => listener(event));
   };
-  const watchedReads = vi.fn(async (target: string) => fs.readFile(target).catch(() => null));
+  const watchedReads = vi.fn(async (target: string) =>
+    ledger.span('watch read', () => fs.readFile(target).catch(() => null)),
+  );
   manager = new ProjectWatchManager({
     readWatchedFile: watchedReads,
     loadSnapshot: snapshot,
@@ -201,9 +199,11 @@ export async function fixture(
     },
   });
   const watch = manager;
-  stops.push(() => watch.stopAll());
+  trackWatch(ledger, watch);
+  ledger.stop(() => watch.stopAll());
   const bridge = {
-    startProjectWatch: async () => workflowOutcome(() => watch.start(projectPath)),
+    startProjectWatch: async () =>
+      ledger.span('watch start', () => workflowOutcome(() => watch.start(projectPath))),
     stopProjectWatch: async ({ watchId }) => workflowOutcome(() => watch.stop(watchId)),
     onProjectWatchEvent: (listener) => {
       listeners.add(listener);
@@ -212,10 +212,12 @@ export async function fixture(
       };
     },
     reloadWatchedProject: vi.fn<WorkflowBridge['reloadWatchedProject']>(async ({ watchId }) =>
-      workflowOutcome(() => watch.reload(watchId)),
+      ledger.span('watch reload', () => workflowOutcome(() => watch.reload(watchId))),
     ),
     saveProjectCompareAndSwap: vi.fn<WorkflowBridge['saveProjectCompareAndSwap']>(async (input) =>
-      workflowOutcome(() => watch.compareAndSwap(input.watchId, input.expectedRevision, input.project)),
+      ledger.span('CAS', () =>
+        workflowOutcome(() => watch.compareAndSwap(input.watchId, input.expectedRevision, input.project)),
+      ),
     ),
   } satisfies Partial<WorkflowBridge>;
   window.imnota = bridge as unknown as ImnotaBridge;
@@ -232,9 +234,13 @@ export async function fixture(
   );
   await waitFor(() => expect(hook.result.current.projectRevision).toBe(source.projectRevision));
   const restore = vi.fn(() =>
-    kind === 'screenshot'
-      ? call<ProjectSnapshot>('screenshots:undo-delete', { projectPath, undoToken: deleted.undoToken })
-      : service.undoDelete({ projectPath, undoToken: deleted.undoToken }),
+    ledger.span('Restore', () =>
+      ledger.checkFault(projectFile, () =>
+        kind === 'screenshot'
+          ? call<ProjectSnapshot>('screenshots:undo-delete', { projectPath, undoToken: deleted.undoToken })
+          : service.undoDelete({ projectPath, undoToken: deleted.undoToken }),
+      ),
+    ),
   );
   published.mockClear();
   invalidated.mockClear();
