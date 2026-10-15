@@ -13,6 +13,7 @@ import {
   SMOKE_CAPTURE_PREPARATION,
   SMOKE_CANVAS_CAPTURE_PREPARATION,
   locatorWaitScript,
+  SMOKE_RENDERER_DIAGNOSTIC,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -27,6 +28,71 @@ afterEach(async () => {
 });
 
 describe('native smoke driver', () => {
+  it.each(['hidden', 'missing'])(
+    'samples failed-wait target geometry and post-failure event-loop lag: %s',
+    async (mode) => {
+      const renderer = {};
+      const context = {
+        window: renderer,
+        globalThis: renderer,
+        document: {
+          body: { innerText: 'Synthetic library' },
+          activeElement: null,
+          querySelectorAll: () =>
+            mode === 'missing'
+              ? []
+              : [
+                  {
+                    getAttribute: () => null,
+                    textContent: 'Projects',
+                    matches: () => false,
+                    getBoundingClientRect: () => ({ x: 10, y: 20, width: 800, height: 600 }),
+                  },
+                ],
+          addEventListener() {},
+          removeEventListener() {},
+        },
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+        HTMLLabelElement: class {},
+        getComputedStyle: () => ({ visibility: 'hidden', display: 'block', opacity: '1' }),
+        requestAnimationFrame: () => {},
+        performance: { now: vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(17) },
+        setTimeout: (callback: () => void) => callback(),
+      };
+      let settled = false;
+      const waiting = runInNewContext(locatorWaitScript({ selector: '.library' }, {}), context);
+      void waiting.then(() => {
+        settled = true;
+      });
+      const sample = await runInNewContext(SMOKE_RENDERER_DIAGNOSTIC, context);
+      expect(sample).toMatchObject({
+        sampledAt: expect.any(String),
+        eventLoopLagMs: 7,
+        wait: { locator: { selector: '.library' }, sampledAt: expect.any(String) },
+      });
+      expect(sample.wait.target).toEqual(
+        mode === 'missing'
+          ? null
+          : {
+              visible: false,
+              visibility: 'hidden',
+              display: 'block',
+              opacity: '1',
+              x: 10,
+              y: 20,
+              width: 800,
+              height: 600,
+              text: 'Projects',
+              disabled: false,
+            },
+      );
+      expect(settled).toBe(false); // Diagnostic sampling cannot satisfy readiness.
+    },
+  );
+
   it.each(['deferred', 'fast', 'failure', 'missing', 'wrong-action'] as const)(
     'observes only the new onboarding copy attempt (%s)',
     async (mode) => {
