@@ -645,9 +645,9 @@ export class NativeUiDriver {
   async capture(
     directory: string,
     filename: string,
-    requirement?: SmokeScreenshotCanvas | 'annotation-canvas',
+    requirement: SmokeScreenshotCanvas | 'annotation-canvas' | 'none',
   ): Promise<SmokeCapture> {
-    let expected = requirement === 'annotation-canvas' ? undefined : requirement;
+    let expected = typeof requirement === 'string' ? undefined : requirement;
     const target = safeArtifactPath(directory, filename);
     const deadline = Date.now() + this.defaultTimeoutMs;
     const readinessRestarts: NonNullable<SmokeCapture['readinessRestarts']> = { count: 0, reasons: {} };
@@ -657,7 +657,8 @@ export class NativeUiDriver {
         throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
       return timeout;
     };
-    let canvasRequired = Boolean(requirement);
+    // 'none' adds no requirement; retain canvas inference when one is already present.
+    let canvasRequired = requirement !== 'none';
     const prepareCanvas = async () => {
       try {
         const canvas = await this.evaluate<
