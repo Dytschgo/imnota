@@ -311,8 +311,10 @@ async function exerciseOnboarding(
     { selector: '[data-testid="onboarding-guided-note"]' },
     { text: 'Add guided note', exact: true },
   ]);
-  if (artifactDirectory)
+  if (artifactDirectory) {
+    await driver.waitForScreenshotCanvas();
     artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-annotate.png'));
+  }
   const handoffRoot = onboardingHandoffRoot({
     temporaryDirectory: app.getPath('temp'),
     userDataDirectory: app.getPath('userData'),
@@ -1392,25 +1394,10 @@ async function captureWorkspaceMatrix(
     driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
-    await driver.evaluate(`new Promise((resolve, reject) => {
-      const deadline = Date.now() + 10000;
-      const check = () => {
-        const selected = document.querySelector(
-          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
-        );
-        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
-        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
-        const rendered = canvas?.querySelector('.konvajs-content canvas');
-        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
-            rendered?.width > 0 && rendered.height > 0) return resolve(true);
-        if (Date.now() >= deadline)
-          return reject(new Error('Workspace visual fixture did not render selected screenshot ${screenshot.id}.'));
-        requestAnimationFrame(check);
-      };
-      check();
-    })`);
+    await driver.waitForScreenshotCanvas(screenshot);
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
+      await driver.waitForScreenshotCanvas(screenshot);
       artifacts.push(
         await driver.capture(
           artifactDirectory,
@@ -1507,25 +1494,6 @@ async function exercisePreferencesAndChannel(
 ): Promise<void> {
   const screenshot = (await host.readProject(projectPath)).screenshots[0];
   if (!screenshot) throw new Error('Preference smoke fixture has no screenshot.');
-  const waitForScreenshotCanvas = async () => {
-    await driver.evaluate(`new Promise((resolve, reject) => {
-      const deadline = Date.now() + 10000;
-      const check = () => {
-        const selected = document.querySelector(
-          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
-        );
-        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
-        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
-        const rendered = canvas?.querySelector('.konvajs-content canvas');
-        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
-            rendered?.width > 0 && rendered.height > 0) return resolve(true);
-        if (Date.now() >= deadline)
-          return reject(new Error('Preference smoke did not render selected screenshot ${screenshot.id}.'));
-        requestAnimationFrame(check);
-      };
-      check();
-    })`);
-  };
   // Reopened local smoke windows may be hidden. Present this isolated fixture so
   // native focus and screenshot paint reflect the same settings state as the DOM.
   driver.browserWindow.show();
@@ -1626,7 +1594,7 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({ selector: '.workspace' });
   await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
   await driver.waitFor({ selector: '.workspace' });
-  await waitForScreenshotCanvas();
+  await driver.waitForScreenshotCanvas(screenshot);
   await driver.click({ selector: '[aria-label="Collapse quick access"]' });
   const quickAccessHidden = await driver.evaluate<boolean>(
     `getComputedStyle(document.querySelector('#quick-access-collections')).display === 'none'`,
@@ -1671,7 +1639,7 @@ async function exercisePreferencesAndChannel(
     await driver.waitFor({ selector: '.workspace' });
     await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
     await driver.waitFor({ selector: '.workspace' });
-    await waitForScreenshotCanvas();
+    await driver.waitForScreenshotCanvas(screenshot);
     await driver.resize(SMOKE_VIEWPORTS[0]);
     await waitForStableCanvas(driver, {
       id: screenshot.id,
@@ -1684,9 +1652,12 @@ async function exercisePreferencesAndChannel(
           throw new Error('Workspace panel duplicates the app-wide wallpaper');
       }
     })()`);
+    await driver.waitForScreenshotCanvas(screenshot);
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png'));
     await driver.click({ selector: '.sidebar-toggle' });
     await driver.waitFor({ selector: '.navigation-restore' });
+    // Collapsing navigation can remount the canvas and restart off-DOM image decoding.
+    await driver.waitForScreenshotCanvas(screenshot);
     artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png'));
     await driver.click({ selector: '.navigation-restore' });
     await driver.click({ selector: '[data-testid="settings-button"]' });

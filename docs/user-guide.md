@@ -99,7 +99,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem. Select a card's preview to inspect the full-resolution image; it opens at **Fit width**, and **Fit image** or **Actual size** change the scale.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
