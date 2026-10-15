@@ -80,26 +80,30 @@ it('bounds binary evidence allocations and hashes the chunks actually written du
     return handle;
   });
   let evidence: WrittenFileEvidence | undefined;
-  await atomicWrite(target, content, (value) => {
-    evidence = value;
-  });
-  const copiedSizes = from.mock.calls.flatMap(([value]) =>
-    ArrayBuffer.isView(value) ? [value.byteLength] : [],
-  );
-  const allocatedSizes = [...alloc.mock.calls, ...unsafe.mock.calls, ...unsafeSlow.mock.calls].map(
-    ([size]) => size,
-  );
-  from.mockRestore();
-  alloc.mockRestore();
-  unsafe.mockRestore();
-  unsafeSlow.mockRestore();
-  expect([...copiedSizes, ...allocatedSizes].every((size) => size <= chunkSize)).toBe(true);
+  try {
+    await atomicWrite(target, content, (value) => {
+      evidence = value;
+    });
+    const copiedSizes = from.mock.calls.flatMap(([value]) =>
+      ArrayBuffer.isView(value) ? [value.byteLength] : [],
+    );
+    const allocatedSizes = [...alloc.mock.calls, ...unsafe.mock.calls, ...unsafeSlow.mock.calls].map(
+      ([size]) => size,
+    );
+    expect([...copiedSizes, ...allocatedSizes].every((size) => size <= chunkSize)).toBe(true);
+  } finally {
+    from.mockRestore();
+    alloc.mockRestore();
+    unsafe.mockRestore();
+    unsafeSlow.mockRestore();
+  }
   expect(writeSizes.length).toBe(Math.ceil(content.length / chunkSize));
   expect(Math.max(...writeSizes)).toBe(chunkSize);
   expect(writeSizes.reduce((sum, size) => sum + size, 0)).toBe(content.length);
   const written = await fs.readFile(target);
-  expect(written.subarray(0, chunkSize)).toEqual(Buffer.alloc(chunkSize, 7));
-  expect(written.subarray(chunkSize)).toEqual(Buffer.alloc(content.length - chunkSize, 42));
+  expect(written.length).toBe(content.length);
+  expect(written.subarray(0, chunkSize).equals(Buffer.alloc(chunkSize, 7))).toBe(true);
+  expect(written.subarray(chunkSize).equals(Buffer.alloc(content.length - chunkSize, 42))).toBe(true);
   expect(evidence).toMatchObject({
     size: BigInt(written.length),
     sha256: createHash('sha256').update(written).digest('hex'),
