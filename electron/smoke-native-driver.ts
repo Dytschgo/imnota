@@ -41,7 +41,10 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
   return `new Promise((resolve, reject) => {
   const expected = ${JSON.stringify(expected ?? null)};
   const capture = ${capture};
-  const selectedTestId = expected ? 'screenshot-' + expected.id : capture
+  // Rail test IDs also label text/drawing items. Only an annotation canvas
+  // establishes a screenshot here; initial gaps need an explicit expectation.
+  const selectedTestId = expected ? 'screenshot-' + expected.id : capture &&
+    document.querySelectorAll('[data-testid="annotation-canvas"]').length
     ? document.querySelector('.shot-item.active [data-testid^="screenshot-"]')?.getAttribute('data-testid')
     : null;
   const required = ${required} || Boolean(selectedTestId);
@@ -49,33 +52,43 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
   let capturedStages;
   let capturedDimensions;
   let valid = true;
+  const reasons = new Set();
   const observer = new MutationObserver(check);
   function finish(error) {
     observer.disconnect();
     if (capture) delete window.__imnotaSmokeCanvasCapture;
     if (error) reject(new Error(error)); else resolve();
   }
-  function pending() { valid = false; }
+  function pending(reason) {
+    valid = false;
+    if (capturedCanvases) reasons.add(reason);
+  }
   function check() {
     const canvases = [...document.querySelectorAll('[data-testid="annotation-canvas"]')];
-    if ((required || capturedCanvases?.length) && !canvases.length) return pending();
-    if (selectedTestId && !document.querySelector('.shot-item.active [data-testid="' + selectedTestId + '"]')) return pending();
-    if (capturedCanvases && (canvases.length !== capturedCanvases.length ||
-        canvases.some((canvas, index) => canvas !== capturedCanvases[index] ||
-          canvas.querySelector('.konvajs-content canvas') !== capturedStages[index] ||
-          canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim() !== capturedDimensions[index]))) return pending();
-    for (const canvas of canvases) {
+    if ((required || capturedCanvases?.length) && !canvases.length) return pending('missing-canvas');
+    let ready = true;
+    const invalidate = reason => { ready = false; pending(reason); };
+    if (selectedTestId && !document.querySelector('.shot-item.active [data-testid="' + selectedTestId + '"]')) invalidate('selection-changed');
+    if (capturedCanvases && canvases.length !== capturedCanvases.length) invalidate('stage-replaced');
+    for (const [index, canvas] of canvases.entries()) {
       const state = canvas.querySelector('[data-testid="canvas-load-state"]');
       if (state?.dataset.state === 'failed') {
-        pending();
+        pending('loading');
         if (!capturedCanvases) finish('Cannot capture: selected screenshot failed to load.');
         return;
       }
       const rendered = canvas.querySelector('.konvajs-content canvas');
-      if (state || !rendered || rendered.width <= 0 || rendered.height <= 0) return pending();
+      const dimensions = canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
+      if (state) invalidate('loading');
+      else if (!rendered || rendered.width <= 0 || rendered.height <= 0) invalidate('missing-canvas');
+      if (capturedCanvases) {
+        if (canvas !== capturedCanvases[index] || (rendered && rendered !== capturedStages[index])) invalidate('stage-replaced');
+        if (dimensions !== capturedDimensions[index]) invalidate('dimensions-changed');
+      }
       if (expected && canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim() !==
-          expected.originalWidth + ' \u00d7 ' + expected.originalHeight) return pending();
+          expected.originalWidth + ' \u00d7 ' + expected.originalHeight) invalidate('dimensions-changed');
     }
+    if (!ready) return;
     if (capturedCanvases) return;
     if (!capture || !canvases.length) return finish();
     valid = true;
@@ -84,6 +97,7 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
     capturedDimensions = canvases.map(canvas => canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim());
     window.__imnotaSmokeCanvasCapture = {
       valid() { check(); return valid; },
+      reasons() { return [...reasons]; },
       dispose() { observer.disconnect(); }
     };
     const dimensions = capturedDimensions[0]?.split(' \u00d7 ').map(Number);
@@ -172,7 +186,14 @@ export interface SmokeCapture {
   cssViewport: SmokeViewport;
   pngPixels: SmokeViewport;
   devicePixelRatio: number;
+  readinessRestarts?: {
+    count: number;
+    reasons: Partial<Record<SmokeCanvasInvalidationReason, number>>;
+  };
 }
+
+type SmokeCanvasInvalidationReason =
+  'loading' | 'missing-canvas' | 'selection-changed' | 'dimensions-changed' | 'stage-replaced';
 
 export function sourceBoxInteriorPoint(
   origin: SmokePoint,
@@ -607,6 +628,7 @@ export class NativeUiDriver {
   ): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
     const deadline = Date.now() + this.defaultTimeoutMs;
+    const readinessRestarts: NonNullable<SmokeCapture['readinessRestarts']> = { count: 0, reasons: {} };
     const remaining = () => {
       const timeout = deadline - Date.now();
       if (timeout <= 0)
@@ -645,10 +667,19 @@ export class NativeUiDriver {
         );
         if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
         png = image.toPNG();
-        const canvasValid =
-          !canvasRequired ||
-          (await this.evaluate<boolean>('window.__imnotaSmokeCanvasCapture?.valid() ?? false', remaining()));
-        if (!canvasValid) {
+        const readiness = canvasRequired
+          ? await this.evaluate<{ valid: boolean; reasons: SmokeCanvasInvalidationReason[] }>(
+              `(() => {
+                const guard = window.__imnotaSmokeCanvasCapture;
+                return { valid: guard?.valid() ?? false, reasons: guard?.reasons?.() ?? ['missing-canvas'] };
+              })()`,
+              remaining(),
+            )
+          : { valid: true, reasons: [] };
+        if (!readiness.valid) {
+          readinessRestarts.count += 1;
+          for (const reason of readiness.reasons)
+            readinessRestarts.reasons[reason] = (readinessRestarts.reasons[reason] ?? 0) + 1;
           // Discard every compared frame, wait for the original screenshot, then
           // start fresh. State invalidations share the original capture deadline.
           previous = undefined;
@@ -662,6 +693,14 @@ export class NativeUiDriver {
         previous = png;
         await wait(Math.min(100, remaining()));
       }
+    } catch (error) {
+      const reasons = Object.entries(readinessRestarts.reasons)
+        .map(([reason, count]) => `${reason}=${count}`)
+        .join(', ');
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} Readiness restarts: ${readinessRestarts.count}${reasons ? ` (${reasons})` : ''}.`,
+        { cause: error },
+      );
     } finally {
       await this.evaluate(
         'window.__imnotaSmokeCanvasCapture?.dispose(); delete window.__imnotaSmokeCanvasCapture',
@@ -681,6 +720,7 @@ export class NativeUiDriver {
       cssViewport: metrics.cssViewport,
       pngPixels: { width: pngSize.width, height: pngSize.height },
       devicePixelRatio: metrics.devicePixelRatio,
+      ...(readinessRestarts.count ? { readinessRestarts } : {}),
     };
   }
 }

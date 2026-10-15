@@ -18,6 +18,7 @@ import {
   safeArtifactPath,
   sourceBoxInteriorPoint,
   validateCreatedSmokeDirectory,
+  type SmokeCapture,
 } from './smoke-native-driver.js';
 
 const temporary: string[] = [];
@@ -847,6 +848,7 @@ describe('native smoke driver', () => {
   it.each([
     'before-frames',
     'initial-gap',
+    'initial-loading',
     'churning',
     'third-frame',
     'transient-remount',
@@ -856,6 +858,10 @@ describe('native smoke driver', () => {
     'deadline',
     'failed',
     'no-canvas',
+    'selected-text',
+    'selected-drawing',
+    'stage-replaced',
+    'settled-churn',
   ])('guards captured pixels across canvas changes: %s', async (scenario) => {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
     temporary.push(parent);
@@ -875,7 +881,8 @@ describe('native smoke driver', () => {
       let wrongDimensions = false;
       let stage = { width: 800, height: 600 };
       let recovered = false;
-      const selected = { getAttribute: () => 'screenshot-fixture' };
+      const canvasFree = ['no-canvas', 'selected-text', 'selected-drawing'].includes(scenario);
+      const selected = { getAttribute: () => `screenshot-${canvasFree ? scenario : 'fixture'}` };
       const canvas = {
         querySelector: (selector: string) => {
           if (selector.includes('canvas-load-state'))
@@ -892,7 +899,7 @@ describe('native smoke driver', () => {
           body: {},
           fonts: { ready: Promise.resolve() },
           images: [],
-          querySelectorAll: () => (scenario === 'no-canvas' || missing ? [] : [canvas]),
+          querySelectorAll: () => (canvasFree || missing ? [] : [canvas]),
           querySelector: () => (wrongScreenshot || scenario === 'no-canvas' ? null : selected),
         },
         MutationObserver: class {
@@ -912,17 +919,23 @@ describe('native smoke driver', () => {
         return runInNewContext(source, context);
       });
       const capturePage = vi.fn(async () => {
-        const value = recovered || scenario === 'no-canvas' ? 'loaded' : 'loading';
+        const value = recovered || canvasFree ? 'loaded' : 'loading';
         const changeAt = scenario === 'third-frame' || scenario === 'transient-remount' ? 3 : 1;
-        if (scenario === 'churning') {
+        if (scenario === 'churning' || (scenario === 'settled-churn' && capturePage.mock.calls.length <= 2)) {
           // Each new stage is already loaded by the post-frame check; none may
           // extend the one capture budget or contribute to an accepted sequence.
           vi.setSystemTime(Date.now() + 200);
           stage = { width: 800, height: 600 };
           notify();
+          if (scenario === 'settled-churn') recovered = true;
+        } else if (scenario === 'stage-replaced' && capturePage.mock.calls.length === 1) {
+          stage = { width: 800, height: 600 };
+          notify();
+          recovered = true;
         } else if (
-          scenario !== 'no-canvas' &&
+          !canvasFree &&
           scenario !== 'initial-gap' &&
+          scenario !== 'initial-loading' &&
           capturePage.mock.calls.length === changeAt
         ) {
           loading = true;
@@ -947,33 +960,40 @@ describe('native smoke driver', () => {
       const window = { webContents: { executeJavaScript, capturePage } } as unknown as BrowserWindow;
       const driver = new NativeUiDriver(window, 1_000);
       // Establish the same successful workflow wait that preceded the failed artifact.
-      if (scenario !== 'no-canvas') await driver.waitForScreenshotCanvas(expected);
+      if (!canvasFree) await driver.waitForScreenshotCanvas(expected);
       if (scenario === 'initial-gap') missing = true;
+      if (scenario === 'initial-loading') loading = true;
       const result = driver.capture(
         artifacts,
         'remount.png',
         scenario === 'before-frames' || scenario === 'initial-gap' ? expected : undefined,
       );
+      // Observe rejection immediately even when fake time advances before awaiting it.
+      void result.catch(() => undefined);
       const failure =
         scenario === 'deadline' || scenario === 'failed' || scenario === 'churning'
           ? expect(result).rejects.toThrow(
               scenario === 'failed'
                 ? 'selected screenshot failed to load'
                 : scenario === 'churning'
-                  ? 'Captured artifact remount.png did not settle before the capture timeout.'
-                  : 'Canvas readiness failed for remount.png (screenshot fixture) within 1000ms',
+                  ? 'Readiness restarts: 4 (stage-replaced=4)'
+                  : 'Readiness restarts: 1 (loading=1)',
             )
           : undefined;
+      void failure?.catch(() => undefined);
       await vi.advanceTimersByTimeAsync(200);
-      if (scenario === 'no-canvas') {
-        expect(await fs.readFile((await result).path, 'utf8')).toBe('loaded');
+      if (canvasFree) {
+        await vi.advanceTimersByTimeAsync(800);
+        const capture = await result;
+        expect(await fs.readFile(capture.path, 'utf8')).toBe('loaded');
+        expect(capture).not.toHaveProperty('readinessRestarts');
         expect(capturePage).toHaveBeenCalledTimes(3);
       } else if (failure) {
         await vi.advanceTimersByTimeAsync(800);
         await failure;
         await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({ code: 'ENOENT' });
       } else {
-        if (scenario !== 'transient-remount') {
+        if (!['transient-remount', 'stage-replaced', 'settled-churn'].includes(scenario)) {
           await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({
             code: 'ENOENT',
           });
@@ -990,13 +1010,42 @@ describe('native smoke driver', () => {
           notify();
         }
         await vi.advanceTimersByTimeAsync(200);
-        expect(await fs.readFile((await result).path, 'utf8')).toBe('loaded');
+        const capture = await result;
+        expect(await fs.readFile(capture.path, 'utf8')).toBe('loaded');
+        const reasons =
+          scenario === 'initial-gap' || scenario === 'initial-loading'
+            ? undefined
+            : scenario === 'missing-canvas'
+              ? { 'missing-canvas': 1 }
+              : scenario === 'wrong-screenshot'
+                ? { loading: 1, 'selection-changed': 1 }
+                : scenario === 'wrong-dimensions'
+                  ? { loading: 1, 'dimensions-changed': 1 }
+                  : scenario === 'stage-replaced'
+                    ? { 'stage-replaced': 1 }
+                    : scenario === 'settled-churn'
+                      ? { 'stage-replaced': 2 }
+                      : scenario === 'transient-remount'
+                        ? { loading: 1, 'stage-replaced': 1 }
+                        : { loading: 1 };
+        if (reasons) {
+          // Workflow reports serialize the full capture objects in artifacts.
+          const evidence = JSON.parse(JSON.stringify({ artifacts: [capture] })) as {
+            artifacts: SmokeCapture[];
+          };
+          expect(evidence.artifacts[0].readinessRestarts).toEqual({
+            count: scenario === 'settled-churn' ? 2 : 1,
+            reasons,
+          });
+        } else expect(capture).not.toHaveProperty('readinessRestarts');
         expect(capturePage.mock.calls.length).toBe(
           scenario === 'third-frame' || scenario === 'transient-remount'
             ? 6
-            : scenario === 'initial-gap'
-              ? 3
-              : 4,
+            : scenario === 'settled-churn'
+              ? 5
+              : scenario === 'initial-gap' || scenario === 'initial-loading'
+                ? 3
+                : 4,
         );
       }
       expect(renderer).not.toHaveProperty('__imnotaSmokeCanvasCapture');
