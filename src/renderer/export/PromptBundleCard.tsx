@@ -55,6 +55,7 @@ export interface PromptBundleCardProps {
   disabled?: boolean;
   /** The dialog already shows this failure, so the card does not repeat it. */
   errorReported?: boolean;
+  fallbackAvailable?: boolean;
   fileClipboardAvailable?: boolean;
   platform?: ShortcutPlatform;
   defaultCopyVariant?: WindowsCopyVariantId;
@@ -96,6 +97,7 @@ export function PromptBundleCard({
   bundle,
   disabled = false,
   errorReported = false,
+  fallbackAvailable = false,
   fileClipboardAvailable = false,
   platform = 'windows',
   defaultCopyVariant = 'files',
@@ -243,7 +245,8 @@ export function PromptBundleCard({
     }
   };
 
-  const showFallbacks = bundle.delivery === 'file-only' || Boolean(bundle.warning || bundle.error);
+  const showFallbacks =
+    fallbackAvailable || bundle.delivery === 'file-only' || Boolean(bundle.warning || bundle.error);
   // Labels stay in the DOM for assistive tech and the native smoke; only the values are shown.
   const facts: Array<[label: string, value: string]> = [
     ['Content', bundle.pictureNumbers.length ? pictureLabel(bundle.pictureNumbers) : 'Text only'],

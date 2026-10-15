@@ -1,3 +1,4 @@
+import { publicError } from './export/prompt-export-controller-helpers';
 import { describe, expect, it, vi } from 'vitest';
 import { planPromptBundles, type PromptBundle } from '../shared/prompt-bundles';
 import {
@@ -265,4 +266,65 @@ describe('prompt bundle composition', () => {
     });
     expect(testEnvironment.events).toEqual([]);
   });
+});
+
+describe('composer failure guidance', () => {
+  it('classifies unavailable browser composition as retryable', async () => {
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    try {
+      const error = await composePromptBundle(bundle()).catch((reason: unknown) => reason);
+      expect(publicError(error)).toMatchObject({
+        code: 'composition-unavailable',
+        recovery: 'retry',
+        technicalDetails: 'Prompt bundle composition is unavailable on this device.',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each(['invalid-png', 'thrown'] as const)('classifies %s encoding failure as retryable', async (mode) => {
+    const env = environment().renderEnvironment;
+    const createSurface = env.createSurface;
+    env.createSurface = (width, height) => ({
+      ...createSurface(width, height),
+      toPngDataUrl: () => {
+        if (mode === 'thrown') throw new Error('SecurityError at D:/private/source.png');
+        return 'data:,';
+      },
+    });
+    const error = await composePromptBundle(bundle(), {
+      environment: env,
+      resolvePicturePng: resolver().resolve,
+    }).catch((reason: unknown) => reason);
+    const detail = publicError(error);
+    expect(detail).toMatchObject({ code: 'encode-failed', recovery: 'retry' });
+    expect(detail.message).not.toMatch(/private|SecurityError/);
+    expect(detail.technicalDetails).toContain(mode === 'thrown' ? 'SecurityError' : 'encoded as PNG');
+  });
+
+  it.each(['revision', 'resolved-dimensions', 'decoded-dimensions'] as const)(
+    'classifies changed %s as rebuild',
+    async (change) => {
+      const env = environment().renderEnvironment;
+      const pictureResolver = resolver();
+      if (change === 'decoded-dimensions') {
+        const decode = env.decodePng;
+        env.decodePng = async (dataUrl) => ({ ...(await decode(dataUrl)), width: 101 });
+      }
+      const error = await composePromptBundle(bundle(), {
+        environment: env,
+        resolvePicturePng: async (picture) => ({
+          ...(await pictureResolver.resolve(picture)),
+          width: change === 'resolved-dimensions' ? picture.width + 1 : picture.width,
+          contentRevision: change === 'revision' ? 'new-revision' : picture.contentRevision,
+        }),
+      }).catch((reason: unknown) => reason);
+      expect(publicError(error)).toMatchObject({
+        code: 'content-changed',
+        recovery: 'rebuild',
+        technicalDetails: expect.stringContaining('Picture 1'),
+      });
+    },
+  );
 });

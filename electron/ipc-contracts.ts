@@ -22,6 +22,9 @@ export const projectInput = z.object({
 });
 export const pathInput = z.string().min(1).max(2000);
 
+// The clipboard boundary enforces the size limit with its typed too-large failure.
+export const workflowPromptMarkdownInput = z.tuple([z.string()]);
+
 export const screenshotInput = z.object({ projectPath: pathInput, screenshot: screenshotSchema });
 export const png = z
   .string()

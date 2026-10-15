@@ -1,3 +1,4 @@
+import type { ExportRecovery } from './export-failure-catalog';
 import type { CollectionContentItem } from '../../shared/markdown';
 import {
   applyPromptBundleMarkdownIdentity,
@@ -78,7 +79,7 @@ export interface PromptExportBundleManifestInput {
 }
 
 export interface PromptBundleControllerBridge {
-  copyText?(text: string): Promise<void>;
+  copyPromptExportMarkdown?(text: string): Promise<WorkflowResult<void>>;
   loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
     image: ImagePayload;
     annotations: Annotation[];
@@ -167,6 +168,9 @@ export type PromptBundleControllerErrorCode =
   | 'no-content'
   | 'render-limit'
   | 'save-failed'
+  | 'composition-unavailable'
+  | 'encode-failed'
+  | 'export-incomplete'
   | 'unexpected';
 
 export interface PromptBundleControllerError {
@@ -174,6 +178,7 @@ export interface PromptBundleControllerError {
   message: string;
   retryable: boolean;
   fallbackAvailable: boolean;
+  recovery: ExportRecovery;
   nativeCode?: WorkflowError['code'];
   technicalDetails?: string;
 }
@@ -187,6 +192,9 @@ export interface HostedShareArtifacts {
   bundleNumbers: readonly number[];
   imageBundleNumbers: readonly number[];
 }
+
+export type PromptBundleRetryResult =
+  PromptBundleControllerActionResult | { ok: true; value: HostedShareArtifacts };
 
 export interface PromptBundleLargePreview {
   bundleNumber: number;
@@ -238,6 +246,7 @@ export class PromptBundleControllerEngine {
   private runSequence = 0;
   private previewSequence = 0;
   private previewAbort?: AbortController;
+  private previewFailure?: PromptBundleControllerError;
   private pendingCleanup?: ActiveRun;
   private disposed = false;
 
@@ -648,7 +657,8 @@ export class PromptBundleControllerEngine {
       run.finalized = finalized;
       if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
         this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
-        throw cancelledFailure();
+        if (run.terminalKind === 'cancel' || run.controller.signal.aborted) throw cancelledFailure();
+        throw failure('export-incomplete', 'Prompt export did not complete.', true);
       }
       this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
       return { prepared, session, finalized };
@@ -1192,7 +1202,7 @@ export class PromptBundleControllerEngine {
       typeof selection === 'number'
         ? this.latestArtifact?.grants.has(selection)
         : Boolean(selection.artifactSessionId);
-    if (!hasGrant && this.bridge.copyText) {
+    if (!hasGrant && this.bridge.copyPromptExportMarkdown) {
       let run: ActiveRun | undefined;
       try {
         if (
@@ -1243,7 +1253,7 @@ export class PromptBundleControllerEngine {
             );
         }
         this.assertActive(run);
-        await this.bridge.copyText(bundle.markdown);
+        unwrap(await this.bridge.copyPromptExportMarkdown(bundle.markdown));
         this.assertActive(run);
         // Do not orphan a finalized artifact for the same content: replacing latestPlan
         // gives it a new random planId, which makes open()/copy treat it as stale.
@@ -1362,6 +1372,9 @@ export class PromptBundleControllerEngine {
         await this.validateArtifactContext(artifact, controller.signal);
         if (sequence !== this.previewSequence) throw cancelledFailure();
         this.emit({
+          ...(this.previewFailure && this.state.error === this.previewFailure
+            ? { error: undefined, progress: undefined }
+            : {}),
           preview: {
             bundleNumber,
             dataUrl:
@@ -1389,6 +1402,9 @@ export class PromptBundleControllerEngine {
         );
       if (sequence !== this.previewSequence) throw cancelledFailure();
       this.emit({
+        ...(this.previewFailure && this.state.error === this.previewFailure
+          ? { error: undefined, progress: undefined }
+          : {}),
         preview: {
           bundleNumber,
           dataUrl:
@@ -1404,7 +1420,9 @@ export class PromptBundleControllerEngine {
     } catch (error) {
       if (sequence !== this.previewSequence || controller.signal.aborted)
         return { ok: false, error: cancelledFailure().detail };
-      return this.resultError(error);
+      const result = this.resultError(error);
+      if (!result.ok) this.previewFailure = result.error;
+      return result;
     } finally {
       if (sequence === this.previewSequence) this.previewAbort = undefined;
     }

@@ -1,8 +1,17 @@
+import { controllerExportFailure, nativeExportFailure } from './export-failure-catalog';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptBundleDialogHost, type PromptBundleUiController } from './PromptBundleDialogHost';
 import { PromptSharingDialog } from './PromptSharingDialog';
+
+vi.mock('./HostedShareDialog', () => ({
+  HostedShareDialog: ({ artifacts }: { artifacts: { title: string } }) => (
+    <div role="dialog" aria-label="Hosted share">
+      {artifacts.title}
+    </div>
+  ),
+}));
 
 afterEach(cleanup);
 
@@ -123,12 +132,29 @@ it('offers explicit retry when native export cleanup is still pending', () => {
     <PromptSharingDialog
       {...baseProps}
       bundles={[]}
-      error={{ message: 'The previous export session could not be cleaned up.' }}
+      error={controllerExportFailure('cleanup-pending')}
       cleanupPending
       onRetryCleanup={onRetryCleanup}
     />,
   );
-  expect(screen.getByRole('alert')).toHaveTextContent('could not be cleaned up');
+  expect(screen.getByRole('alert')).toHaveTextContent('cleanup could not finish');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
+  expect(onRetryCleanup).toHaveBeenCalledOnce();
+});
+
+it('keeps Retry cleanup available when a different error appears while cleanup is pending', () => {
+  const onRetryCleanup = vi.fn();
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      error={controllerExportFailure('busy')}
+      cleanupPending
+      onRetryCleanup={onRetryCleanup}
+      onRebuild={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: 'Rebuild bundles' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
   expect(onRetryCleanup).toHaveBeenCalledOnce();
 });
@@ -154,6 +180,7 @@ it.each([false, true])(
       ],
       isOpen: true,
       cleanupPending: false,
+      canRetry: false,
       close: vi.fn(),
       copyFresh: vi.fn(success),
       copyVariant: vi.fn(success),
@@ -166,11 +193,13 @@ it.each([false, true])(
       cancel: vi.fn(success),
       loadPreview: vi.fn(success),
       clearPreview: vi.fn(),
+      retry: vi.fn(success),
       retryCleanup: vi.fn(success),
       prepareHostedShare: vi.fn(async () => ({
         ok: false as const,
         error: {
           code: 'unexpected' as const,
+          recovery: 'rebuild' as const,
           message: 'Not used',
           retryable: false,
           fallbackAvailable: false,
@@ -234,7 +263,12 @@ it('shows a failure once, with technical details and a Rebuild bundles action', 
       onPrepareFreshFiles={onPrepareFreshFiles}
       bundles={[bundle]}
       progress={{ phase: 'error', message: 'Export failed' }}
-      error={{ message: bundle.error, technicalDetails: 'ENOENT bundle-1.png' }}
+      error={nativeExportFailure({
+        code: 'io-failure',
+        message: 'ENOENT bundle-1.png',
+        retryable: true,
+        details: { errno: 'ENOENT' },
+      })}
     />,
   );
   expect(screen.getAllByRole('alert')).toHaveLength(1);
@@ -248,3 +282,127 @@ it('shows a failure once, with technical details and a Rebuild bundles action', 
     bundleNumber: 1,
   });
 });
+
+const recoveryBundle = {
+  planId: 'plan-recovery',
+  bundleNumber: 1,
+  pictureNumbers: [1],
+  screenshotCount: 1,
+  excludedCount: 0,
+  width: 800,
+  height: 600,
+  delivery: 'clipboard' as const,
+  state: 'idle' as const,
+};
+
+it.each(['cancelled', 'render-limit', 'disposed', 'busy'] as const)(
+  'does not offer Rebuild bundles for %s',
+  (code) => {
+    render(
+      <PromptSharingDialog {...baseProps} bundles={[recoveryBundle]} error={controllerExportFailure(code)} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Rebuild bundles' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  },
+);
+
+it('shows card fallbacks without Rebuild for clipboard limits, even when the card has no error', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[recoveryBundle]}
+      error={nativeExportFailure({
+        code: 'clipboard-limit',
+        message: 'raw',
+        retryable: false,
+        details: { reason: 'too-large' },
+      })}
+      onCopyMarkdown={vi.fn()}
+      onOpenFiles={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: 'Rebuild bundles' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy Markdown only' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Open files' })).toBeEnabled();
+});
+
+it.each(['rebuild', 'retry'] as const)('offers %s recovery before any cards are available', (recovery) => {
+  const onRecover = vi.fn();
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[]}
+      error={controllerExportFailure(recovery === 'rebuild' ? 'unexpected' : 'composition-unavailable')}
+      onRebuild={onRecover}
+      onRetry={onRecover}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: recovery === 'rebuild' ? 'Rebuild bundles' : 'Try again' }),
+  );
+  expect(onRecover).toHaveBeenCalledOnce();
+});
+
+it('does not offer retry when the error marks it unavailable', () => {
+  render(
+    <PromptSharingDialog
+      {...baseProps}
+      bundles={[recoveryBundle]}
+      error={{ ...controllerExportFailure('encode-failed'), retryable: false }}
+      onRetry={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+});
+
+it.each([false, true])(
+  'offers hosted preparation retry only with a matching error target (%s)',
+  async (canRetry) => {
+    const success = vi.fn(async () => ({ ok: true as const }));
+    const error = controllerExportFailure('composition-unavailable');
+    const controller: PromptBundleUiController = {
+      cards: [],
+      isOpen: true,
+      cleanupPending: false,
+      canRetry,
+      error,
+      close: vi.fn(),
+      clearPreview: vi.fn(),
+      copyFresh: success,
+      copyVariant: success,
+      prepareFreshFiles: success,
+      copyMarkdown: success,
+      copyImage: success,
+      openFiles: success,
+      copyPaths: success,
+      openFolder: success,
+      cancel: success,
+      loadPreview: success,
+      retryCleanup: success,
+      prepareHostedShare: vi.fn(async () => ({ ok: false as const, error })),
+      retry: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          title: 'Synthetic shared collection',
+          sessionId: 'session',
+          bundleNumbers: [1],
+          imageBundleNumbers: [],
+        },
+      })),
+    };
+    const onError = vi.fn();
+    render(<PromptBundleDialogHost controller={controller} onError={onError} />);
+    if (!canRetry) {
+      expect(screen.getByRole('alert')).toHaveTextContent(error.message);
+      expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      expect(controller.retry).not.toHaveBeenCalled();
+      return;
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('dialog', { name: 'Hosted share' })).toHaveTextContent(
+      'Synthetic shared collection',
+    );
+    expect(screen.queryByRole('dialog', { name: 'Share bundles' })).not.toBeInTheDocument();
+    expect(onError).not.toHaveBeenCalled();
+  },
+);

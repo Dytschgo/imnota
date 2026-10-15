@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { workflowOutcome } from './workflow-errors.js';
 import type { NativeImage } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 
@@ -220,5 +221,35 @@ describe('main-process clipboard completion', () => {
     broken.getType.mockResolvedValueOnce({ title: 'bookmark', url: 'https://example.com' });
     mocks.clipboard.read.mockResolvedValueOnce([broken]);
     await expect(nativeClipboard.readImage()).rejects.toThrow('invalid media payload');
+  });
+});
+
+it.each([
+  ['text', () => nativeClipboard.writeText('Markdown'), mocks.clipboard.writeText],
+  ['image', () => nativeClipboard.writeImage(image), mocks.clipboard.write],
+  [
+    'context',
+    () => nativeClipboard.writeContext('Markdown', '<p>Markdown</p>', image),
+    mocks.clipboard.write,
+  ],
+] as const)(
+  'reports OS %s write failures with the rejected clipboard reason',
+  async (_label, write, nativeWrite) => {
+    nativeWrite.mockRejectedValueOnce(new Error('OS rejected the format'));
+    await expect(workflowOutcome<unknown>(write)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'clipboard-limit', retryable: false, details: { reason: 'rejected' } },
+    });
+  },
+);
+
+it('reports file clipboard calls on unsupported platforms explicitly', async () => {
+  const write =
+    process.platform === 'darwin'
+      ? () => nativeClipboard.writeWindowsFiles(Buffer.alloc(8), ['/a.md', '/a.png'])
+      : () => nativeClipboard.writeMacFiles(['/a.md', '/a.png']);
+  await expect(workflowOutcome<unknown>(write)).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'clipboard-limit', retryable: false, details: { reason: 'rejected' } },
   });
 });

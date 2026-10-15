@@ -1,3 +1,5 @@
+import { act, renderHook } from '@testing-library/react';
+import { usePromptBundleController } from './usePromptBundleController';
 import { describe, expect, test, vi } from 'vitest';
 import type { Annotation, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type {
@@ -916,7 +918,7 @@ describe('prompt export controller orchestration', () => {
 
   test('copies Markdown directly without image rendering or a combined-copy attempt', async () => {
     const native = fakeBridge();
-    native.bridge.copyText = vi.fn(async () => undefined);
+    native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
     const renderer = fakeRendering();
     renderer.rendering.compose = vi.fn(async () => {
       throw new Error('No bitmap memory');
@@ -925,7 +927,9 @@ describe('prompt export controller orchestration', () => {
     await controller.open();
     const result = await controller.copyMarkdown(controller.getState().cards[0]);
     expect(result.ok).toBe(true);
-    expect(native.bridge.copyText).toHaveBeenCalledWith(expect.stringContaining('Description 1'));
+    expect(native.bridge.copyPromptExportMarkdown).toHaveBeenCalledWith(
+      expect.stringContaining('Description 1'),
+    );
     expect(renderer.rendering.compose).not.toHaveBeenCalled();
     expect(native.copies).toEqual([]);
     expect(controller.getState().cards[0].outcome).toBe('markdown');
@@ -934,7 +938,7 @@ describe('prompt export controller orchestration', () => {
   test('direct Markdown fallback refreshes a changed card without copying or rendering', async () => {
     let context = savedContext([screenshot(0)]);
     const native = fakeBridge();
-    native.bridge.copyText = vi.fn(async () => undefined);
+    native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
     const renderer = fakeRendering();
     renderer.rendering.compose = vi.fn(async () => {
       throw new Error('Markdown fallback must not render an image');
@@ -948,13 +952,15 @@ describe('prompt export controller orchestration', () => {
       ok: false,
       error: { code: 'content-changed' },
     });
-    expect(native.bridge.copyText).not.toHaveBeenCalled();
+    expect(native.bridge.copyPromptExportMarkdown).not.toHaveBeenCalled();
     expect(native.starts).toEqual([]);
     expect(controller.getState().cards[0].pictureNumbers).toEqual([1]);
     expect(controller.getState().cards[0].planId).not.toBe(selected.planId);
 
     expect((await controller.copyMarkdown(controller.getState().cards[0])).ok).toBe(true);
-    expect(native.bridge.copyText).toHaveBeenCalledWith(expect.stringContaining('Description 2'));
+    expect(native.bridge.copyPromptExportMarkdown).toHaveBeenCalledWith(
+      expect.stringContaining('Description 2'),
+    );
     expect(renderer.rendering.compose).not.toHaveBeenCalled();
     expect(native.starts).toEqual([]);
   });
@@ -962,7 +968,7 @@ describe('prompt export controller orchestration', () => {
   test('direct Markdown fallback replaces a selected card that disappeared during replanning', async () => {
     let context = savedContext([screenshot(0), screenshot(1)]);
     const native = fakeBridge();
-    native.bridge.copyText = vi.fn(async () => undefined);
+    native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
     const controller = engine(
       async () => context,
       native.bridge,
@@ -978,10 +984,10 @@ describe('prompt export controller orchestration', () => {
       ok: false,
       error: { code: 'content-changed' },
     });
-    expect(native.bridge.copyText).not.toHaveBeenCalled();
+    expect(native.bridge.copyPromptExportMarkdown).not.toHaveBeenCalled();
     expect(controller.getState().cards).toHaveLength(1);
     expect((await controller.copyMarkdown(controller.getState().cards[0])).ok).toBe(true);
-    expect(native.bridge.copyText).toHaveBeenCalledTimes(1);
+    expect(native.bridge.copyPromptExportMarkdown).toHaveBeenCalledTimes(1);
     expect(native.starts).toEqual([]);
   });
 
@@ -1189,7 +1195,7 @@ describe('prompt export controller orchestration', () => {
     'Markdown-only copy before any export does not orphan the bundle cache (content changes: $contentChanges)',
     async ({ contentChanges, expectedSessions }) => {
       const native = fakeBridge();
-      native.bridge.copyText = vi.fn(async () => undefined);
+      native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
       const load = native.bridge.loadScreenshotContent;
       let pixels = PNG;
       native.bridge.loadScreenshotContent = async (input) => {
@@ -1584,7 +1590,7 @@ describe('prompt export controller orchestration', () => {
         let context = savedContext([screenshot(0)]);
         const native = fakeBridge();
         const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
-        native.bridge.copyText = vi.fn(async () => undefined);
+        native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
         const controller = engine(async () => context, native.bridge, fakeRendering().rendering);
         expect((await controller.prepareFreshFiles()).ok).toBe(true);
         const card = controller.getState().cards[0];
@@ -1604,7 +1610,7 @@ describe('prompt export controller orchestration', () => {
         expect(native.copies).toEqual([]);
         expect(native.opens).toEqual([]);
         expect(read).not.toHaveBeenCalled();
-        expect(native.bridge.copyText).not.toHaveBeenCalled();
+        expect(native.bridge.copyPromptExportMarkdown).not.toHaveBeenCalled();
         expect(native.starts).toHaveLength(1);
         expect(controller.getState().preview).toBeUndefined();
       },
@@ -1761,7 +1767,7 @@ describe('prompt export controller orchestration', () => {
 
   test('does not copy freshly planned Markdown if a screenshot changes before validation', async () => {
     const native = fakeBridge({ revisionForLoad: (_id, count) => (count === 1 ? 'one' : 'two') });
-    native.bridge.copyText = vi.fn(async () => undefined);
+    native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
     const controller = engine(
       async () => savedContext([screenshot(0)]),
       native.bridge,
@@ -1769,7 +1775,7 @@ describe('prompt export controller orchestration', () => {
     );
     const result = await controller.copyMarkdown(1);
     expect(result).toMatchObject({ ok: false, error: { code: 'content-changed' } });
-    expect(native.bridge.copyText).not.toHaveBeenCalled();
+    expect(native.bridge.copyPromptExportMarkdown).not.toHaveBeenCalled();
   });
 
   test.each(['markdown', 'image'] as const)(
@@ -2249,5 +2255,387 @@ describe('prompt export controller orchestration', () => {
       expect(result.error.message).not.toMatch(/use (the )?saved files|save separately/i);
     }
     expect(native.starts).toHaveLength(0);
+  });
+});
+
+test('reports incomplete export rather than cancellation when native finish stops without a user cancel', async () => {
+  const native = fakeBridge();
+  const finish = native.bridge.finishPromptExport;
+  native.bridge.finishPromptExport = async (input) => {
+    const result = await finish(input);
+    if (!result.ok) return result;
+    return ok({ ...result.value, status: 'cancelled' as const });
+  };
+  const controller = new PromptBundleControllerEngine({
+    getSavedContext: async () => savedContext([screenshot(0)]),
+    bridge: native.bridge,
+    rendering: fakeRendering().rendering,
+  });
+  const result = await controller.prepareFreshFiles();
+  expect(result).toMatchObject({ ok: false, error: { code: 'export-incomplete', recovery: 'rebuild' } });
+  if (!result.ok) {
+    expect(result.error.message).toContain('did not complete');
+    expect(result.error.message).not.toMatch(/cancelled/i);
+  }
+  expect(controller.getState().progress?.phase).toBe('error');
+  expect(native.cancellations).toEqual([]);
+});
+
+describe('Try again with the real export engine', () => {
+  test.each(['too-large', 'rejected'] as const)(
+    'direct Markdown-only copy reports the catalog clipboard %s failure before files exist',
+    async (reason) => {
+      const native = fakeBridge();
+      // The legacy channel loses the native code across Electron's rejected invoke.
+      const legacyCopy = vi.fn(async () => {
+        throw new Error('Private Markdown clipboard failure');
+      });
+      Object.assign(native.bridge, { copyText: legacyCopy });
+      const copyMarkdown = vi.fn(async (): Promise<WorkflowResult<void>> => ({
+        ok: false,
+        error: {
+          code: 'clipboard-limit',
+          message: 'Private Markdown clipboard failure',
+          retryable: false,
+          details: { reason },
+        },
+      }));
+      Object.assign(native.bridge, { copyPromptExportMarkdown: copyMarkdown });
+      const controller = engine(
+        async () => savedContext([screenshot(0)]),
+        native.bridge,
+        fakeRendering().rendering,
+      );
+      await controller.open();
+      const outcome = await controller.copyMarkdown(controller.getState().cards[0]);
+      expect(outcome).toMatchObject({
+        ok: false,
+        error: {
+          code: 'native-failure',
+          nativeCode: 'clipboard-limit',
+          recovery: 'use-files',
+          message:
+            reason === 'too-large'
+              ? 'This prompt is too large for the clipboard. Use the saved PNG and Markdown files.'
+              : 'The clipboard did not accept this prompt. Use Copy Markdown only or Open files.',
+        },
+      });
+      expect(copyMarkdown).toHaveBeenCalledOnce();
+      expect(legacyCopy).not.toHaveBeenCalled();
+      expect(native.starts).toEqual([]);
+      if (!outcome.ok) expect(outcome.error.message).not.toContain('Private Markdown');
+    },
+  );
+  const failures = [
+    { code: 'clipboard-limit', message: 'Clipboard busy', retryable: true, details: { reason: 'busy' } },
+    { code: 'io-failure', message: 'Export locked', retryable: false, details: { errno: 'EBUSY' } },
+  ] as const;
+
+  test('cancelled Rich completion cannot replace the newer Copy image failure retry', async () => {
+    const native = fakeBridge();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const copy = vi
+      .spyOn(native.bridge, 'copyPromptExportBundle')
+      .mockImplementationOnce(async () => {
+        entered();
+        await gate;
+        return ok({ target: 'rich' });
+      })
+      .mockResolvedValueOnce({ ok: false, error: failures[0] });
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => savedContext([screenshot(0)]),
+        bridge: native.bridge,
+        rendering: fakeRendering().rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+      });
+      let pending!: ReturnType<typeof result.current.copyFresh>;
+      await act(async () => {
+        pending = result.current.copyFresh(result.current.cards[0]);
+        await started;
+        expect((await result.current.cancel()).ok).toBe(true);
+        expect(await result.current.copyImage(result.current.cards[0])).toMatchObject({
+          ok: false,
+          error: { recovery: 'retry', message: 'Another app is using the clipboard. Try again.' },
+        });
+      });
+      const displayed = result.current.error;
+      await act(async () => {
+        release();
+        expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+      });
+      expect(result.current.error).toBe(displayed);
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(copy.mock.calls.map(([input]) => input.target)).toEqual(['rich', 'image', 'image']);
+    } finally {
+      release();
+      unmount();
+    }
+  });
+
+  test('Try again reloads a failed EBUSY preview after a successful copy without writing the clipboard', async () => {
+    const native = fakeBridge();
+    const copy = vi.spyOn(native.bridge, 'copyPromptExportBundle');
+    const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => savedContext([screenshot(0)]),
+        bridge: native.bridge,
+        rendering: fakeRendering().rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+        expect((await result.current.copyFresh(result.current.cards[0])).ok).toBe(true);
+      });
+      read.mockResolvedValueOnce({ ok: false, error: failures[1] });
+      await act(async () => {
+        expect(await result.current.loadPreview(result.current.cards[0])).toMatchObject({
+          ok: false,
+          error: { recovery: 'retry' },
+        });
+      });
+      const readsBeforeRetry = read.mock.calls.length;
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(result.current.preview).toMatchObject({ bundleNumber: 1, dataUrl: PNG });
+      expect(result.current.error).toBeUndefined();
+      expect(read).toHaveBeenCalledTimes(readsBeforeRetry + 1);
+      expect(copy).toHaveBeenCalledOnce();
+    } finally {
+      unmount();
+    }
+  });
+
+  test('a second failed preview retry stays associated with its newly displayed error', async () => {
+    const native = fakeBridge();
+    const copy = vi.spyOn(native.bridge, 'copyPromptExportBundle');
+    const read = vi.spyOn(native.bridge, 'readPromptExportBundle');
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => savedContext([screenshot(0)]),
+        bridge: native.bridge,
+        rendering: fakeRendering().rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+        await result.current.copyFresh(result.current.cards[0]);
+      });
+      read
+        .mockResolvedValueOnce({ ok: false, error: failures[1] })
+        .mockResolvedValueOnce({ ok: false, error: failures[1] });
+      await act(async () => {
+        await result.current.loadPreview(result.current.cards[0]);
+      });
+      const firstError = result.current.error;
+      expect(result.current.canRetry).toBe(true);
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(false);
+      });
+      expect(result.current.error).not.toBe(firstError);
+      expect(result.current.canRetry).toBe(true);
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(result.current.preview).toMatchObject({ bundleNumber: 1, dataUrl: PNG });
+      expect(result.current.error).toBeUndefined();
+      expect(result.current.canRetry).toBe(false);
+      expect(copy).toHaveBeenCalledOnce();
+    } finally {
+      unmount();
+    }
+  });
+
+  test.each(['copyFresh', 'copyVariant', 'copyMarkdown', 'copyImage', 'copyPaths', 'openFiles'] as const)(
+    '%s retries the same bundle using its current card after preparation replaces the plan',
+    async (action) => {
+      const native = fakeBridge();
+      const copy = native.bridge.copyPromptExportBundle;
+      const open = native.bridge.openPromptExportBundle;
+      let failed = false;
+      native.bridge.copyPromptExportBundle = async (input) => {
+        const success = await copy(input);
+        if (failed) return success;
+        failed = true;
+        return { ok: false, error: failures[0] };
+      };
+      native.bridge.openPromptExportBundle = async (input) => {
+        const success = await open(input);
+        if (failed) return success;
+        failed = true;
+        return { ok: false, error: failures[1] };
+      };
+      const { result, unmount } = renderHook(() =>
+        usePromptBundleController({
+          getSavedContext: async () => savedContext([screenshot(0), screenshot(1)]),
+          bridge: native.bridge,
+          rendering: fakeRendering({ preflightSize: { width: 100, height: 5000 } }).rendering,
+        }),
+      );
+      try {
+        await act(async () => {
+          expect((await result.current.open()).ok).toBe(true);
+        });
+        expect(result.current.cards).toHaveLength(2);
+        const selected = result.current.cards[1];
+        expect(selected.artifactSessionId).toBeUndefined();
+        await act(async () => {
+          const outcome =
+            action === 'copyVariant'
+              ? await result.current.copyVariant(selected, 'files-rich')
+              : await result.current[action](selected);
+          expect(outcome).toMatchObject({ ok: false, error: { recovery: 'retry' } });
+        });
+        expect(result.current.cards[1].planId).not.toBe(selected.planId);
+        await act(async () => {
+          expect(await result.current.retry()).toMatchObject({ ok: true, bundleNumber: 2 });
+        });
+        expect(result.current.error).toBeUndefined();
+        expect(native.starts).toHaveLength(1);
+        const deliveries = action === 'openFiles' ? native.opens : native.copies;
+        expect(deliveries.length).toBeGreaterThanOrEqual(2);
+        expect(
+          deliveries.every((delivery) => delivery.bundleNumber === 2 && delivery.sessionId === 'session-1'),
+        ).toBe(true);
+        if (action === 'copyVariant')
+          expect(native.copies.map((input) => input.target)).toEqual(['files-rich', 'files-rich']);
+      } finally {
+        unmount();
+      }
+    },
+  );
+
+  test.each(failures)('preview does not replace the failed copy retry target ($code)', async (error) => {
+    const native = fakeBridge();
+    const copy = vi
+      .spyOn(native.bridge, 'copyPromptExportBundle')
+      .mockResolvedValueOnce({ ok: false, error });
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => savedContext([screenshot(0)]),
+        bridge: native.bridge,
+        rendering: fakeRendering().rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+      });
+      await act(async () => {
+        await result.current.copyFresh(result.current.cards[0]);
+      });
+      const failure = result.current.error;
+      await act(async () => {
+        expect((await result.current.loadPreview(result.current.cards[0])).ok).toBe(true);
+      });
+      expect(result.current.error).toBe(failure);
+      act(() => result.current.clearPreview());
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(copy).toHaveBeenCalledTimes(2);
+      expect(result.current.error).toBeUndefined();
+    } finally {
+      unmount();
+    }
+  });
+
+  test('a busy action does not replace the accepted copy retry target', async () => {
+    const native = fakeBridge();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const copy = vi.spyOn(native.bridge, 'copyPromptExportBundle').mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      return { ok: false, error: failures[0] };
+    });
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => savedContext([screenshot(0)]),
+        bridge: native.bridge,
+        rendering: fakeRendering().rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+      });
+      await act(async () => {
+        const pending = result.current.copyFresh(result.current.cards[0]);
+        await started;
+        expect(await result.current.copyImage(result.current.cards[0])).toMatchObject({
+          ok: false,
+          error: { code: 'busy' },
+        });
+        release();
+        expect(await pending).toMatchObject({ ok: false, error: { recovery: 'retry' } });
+      });
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(copy).toHaveBeenLastCalledWith({ sessionId: 'session-1', bundleNumber: 1, target: 'rich' });
+    } finally {
+      release();
+      unmount();
+    }
+  });
+
+  test('retry rebuilds without copying when the selected bundle no longer exists', async () => {
+    let context = savedContext([screenshot(0), screenshot(1)]);
+    const native = fakeBridge();
+    native.bridge.copyPromptExportMarkdown = vi.fn(async () => ok(undefined));
+    const { result, unmount } = renderHook(() =>
+      usePromptBundleController({
+        getSavedContext: async () => context,
+        bridge: native.bridge,
+        rendering: fakeRendering({ preflightSize: { width: 100, height: 5000 } }).rendering,
+      }),
+    );
+    try {
+      await act(async () => {
+        await result.current.open();
+      });
+      const selected = result.current.cards[1];
+      context = savedContext([screenshot(0)]);
+      await act(async () => {
+        expect(await result.current.copyMarkdown(selected)).toMatchObject({
+          ok: false,
+          error: { recovery: 'rebuild' },
+        });
+      });
+      expect(result.current.cards).toHaveLength(1);
+      await act(async () => {
+        expect((await result.current.retry()).ok).toBe(true);
+      });
+      expect(result.current.error).toBeUndefined();
+      expect(native.starts).toHaveLength(1);
+      expect(native.bridge.copyPromptExportMarkdown).not.toHaveBeenCalled();
+      expect(native.copies).toEqual([]);
+    } finally {
+      unmount();
+    }
   });
 });

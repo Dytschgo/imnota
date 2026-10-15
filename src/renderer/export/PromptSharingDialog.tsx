@@ -8,6 +8,7 @@ import {
   type PromptBundleActionRequest,
   type PromptBundleCardModel,
 } from './PromptBundleCard';
+import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import './prompt-bundles.css';
 
 export interface PromptSharingDialogProps {
@@ -17,7 +18,7 @@ export interface PromptSharingDialogProps {
   defaultCopyVariant?: WindowsCopyVariantId;
   bundles: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
-  error?: { message: string; technicalDetails?: string };
+  error?: PromptBundleControllerError;
   preferenceError?: string;
   cleanupPending?: boolean;
   noContentMessage?: string;
@@ -36,6 +37,8 @@ export interface PromptSharingDialogProps {
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
   onOpenExportFolder?(): void | Promise<void>;
   onCancel?(): void | Promise<void>;
+  onRebuild?(): void | Promise<void>;
+  onRetry?(): void | Promise<void>;
   onRetryCleanup?(): void | Promise<void>;
   onShareHosted?(): void | Promise<void>;
 }
@@ -82,6 +85,8 @@ export function PromptSharingDialog({
   onOpenExportFolder,
   onCancel,
   onRetryCleanup,
+  onRebuild,
+  onRetry,
   onShareHosted,
 }: PromptSharingDialogProps) {
   const busy = progress
@@ -125,26 +130,32 @@ export function PromptSharingDialog({
                 </details>
               )}
             </div>
-            {cleanupPending
-              ? onRetryCleanup && (
-                  <Button variant="soft" onClick={() => void onRetryCleanup()}>
-                    Retry cleanup
-                  </Button>
-                )
-              : rebuildBundle && (
-                  <Button
-                    variant="soft"
-                    onClick={() =>
-                      void onPrepareFreshFiles({
-                        planId: rebuildBundle.planId,
-                        artifactSessionId: rebuildBundle.artifactSessionId,
-                        bundleNumber: rebuildBundle.bundleNumber,
-                      })
-                    }
-                  >
-                    Rebuild bundles
-                  </Button>
-                )}
+            {/* A pending cleanup blocks every other export action, so it always wins. */}
+            {(cleanupPending || error.recovery === 'retry-cleanup') && onRetryCleanup ? (
+              <Button variant="soft" disabled={busy} onClick={() => void onRetryCleanup()}>
+                Retry cleanup
+              </Button>
+            ) : error.retryable && error.recovery === 'retry' && onRetry ? (
+              <Button variant="soft" disabled={busy} onClick={() => void onRetry()}>
+                Try again
+              </Button>
+            ) : error.retryable && error.recovery === 'rebuild' && (rebuildBundle || onRebuild) ? (
+              <Button
+                variant="soft"
+                disabled={busy || cleanupPending}
+                onClick={() => {
+                  if (rebuildBundle)
+                    void onPrepareFreshFiles({
+                      planId: rebuildBundle.planId,
+                      artifactSessionId: rebuildBundle.artifactSessionId,
+                      bundleNumber: rebuildBundle.bundleNumber,
+                    });
+                  else void onRebuild?.();
+                }}
+              >
+                Rebuild bundles
+              </Button>
+            ) : null}
           </div>
         )}
         {preferenceError && (
@@ -177,6 +188,7 @@ export function PromptSharingDialog({
                 platform={platform}
                 defaultCopyVariant={defaultCopyVariant}
                 errorReported={Boolean(error)}
+                fallbackAvailable={Boolean(error?.fallbackAvailable && bundle === rebuildBundle)}
                 onCopyFresh={onCopyFresh}
                 onCopyVariant={onCopyVariant}
                 onSelectCopyVariant={onSelectCopyVariant}

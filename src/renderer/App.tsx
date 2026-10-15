@@ -280,7 +280,7 @@ export default function App() {
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
-      if (!result.ok) setError(result.error.message);
+      if (!result.ok && !promptBundles.isErrorShowing(result.error)) setError(result.error.message);
     },
     [promptBundles],
   );
