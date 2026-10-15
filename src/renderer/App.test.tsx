@@ -1582,18 +1582,17 @@ describe('feedback controls', () => {
     await waitFor(() => expect(annotationCanvasSpy.mock.calls.at(-1)?.[0]).toMatchObject({ tool: 'text' }));
   });
 
-  it('runs an available Terminal update from the app banner', async () => {
+  it('downloads an available update from the app banner', async () => {
     const downloadUpdate = vi.fn(async () => {});
     renderApp({
       getUpdateStatus: async () => ({
         state: 'available',
         version: '0.3.0',
-        terminalCommand: '/bin/bash /tmp/imnota-update/Update.command',
         message: 'Stable 0.3.0 is available. Nightly remains selected for future checks.',
       }),
       downloadUpdate,
     });
-    const update = await screen.findByRole('button', { name: 'Run update in Terminal' });
+    const update = await screen.findByRole('button', { name: 'Download update' });
     fireEvent.click(update);
     fireEvent.focus(update);
     expect(screen.getByRole('dialog', { name: 'Update status' })).toHaveTextContent(
