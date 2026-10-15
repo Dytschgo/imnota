@@ -148,6 +148,9 @@ mv() {
   if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
   if [[ "$*" == *-axo* ]]; then return 0; fi
   if [ "\${FAKE_MAC_READINESS:-}" = exits ] && [ "\${FAKE_POLL:-0}" -gt 0 ]; then return 1; fi
+  if [[ "$*" == *'stat=,comm='* ]]; then
+    if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z '; else printf 'S '; fi
+  fi
   if [ "$2" = stat= ]; then
     if [ "\${FAKE_MAC_READINESS:-}" = zombie ]; then printf 'Z\n'; else printf 'S\n'; fi
     return 0

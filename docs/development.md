@@ -121,27 +121,40 @@ Linux replacement uses GNU `mv -fT` to replace the destination entry without
 following a file or directory symlink; a hardlink peer keeps its previous bytes.
 A directory occupying the destination causes refusal and staging cleanup. After
 replacement, a desktop-file write failure leaves the verified binary installed;
-there is no automatic Linux rollback. macOS stages its previous app in a private
-same-volume `.imnota-install.*` directory. Both Mac paths ask a running Imnota to quit
+there is no automatic Linux rollback. The macOS quick installer keeps its previous
+app at `.imnota-install.*/previous-Imnota.app` inside the installation folder.
+The Terminal updater instead keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`
+inside that folder, with separate `.imnota-update.*` staging. Both Mac paths ask a running Imnota to quit
 before replacement. Both use a single 60-second wall-clock deadline that includes
 the quit request. AppleScript has a five-second event timeout, and a separate
-watchdog terminates the request sender at the deadline; a blocked request aborts
+watchdog signals the request sender only when one process snapshot confirms a
+live `/usr/bin/osascript` child of the installer, separately before TERM and KILL.
+Bash may reap that child before explicit `wait`, so its recorded PID alone is not
+ownership. An unverified sender is left alone; a blocked request aborts
 without replacing anything. Copy, installed-bundle verification, open-command
 or replacement-observation failure attempts to restore the previous app.
 Rollback first enumerates replacement-owned processes (including helpers) using
 `/bin/ps`, requests quit for that exact bundle, and waits before sending TERM only
-to PIDs whose executable is still verified inside its physical bundle. Shutdown
+to PIDs whose executable and live state are verified together in one snapshot
+inside its physical bundle. macOS has no pidfds: a residual kernel-level race
+between the final check and signal remains; keep that window minimal. Shutdown
 has one 10-second deadline; failed process inspection or an unconfirmed stop keeps
 the failed replacement at the reported staging path while restoring the old app.
 Quit that remaining process before reopening the restored app. No unverified PID
 is signaled. Successful verification and bounded replacement observation commit the replacement
-and remove the temporary rollback. If restoration itself
-fails, staging is preserved and the recovery path is reported. Both Mac install
+and remove the temporary rollback. If restoration itself fails, the previous app
+is preserved at its rollback location above and the actual path is reported.
+If replacement shutdown cannot be confirmed, the quick installer preserves it at
+`.imnota-install.*/failed-Imnota.app`; the updater uses
+`.imnota-update.*/failed-Imnota.app`. If moving it aside fails, it remains at
+`Imnota.app` and the previous app stays at its reported rollback location. All
+these paths are relative to the verified physical installation folder. Both Mac install
 paths use `.imnota-update.lock` to avoid retiring another live transaction's backup.
 An interrupted lock is left for manual removal after confirming no installer is running.
 
 Both standalone scripts use `wait_for_replacement`: for up to 30 seconds, poll
-`/usr/bin/pgrep -x Imnota`, then `/bin/ps -o comm=` and `/bin/ps -o stat=` for each candidate. Require
+`/usr/bin/pgrep -x Imnota`, then a combined `/bin/ps -ww -o stat=,comm=`
+snapshot for each candidate, with an exact main-executable check. Require
 the executable to be exactly the installed physical bundle's `Contents/MacOS/Imnota`
 (with no executable or parent symlink), and require a non-zombie process.
 Process inspection failures report an explicit `/bin/ps` error. The same

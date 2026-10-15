@@ -675,6 +675,9 @@ poll=0
   if [[ "$*" == *"$$"* ]]; then printf shell; return 0; fi
   if [[ "$*" == *-axo* ]]; then return 0; fi
   if [[ "$readiness" == exits && "$poll" -gt 0 ]]; then return 1; fi
+  if [[ "$*" == *'stat=,comm='* ]]; then
+    if [[ "$readiness" == zombie ]]; then printf 'Z '; else printf 'S '; fi
+  fi
   if [[ "$2" == stat= ]]; then
     if [[ "$readiness" == zombie ]]; then printf Z; else printf S; fi
     return 0

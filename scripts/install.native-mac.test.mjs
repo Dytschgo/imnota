@@ -20,6 +20,40 @@ const skip =
     ? 'Requires native macOS'
     : !archive && 'Set IMNOTA_NATIVE_MAC_ARCHIVE to the built universal ZIP';
 
+// Explicit macOS preflight: source substrings (for example Linux install paths)
+// are not tool invocations. The portable lifecycle test guards this inventory.
+const macosTools = [
+  '/bin/bash',
+  '/bin/chmod',
+  '/bin/cp',
+  '/bin/ln',
+  '/bin/mkdir',
+  '/bin/mv',
+  '/bin/ps',
+  '/bin/rm',
+  '/bin/rmdir',
+  '/bin/sleep',
+  '/usr/bin/awk',
+  '/usr/bin/codesign',
+  '/usr/bin/curl',
+  '/usr/bin/ditto',
+  '/usr/bin/env',
+  '/usr/bin/find',
+  '/usr/bin/lipo',
+  '/usr/bin/mktemp',
+  '/usr/bin/open',
+  '/usr/bin/osascript',
+  '/usr/bin/pgrep',
+  '/usr/bin/readlink',
+  '/usr/bin/shasum',
+  '/usr/bin/stat',
+  '/usr/bin/sw_vers',
+  '/usr/bin/tr',
+  '/usr/bin/uname',
+  '/usr/bin/zipinfo',
+  '/usr/libexec/PlistBuddy',
+];
+
 // Transport and GUI launch are substituted without production fixture hooks.
 // All extraction, plist/signature/architecture checks and filesystem operations
 // are native. After the final signature check, fake open replaces the fixture's
@@ -59,7 +93,7 @@ open() {
   start_fixture_process "$1" 120 || return 1
 }
 /usr/bin/osascript() {
-  if [[ "$FAULT" == blocked-quit ]]; then exec /bin/sleep 120; fi
+  if [[ "$FAULT" == blocked-quit ]]; then exec /usr/bin/osascript -e 'delay 120'; fi
   # Only the fixture PID can be asked to quit; never a personal app.
   [[ "$FAULT" == quit || "$FAULT" == refuses-quit || "$FAULT" == running-failure ]] || return 1
   printf 'quit\n' >> "$FIXTURE_ROOT/launches"
@@ -304,11 +338,7 @@ test(
       path.isAbsolute(archive) && fs.statSync(archive).isFile(),
       'Archive must be an existing absolute path',
     );
-    const toolSources = [installer, updater, fileURLToPath(import.meta.url)]
-      .map((file) => fs.readFileSync(file, 'utf8'))
-      .join('\n');
-    const tools = new Set(toolSources.match(/\/(?:usr\/(?:bin|libexec)|bin)\/[A-Za-z0-9_-]+/g));
-    for (const tool of tools) fs.accessSync(tool, fs.constants.X_OK);
+    for (const tool of macosTools) fs.accessSync(tool, fs.constants.X_OK);
     assert.match(command('/bin/bash', ['--version']), /version 3\.2\./, 'Exercise the system Bash 3.2');
     assert.equal(
       spawnSync('/usr/bin/pgrep', ['-x', 'Imnota']).status,

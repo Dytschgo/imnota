@@ -8,6 +8,16 @@ Open **Settings → App updates → Update channel**. Selecting **Nightly (previ
 
 Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit within one 60-second bound (including the quit request), replaces the app and reopens it. The previous app remains available for automatic rollback until final signature verification succeeds and the same replacement process is observed running from the installed bundle on successive polls within 30 seconds. An accepted open request alone does not commit the update; missing or exited replacement processes trigger rollback. Before restoring, it requests quit of the verified replacement, waits, then sends TERM only to PIDs still verified inside its physical bundle. If that 10-second shutdown cannot be confirmed, it preserves the failed replacement at a reported path while restoring the previous app; quit that remaining process before reopening the restored app. After success it removes the rollback copy and recognized older Imnota app backups in that installation folder. If automatic restoration fails, the helper reports the preserved old app path for manual recovery. It does not require Developer ID signing, administrator privileges or removal of quarantine.
 
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the Terminal updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
+
 Channel switching is disabled while checking, downloading or awaiting native installation. Failed checks/downloads allow retry. Nightly checks compare the latest nightly with the latest stable release and offer the newer version. For example, stable `0.2.2` supersedes `0.2.2-nightly.20260905.1234`; a later `0.2.3-nightly` becomes eligible again. The preference remains Nightly throughout, and an already newer installed version is never downgraded.
 
 Switching back to Stable never automatically downgrades. If the installed nightly is newer, Imnota explains that and offers the selected stable release page. Back up before manually replacing a newer app; an older version may not understand a future project's schema.

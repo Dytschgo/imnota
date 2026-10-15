@@ -81,6 +81,15 @@ is_app_running() {
 }
 
 # These lifecycle helpers must stay identical in the two standalone Mac scripts.
+# Bash may reap an asynchronous child before wait; $! alone is not ownership.
+# Read liveness, parent and executable together before each watchdog signal.
+quit_sender_is_running() {
+  local snapshot state parent executable
+  snapshot="$(/bin/ps -ww -o stat=,ppid=,comm= -p "$1")" || return 1
+  read -r state parent executable <<< "$snapshot"
+  [[ -n "$state" && "$state" != *Z* && "$parent" == "$$" && "$executable" == /usr/bin/osascript ]]
+}
+
 # Bound the AppleEvent AND its sender: a modal dialog must not outlive our deadline.
 bounded_quit_request() {
   local deadline=$1 bundle=${2:-} sender status
@@ -98,10 +107,11 @@ end timeout' &
   sender=$!
   while kill -0 "$sender" 2>/dev/null; do
     if (( SECONDS >= deadline )); then
-      kill -TERM "$sender" 2>/dev/null || true
-      # This is our unreaped request sender, never an application process.
-      kill -KILL "$sender" 2>/dev/null || true
-      wait "$sender" 2>/dev/null || true
+      # macOS has no pidfds: a residual kernel check-to-kill race remains.
+      # Keep each combined ownership/liveness snapshot adjacent to its signal.
+      if quit_sender_is_running "$sender"; then kill -TERM "$sender" 2>/dev/null || true; fi
+      if quit_sender_is_running "$sender"; then kill -KILL "$sender" 2>/dev/null || true; fi
+      # Do not wait here: an unverified or unkillable sender must not extend the deadline.
       echo "Imnota quit request timed out." >&2
       return 1
     fi
@@ -142,9 +152,9 @@ require_process_inspection() {
 
 # 0 = live owned process, 1 = absent/unowned, 2 = inspection unavailable.
 replacement_pid_belongs_to_bundle() {
-  local pid=$1 bundle=$2 executable state physical_parent status
+  local pid=$1 bundle=$2 snapshot executable state physical_parent status
   [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
-  if executable="$(/bin/ps -ww -o comm= -p "$pid")"; then :; else
+  if snapshot="$(/bin/ps -ww -o stat=,comm= -p "$pid")"; then :; else
     status=$?
     if (( status != 1 )); then
       echo "Could not run /bin/ps for replacement PID $pid (status $status)." >&2
@@ -153,23 +163,15 @@ replacement_pid_belongs_to_bundle() {
     require_process_inspection || return 2
     return 1
   fi
-  [[ "$executable" == "$bundle/"* ]] || return 1
+  read -r state executable <<< "$snapshot"
+  [[ -n "$state" && "$state" != *Z* && "$executable" == "$bundle/"* ]] || return 1
   if [[ ! -x "$executable" || -L "$executable" ]] ||
     ! physical_parent="$(cd -- "${executable%/*}" && pwd -P)" ||
     [[ "$physical_parent/${executable##*/}" != "$executable" ]]; then
     echo "Could not verify physical replacement executable: $executable" >&2
     return 2
   fi
-  if state="$(/bin/ps -o stat= -p "$pid")"; then :; else
-    status=$?
-    if (( status != 1 )); then
-      echo "Could not run /bin/ps for replacement PID $pid (status $status)." >&2
-      return 2
-    fi
-    require_process_inspection || return 2
-    return 1
-  fi
-  [[ -n "$state" && "$state" != *Z* ]]
+  return 0
 }
 
 # Inspect every process, including Electron helpers, without matching by app name.
@@ -197,7 +199,7 @@ $listing"
 }
 
 quiesce_replacement() {
-  local bundle=$1 deadline=$((SECONDS + 10)) grace=$((SECONDS + 5)) pid status
+  local bundle=$1 deadline=$((SECONDS + 10)) grace=$((SECONDS + 5)) pid
   (( replacement_launched != 0 )) || return 0
   require_process_inspection || return 1
   find_replacement_pids "$bundle" || return 1
@@ -211,12 +213,14 @@ quiesce_replacement() {
   done
   find_replacement_pids "$bundle" || return 1
   for pid in $replacement_pids; do
-    # Recheck immediately before TERM; never signal a reused/unrelated PID.
+    # Recheck ownership and liveness in ONE snapshot before TERM. macOS has no
+    # pidfds, so the residual kernel check-to-kill race cannot be eliminated.
+    # Keep this check adjacent to kill; never use a later state-only snapshot.
     if replacement_pid_belongs_to_bundle "$pid" "$bundle"; then
       kill -TERM "$pid" 2>/dev/null || true
     else
-      status=$?
-      (( status != 2 )) || return 1
+      echo "Replacement ownership could not be confirmed before TERM; its bundle will be preserved." >&2
+      return 1
     fi
   done
   while :; do

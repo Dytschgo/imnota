@@ -71,6 +71,16 @@ Keep the prior stable installer available. If a release fails, stop promotion an
 
 macOS app rollback copies now last only until installation commits: the quick installer checks the installed executable and signature, and both paths require installed signature verification and observation of the same running replacement process from the installed bundle on successive polls within 30 seconds. Both request a graceful quit first and refuse replacement if the app or quit request exceeds one 60-second deadline. Rollback first requests quit of the verified replacement and waits, then uses TERM only for PIDs still verified inside the replacement bundle, within a 10-second shutdown deadline. An unconfirmed stop preserves the failed replacement at a reported recovery path while restoring the previous app; quit that remaining process before reopening the restored app. Missing or exited replacements trigger restoration even when `open` accepts the request. Both then retire recognized old Imnota app backups after checking the bundle identifier, including managed rollback bundles. Project backups are separate. Verify repeated successful installs leave no app rollback bundles, failure restores the previous app (or reports its preserved path if the restore itself fails), and unrelated look-alikes survive; record native macOS evidence and independent review before shipping. Use the [storage audit and walkthrough](development.md#installer-and-updater-storage-audit) for Windows/Linux cache expectations and interrupted-transaction recovery. Reinstall the prior tested release for a downgrade after success; do not depend on a retained local app rollback copy.
 
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the Terminal updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
+
 macOS builds are currently ad-hoc signed, not Apple-notarised. Record actual Gatekeeper/install results and Intel/Apple Silicon coverage separately. CI now includes packaged Windows portable and extracted Linux AppImage smoke alongside the packaged Mac archive check. These are launch/core-workflow tests, not a substitute for testing NSIS/deb installation, Gatekeeper prompts or real update installation on target machines. Do not mark those manual checks passed solely from a package job.
 
 Test the guard with `node --test scripts/release-readiness.test.mjs` (also included in `pnpm test`). See [nightly build instructions](nightly-builds.md) for channel selection, guarded publishing and remaining rollout validation.

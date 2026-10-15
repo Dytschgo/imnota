@@ -6,6 +6,16 @@ Imnota turns screenshots, Markdown text blocks and drawings in one collection in
 
 On macOS, the quick installer and **Run update in Terminal** keep the previous app only during replacement. Both allow at most 60 seconds for the running app to quit, including the quit request itself, and abort before replacement if it cannot close safely. On copy, final signature check, launch or replacement-observation failure, both attempt to restore the previous app. The rollback copy is retired only after installed signature verification and observation of the same running replacement process from the installed bundle on two polls at least one second apart, within 30 seconds. An accepted open request alone does not commit the installation. Before restoring, they ask the replacement to quit, wait, then send TERM only to processes whose executable is verified inside that replacement bundle. This shutdown has a 10-second bound. If shutdown cannot be confirmed, they preserve the failed replacement at a reported recovery path and restore the old app; quit the remaining replacement process before reopening the restored app. A successful installation removes the temporary rollback copy and recognized older app backups in the same installation folder (`Imnota-backup-<timestamp>.app`, `Imnota Backup <version> <timestamp> <number>.app`, and managed Imnota bundles under `.imnota-backups.noindex`). Cleanup requires the Imnota bundle identifier; unrelated folders and project snapshots are preserved. Cleanup failures report a warning without undoing a successful installation. If automatic restore fails, the terminal reports the preserved recovery path so you can move the previous app back before reopening it.
 
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the Terminal updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
+
 Windows installers and Linux AppImage updates replace the app without creating a history of app backup folders. Native updates can retain download metadata and a reusable installer cache; these are separate from project backups. See the [installer audit](development.md#installer-and-updater-storage-audit) for paths and native verification limits. To return to an older release after a successful installation, download its installer and check [project migration compatibility](data-format.md).
 
 ## Start a project and collection
