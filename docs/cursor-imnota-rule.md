@@ -6,6 +6,7 @@ alwaysApply: false
 When the user refers to “the screenshot”, “the bundle”, “the prompt”, or “the Imnota collection”, call the Imnota MCP tools instead of guessing from chat images.
 
 - `get_latest_bundle` for the latest prepared Markdown + PNG export
+- `list_new_since` to check for exports newer than a time you already handled, then `get_bundle` to read one
 - `get_item` for a specific screenshot, drawing, or Markdown block
 - `list_projects` / `list_collections` to locate the collection and discover prepared bundle ids
 - `list_collection_items` to inspect its ordered items

@@ -19,6 +19,8 @@ Projects are plain folders containing JSON, Markdown and image files. Local edit
 - Five editable workflow templates for new projects
 - Local content search with links to matching items
 - Separate Markdown/image copy, generated-file access and file-path fallbacks
+- **Copy for terminal**: a short summary plus quoted Markdown and PNG paths that paste into Claude Code, Codex or Copilot CLI, with a WSL (`/mnt/c/...`) variant on Windows
+- Optional read-only local MCP access for agents, including `get_latest_bundle` and `list_new_since` to pick up new feedback
 - Manual local snapshots, optional automatic history and validated restore with safety copies
 - Area, window and display capture on Windows and macOS, saved as PNG screenshots
 - Mixed collections containing screenshots, Markdown text blocks and Excalidraw drawings

@@ -109,7 +109,16 @@ export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void 
           .object({
             sessionId: workflowSessionId,
             bundleNumber: workflowBundleNumber,
-            target: z.enum(['rich', 'files', 'files-rich', 'markdown', 'image', 'paths']),
+            target: z.enum([
+              'rich',
+              'files',
+              'files-rich',
+              'markdown',
+              'image',
+              'paths',
+              'terminal',
+              'terminal-wsl',
+            ]),
           })
           .strict(),
       ])

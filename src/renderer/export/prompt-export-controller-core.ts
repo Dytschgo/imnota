@@ -1153,7 +1153,12 @@ export class PromptBundleControllerEngine {
         progress: {
           phase: 'copying',
           bundleNumber,
-          message: outcome === 'opened' ? 'Opening generated files' : `Copying ${outcome}`,
+          message:
+            outcome === 'opened'
+              ? 'Opening generated files'
+              : outcome === 'terminal'
+                ? 'Copying for terminal'
+                : `Copying ${outcome}`,
         },
       });
       this.setCardState(bundleNumber, 'copying');
@@ -1273,6 +1278,23 @@ export class PromptBundleControllerEngine {
       (sessionId, bundleNumber) =>
         this.bridge.copyPromptExportBundle({ sessionId, bundleNumber, target: 'image' }),
       'image',
+    );
+  }
+
+  /** Plain text for an agent CLI: a short summary plus the quoted Markdown and PNG paths. */
+  copyForTerminal(
+    selection: PromptBundleSelection,
+    wsl = false,
+  ): Promise<PromptBundleControllerActionResult> {
+    return this.nativeArtifactAction(
+      selection,
+      (sessionId, bundleNumber) =>
+        this.bridge.copyPromptExportBundle({
+          sessionId,
+          bundleNumber,
+          target: wsl ? 'terminal-wsl' : 'terminal',
+        }),
+      'terminal',
     );
   }
 

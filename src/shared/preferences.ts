@@ -140,6 +140,7 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     '- list_collections: pass projectPath to discover collection ids and up to ten recent prepared bundle ids per collection, including archived collections.',
     '- list_collection_items: ordered items of a collection (id, kind, title, includeInExport, priority).',
     '- get_latest_bundle: the latest saved export as Markdown text plus PNG image blocks. No arguments searches active projects and collections; projectPath narrows to a project; projectPath and collectionId select a collection. Returns "bundle not prepared" when no readable export exists; it never generates an export.',
+    '- list_new_since: ids, paths and times of saved exports newer than since (local YYYY-MM-DDTHH:MM:SS), newest first; without since, the most recent ones. Use it to check for new feedback, then read one with get_bundle.',
     '- get_bundle: pass an id from list_collections or get_latest_bundle to read that saved export. Returns "bundle not found" if it was removed or is no longer accessible.',
     '- get_item: one item as Markdown plus its image path for screenshots and drawings.',
     '- search_saved_text: search saved descriptions, annotation text, Markdown blocks and drawing text.',

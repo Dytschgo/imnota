@@ -156,7 +156,15 @@ export interface PromptExportSourceAsset {
 export const WINDOWS_COPY_VARIANT_IDS = ['files', 'files-rich', 'rich'] as const;
 export type WindowsCopyVariantId = NativeCopyFunction;
 
-export type PromptExportCopyTarget = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
+export type PromptExportCopyTarget =
+  | WindowsCopyVariantId
+  | 'markdown'
+  | 'image'
+  | 'paths'
+  /** Plain-text hand-off for an agent CLI: summary plus quoted Markdown and PNG paths. */
+  | 'terminal'
+  /** Windows only: the same hand-off with paths translated for a WSL shell (/mnt/c/...). */
+  | 'terminal-wsl';
 
 /**
  * What the operating-system clipboard reports after a combined write. Read

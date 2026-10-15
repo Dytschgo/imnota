@@ -83,6 +83,7 @@ const COPY_OUTCOME_LABELS: Record<PromptDeliveryOutcome, string> = {
   markdown: 'Markdown copied',
   image: 'Image copied',
   paths: 'File paths copied',
+  terminal: 'Copied for terminal',
   files: 'Files ready',
   opened: 'Files opened',
 };
