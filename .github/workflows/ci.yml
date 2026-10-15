@@ -105,18 +105,22 @@ jobs:
         working-directory: .
 
   quality:
-    # Keep the strict branch-protection context, including the tests moved off the
-    # packaging critical path. A failed/skipped dependency must not turn this green.
-    needs: [quality-checks, share-service]
-    if: ${{ always() && !cancelled() }}
+    # Keep the strict branch-protection context and wait for every Validate gate.
+    # Only classifier/event-authorized skips may pass; failures/cancellations never do.
+    needs: [changes, quality-checks, share-service, package, dependency-review]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require all quality and platform checks
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Require all applicable validation jobs
         env:
-          QUALITY_RESULT: ${{ needs.quality-checks.result }}
-          PLATFORM_RESULT: ${{ needs.share-service.result }}
-        run: test "$QUALITY_RESULT" = success && test "$PLATFORM_RESULT" = success
+          IMNOTA_CI_NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci-quality-gate.mjs
 
   quality-checks:
     needs: changes
