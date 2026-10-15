@@ -2,6 +2,7 @@ import { COMMITTED_WRITE_WARNING, RESTORE_CONFIRMATION_FAILURE } from '../shared
 import { reloadWindow, setReloadProtection } from './app/reload-guard';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Profiler, type ProfilerOnRenderCallback } from 'react';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
 import type { WorkflowBridge } from '../shared/workflow-bridge';
@@ -97,7 +98,7 @@ describe('feedback controls', () => {
   function renderApp(
     overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
     narrowViewport = false,
-    { resumeRecent = false }: { resumeRecent?: boolean } = {},
+    { resumeRecent = false, onRender }: { resumeRecent?: boolean; onRender?: ProfilerOnRenderCallback } = {},
   ) {
     // Launch resumes the most recent project unless a saved session names another page.
     // Most tests start from the Library, so they save that page first.
@@ -190,8 +191,126 @@ describe('feedback controls', () => {
             removeEventListener() {},
           },
     ) as unknown as typeof window.matchMedia;
-    return render(<App />);
+    return render(
+      onRender ? (
+        <Profiler id="startup" onRender={onRender}>
+          <App />
+        </Profiler>
+      ) : (
+        <App />
+      ),
+    );
   }
+
+  it.each([null, '/tmp/imnota-smoke-fresh'])(
+    'settles fresh-profile startup without pin or settings writes (workspace: %s)',
+    async (workspacePath) => {
+      const previousState = useAppStore.getState();
+      const previousStorage = { ...localStorage };
+      localStorage.clear();
+      useAppStore.setState({
+        snapshot: null,
+        projects: [],
+        recentCollections: [],
+        view: 'projects',
+        search: '',
+        navigationOpen: true,
+        settings: { ...previousState.settings, workspacePath: null },
+      });
+      const getSettings = vi.fn<ImnotaBridge['getSettings']>(async () => ({
+        ...previousState.settings,
+        workspacePath,
+      }));
+      const listProjects = vi.fn<ImnotaBridge['listProjects']>(async () => []);
+      const getPreferenceSettings = vi.fn<ImnotaBridge['getPreferenceSettings']>(async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: false, migratedFromLegacyProfile: false },
+        },
+      }));
+      const idleProjectCalls = {
+        loadProject: vi.fn<ImnotaBridge['loadProject']>(),
+        startProjectWatch: vi.fn<ImnotaBridge['startProjectWatch']>(),
+        onProjectWatchEvent: vi.fn<ImnotaBridge['onProjectWatchEvent']>(),
+        reloadWatchedProject: vi.fn<ImnotaBridge['reloadWatchedProject']>(),
+        updateProjectMetadata: vi.fn<ImnotaBridge['updateProjectMetadata']>(),
+        saveProject: vi.fn<ImnotaBridge['saveProject']>(),
+        saveProjectCompareAndSwap: vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(),
+        saveScreenshotContent: vi.fn<ImnotaBridge['saveScreenshotContent']>(),
+        setSettings: vi.fn<ImnotaBridge['setSettings']>(),
+        setPreferenceSettings: vi.fn<ImnotaBridge['setPreferenceSettings']>(),
+      };
+      const onRender = vi.fn<ProfilerOnRenderCallback>(() => {
+        // Fail at the render boundary rather than letting an effect loop run until the test deadline.
+        if (onRender.mock.calls.length > 20) throw new Error('Fresh-profile startup did not settle.');
+      });
+      let view!: ReturnType<typeof renderApp>;
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          view = renderApp(
+            {
+              getSettings,
+              listProjects,
+              getPreferenceSettings,
+              getNativePerformanceProfile: async () => ({
+                ok: true,
+                value: {
+                  platform: 'linux',
+                  performanceClass: 'standard',
+                  reducedEffectsRecommended: false,
+                  reasons: [],
+                },
+              }),
+              ...idleProjectCalls,
+            },
+            false,
+            { resumeRecent: true, onRender },
+          );
+        });
+        expect(screen.getByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.getByText('No recently opened collections.')).toBeInTheDocument();
+        if (workspacePath) {
+          expect(document.querySelector('.library')).toBeInTheDocument();
+          expect(screen.getByText('Your project library is empty')).toBeInTheDocument();
+          expect(screen.getByTestId('onboarding-dialog')).toBeInTheDocument();
+        } else {
+          expect(screen.getByRole('button', { name: 'Choose workspace' })).toBeInTheDocument();
+        }
+        const settledRenders = onRender.mock.calls.length;
+        // Drain scheduled work once; this advances virtual time without sleeps or retrying assertions.
+        await act(async () => {
+          await vi.runOnlyPendingTimersAsync();
+        });
+        expect(onRender).toHaveBeenCalledTimes(settledRenders);
+        await act(async () => {
+          view.rerender(
+            <Profiler id="startup" onRender={onRender}>
+              <App />
+            </Profiler>,
+          );
+        });
+        expect(onRender).toHaveBeenCalledTimes(settledRenders + 1);
+        await act(async () => {
+          await vi.runOnlyPendingTimersAsync();
+        });
+        expect(onRender).toHaveBeenCalledTimes(settledRenders + 1);
+        expect(getSettings).toHaveBeenCalledOnce();
+        expect(getPreferenceSettings).toHaveBeenCalledOnce();
+        expect(listProjects).toHaveBeenCalledTimes(workspacePath ? 1 : 0);
+        for (const call of Object.values(idleProjectCalls)) expect(call).not.toHaveBeenCalled();
+        expect(localStorage.getItem('imnota:sidenav-disclosures')).toBeNull();
+        expect(useAppStore.getState().snapshot).toBeNull();
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+        useAppStore.setState(previousState);
+        localStorage.clear();
+        for (const [key, value] of Object.entries(previousStorage)) localStorage.setItem(key, value);
+      }
+    },
+  );
 
   async function renderEditingProject(
     overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
