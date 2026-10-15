@@ -354,6 +354,20 @@ export class PromptBundleControllerEngine {
     );
   }
 
+  /** Called only while the terminating run still owns the current cards. */
+  private settledCards(error?: string): readonly PromptBundleCardModel[] {
+    return this.state.cards.map((card) =>
+      ['preparing', 'writing', 'copying'].includes(card.state)
+        ? {
+            ...card,
+            state: error ? 'error' : card.outcome && card.outcome !== 'opened' ? 'copied' : 'idle',
+            error,
+            outcome: error ? undefined : card.outcome,
+          }
+        : card,
+    );
+  }
+
   private resultError(
     error: unknown,
     run?: ActiveRun,
@@ -363,6 +377,7 @@ export class PromptBundleControllerEngine {
     const detail = bundle ? { ...publicError(error), bundle } : publicError(error);
     if (!run || this.activeRun === run) {
       this.emit({
+        cards: run ? this.settledCards(detail.message) : this.state.cards,
         error: detail,
         progress: {
           phase: detail.code === 'cancelled' ? 'cancelled' : 'error',
@@ -560,7 +575,8 @@ export class PromptBundleControllerEngine {
         throw nativeFailure(result.error);
       }
       run.finalized = result.value;
-      if (run.plan) this.applyArtifact(run.plan, run.session, result.value, new Map());
+      if (run.plan && (this.activeRun === run || this.pendingCleanup === run))
+        this.applyArtifact(run.plan, run.session, result.value, new Map());
       if (this.pendingCleanup === run) {
         this.pendingCleanup = undefined;
         this.emit({ cleanupPending: false });
@@ -677,10 +693,12 @@ export class PromptBundleControllerEngine {
       const finalized = finishResult.value;
       run.finalized = finalized;
       if (run.terminalKind !== 'finish' || finalized.status !== 'completed') {
-        this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
+        if (this.activeRun === run)
+          this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
         if (run.terminalKind === 'cancel' || run.controller.signal.aborted) throw cancelledFailure();
         throw failure('export-incomplete', 'Prompt export did not complete.', true);
       }
+      this.assertActive(run);
       this.applyArtifact(prepared, session, finalized, settled.encodedCharacters);
       return { prepared, session, finalized };
     } finally {
@@ -929,7 +947,8 @@ export class PromptBundleControllerEngine {
       this.activeRun = undefined;
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
-      if (bundleNumber !== undefined) this.setCardState(bundleNumber, 'error', publicError(error).message);
+      if (run && this.activeRun === run && bundleNumber !== undefined)
+        this.setCardState(bundleNumber, 'error', publicError(error).message);
       return this.resultError(error, run, selection);
     }
   }
@@ -1093,7 +1112,7 @@ export class PromptBundleControllerEngine {
         });
         if (!copy.ok) {
           const detail = nativeFailure(copy.error, true).detail;
-          this.setCardState(bundle.number, 'error', detail.message);
+          if (this.activeRun === run) this.setCardState(bundle.number, 'error', detail.message);
           throw new ControllerFailure(detail);
         }
         this.assertActive(run);
@@ -1217,7 +1236,7 @@ export class PromptBundleControllerEngine {
       return { ok: true, sessionId: artifact.sessionId, bundleNumber };
     } catch (error) {
       const number = selectionNumber(selection);
-      if (number !== undefined)
+      if (run && this.activeRun === run && number !== undefined)
         this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
       return this.resultError(error, run, selection);
     }
@@ -1464,10 +1483,12 @@ export class PromptBundleControllerEngine {
       const result = await this.terminate(run, 'cancel');
       const finalized = unwrap(result);
       if (run.session) run.finalized = finalized;
-      if (run.session && run.plan) this.applyArtifact(run.plan, run.session, finalized, new Map());
       if (this.activeRun === run) {
+        if (run.session && run.plan) this.applyArtifact(run.plan, run.session, finalized, new Map());
+        const cards = this.settledCards();
         this.activeRun = undefined;
         this.emit({
+          cards,
           progress: {
             phase: finalized.status === 'completed' ? 'complete' : 'cancelled',
             message:
