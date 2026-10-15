@@ -2285,6 +2285,268 @@ test('reports incomplete export rather than cancellation when native finish stop
 
 describe('bundle failure recovery targeting', () => {
   test.each([
+    { failedBundle: 1, errno: 'ENOSPC', message: 'The disk is full. Free some space, then rebuild bundles.' },
+    {
+      failedBundle: 1,
+      errno: 'EACCES',
+      message: 'The export folder is not writable. Choose a writable workspace folder, then rebuild bundles.',
+    },
+    { failedBundle: 2, errno: 'ENOSPC', message: 'The disk is full. Free some space, then rebuild bundles.' },
+  ])(
+    'write failure on bundle $failedBundle ($errno) leaves no busy card and keeps recovery targeting',
+    async ({ failedBundle, errno, message }) => {
+      const native = fakeBridge();
+      const write = native.bridge.writePromptExportBundle;
+      native.bridge.writePromptExportBundle = async (input) =>
+        input.bundleNumber === failedBundle
+          ? {
+              ok: false,
+              error: {
+                code: 'io-failure',
+                message: 'Private disk failure',
+                retryable: true,
+                details: { errno },
+              },
+            }
+          : write(input);
+      const controller = engine(
+        async () => savedContext([screenshot(0), screenshot(1)]),
+        native.bridge,
+        fakeRendering({ preflightSize: { width: 100, height: 5000 } }).rendering,
+      );
+      await controller.open();
+      expect(await controller.prepareFreshFiles(controller.getState().cards[failedBundle - 1])).toMatchObject(
+        {
+          ok: false,
+          error: { nativeCode: 'io-failure', recovery: 'rebuild' },
+        },
+      );
+      const state = controller.getState();
+      const selected = state.cards[failedBundle - 1];
+      expect(state.error?.bundle).toEqual({
+        planId: selected.planId,
+        artifactSessionId: selected.artifactSessionId,
+        bundleNumber: failedBundle,
+      });
+      expect(native.writes).toHaveLength(failedBundle - 1);
+      expect(native.cancellations).toEqual(['session-1']);
+      expect(state.cleanupPending).toBe(false);
+      if (failedBundle === 2) {
+        expect(state.cards[0]).toMatchObject({ state: 'idle', artifactSessionId: 'session-1' });
+      }
+      expect(selected.artifactSessionId).toBeUndefined();
+      const onPrepareFreshFiles = vi.fn();
+      const dialog = render(
+        createElement(PromptSharingDialog, {
+          bundles: state.cards,
+          progress: state.progress,
+          error: state.error,
+          onClose: vi.fn(),
+          onCopyFresh: vi.fn(),
+          onPrepareFreshFiles,
+        }),
+      );
+      try {
+        for (const card of dialog.getAllByTestId('prompt-bundle-card')) {
+          expect(card).toHaveAttribute('aria-busy', 'false');
+          expect(card.querySelector('.spin')).toBeNull();
+          expect(within(card).getByRole('button', { name: 'Rich copy' })).toBeEnabled();
+          expect(within(card).getByRole('button', { name: 'Copy options' })).toBeEnabled();
+        }
+        expect(dialog.getByRole('alert')).toHaveTextContent(message);
+        expect(dialog.queryByRole('status')).not.toBeInTheDocument();
+        fireEvent.click(dialog.getByRole('button', { name: 'Rebuild bundles' }));
+        expect(onPrepareFreshFiles).toHaveBeenCalledWith(state.error?.bundle);
+      } finally {
+        dialog.unmount();
+      }
+      if (failedBundle === 1) expect(selected.state).toBe('error');
+    },
+  );
+
+  test('cancellation during the first write restores ready cards before the write settles', async () => {
+    const native = fakeBridge();
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    native.bridge.writePromptExportBundle = async () => {
+      entered();
+      await gate;
+      return { ok: false, error: { code: 'io-failure', message: 'Write cancelled', retryable: true } };
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    const pending = controller.prepareFreshFiles();
+    await started;
+    expect(controller.getState().cards[0].state).toBe('writing');
+    const renderDialog = () =>
+      createElement(PromptSharingDialog, {
+        bundles: controller.getState().cards,
+        progress: controller.getState().progress,
+        onClose: vi.fn(),
+        onCopyFresh: vi.fn(),
+        onPrepareFreshFiles: vi.fn(),
+      });
+    const dialog = render(renderDialog());
+    let state = controller.getState();
+    try {
+      expect(dialog.getByTestId('prompt-bundle-card')).toHaveAttribute('aria-busy', 'true');
+      expect(dialog.getByTestId('prompt-bundle-card').querySelector('.spin')).not.toBeNull();
+      expect(dialog.getByRole('status')).toHaveClass(
+        'prompt-sharing-progress',
+        'prompt-sharing-progress-writing',
+      );
+      expect(dialog.getByRole('progressbar')).not.toHaveAttribute('value');
+      expect(await controller.cancel()).toMatchObject({ ok: true });
+      state = controller.getState();
+      dialog.rerender(renderDialog());
+      expect(dialog.getByTestId('prompt-bundle-card')).toHaveAttribute('aria-busy', 'false');
+      expect(dialog.getByTestId('prompt-bundle-card').querySelector('.spin')).toBeNull();
+      expect(dialog.getByTestId('copy-bundle-1')).toBeEnabled();
+      expect(state.cards[0].state).toBe('idle');
+      expect(state.progress?.phase).toBe('cancelled');
+      expect(dialog.getByRole('status')).toHaveClass(
+        'prompt-sharing-progress',
+        'prompt-sharing-progress-cancelled',
+      );
+      expect(dialog.queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(state.error).toBeUndefined();
+    } finally {
+      release();
+      await pending;
+      dialog.unmount();
+    }
+    expect(controller.getState().cards).toBe(state.cards);
+  });
+
+  test('a stale first-write failure cannot reset a newer run busy card', async () => {
+    const native = fakeBridge();
+    let enteredFirst!: () => void;
+    let enteredSecond!: () => void;
+    let failFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      enteredFirst = resolve;
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      enteredSecond = resolve;
+    });
+    const firstGate = new Promise<void>((resolve) => {
+      failFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const write = native.bridge.writePromptExportBundle;
+    native.bridge.writePromptExportBundle = async (input) => {
+      if (input.sessionId === 'session-1') {
+        enteredFirst();
+        await firstGate;
+        return { ok: false, error: { code: 'io-failure', message: 'Old write failed', retryable: true } };
+      }
+      enteredSecond();
+      await secondGate;
+      return write(input);
+    };
+    const controller = engine(
+      async () => savedContext([screenshot(0)]),
+      native.bridge,
+      fakeRendering().rendering,
+    );
+    const first = controller.prepareFreshFiles();
+    await firstStarted;
+    await controller.cancel();
+    const second = controller.prepareFreshFiles();
+    await secondStarted;
+    const newerState = controller.getState();
+    try {
+      expect(newerState.cards[0].state).toBe('writing');
+      failFirst();
+      expect(await first).toMatchObject({ ok: false });
+      expect(controller.getState()).toBe(newerState);
+      expect(controller.getState().cards[0].state).toBe('writing');
+    } finally {
+      failFirst();
+      releaseSecond();
+      await Promise.all([first, second]);
+    }
+    expect(controller.getState().cards[0]).toMatchObject({ state: 'idle', artifactSessionId: 'session-2' });
+  });
+
+  test.each([
+    { action: 'copyFresh', prepare: 'open' },
+    { action: 'copyFresh', prepare: 'prepareFreshFiles' },
+    { action: 'copyImage', prepare: 'prepareFreshFiles' },
+  ] as const)(
+    'a stale $action failure after $prepare cannot reset a newer run busy card',
+    async ({ action, prepare }) => {
+      const native = fakeBridge();
+      let enteredFirst!: () => void;
+      let enteredSecond!: () => void;
+      let failFirst!: () => void;
+      let releaseSecond!: () => void;
+      const firstStarted = new Promise<void>((resolve) => {
+        enteredFirst = resolve;
+      });
+      const secondStarted = new Promise<void>((resolve) => {
+        enteredSecond = resolve;
+      });
+      const firstGate = new Promise<void>((resolve) => {
+        failFirst = resolve;
+      });
+      const secondGate = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const copy = native.bridge.copyPromptExportBundle;
+      vi.spyOn(native.bridge, 'copyPromptExportBundle')
+        .mockImplementationOnce(async () => {
+          enteredFirst();
+          await firstGate;
+          return {
+            ok: false,
+            error: { code: 'clipboard-limit', message: 'Old copy failed', retryable: true },
+          };
+        })
+        .mockImplementationOnce(async (input) => {
+          enteredSecond();
+          await secondGate;
+          return copy(input);
+        });
+      const controller = engine(
+        async () => savedContext([screenshot(0)]),
+        native.bridge,
+        fakeRendering().rendering,
+      );
+      await controller[prepare]();
+      const first = controller[action](controller.getState().cards[0]);
+      await firstStarted;
+      await controller.cancel();
+      const second = controller.copyFresh(controller.getState().cards[0]);
+      await secondStarted;
+      const newerState = controller.getState();
+      try {
+        expect(newerState.cards[0].state).toBe('copying');
+        failFirst();
+        expect(await first).toMatchObject({ ok: false });
+        expect(controller.getState()).toBe(newerState);
+      } finally {
+        failFirst();
+        releaseSecond();
+        await Promise.all([first, second]);
+      }
+      expect(controller.getState().cards[0].state).toBe('copied');
+    },
+  );
+
+  test.each([
     'copyFresh',
     'copyVariant',
     'copyMarkdown',
