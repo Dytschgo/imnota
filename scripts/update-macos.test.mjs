@@ -36,11 +36,94 @@ function runBash(body, args = []) {
   assert.ok(bash, 'Bash is required for this test');
   const portableStat =
     process.platform === 'darwin' ? '' : 'stat_identity() { /usr/bin/stat -c "%d:%i" "$1"; }';
+  // Git Bash cannot model POSIX mode bits; native macOS retains the real check.
+  const portableMode =
+    process.platform === 'darwin'
+      ? ''
+      : process.platform === 'win32'
+        ? 'directory_mode() { printf 700; }'
+        : 'directory_mode() { /usr/bin/stat -c "%a" "$1"; }';
   return spawnSync(
     bash,
-    ['-c', `source "$1"\n${portableStat}\n${body}`, 'test', bashPath(scriptPath), ...args],
+    ['-c', `source "$1"\n${portableStat}\n${portableMode}\n${body}`, 'test', bashPath(scriptPath), ...args],
     {
       encoding: 'utf8',
+    },
+  );
+}
+
+// Exercise the production policy with synthetic observations, without adding a
+// production flag, environment override or alternate Applications path.
+for (const [name, facts, status] of [
+  ['user-owned parent', ['/Users/test/Applications', 1, 1, 1, 1, 501, 'staff', '755', 0], 0],
+  ['standard system Applications', ['/Applications', 1, 0, 1, 1, 0, 'admin', '775', 1], 0],
+  ['system Applications without admin membership', ['/Applications', 1, 0, 1, 1, 0, 'admin', '775', 0], 2],
+  ['world-writable system Applications', ['/Applications', 1, 0, 1, 1, 0, 'admin', '777', 1], 2],
+  ['another group-writable folder', ['/Shared/Apps', 1, 0, 1, 1, 0, 'admin', '775', 1], 2],
+  ['non-writable system Applications', ['/Applications', 1, 0, 0, 1, 0, 'admin', '755', 1], 1],
+  ['non-searchable parent', ['/Applications', 1, 0, 1, 0, 0, 'admin', '775', 1], 1],
+  ['symlinked system Applications', ['/Applications', 0, 0, 1, 1, 0, 'admin', '775', 1], 2],
+  ['system Applications with another owner', ['/Applications', 1, 0, 1, 1, 502, 'admin', '775', 1], 2],
+  [
+    'user-owned but nonstandard system Applications',
+    ['/Applications', 1, 1, 1, 1, 501, 'admin', '775', 1],
+    2,
+  ],
+  ['system Applications with another group', ['/Applications', 1, 0, 1, 1, 0, 'staff', '775', 1], 2],
+  ['system Applications with unreadable mode', ['/Applications', 1, 0, 1, 1, 0, 'admin', '', 1], 2],
+]) {
+  test(`app parent policy: ${name}`, { skip: !bash }, () => {
+    const result = runBash('app_parent_policy "${@:2}"', facts.map(String));
+    assert.equal(result.status, status, result.stderr);
+    if (status !== 0) {
+      const message = runBash(
+        'app_parent_status() { app_parent_policy "${facts[@]}"; }; facts=("${@:2}"); validate_app_parent "${facts[0]}"',
+        facts.map(String),
+      );
+      assert.notEqual(message.status, 0);
+      assert.match(
+        message.stderr,
+        status === 1
+          ? /not writable and searchable by you/
+          : /ownership requirements.*standard \/Applications/,
+      );
+    }
+  });
+}
+
+for (const succeeds of [true, false]) {
+  test(
+    `system Applications policy permits transaction ${succeeds ? 'commit and backup retirement' : 'rollback'}`,
+    { skip: !bash },
+    () => {
+      const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+app_path="$root/Imnota.app"
+stage_dir="$root/.imnota-update.test"
+mkdir -p "$app_path" "$stage_dir/new.app" "$root/Imnota-backup-20260101-010101.app"
+printf old > "$app_path/marker"
+printf new > "$stage_dir/new.app/marker"
+# Model only the parent via policy facts; transaction paths still use real
+# directories and the strict ownership checks. This override is test-local.
+app_parent_status() { [[ "$1" == "$root" ]] && app_parent_policy /Applications 1 0 1 1 0 admin 775 1; }
+plist_value() { printf com.dytschgo.imnota; }
+verify_signature() { return ${succeeds ? 0 : 1}; }
+launch_app() { return 0; }
+wait_for_replacement() { return 0; }
+acquire_lock "$root"
+[[ -O "$lock_dir" && ! -L "$lock_dir" ]]
+set +e
+( trap cleanup EXIT; swap_and_launch "$stage_dir/new.app" )
+status=$?
+set -e
+[[ "$status" ${succeeds ? '-eq 0' : '-ne 0'} ]]
+[[ "$(cat "$app_path/marker")" == ${succeeds ? 'new' : 'old'} ]]
+[[ ! -e "$root/.imnota-backups.noindex" && ! -e "$stage_dir" && ! -e "$lock_dir" ]]
+[[ ${succeeds ? '! ' : ''}-d "$root/Imnota-backup-20260101-010101.app" ]]
+`);
+      assert.equal(result.status, 0, result.stderr);
     },
   );
 }
