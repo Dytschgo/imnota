@@ -16,6 +16,53 @@ afterEach(async () => {
   await fs.rm(directory, { recursive: true, force: true });
 });
 
+it.each(['before capture', 'after capture'])(
+  'preserves a same-size edit with restored mtime %s',
+  async (interleaving) => {
+    const target = path.join(directory, 'created.png');
+    const restoredTime = new Date('2024-01-01T00:00:00Z');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (args[1] === 'wx') {
+        const sync = handle.sync.bind(handle);
+        vi.spyOn(handle, 'sync').mockImplementation(async () => {
+          await sync();
+          await fs.utimes(args[0], restoredTime, restoredTime);
+        });
+      }
+      return handle;
+    });
+    const edit = async () => {
+      const before = await fs.lstat(target, { bigint: true });
+      await fs.writeFile(target, 'EDIT');
+      await fs.utimes(target, restoredTime, restoredTime);
+      const after = await fs.lstat(target, { bigint: true });
+      expect([after.dev, after.ino, after.size, after.mtimeNs]).toEqual([
+        before.dev,
+        before.ino,
+        before.size,
+        before.mtimeNs,
+      ]);
+    };
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+      await rename(...args);
+      // Real edit + native timestamp restoration after publication, before the
+      // writer can return evidence (and before the old witness's post-rename stat).
+      if (interleaving === 'before capture') await edit();
+    });
+    await expect(
+      withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+        await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+        if (interleaving === 'after capture') await edit();
+        throw originalError;
+      }),
+    ).rejects.toBe(originalError);
+    expect(await fs.readFile(target, 'utf8')).toBe('EDIT');
+  },
+);
+
 it.each(['native', 'forward-slash'])(
   'preserves a foreign replacement after successful rename (%s path)',
   async (style) => {
@@ -92,6 +139,96 @@ it('removes our unchanged file on metadata failure', async () => {
   await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
+it('preserves edited bytes even when every metadata field is unchanged', async () => {
+  const target = path.join(directory, 'created.png');
+  await expect(
+    withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+      await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+      const baseline = await fs.lstat(target, { bigint: true });
+      await fs.writeFile(target, 'EDIT');
+      const project = <T>(stat: T): T =>
+        Object.assign(stat as object, {
+          dev: baseline.dev,
+          ino: baseline.ino,
+          size: baseline.size,
+          mtimeNs: baseline.mtimeNs,
+          ctimeNs: baseline.ctimeNs,
+        }) as T;
+      const lstat = fs.lstat.bind(fs);
+      vi.spyOn(fs, 'lstat').mockImplementation(async (...args) => project(await lstat(...args)));
+      const open = fs.open.bind(fs);
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        const handle = await open(...args);
+        const stat = handle.stat.bind(handle);
+        vi.spyOn(handle, 'stat').mockImplementation(async (...options) => project(await stat(...options)));
+        return handle;
+      });
+      throw originalError;
+    }),
+  ).rejects.toBe(originalError);
+  expect(await fs.readFile(target, 'utf8')).toBe('EDIT');
+});
+
+it('can remove byte-identical rewrites of the same file', async () => {
+  const target = path.join(directory, 'created.png');
+  await expect(
+    withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+      await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+      await fs.writeFile(target, 'OURS');
+      await fs.utimes(target, new Date('2024-01-01'), new Date('2024-01-01'));
+      throw originalError;
+    }),
+  ).rejects.toBe(originalError);
+  await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('skips content reads when size differs', async () => {
+  const target = path.join(directory, 'created.png');
+  const open = vi.spyOn(fs, 'open');
+  await expect(
+    withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+      await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+      await fs.writeFile(target, 'LONGER EDIT');
+      open.mockClear();
+      throw originalError;
+    }),
+  ).rejects.toBe(originalError);
+  expect(open).not.toHaveBeenCalled();
+  expect(await fs.readFile(target, 'utf8')).toBe('LONGER EDIT');
+});
+
+it.each(['open', 'read', 'stat', 'growth', 'replacement'])(
+  'preserves the file and original error on rollback read %s uncertainty',
+  async (fault) => {
+    const target = path.join(directory, 'created.png');
+    const foreign = path.join(directory, 'foreign.png');
+    await fs.writeFile(foreign, 'OURS');
+    await expect(
+      withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+        await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+        const open = fs.open.bind(fs);
+        vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+          if (fault === 'open') throw new Error('EACCES');
+          const handle = await open(...args);
+          if (fault === 'stat') vi.spyOn(handle, 'stat').mockRejectedValue(new Error('EIO'));
+          if (fault === 'read') vi.spyOn(handle, 'read').mockRejectedValue(new Error('EIO'));
+          if (fault === 'growth' || fault === 'replacement') {
+            const read = handle.read.bind(handle);
+            vi.spyOn(handle, 'read').mockImplementationOnce(async (...options) => {
+              if (fault === 'growth') await fs.appendFile(target, 'GROWTH');
+              else await fs.rename(foreign, target);
+              return read(...options);
+            });
+          }
+          return handle;
+        });
+        throw originalError;
+      }),
+    ).rejects.toBe(originalError);
+    expect(await fs.readFile(target, 'utf8')).toBe(fault === 'growth' ? 'OURSGROWTH' : 'OURS');
+  },
+);
+
 it('keeps referenced files when project replacement committed', async () => {
   const target = path.join(directory, 'created.png');
   const projectFile = path.join(directory, 'project.json');
@@ -109,7 +246,8 @@ it('keeps referenced files when project replacement committed', async () => {
 it('preserves a foreign replacement between evidence capture and cleanup', async () => {
   const target = path.join(directory, 'created.png');
   const foreign = path.join(directory, 'foreign.png');
-  await fs.writeFile(foreign, 'FOREIGN');
+  // Even byte-identical content cannot authorize removal of a different inode.
+  await fs.writeFile(foreign, 'OURS');
   await expect(
     withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
       await create(target, (capture) => atomicWrite(target, 'OURS', capture));
@@ -117,7 +255,7 @@ it('preserves a foreign replacement between evidence capture and cleanup', async
       throw originalError;
     }),
   ).rejects.toBe(originalError);
-  expect(await fs.readFile(target, 'utf8')).toBe('FOREIGN');
+  expect(await fs.readFile(target, 'utf8')).toBe('OURS');
 });
 
 it('preserves a successful write without writer evidence', async () => {
@@ -131,20 +269,23 @@ it('preserves a successful write without writer evidence', async () => {
   expect(await fs.readFile(target, 'utf8')).toBe('UNPROVEN');
 });
 
-it.each(['before-stat', 'witness-open', 'after-stat'])(
+it.each(['writer-stat', 'unsupported-identity'])(
   'preserves a write when %s cannot provide evidence',
   async (stage) => {
     const target = path.join(directory, 'created.png');
     const open = fs.open.bind(fs);
     vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
       const temporary = String(args[0]).includes('.tmp-');
-      if (temporary && args[1] === 'r' && stage === 'witness-open') throw new Error('EACCES');
       const handle = await open(...args);
-      if (
-        temporary &&
-        ((args[1] === 'wx' && stage === 'before-stat') || (args[1] === 'r' && stage === 'after-stat'))
-      )
-        vi.spyOn(handle, 'stat').mockRejectedValue(new Error('EIO'));
+      if (temporary && args[1] === 'wx') {
+        if (stage === 'writer-stat') vi.spyOn(handle, 'stat').mockRejectedValue(new Error('EIO'));
+        else {
+          const stat = handle.stat.bind(handle);
+          vi.spyOn(handle, 'stat').mockImplementation(async (...options) =>
+            Object.assign(await stat(...options), { ino: 0n }),
+          );
+        }
+      }
       return handle;
     });
     await expect(

@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { atomicWrite, CommittedWriteError } from './files.js';
+import { atomicWrite, CommittedWriteError, type WrittenFileEvidence } from './files.js';
 
 const platform = process.platform;
 const rename = fs.rename.bind(fs);
@@ -23,6 +24,37 @@ afterEach(async () => {
   vi.restoreAllMocks();
   Object.defineProperty(process, 'platform', { value: platform });
   await fs.rm(directory, { recursive: true, force: true });
+});
+
+it('captures the exact binary write despite caller mutation, without reading the candidate', async () => {
+  const content = Uint8Array.from([0, 128, 255, 10]);
+  const expected = Buffer.from(content);
+  const open = fs.open.bind(fs);
+  const opened: unknown[] = [];
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    opened.push(args[1]);
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      const write = handle.writeFile.bind(handle);
+      vi.spyOn(handle, 'writeFile').mockImplementation(async (...options) => {
+        content.fill(42);
+        return write(...options);
+      });
+    }
+    return handle;
+  });
+  const read = vi.spyOn(fs, 'readFile');
+  let evidence: WrittenFileEvidence | undefined;
+  await atomicWrite(target, content, (value) => {
+    evidence = value;
+  });
+  expect(read).not.toHaveBeenCalled();
+  expect(opened).toEqual(platform === 'win32' ? ['wx'] : ['wx', 'r']);
+  expect(await fs.readFile(target)).toEqual(expected);
+  expect(evidence).toMatchObject({
+    size: BigInt(expected.length),
+    sha256: createHash('sha256').update(expected).digest('hex'),
+  });
 });
 
 describe('durable replacement', () => {

@@ -2,7 +2,7 @@ import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { NativeWorkflowError } from './workflow-errors.js';
 
 export function isWithin(parent: string, target: string): boolean {
@@ -156,7 +156,11 @@ export interface WrittenFileIdentity {
   readonly ctimeNs: bigint;
 }
 
-export type CaptureWrittenFileIdentity = (identity: WrittenFileIdentity | undefined) => void;
+export interface WrittenFileEvidence extends WrittenFileIdentity {
+  readonly sha256: string;
+}
+
+export type CaptureWrittenFileIdentity = (identity: WrittenFileEvidence | undefined) => void;
 
 /** Missing/unsupported identity fields cannot authorize destructive cleanup. */
 export function writtenFileIdentity(stat: BigIntStats): WrittenFileIdentity | undefined {
@@ -178,7 +182,7 @@ export function writtenFileIdentity(stat: BigIntStats): WrittenFileIdentity | un
   return { dev, ino, size, mtimeNs, ctimeNs };
 }
 
-const writes = new Map<string, Promise<WrittenFileIdentity | undefined>>();
+const writes = new Map<string, Promise<WrittenFileEvidence | undefined>>();
 export async function atomicWrite(
   filePath: string,
   content: string | Uint8Array,
@@ -201,28 +205,32 @@ async function writeFileAtomically(
   filePath: string,
   content: string | Uint8Array,
   captureIdentity: boolean,
-): Promise<WrittenFileIdentity | undefined> {
+): Promise<WrittenFileEvidence | undefined> {
+  // Snapshot caller-owned bytes so mutation during asynchronous I/O cannot make
+  // the hash describe different bytes from the write. Noncapturing writes are unchanged.
+  const bytes = captureIdentity
+    ? typeof content === 'string'
+      ? Buffer.from(content, 'utf8')
+      : Buffer.from(content)
+    : content;
+  const sha256 = captureIdentity ? createHash('sha256').update(bytes).digest('hex') : undefined;
   await assertNoLinks(filePath);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
-  let witness: Awaited<ReturnType<typeof fs.open>> | undefined;
-  let before: WrittenFileIdentity | undefined;
-  let identity: WrittenFileIdentity | undefined;
+  let identity: WrittenFileEvidence | undefined;
   try {
     // Flush the candidate before it replaces the destination. Without this a power loss
     // shortly after the rename can leave an empty or truncated file under the final name.
     const handle = await fs.open(temporary, 'wx');
     try {
-      await handle.writeFile(content);
+      await handle.writeFile(bytes);
       await handle.sync();
-      if (captureIdentity) {
-        before = await handle
+      if (sha256) {
+        const stat = await handle
           .stat({ bigint: true })
           .then(writtenFileIdentity)
           .catch(() => undefined);
-        // Keep a read-only witness across rename, while preserving the writer's
-        // close-before-rename and flush ordering (including Windows close errors).
-        if (before) witness = await fs.open(temporary, 'r').catch(() => undefined);
+        if (stat) identity = { ...stat, sha256 };
       }
     } finally {
       await handle.close();
@@ -245,24 +253,7 @@ async function writeFileAtomically(
         await assertNoLinks(temporary);
       }
     }
-    if (before && witness) {
-      const after = await witness
-        .stat({ bigint: true })
-        .then(writtenFileIdentity)
-        .catch(() => undefined);
-      if (
-        after &&
-        before.dev === after.dev &&
-        before.ino === after.ino &&
-        before.size === after.size &&
-        before.mtimeNs === after.mtimeNs
-      )
-        identity = after;
-      // Rename can change ctime on POSIX. Capture its post-rename value from the
-      // verified candidate descriptor, never by adopting the destination's inode.
-    }
   } finally {
-    await witness?.close().catch(() => undefined);
     await fs.unlink(temporary).catch(() => undefined);
   }
   try {

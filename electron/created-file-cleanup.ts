@@ -1,20 +1,74 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   CommittedWriteError,
+  assertNoLinks,
   writtenFileIdentity,
   type CaptureWrittenFileIdentity,
   type WrittenFileIdentity,
+  type WrittenFileEvidence,
 } from './files.js';
 
-/** Roll back successful writes only while the writer's own descriptor evidence still matches. */
+function sameFile(a: WrittenFileIdentity, b: WrittenFileIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size;
+}
+
+function sameSample(a: WrittenFileIdentity, b: WrittenFileIdentity): boolean {
+  return sameFile(a, b) && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+}
+
+async function removeIfUnchanged(target: string, evidence: WrittenFileEvidence): Promise<void> {
+  const current = writtenFileIdentity(await fs.lstat(target, { bigint: true }));
+  // Reject a different identity/size before reading. Bound reads even if a file grows.
+  if (!current || !sameFile(current, evidence) || evidence.size >= BigInt(Number.MAX_SAFE_INTEGER)) return;
+  await assertNoLinks(target);
+  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+  const handle = await fs.open(target, fsConstants.O_RDONLY | noFollow);
+  try {
+    const before = writtenFileIdentity(await handle.stat({ bigint: true }));
+    if (!before || !sameSample(before, current)) return;
+    const hash = createHash('sha256');
+    const buffer = Buffer.alloc(64 * 1024);
+    const size = Number(evidence.size);
+    let bytes = 0;
+    while (bytes <= size) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size + 1 - bytes), bytes);
+      if (!bytesRead) break;
+      bytes += bytesRead;
+      if (bytes > size) return;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    const after = writtenFileIdentity(await handle.stat({ bigint: true }));
+    const finalPath = writtenFileIdentity(await fs.lstat(target, { bigint: true }));
+    if (
+      bytes === size &&
+      after &&
+      finalPath &&
+      sameSample(before, after) &&
+      sameSample(after, finalPath) &&
+      hash.digest('hex') === evidence.sha256
+    ) {
+      // Timestamp changes across rename do not establish content ownership. A
+      // foreign writer producing byte-identical content is harmless to delete.
+      // No intervening I/O after these checks: Node has no conditional unlink.
+      // A concurrent edit/replacement after the last read/check can still be deleted.
+      await fs.unlink(target);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Roll back successful writes only while descriptor identity and content still match. */
 export async function withCreatedFileCleanup<T>(
   projectFile: string,
   operation: (
     create: (target: string, write: (capture: CaptureWrittenFileIdentity) => Promise<void>) => Promise<void>,
   ) => Promise<T>,
 ): Promise<T> {
-  const created: { path: string; identity: WrittenFileIdentity }[] = [];
+  const created: { path: string; identity: WrittenFileEvidence }[] = [];
   try {
     return await operation(async (target, write) => {
       const existing = await fs.lstat(target).catch((error: NodeJS.ErrnoException) => {
@@ -23,7 +77,7 @@ export async function withCreatedFileCleanup<T>(
       });
       // uniqueStoredName checks images, but a leftover sidecar can still occupy a destination.
       if (existing) throw new Error(`Screenshot destination already exists: ${target}`);
-      let identity: WrittenFileIdentity | undefined;
+      let identity: WrittenFileEvidence | undefined;
       await write((evidence) => {
         identity = evidence;
       });
@@ -37,19 +91,7 @@ export async function withCreatedFileCleanup<T>(
     )) {
       for (const entry of created) {
         try {
-          const current = writtenFileIdentity(await fs.lstat(entry.path, { bigint: true }));
-          if (
-            current &&
-            current.dev === entry.identity.dev &&
-            current.ino === entry.identity.ino &&
-            current.size === entry.identity.size &&
-            current.mtimeNs === entry.identity.mtimeNs &&
-            current.ctimeNs === entry.identity.ctimeNs
-          ) {
-            // No intervening I/O: Node has no portable compare-and-unlink. Another
-            // process can still replace/edit this path between lstat and unlink.
-            await fs.unlink(entry.path);
-          }
+          await removeIfUnchanged(entry.path, entry.identity);
         } catch {
           // Cleanup is best-effort and must preserve the original operation error.
         }

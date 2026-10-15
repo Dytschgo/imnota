@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -12,7 +13,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from '../src/shared/workspace-settings.js'
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
 import { emptyProject } from '../src/shared/utils.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
-import { CommittedWriteError, atomicWrite, writtenFileIdentity, type WrittenFileIdentity } from './files.js';
+import { CommittedWriteError, atomicWrite, writtenFileIdentity, type WrittenFileEvidence } from './files.js';
 import { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import { IpcRouter } from './ipc-router.js';
 import { registerSettingsIpc } from './ipc-settings.js';
@@ -49,7 +50,7 @@ it('forwards descriptor evidence through the application write wrapper without c
     version: 'test',
     platform: process.platform,
   });
-  let identity: WrittenFileIdentity | undefined;
+  let identity: WrittenFileEvidence | undefined;
   const published = vi.fn();
   const invalidated = vi.fn();
   await writeApplicationFile(
@@ -65,7 +66,13 @@ it('forwards descriptor evidence through the application write wrapper without c
     },
   );
   expect(identity).toBeDefined();
-  expect(identity).toEqual(writtenFileIdentity(await fs.lstat(target, { bigint: true })));
+  const current = writtenFileIdentity(await fs.lstat(target, { bigint: true }));
+  expect(identity).toMatchObject({
+    dev: current?.dev,
+    ino: current?.ino,
+    size: current?.size,
+    sha256: createHash('sha256').update('OURS').digest('hex'),
+  });
   expect(published).toHaveBeenCalledExactlyOnceWith(target, 'OURS');
   expect(invalidated).toHaveBeenCalledExactlyOnceWith(target);
 });
