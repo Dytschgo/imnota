@@ -29,7 +29,7 @@ export const SMOKE_CAPTURE_PREPARATION = `(async () => {
 // every artifact, including canvas reloads during layout changes.
 export const SMOKE_CANVAS_CAPTURE_PREPARATION = canvasReadinessScript();
 
-interface SmokeScreenshotCanvas {
+export interface SmokeScreenshotCanvas {
   id: string;
   originalWidth: number;
   originalHeight: number;
@@ -42,9 +42,10 @@ function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = fals
   const expected = ${JSON.stringify(expected ?? null)};
   const capture = ${capture};
   // Rail test IDs also label text/drawing items. Only an annotation canvas
-  // establishes a screenshot here; initial gaps need an explicit expectation.
+  // establishes a screenshot for inferred calls; explicit requirements also
+  // retain the selected screenshot identity across an initial canvas gap.
   const selectedTestId = expected ? 'screenshot-' + expected.id : capture &&
-    document.querySelectorAll('[data-testid="annotation-canvas"]').length
+    (${required} || document.querySelectorAll('[data-testid="annotation-canvas"]').length)
     ? document.querySelector('.shot-item.active [data-testid^="screenshot-"]')?.getAttribute('data-testid')
     : null;
   const required = ${required} || Boolean(selectedTestId);
@@ -624,8 +625,9 @@ export class NativeUiDriver {
   async capture(
     directory: string,
     filename: string,
-    expected?: SmokeScreenshotCanvas,
+    requirement?: SmokeScreenshotCanvas | 'annotation-canvas',
   ): Promise<SmokeCapture> {
+    let expected = requirement === 'annotation-canvas' ? undefined : requirement;
     const target = safeArtifactPath(directory, filename);
     const deadline = Date.now() + this.defaultTimeoutMs;
     const readinessRestarts: NonNullable<SmokeCapture['readinessRestarts']> = { count: 0, reasons: {} };
@@ -635,7 +637,7 @@ export class NativeUiDriver {
         throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
       return timeout;
     };
-    let canvasRequired = Boolean(expected);
+    let canvasRequired = Boolean(requirement);
     const prepareCanvas = async () => {
       try {
         const canvas = await this.evaluate<
