@@ -11,27 +11,46 @@ import {
 
 describe('prompt export controller helpers', () => {
   it('keeps controller failure details and classifies other errors', () => {
-    expect(publicError(failure('native-failure', 'Clipboard busy', false, true))).toEqual({
-      code: 'native-failure',
+    const error = failure('native-failure', 'Clipboard busy', false, true);
+    expect(publicError(error)).toBe(error.detail);
+    // Renderer-authored guidance names the specific next step, so it stays the visible message.
+    expect(error.detail).toMatchObject({
       message: 'Clipboard busy',
-      retryable: false,
+      recovery: 'retry',
       fallbackAvailable: true,
-      nativeCode: undefined,
-      technicalDetails: undefined,
+    });
+    expect(error.detail.technicalDetails).toBeUndefined();
+    expect(
+      failure('content-changed', 'Picture 3 changed after export planning. Save and export again.').detail,
+    ).toMatchObject({
+      code: 'content-changed',
+      message: 'Picture 3 changed after export planning. Save and export again.',
+      recovery: 'rebuild',
+    });
+    expect(
+      failure('native-failure', 'Use its saved PNG and Markdown files.', true, true, 'clipboard-limit')
+        .detail,
+    ).toMatchObject({
+      nativeCode: 'clipboard-limit',
+      message: 'Use its saved PNG and Markdown files.',
+      recovery: 'use-files',
+      fallbackAvailable: true,
     });
     expect(publicError(new Error('Bundle 2 is above the safe renderer limit.'))).toMatchObject({
       code: 'render-limit',
-      retryable: true,
+      retryable: false,
+      recovery: 'fix-content',
     });
     expect(publicError(new Error('  disk full at P:/private/project  '))).toEqual({
       code: 'unexpected',
-      message: 'Prompt export failed unexpectedly. Try Rebuild bundles.',
+      recovery: 'rebuild',
+      message: 'Prompt export could not finish. Rebuild bundles to try again.',
       retryable: true,
       fallbackAvailable: false,
       technicalDetails: 'disk full at P:/private/project',
     });
     expect(publicError('not an error').message).toBe(
-      'Prompt export failed unexpectedly. Try Rebuild bundles.',
+      'Prompt export could not finish. Rebuild bundles to try again.',
     );
   });
 
@@ -45,16 +64,26 @@ describe('prompt export controller helpers', () => {
 
   it('keeps native paths in optional details and gives a recovery step in the alert', () => {
     expect(
-      nativeFailure({ code: 'io-failure', message: 'ENOENT P:/private/export.png', retryable: true }).detail,
+      nativeFailure({
+        code: 'io-failure',
+        message: 'ENOENT P:/private/export.png',
+        retryable: true,
+        details: { errno: 'ENOENT' },
+      }).detail,
     ).toMatchObject({
-      message: 'An export file is missing. Choose Rebuild bundles to create a new copy.',
+      message: 'An export file is missing. Rebuild bundles to create a new copy.',
       technicalDetails: 'ENOENT P:/private/export.png',
     });
     expect(
-      nativeFailure({ code: 'io-failure', message: 'EACCES P:/private/export', retryable: true }).detail,
+      nativeFailure({
+        code: 'io-failure',
+        message: 'EACCES P:/private/export',
+        retryable: true,
+        details: { errno: 'EACCES' },
+      }).detail,
     ).toMatchObject({
       code: 'native-failure',
-      message: expect.stringMatching(/Check available space and folder access/i),
+      message: expect.stringMatching(/export folder is not writable/i),
       technicalDetails: 'EACCES P:/private/export',
     });
     expect(

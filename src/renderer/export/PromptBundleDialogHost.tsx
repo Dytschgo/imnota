@@ -5,15 +5,12 @@ import type { PromptBundleActionRequest, PromptBundleCardModel } from './PromptB
 import { PromptSharingDialog } from './PromptSharingDialog';
 import { HostedShareDialog } from './HostedShareDialog';
 import { useState } from 'react';
-import type { HostedShareArtifacts } from './prompt-export-controller-core';
+import type { HostedShareArtifacts, PromptBundleRetryResult } from './prompt-export-controller-core';
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import type { ShortcutPlatform } from '../../shared/shortcuts';
 
-interface PromptActionError {
-  message: string;
-  technicalDetails?: string;
-}
+type PromptActionError = PromptBundleControllerError;
 
 type PromptActionResult = { ok: true } | { ok: false; error: PromptActionError };
 
@@ -40,6 +37,8 @@ export interface PromptBundleUiController {
   cancel(): Promise<PromptActionResult>;
   loadPreview(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   clearPreview(): void;
+  retry(): Promise<PromptBundleRetryResult>;
+  canRetry: boolean;
   retryCleanup(): Promise<PromptActionResult>;
   prepareHostedShare(): Promise<
     { ok: true; value: HostedShareArtifacts } | { ok: false; error: PromptBundleControllerError }
@@ -63,7 +62,7 @@ export function PromptBundleDialogHost({
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
   const [preferenceError, setPreferenceError] = useState<string>();
-  // Bundle failures are shown once, inside the dialog, with a Rebuild action.
+  // Bundle failures are shown once, inside the dialog, with the appropriate recovery action.
   const run = async (action: Promise<PromptActionResult>) => {
     await action;
   };
@@ -107,11 +106,20 @@ export function PromptBundleDialogHost({
         onCopyPaths={(selection) => run(controller.copyPaths(selection))}
         onOpenExportFolder={() => run(controller.openFolder())}
         onCancel={() => run(controller.cancel())}
+        onRebuild={() => run(controller.prepareFreshFiles())}
+        onRetry={
+          controller.canRetry
+            ? async () => {
+                const result = await controller.retry();
+                if (result.ok && 'value' in result) setHostedArtifacts(result.value);
+              }
+            : undefined
+        }
         onRetryCleanup={() => run(controller.retryCleanup())}
         onShareHosted={async () => {
           const result = await controller.prepareHostedShare();
           if (result.ok) setHostedArtifacts(result.value);
-          else onError(result.error.message);
+          // The controller reports preparation failures in the sharing dialog.
         }}
         onLoadPreview={(selection) => run(controller.loadPreview(selection))}
       />

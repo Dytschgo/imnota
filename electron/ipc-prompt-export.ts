@@ -1,11 +1,27 @@
 import { filenameSchema } from '../src/shared/schema.js';
-import { pathInput, workflowBundleNumber, workflowManifest, workflowSessionId } from './ipc-contracts.js';
+import {
+  pathInput,
+  workflowBundleNumber,
+  workflowManifest,
+  workflowSessionId,
+  workflowPromptMarkdownInput,
+} from './ipc-contracts.js';
+import { assertClipboardText } from './clipboard-input.js';
 import { z } from 'zod';
 import type { IpcRouter } from './ipc-router.js';
 import type { IpcHost } from './main.js';
 
 export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void {
   const { handleWorkflow } = router;
+  handleWorkflow(
+    'workflow:prompt-export:copy-markdown',
+    async (_event, ...args) => {
+      const [text] = workflowPromptMarkdownInput.parse(args);
+      assertClipboardText(text);
+      await host.copyTextToClipboard(text);
+    },
+    true,
+  );
   handleWorkflow(
     'workflow:prompt-export:start',
     async (_event, ...args) => {

@@ -15,6 +15,12 @@ import {
   Tray,
 } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
+import {
+  assertClipboardText,
+  clipboardImage,
+  nativeClipboardOwnerHandle,
+  validateDecodedPromptPng,
+} from './clipboard-input.js';
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
@@ -75,14 +81,14 @@ import {
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
-import { clipboardContextHtml, clipboardPngDimensions } from '../src/shared/clipboard-context.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { prepareTerminalUpdate } from './terminal-update.js';
-import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
-import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
+import { PromptBundleStore } from './prompt-bundle-store.js';
 import { type OcrCropRect } from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
@@ -943,8 +949,7 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
 }
 
 async function copyTextToClipboard(text: string): Promise<void> {
-  if (typeof text !== 'string' || text.length > 2_000_000)
-    throw new Error('Context is too large to copy. Export the Markdown file instead.');
+  assertClipboardText(text);
   await nativeClipboard.writeText(text);
 }
 
@@ -956,33 +961,13 @@ function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
   return cropped.toPNG();
 }
 
-function clipboardImage(imageDataUrl: string) {
-  const size = clipboardPngDimensions(imageDataUrl);
-  const image = nativeImage.createFromDataURL(imageDataUrl);
-  if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
-    throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
-  return image;
-}
-
-function validateDecodedPromptPng(
-  png: Uint8Array,
-  expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
-): void {
-  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
-  const size = image.getSize();
-  if (image.isEmpty() || size.width !== expected.width || size.height !== expected.height)
-    throw new Error('Prompt PNG could not be fully decoded at its reserved dimensions.');
-}
-
 async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
   await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
 function clipboardOwnerHandle(): Buffer {
   const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (!owner || owner.isDestroyed())
-    throw new Error('A live Imnota window is required for clipboard access.');
-  return owner.getNativeWindowHandle();
+  return nativeClipboardOwnerHandle(owner);
 }
 
 async function copyBundleToClipboard(
@@ -1945,13 +1930,7 @@ function registerIpc(): void {
       authorize: async (projectPath, collectionId) => {
         const safePath = await assertProjectPath(projectPath);
         const project = await readProjectMetadata(safePath);
-        const collection = project.collections.find((candidate) => candidate.id === collectionId);
-        if (!collection) throw new Error('Collection does not belong to this project.');
-        return {
-          projectPath: safePath,
-          collectionId: collection.id,
-          collectionName: collection.name,
-        };
+        return promptCollectionGrant(safePath, collectionId, project.collections);
       },
       copyContext: (markdown, imageDataUrl, filePaths, variant) =>
         copyBundleToClipboard(markdown, imageDataUrl, filePaths, variant),
