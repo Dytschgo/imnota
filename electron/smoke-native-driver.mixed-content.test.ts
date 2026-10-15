@@ -52,7 +52,11 @@ it.each(['drawing', 'text'] as const)(
       webContents: { capturePage, executeJavaScript: vi.fn(async (source: string) => eval(source)) },
     } as unknown as BrowserWindow;
     // The workflow passes no screenshot expectation for these two captures.
-    const result = new NativeUiDriver(nativeWindow, 1_000).capture(directory, `mixed-content-${kind}.png`);
+    const result = new NativeUiDriver(nativeWindow, 1_000).capture(
+      directory,
+      `mixed-content-${kind}.png`,
+      'none',
+    );
     void result.catch(() => undefined);
     await vi.advanceTimersByTimeAsync(1_000);
     const capture = await result;

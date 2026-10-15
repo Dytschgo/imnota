@@ -45,6 +45,10 @@ Versions use the next patch of the candidate's stable package version: for examp
 
 The workflow runs quality tests, including the tracked-file secret scan, and builds Windows, macOS and Linux artifacts. Every job has a time limit, recorded with the [pinned-action policy](ci-routing.md#pinned-actions-time-limits-and-least-privilege). Packaged smoke tests must confirm success from inside the application, including its expected nightly version. The collected `nightly.yml`, `nightly-linux.yml` and `nightly-mac.yml` manifests must match the version, filenames and SHA-512 hashes of staged assets. SHA-256 checksums are also generated.
 
+Nightly and stable macOS package jobs run **Verify native Mac installer transactions** against that candidate's exact universal ZIP; nightly uses the overridden nightly version for the fixture's release metadata and version assertions (the stable-only quick installer uses a stable-shaped fixture URL redirected to the same ZIP). The archive must exist and the native transactions must pass before publication. These native filesystem/signature/process tests simulate GUI startup; the packaged walkthrough and public-download checks remain separate gates.
+
+Failed packaged walkthroughs on all three platforms retain screenshots, `verification-failure.json` (including renderer diagnostics when available), and progress/capture files in Actions artifacts for 7 days: `smoke-failure-evidence-nightly-<platform>` or `smoke-failure-evidence-release-<platform>`. The stable public Mac check uses `smoke-failure-evidence-public-mac-release` with the same retention. These names stay outside the `nightly-*` / `release-*` distributable download patterns. See [development](development.md) for evidence limits and [release readiness](release-readiness.md) for the first-run checks.
+
 Publication first stages a draft, then publishes a GitHub prerelease with `make_latest: false`. Stable update metadata and the stable installer's Latest alias are untouched. Download a nightly through the app's selected-channel link or the repository's prereleases, not the stable one-command installer.
 
 ## Stable releases

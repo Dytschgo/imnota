@@ -2,10 +2,9 @@ import { recoverScreenshotTrashTransactions } from '../../../electron/screenshot
 import { recoverContentTrashTransactions } from '../../../electron/content-trash';
 import { CommittedWriteError } from '../../../electron/files';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { act } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import type { ProjectSnapshot } from '../../shared/types';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import { projectRevisionForSource } from '../../../electron/project-watch';
@@ -13,25 +12,20 @@ import {
   cases,
   kinds,
   platform,
-  roots,
-  stops,
+  session,
+  it,
   fault,
   fixture,
 } from './useProjectPersistence.restore.fixtures';
 
 vi.mock('electron', () => ({ app: {}, shell: { trashItem: (target: string) => fs.unlink(target) } }));
 vi.mock('../../../electron/native-clipboard', () => ({ nativeClipboard: {} }));
-afterEach(async () => {
-  vi.restoreAllMocks();
-  Object.defineProperty(process, 'platform', { value: platform });
-  for (const stop of stops.splice(0)) stop();
-  for (const root of roots.splice(0)) {
-    if (
-      path.dirname(root) !== (await fs.realpath(os.tmpdir())) ||
-      !path.basename(root).startsWith('imnota-restore-')
-    )
-      throw new Error('Unexpected fixture cleanup');
-    await fs.rm(root, { recursive: true, force: true });
+afterEach(async (context) => {
+  try {
+    await session.cleanup(context);
+  } finally {
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', { value: platform });
   }
 });
 

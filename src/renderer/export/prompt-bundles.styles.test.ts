@@ -5,8 +5,8 @@ import { expect, it } from 'vitest';
 
 const stylesheet = postcss.parse(readFileSync(resolve('src/renderer/export/prompt-bundles.css'), 'utf8'));
 
-// Check selector reachability in the shipped stylesheet. Chromium verification
-// separately covers computed colours, masking, and the full cascade.
+// Check selector reachability and declarations in the shipped stylesheet.
+// Computed colours, masking, and the full cascade are not covered here.
 function declarationsFor(row: HTMLElement, reducedMotion: boolean) {
   const declarations: Array<{ property: string; value: string; pseudo: boolean }> = [];
   stylesheet.walkRules((rule) => {

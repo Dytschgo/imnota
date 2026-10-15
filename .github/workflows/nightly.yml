@@ -149,6 +149,15 @@ jobs:
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify native Mac installer transactions
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          export IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-${IMNOTA_EXPECT_VERSION}-universal-mac.zip"
+          test -f "$IMNOTA_NATIVE_MAC_ARCHIVE"
+          node --test scripts/install.native-mac.test.mjs
       - name: Retain Mac walkthrough evidence
         if: always() && matrix.platform == 'macos'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -178,7 +187,17 @@ jobs:
         if: matrix.platform == 'linux'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
         env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-nightly-linux
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      # Diagnostic artifacts must never match the publication asset pattern.
+      - name: Retain packaged smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-failure-evidence-nightly-${{ matrix.platform }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-*/
+          if-no-files-found: ignore
+          retention-days: 7
       # Evidence must remain outside the publish job's nightly-* artifact pattern.
       - name: Retain packaged MCP evidence
         if: always()

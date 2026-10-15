@@ -13,6 +13,7 @@ import {
   SMOKE_CAPTURE_PREPARATION,
   SMOKE_CANVAS_CAPTURE_PREPARATION,
   locatorWaitScript,
+  SMOKE_RENDERER_DIAGNOSTIC,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
@@ -27,6 +28,71 @@ afterEach(async () => {
 });
 
 describe('native smoke driver', () => {
+  it.each(['hidden', 'missing'])(
+    'samples failed-wait target geometry and post-failure event-loop lag: %s',
+    async (mode) => {
+      const renderer = {};
+      const context = {
+        window: renderer,
+        globalThis: renderer,
+        document: {
+          body: { innerText: 'Synthetic library' },
+          activeElement: null,
+          querySelectorAll: () =>
+            mode === 'missing'
+              ? []
+              : [
+                  {
+                    getAttribute: () => null,
+                    textContent: 'Projects',
+                    matches: () => false,
+                    getBoundingClientRect: () => ({ x: 10, y: 20, width: 800, height: 600 }),
+                  },
+                ],
+          addEventListener() {},
+          removeEventListener() {},
+        },
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+        HTMLLabelElement: class {},
+        getComputedStyle: () => ({ visibility: 'hidden', display: 'block', opacity: '1' }),
+        requestAnimationFrame: () => {},
+        performance: { now: vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(17) },
+        setTimeout: (callback: () => void) => callback(),
+      };
+      let settled = false;
+      const waiting = runInNewContext(locatorWaitScript({ selector: '.library' }, {}), context);
+      void waiting.then(() => {
+        settled = true;
+      });
+      const sample = await runInNewContext(SMOKE_RENDERER_DIAGNOSTIC, context);
+      expect(sample).toMatchObject({
+        sampledAt: expect.any(String),
+        eventLoopLagMs: 7,
+        wait: { locator: { selector: '.library' }, sampledAt: expect.any(String) },
+      });
+      expect(sample.wait.target).toEqual(
+        mode === 'missing'
+          ? null
+          : {
+              visible: false,
+              visibility: 'hidden',
+              display: 'block',
+              opacity: '1',
+              x: 10,
+              y: 20,
+              width: 800,
+              height: 600,
+              text: 'Projects',
+              disabled: false,
+            },
+      );
+      expect(settled).toBe(false); // Diagnostic sampling cannot satisfy readiness.
+    },
+  );
+
   it.each(['deferred', 'fast', 'failure', 'missing', 'wrong-action'] as const)(
     'observes only the new onboarding copy attempt (%s)',
     async (mode) => {
@@ -240,7 +306,9 @@ describe('native smoke driver', () => {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
     temporary.push(parent);
     vi.mocked(window.webContents.executeJavaScript).mockResolvedValue(undefined);
-    await expect(driver.capture(parent, 'hung.png')).rejects.toThrow('Page capture hung.png timed out');
+    await expect(driver.capture(parent, 'hung.png', 'none')).rejects.toThrow(
+      'Page capture hung.png timed out',
+    );
     await expect(fs.stat(path.join(parent, 'hung.png'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -827,7 +895,7 @@ describe('native smoke driver', () => {
       },
     } as unknown as BrowserWindow;
 
-    const capture = await new NativeUiDriver(window, 1_000).capture(artifacts, 'matrix.png');
+    const capture = await new NativeUiDriver(window, 1_000).capture(artifacts, 'matrix.png', 'none');
 
     expect(capture).toEqual({
       path: path.join(artifacts, 'matrix.png'),
@@ -966,7 +1034,7 @@ describe('native smoke driver', () => {
       const result = driver.capture(
         artifacts,
         'remount.png',
-        scenario === 'before-frames' || scenario === 'initial-gap' ? expected : undefined,
+        scenario === 'before-frames' || scenario === 'initial-gap' ? expected : 'none',
       );
       // Observe rejection immediately even when fake time advances before awaiting it.
       void result.catch(() => undefined);
@@ -1083,12 +1151,12 @@ describe('native smoke driver', () => {
         ),
       },
     } as unknown as BrowserWindow;
-    const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png');
+    const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png', 'none');
     expect(await fs.readFile(result.path)).toEqual(Buffer.from('settled'));
     expect(capturePage).toHaveBeenCalledTimes(5);
 
     capturePage.mockImplementation(async () => frame(String(capturePage.mock.calls.length)));
-    await expect(new NativeUiDriver(window, 100).capture(artifacts, 'moving.png')).rejects.toThrow(
+    await expect(new NativeUiDriver(window, 100).capture(artifacts, 'moving.png', 'none')).rejects.toThrow(
       'did not settle',
     );
     await expect(fs.stat(path.join(artifacts, 'moving.png'))).rejects.toMatchObject({ code: 'ENOENT' });

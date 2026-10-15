@@ -10,11 +10,12 @@ import { fileURLToPath, URL } from 'node:url';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 const archive = process.env.IMNOTA_NATIVE_MAC_ARCHIVE;
-const version = JSON.parse(fs.readFileSync(path.join(repository, 'package.json'), 'utf8')).version;
+const version =
+  process.env.IMNOTA_EXPECT_VERSION ??
+  JSON.parse(fs.readFileSync(path.join(repository, 'package.json'), 'utf8')).version;
 const installer = path.join(repository, 'scripts/install.sh');
 const updater = path.join(repository, 'scripts/update-macos.sh');
 const archiveName = `Imnota-${version}-universal-mac.zip`;
-const release = `https://github.com/Dytschgo/imnota/releases/download/v${version}`;
 const skip =
   process.platform !== 'darwin'
     ? 'Requires native macOS'
@@ -248,18 +249,38 @@ function lookalike(parent, name, id = 'com.dytschgo.imnota') {
   return bundle;
 }
 
-function environment(f, fault) {
+function fixtureRelease(kind, candidateVersion) {
+  // The quick installer intentionally accepts stable tags only. Redirect its
+  // stable-shaped fixture URL to the exact candidate ZIP without changing that
+  // product contract; the updater exercises the actual nightly tag and version.
+  const tag = `v${kind === 'install' ? candidateVersion.split('-')[0] : candidateVersion}`;
+  return { tag, url: `https://github.com/Dytschgo/imnota/releases/download/${tag}` };
+}
+
+test('native fixture keeps quick-install tags stable and updater identity exact for both channels', () => {
+  for (const candidate of ['0.4.0', '0.4.1-nightly.20261015.123.2']) {
+    const install = fixtureRelease('install', candidate);
+    const update = fixtureRelease('update', candidate);
+    assert.match(install.tag, /^v\d+\.\d+\.\d+$/);
+    assert.equal(update.tag, `v${candidate}`);
+    assert.equal(install.url, `https://github.com/Dytschgo/imnota/releases/download/${install.tag}`);
+    assert.equal(update.url, `https://github.com/Dytschgo/imnota/releases/download/v${candidate}`);
+  }
+});
+
+function environment(f, fault, kind) {
+  const release = fixtureRelease(kind, version);
   return {
     ...process.env,
     HOME: f.home,
     TMPDIR: path.join(f.root, 'tmp'),
-    IMNOTA_RELEASE_TAG: `v${version}`,
+    IMNOTA_RELEASE_TAG: release.tag,
     FIXTURE_ROOT: f.root,
     FIXTURE_ARCHIVE: path.resolve(archive),
-    FIXTURE_RELEASE: release,
+    FIXTURE_RELEASE: release.url,
     FIXTURE_ARCHIVE_NAME: archiveName,
     FIXTURE_VERSION: version,
-    FIXTURE_TAG: `v${version}`,
+    FIXTURE_TAG: release.tag,
     FAULT: fault,
   };
 }
@@ -307,7 +328,7 @@ function stopFixtureProcesses(root) {
 function run(f, kind, fault = '') {
   try {
     return spawnSync('/bin/bash', invocation(kind), {
-      env: environment(f, fault),
+      env: environment(f, fault, kind),
       encoding: 'utf8',
       timeout: 120000,
     });
@@ -520,7 +541,7 @@ test(
         const f = fixture(t);
         seedOld(f);
         const holder = spawn('/bin/bash', invocation(holderKind), {
-          env: environment(f, 'hold'),
+          env: environment(f, 'hold', holderKind),
           stdio: ['pipe', 'pipe', 'pipe'],
           timeout: 180000,
         });

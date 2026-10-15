@@ -12,7 +12,13 @@ export async function exerciseNextFeatures(
   checkpoint: SmokeCheckpoint = async () => undefined,
 ): Promise<SmokeCapture[]> {
   const captures: SmokeCapture[] = [];
-  const capture = async (filename: string) => {
+  const capture = async (
+    filename:
+      | 'next-template-picker.png'
+      | 'next-clipboard-fallbacks.png'
+      | 'next-template-project.png'
+      | 'next-content-search.png',
+  ) => {
     if (!artifactDirectory) return;
     driver.browserWindow.show();
     driver.browserWindow.focus();
@@ -20,7 +26,7 @@ export async function exerciseNextFeatures(
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, filename));
+    captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   };
   await driver.resize({ width: 1280, height: 800 });
   if (await driver.exists({ selector: '.settings-view' }))
@@ -117,11 +123,18 @@ export async function captureNextFeatureLightViews(
 ): Promise<SmokeCapture[]> {
   if (!artifactDirectory) return [];
   const captures: SmokeCapture[] = [];
-  const capture = async (filename: string) => {
+  const capture = async (
+    filename:
+      | 'next-history-light.png'
+      | 'next-history-detail-light.png'
+      | 'next-search-light.png'
+      | 'next-templates-light.png'
+      | 'next-clipboard-light.png',
+  ) => {
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, filename));
+    captures.push(await driver.capture(artifactDirectory, filename, 'none'));
   };
   driver.browserWindow.show();
   driver.browserWindow.focus();

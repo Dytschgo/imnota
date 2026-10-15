@@ -301,6 +301,8 @@ jobs:
       - name: Smoke packaged Linux application
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-ci-linux
       - name: Verify packaged Linux bundle copy and paste
         if: env.RUN_APPLICATION == 'true' && (matrix.os == 'ubuntu-latest')
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
@@ -314,6 +316,15 @@ jobs:
           name: clipboard-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
           if-no-files-found: ignore
+      # Diagnostic artifacts must never match the publication asset pattern.
+      - name: Retain packaged smoke failure evidence
+        if: env.RUN_APPLICATION == 'true' && failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-failure-evidence-ci-${{ matrix.os }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-*/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Retain review installers and build diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: env.RUN_APPLICATION == 'true'

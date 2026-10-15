@@ -266,7 +266,7 @@ export function safeArtifactPath(directory: string, filename: string): string {
   return target;
 }
 
-function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
+function locatorScript(locator: SmokeLocator, scrollIntoView = false, diagnostic = false): string {
   return `(() => {
     const locator = ${JSON.stringify(locator)};
     const visible = (element) => {
@@ -279,7 +279,7 @@ function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
       ? [...document.querySelectorAll(locator.selector)]
       : [...document.querySelectorAll('button, input, textarea, select, label, [role="button"], [role="dialog"], h1, h2, h3')];
     const found = candidates.find((element) => {
-      if (!visible(element)) return false;
+      if (!${diagnostic} && !visible(element)) return false;
       if (!locator.text) return true;
       const value = normalized(element.getAttribute('aria-label') || element.textContent || element.value);
       const expected = normalized(locator.text);
@@ -289,6 +289,8 @@ function locatorScript(locator: SmokeLocator, scrollIntoView = false): string {
     if (${scrollIntoView}) found.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
     const rect = found.getBoundingClientRect();
     return {
+      ...(${diagnostic} ? { visible: visible(found), display: getComputedStyle(found).display,
+        visibility: getComputedStyle(found).visibility, opacity: getComputedStyle(found).opacity } : {}),
       x: rect.x,
       y: rect.y,
       width: rect.width,
@@ -310,6 +312,10 @@ export function locatorWaitScript(
   // cannot be the sole signal: an unpresented window may not receive frames.
   // The driver retains one deadline, including a blocked evaluation.
   return `new Promise(resolve => {
+    globalThis.__imnotaSmokeWaitDiagnostic = () => ({
+      locator: ${JSON.stringify(locator)}, sampledAt: new Date().toISOString(),
+      target: ${locatorScript(locator, false, true)}
+    });
     let finished = false;
     let frame;
     const observer = new MutationObserver(check);
@@ -321,6 +327,7 @@ export function locatorWaitScript(
       const found = ${locatorScript(locator)};
       if (${Boolean(options.absent)} ? !found : found && (!${Boolean(options.enabled)} || !found.disabled)) {
         finished = true;
+        delete globalThis.__imnotaSmokeWaitDiagnostic;
         observer.disconnect();
         document.removeEventListener('focusin', check, true);
         document.removeEventListener('focusout', check, true);
@@ -333,6 +340,19 @@ export function locatorWaitScript(
     check();
   })`;
 }
+
+// Post-failure sampling only: this never participates in readiness or retries a wait.
+export const SMOKE_RENDERER_DIAGNOSTIC = `(async () => {
+  const started = performance.now();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  return {
+    sampledAt: new Date().toISOString(), eventLoopLagMs: performance.now() - started,
+    wait: globalThis.__imnotaSmokeWaitDiagnostic?.(),
+    text: document.body.innerText.slice(-12000),
+    active: document.activeElement?.outerHTML.slice(0, 1000),
+    pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry
+  };
+})()`;
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
@@ -625,9 +645,9 @@ export class NativeUiDriver {
   async capture(
     directory: string,
     filename: string,
-    requirement?: SmokeScreenshotCanvas | 'annotation-canvas',
+    requirement: SmokeScreenshotCanvas | 'annotation-canvas' | 'none',
   ): Promise<SmokeCapture> {
-    let expected = requirement === 'annotation-canvas' ? undefined : requirement;
+    let expected = typeof requirement === 'string' ? undefined : requirement;
     const target = safeArtifactPath(directory, filename);
     const deadline = Date.now() + this.defaultTimeoutMs;
     const readinessRestarts: NonNullable<SmokeCapture['readinessRestarts']> = { count: 0, reasons: {} };
@@ -637,7 +657,8 @@ export class NativeUiDriver {
         throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
       return timeout;
     };
-    let canvasRequired = Boolean(requirement);
+    // 'none' adds no requirement; retain canvas inference when one is already present.
+    let canvasRequired = requirement !== 'none';
     const prepareCanvas = async () => {
       try {
         const canvas = await this.evaluate<
