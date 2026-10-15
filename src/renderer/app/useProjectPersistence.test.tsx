@@ -331,6 +331,11 @@ describe('useProjectPersistence', () => {
     expect(message.split('Additional Restore warning.')).toHaveLength(2);
     expect(message).toContain('Readback error X.');
     expect(message).toContain('Readback error Y.');
+    act(() => hook.result.current.dismissExternalChange());
+    expect(hook.result.current.externalChange).toBeNull();
+    act(() => hook.result.current.revealExternalChange());
+    expect(hook.result.current.externalChange?.message).toBe(message);
+    expect(hook.result.current.hasUnresolvedExternalChange()).toBe(true);
     act(() =>
       mock.emit({
         watchId: 'watch',

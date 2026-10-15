@@ -1364,6 +1364,7 @@ export default function App() {
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
     if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
       onError(
         persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
       );
@@ -1592,6 +1593,7 @@ export default function App() {
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
     if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
       onError(
         persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
       );

@@ -109,6 +109,8 @@ export interface ProjectPersistenceController {
   getSavedContext(collectionId: string): Promise<{ snapshot: ProjectSnapshot; collectionId: string }>;
   reloadExternal(options?: { discardLocalChanges?: boolean }): Promise<boolean>;
   dismissExternalChange(): void;
+  /** Re-show the unresolved notice and its retained warnings without resolving it. */
+  revealExternalChange(): void;
   clearError(): void;
   clearWarning(): void;
 }
@@ -1457,6 +1459,9 @@ export function useProjectPersistence({
     },
     reloadExternal,
     dismissExternalChange: () => setExternalChange(null),
+    revealExternalChange: () => {
+      if (pendingExternalChange.current) publishExternalChange(pendingExternalChange.current);
+    },
     clearError: () => setError(''),
     clearWarning: () => setWarning(''),
   };
