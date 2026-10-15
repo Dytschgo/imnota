@@ -1402,6 +1402,7 @@ async function captureWorkspaceMatrix(
         await driver.capture(
           artifactDirectory,
           `${viewport.width}x${viewport.height}-workspace-${theme}.png`,
+          screenshot,
         ),
       );
     }
@@ -1418,7 +1419,7 @@ async function captureWorkspaceMatrix(
         return drawer.width >= 256 && drawer.right <= innerWidth && close.width > 0;
       })()`);
       if (!drawerVisible) throw new Error('Narrow inspector did not render as an accessible drawer.');
-      artifacts.push(await driver.capture(artifactDirectory, `900x800-inspector-${theme}.png`));
+      artifacts.push(await driver.capture(artifactDirectory, `900x800-inspector-${theme}.png`, screenshot));
       await driver.click({ selector: 'button[aria-label="Close inspector"]' });
       await driver.waitFor({ selector: '.inspector-drawer-layer' }, { absent: true });
       await driver.click({ selector: 'button[aria-label="Expand inspector"]' });
@@ -1653,12 +1654,12 @@ async function exercisePreferencesAndChannel(
       }
     })()`);
     await driver.waitForScreenshotCanvas(screenshot);
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png'));
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png', screenshot));
     await driver.click({ selector: '.sidebar-toggle' });
     await driver.waitFor({ selector: '.navigation-restore' });
-    // Collapsing navigation can remount the canvas and restart off-DOM image decoding.
+    // Capture must retain screenshot readiness throughout compositor frame comparison.
     await driver.waitForScreenshotCanvas(screenshot);
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png'));
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png', screenshot));
     await driver.click({ selector: '.navigation-restore' });
     await driver.click({ selector: '[data-testid="settings-button"]' });
     await driver.waitFor({ selector: '.settings-view' });

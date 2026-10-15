@@ -26,7 +26,7 @@ export const SMOKE_CAPTURE_PREPARATION = `(async () => {
 
 // Konva decodes an off-DOM Image: document.images and stable placeholder pixels
 // cannot establish that the selected screenshot has rendered. Apply this to
-// every artifact, including remounts caused by collapsing the navigation.
+// every artifact, including canvas reloads during layout changes.
 export const SMOKE_CANVAS_CAPTURE_PREPARATION = canvasReadinessScript();
 
 interface SmokeScreenshotCanvas {
@@ -35,29 +35,68 @@ interface SmokeScreenshotCanvas {
   originalHeight: number;
 }
 
-function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = false): string {
+// Keep observing after the initial wait: a loading interval or a replacement
+// stage invalidates the pixel sequence even if it loads before the next check.
+function canvasReadinessScript(expected?: SmokeScreenshotCanvas, required = false, capture = false): string {
   return `new Promise((resolve, reject) => {
   const expected = ${JSON.stringify(expected ?? null)};
+  const capture = ${capture};
+  const selectedTestId = expected ? 'screenshot-' + expected.id : capture
+    ? document.querySelector('.shot-item.active [data-testid^="screenshot-"]')?.getAttribute('data-testid')
+    : null;
+  const required = ${required} || Boolean(selectedTestId);
+  let capturedCanvases;
+  let capturedStages;
+  let capturedDimensions;
+  let valid = true;
   const observer = new MutationObserver(check);
   function finish(error) {
     observer.disconnect();
+    if (capture) delete window.__imnotaSmokeCanvasCapture;
     if (error) reject(new Error(error)); else resolve();
   }
+  function pending() { valid = false; }
   function check() {
-    const canvases = document.querySelectorAll('[data-testid="annotation-canvas"]');
-    if (${required} && !canvases.length) return;
-    if (expected && !document.querySelector('.shot-item.active [data-testid="screenshot-' + expected.id + '"]')) return;
+    const canvases = [...document.querySelectorAll('[data-testid="annotation-canvas"]')];
+    if ((required || capturedCanvases?.length) && !canvases.length) return pending();
+    if (selectedTestId && !document.querySelector('.shot-item.active [data-testid="' + selectedTestId + '"]')) return pending();
+    if (capturedCanvases && (canvases.length !== capturedCanvases.length ||
+        canvases.some((canvas, index) => canvas !== capturedCanvases[index] ||
+          canvas.querySelector('.konvajs-content canvas') !== capturedStages[index] ||
+          canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim() !== capturedDimensions[index]))) return pending();
     for (const canvas of canvases) {
       const state = canvas.querySelector('[data-testid="canvas-load-state"]');
-      if (state?.dataset.state === 'failed') return finish('Cannot capture: selected screenshot failed to load.');
+      if (state?.dataset.state === 'failed') {
+        pending();
+        if (!capturedCanvases) finish('Cannot capture: selected screenshot failed to load.');
+        return;
+      }
       const rendered = canvas.querySelector('.konvajs-content canvas');
-      if (state || !rendered || rendered.width <= 0 || rendered.height <= 0) return;
+      if (state || !rendered || rendered.width <= 0 || rendered.height <= 0) return pending();
       if (expected && canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim() !==
-          expected.originalWidth + ' × ' + expected.originalHeight) return;
+          expected.originalWidth + ' \u00d7 ' + expected.originalHeight) return pending();
     }
-    finish();
+    if (capturedCanvases) return;
+    if (!capture || !canvases.length) return finish();
+    valid = true;
+    capturedCanvases = canvases;
+    capturedStages = canvases.map(canvas => canvas.querySelector('.konvajs-content canvas'));
+    capturedDimensions = canvases.map(canvas => canvas.querySelector('.canvas-meta > span:first-child')?.textContent?.trim());
+    window.__imnotaSmokeCanvasCapture = {
+      valid() { check(); return valid; },
+      dispose() { observer.disconnect(); }
+    };
+    const dimensions = capturedDimensions[0]?.split(' \u00d7 ').map(Number);
+    resolve({
+      required: true,
+      expected: selectedTestId && dimensions?.length === 2 ? {
+        id: selectedTestId.slice('screenshot-'.length),
+        originalWidth: dimensions[0], originalHeight: dimensions[1]
+      } : undefined
+    });
   }
-  observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+  if (capture) window.__imnotaSmokeCanvasCapture = { valid: () => false, dispose: () => observer.disconnect() };
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
   check();
 })`;
 }
@@ -561,36 +600,74 @@ export class NativeUiDriver {
       );
   }
 
-  async capture(directory: string, filename: string): Promise<SmokeCapture> {
+  async capture(
+    directory: string,
+    filename: string,
+    expected?: SmokeScreenshotCanvas,
+  ): Promise<SmokeCapture> {
     const target = safeArtifactPath(directory, filename);
-    try {
-      await this.evaluate(SMOKE_CANVAS_CAPTURE_PREPARATION);
-    } catch (error) {
-      throw new Error(`Canvas readiness failed for ${filename}.`, { cause: error });
-    }
-    // DOM assertions and animation frames can precede Chromium's compositor update.
-    // Decode assets first, then require a stable sequence of actual captured pixels.
-    await this.evaluate(SMOKE_CAPTURE_PREPARATION);
     const deadline = Date.now() + this.defaultTimeoutMs;
+    const remaining = () => {
+      const timeout = deadline - Date.now();
+      if (timeout <= 0)
+        throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
+      return timeout;
+    };
+    let canvasRequired = Boolean(expected);
+    const prepareCanvas = async () => {
+      try {
+        const canvas = await this.evaluate<
+          { required: boolean; expected?: SmokeScreenshotCanvas } | undefined
+        >(canvasReadinessScript(expected, canvasRequired, true), remaining());
+        canvasRequired ||= Boolean(canvas?.required);
+        expected ??= canvas?.expected;
+        await this.evaluate(SMOKE_CAPTURE_PREPARATION, remaining());
+      } catch (error) {
+        throw new Error(
+          `Canvas readiness failed for ${filename} (screenshot ${expected?.id ?? 'canvas'}) within ${this.defaultTimeoutMs}ms: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+    };
     let previous: Buffer | undefined;
     let stableFrames = 0;
     let image;
     let png: Buffer;
-    do {
-      image = await withSmokeDeadline(
-        () => this.window.webContents.capturePage(),
+    try {
+      await prepareCanvas();
+      // DOM assertions and animation frames can precede Chromium's compositor update.
+      // Accept only consecutive settled frames from one continuously loaded canvas.
+      while (true) {
+        image = await withSmokeDeadline(
+          () => this.window.webContents.capturePage(),
+          remaining(),
+          `Page capture ${filename}`,
+        );
+        if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
+        png = image.toPNG();
+        const canvasValid =
+          !canvasRequired ||
+          (await this.evaluate<boolean>('window.__imnotaSmokeCanvasCapture?.valid() ?? false', remaining()));
+        if (!canvasValid) {
+          // Discard every compared frame, wait for the original screenshot, then
+          // start fresh. State invalidations share the original capture deadline.
+          previous = undefined;
+          stableFrames = 0;
+          await this.evaluate('window.__imnotaSmokeCanvasCapture?.dispose()', remaining());
+          await prepareCanvas();
+          continue;
+        }
+        stableFrames = previous?.equals(png) ? stableFrames + 1 : 1;
+        if (stableFrames >= 3) break;
+        previous = png;
+        await wait(Math.min(100, remaining()));
+      }
+    } finally {
+      await this.evaluate(
+        'window.__imnotaSmokeCanvasCapture?.dispose(); delete window.__imnotaSmokeCanvasCapture',
         Math.max(1, deadline - Date.now()),
-        `Page capture ${filename}`,
-      );
-      if (image.isEmpty()) throw new Error(`Captured artifact ${filename} is empty.`);
-      png = image.toPNG();
-      stableFrames = previous?.equals(png) ? stableFrames + 1 : 1;
-      if (stableFrames >= 3) break;
-      previous = png;
-      if (Date.now() >= deadline)
-        throw new Error(`Captured artifact ${filename} did not settle before the capture timeout.`);
-      await wait(100);
-    } while (stableFrames < 3);
+      ).catch(() => undefined);
+    }
     await fs.writeFile(target, png, { flag: 'wx' });
     const metrics = await this.evaluate<{ cssViewport: SmokeViewport; devicePixelRatio: number }>(
       `({

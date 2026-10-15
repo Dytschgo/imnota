@@ -815,10 +815,14 @@ describe('native smoke driver', () => {
           toPNG: () => png,
           getSize: () => ({ width: 2560, height: 1600 }),
         })),
-        executeJavaScript: vi.fn(async () => ({
-          cssViewport: { width: 1280, height: 800 },
-          devicePixelRatio: 2,
-        })),
+        executeJavaScript: vi.fn(async (source: string) =>
+          source.includes('cssViewport:')
+            ? {
+                cssViewport: { width: 1280, height: 800 },
+                devicePixelRatio: 2,
+              }
+            : undefined,
+        ),
       },
     } as unknown as BrowserWindow;
 
@@ -834,10 +838,172 @@ describe('native smoke driver', () => {
     expect(window.webContents.capturePage).toHaveBeenCalledTimes(3);
     expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(
       1,
-      SMOKE_CANVAS_CAPTURE_PREPARATION,
+      expect.stringContaining('const capture = true'),
       true,
     );
     expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(2, SMOKE_CAPTURE_PREPARATION, true);
+  });
+
+  it.each([
+    'before-frames',
+    'initial-gap',
+    'churning',
+    'third-frame',
+    'transient-remount',
+    'missing-canvas',
+    'wrong-screenshot',
+    'wrong-dimensions',
+    'deadline',
+    'failed',
+    'no-canvas',
+  ])('guards captured pixels across canvas changes: %s', async (scenario) => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-remount');
+    await fs.mkdir(artifacts);
+    vi.useFakeTimers();
+    try {
+      const expected = { id: 'fixture', originalWidth: 1920, originalHeight: 1080 };
+      const observers = new Set<() => void>();
+      const notify = () => {
+        for (const check of [...observers]) check();
+      };
+      let loading = false;
+      let failed = false;
+      let missing = false;
+      let wrongScreenshot = false;
+      let wrongDimensions = false;
+      let stage = { width: 800, height: 600 };
+      let recovered = false;
+      const selected = { getAttribute: () => 'screenshot-fixture' };
+      const canvas = {
+        querySelector: (selector: string) => {
+          if (selector.includes('canvas-load-state'))
+            return loading ? { dataset: { state: failed ? 'failed' : 'loading' } } : null;
+          if (selector.includes('canvas-meta'))
+            return { textContent: wrongDimensions ? '100 × 100' : '1920 × 1080' };
+          return loading ? null : stage;
+        },
+      };
+      const renderer = {};
+      const context = {
+        window: renderer,
+        document: {
+          body: {},
+          fonts: { ready: Promise.resolve() },
+          images: [],
+          querySelectorAll: () => (scenario === 'no-canvas' || missing ? [] : [canvas]),
+          querySelector: () => (wrongScreenshot || scenario === 'no-canvas' ? null : selected),
+        },
+        MutationObserver: class {
+          constructor(private check: () => void) {}
+          observe() {
+            observers.add(this.check);
+          }
+          disconnect() {
+            observers.delete(this.check);
+          }
+        },
+        requestAnimationFrame: (callback: () => void) => callback(),
+      };
+      const executeJavaScript = vi.fn((source: string) => {
+        if (source.includes('cssViewport:'))
+          return Promise.resolve({ cssViewport: { width: 1280, height: 800 }, devicePixelRatio: 1 });
+        return runInNewContext(source, context);
+      });
+      const capturePage = vi.fn(async () => {
+        const value = recovered || scenario === 'no-canvas' ? 'loaded' : 'loading';
+        const changeAt = scenario === 'third-frame' || scenario === 'transient-remount' ? 3 : 1;
+        if (scenario === 'churning') {
+          // Each new stage is already loaded by the post-frame check; none may
+          // extend the one capture budget or contribute to an accepted sequence.
+          vi.setSystemTime(Date.now() + 200);
+          stage = { width: 800, height: 600 };
+          notify();
+        } else if (
+          scenario !== 'no-canvas' &&
+          scenario !== 'initial-gap' &&
+          capturePage.mock.calls.length === changeAt
+        ) {
+          loading = true;
+          missing = scenario === 'missing-canvas';
+          wrongScreenshot = scenario === 'wrong-screenshot';
+          wrongDimensions = scenario === 'wrong-dimensions';
+          failed = scenario === 'failed';
+          notify();
+          if (scenario === 'transient-remount') {
+            loading = false;
+            stage = { width: 800, height: 600 };
+            notify();
+            recovered = true;
+          }
+        }
+        return {
+          isEmpty: () => false,
+          toPNG: () => Buffer.from(value),
+          getSize: () => ({ width: 1280, height: 800 }),
+        };
+      });
+      const window = { webContents: { executeJavaScript, capturePage } } as unknown as BrowserWindow;
+      const driver = new NativeUiDriver(window, 1_000);
+      // Establish the same successful workflow wait that preceded the failed artifact.
+      if (scenario !== 'no-canvas') await driver.waitForScreenshotCanvas(expected);
+      if (scenario === 'initial-gap') missing = true;
+      const result = driver.capture(
+        artifacts,
+        'remount.png',
+        scenario === 'before-frames' || scenario === 'initial-gap' ? expected : undefined,
+      );
+      const failure =
+        scenario === 'deadline' || scenario === 'failed' || scenario === 'churning'
+          ? expect(result).rejects.toThrow(
+              scenario === 'failed'
+                ? 'selected screenshot failed to load'
+                : scenario === 'churning'
+                  ? 'Captured artifact remount.png did not settle before the capture timeout.'
+                  : 'Canvas readiness failed for remount.png (screenshot fixture) within 1000ms',
+            )
+          : undefined;
+      await vi.advanceTimersByTimeAsync(200);
+      if (scenario === 'no-canvas') {
+        expect(await fs.readFile((await result).path, 'utf8')).toBe('loaded');
+        expect(capturePage).toHaveBeenCalledTimes(3);
+      } else if (failure) {
+        await vi.advanceTimersByTimeAsync(800);
+        await failure;
+        await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({ code: 'ENOENT' });
+      } else {
+        if (scenario !== 'transient-remount') {
+          await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
+          // The original identity and dimensions must remain required after a remount.
+          loading = false;
+          if (missing || wrongScreenshot || wrongDimensions) {
+            notify();
+            await vi.advanceTimersByTimeAsync(100);
+            expect(capturePage.mock.calls.length).toBe(scenario === 'initial-gap' ? 0 : 1);
+          }
+          missing = wrongScreenshot = wrongDimensions = false;
+          recovered = true;
+          stage = { width: 800, height: 600 };
+          notify();
+        }
+        await vi.advanceTimersByTimeAsync(200);
+        expect(await fs.readFile((await result).path, 'utf8')).toBe('loaded');
+        expect(capturePage.mock.calls.length).toBe(
+          scenario === 'third-frame' || scenario === 'transient-remount'
+            ? 6
+            : scenario === 'initial-gap'
+              ? 3
+              : 4,
+        );
+      }
+      expect(renderer).not.toHaveProperty('__imnotaSmokeCanvasCapture');
+      expect(observers.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('discards partial compositor frames and requires three consecutive settled captures', async () => {
@@ -858,10 +1024,14 @@ describe('native smoke driver', () => {
     const window = {
       webContents: {
         capturePage,
-        executeJavaScript: vi.fn(async () => ({
-          cssViewport: { width: 1280, height: 800 },
-          devicePixelRatio: 1,
-        })),
+        executeJavaScript: vi.fn(async (source: string) =>
+          source.includes('cssViewport:')
+            ? {
+                cssViewport: { width: 1280, height: 800 },
+                devicePixelRatio: 1,
+              }
+            : undefined,
+        ),
       },
     } as unknown as BrowserWindow;
     const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png');
