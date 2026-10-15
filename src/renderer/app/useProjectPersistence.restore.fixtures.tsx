@@ -263,6 +263,8 @@ export async function fixture(
     onSnapshot,
     selected,
     restore,
+    createContent: (contentKind: 'text' | 'drawing') =>
+      service.create({ projectPath, collectionId: shot.collectionId, kind: contentKind }),
   };
 }
 

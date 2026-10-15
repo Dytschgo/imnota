@@ -346,6 +346,102 @@ describe('useProjectPersistence', () => {
     hook.unmount();
   });
 
+  it('retains the durability sentence once across dismissed Restore cancellations X and Y', async () => {
+    const source = snapshot();
+    const mock = bridge();
+    window.imnota = mock.value as never;
+    const hook = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: null,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+    for (const code of ['X', 'Y']) {
+      act(() => hook.result.current.dismissExternalChange());
+      expect(hook.result.current.externalChange).toBeNull();
+      await act(async () => {
+        const token = hook.result.current.beginNativeMutation();
+        await hook.result.current.cancelNativeMutation(
+          token,
+          `${COMMITTED_WRITE_WARNING} Restore could not be confirmed: Error ${code}. Reload and compare.`,
+        );
+      });
+    }
+    const message = hook.result.current.externalChange!.message;
+    expect(message.split(COMMITTED_WRITE_WARNING)).toHaveLength(2);
+    expect(message).toContain('Error X.');
+    expect(message).toContain('Error Y.');
+    act(() =>
+      mock.emit({
+        watchId: 'watch',
+        projectPath: source.projectPath,
+        kind: 'external-change',
+        projectRevision: 'foreign',
+        changedPaths: ['project.json'],
+      }),
+    );
+    expect(hook.result.current.externalChange!.message.split(COMMITTED_WRITE_WARNING)).toHaveLength(2);
+    expect(hook.result.current.externalChange?.message).toContain('Error X.');
+    expect(hook.result.current.externalChange?.message).toContain('Error Y.');
+    expect(hook.result.current.projectRevision).toBeNull();
+    expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  it.each(['project', 'session'] as const)(
+    'clears a retained warning after resolved mutation conflict on a %s switch',
+    async (switchKind) => {
+      const source = snapshot();
+      const mock = bridge();
+      window.imnota = mock.value as never;
+      const hook = renderHook(
+        ({ current, generation }) =>
+          useProjectPersistence({
+            snapshot: current,
+            sessionGeneration: generation,
+            activeScreenshot: null,
+            onProject: vi.fn(),
+            onSnapshot: vi.fn(),
+            onSelectScreenshot: vi.fn(),
+          }),
+        { initialProps: { current: source, generation: 0 } },
+      );
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+      await act(async () => {
+        const token = hook.result.current.beginNativeMutation();
+        await hook.result.current.cancelNativeMutation(
+          token,
+          `${COMMITTED_WRITE_WARNING} Restore confirmation unavailable. Reload and compare.`,
+        );
+        expect(await hook.result.current.acceptMutationSnapshot(source)).toBe(true);
+      });
+      expect(hook.result.current.externalChange?.message).toContain(COMMITTED_WRITE_WARNING);
+      const destination = switchKind === 'project' ? { ...source, projectPath: '/workspace/other' } : source;
+      hook.rerender({
+        current: destination,
+        generation: switchKind === 'session' ? 1 : 0,
+      });
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+      expect(hook.result.current.externalChange).toBeNull();
+      act(() =>
+        mock.emit({
+          watchId: 'watch',
+          projectPath: destination.projectPath,
+          kind: 'external-change',
+          projectRevision: 'foreign',
+          changedPaths: ['project.json'],
+        }),
+      );
+      expect(hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+      expect(hook.result.current.externalChange?.message).not.toContain(COMMITTED_WRITE_WARNING);
+      hook.unmount();
+    },
+  );
+
   it.each([false, true])(
     'recovers metadata after unmount without accepting a changed CAS baseline (%s)',
     async (externalEdit) => {

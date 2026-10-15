@@ -217,6 +217,92 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
   },
 );
 
+it.each(['text', 'drawing'] as const)(
+  'retains the cancelled Restore warning after successfully adding %s without changing save authority',
+  async (kind) => {
+    const f = await fixture('screenshot', { holdWatchEvents: true });
+    const assertFault = fault(f.projectFile, 'EIO');
+    f.snapshot.mockRejectedValueOnce(new Error('Readback unavailable'));
+    await act(async () => {
+      const token = f.hook.result.current.beginNativeMutation();
+      try {
+        await f.restore();
+        throw new Error('Unexpected success');
+      } catch (error) {
+        expect((error as Error).message).toContain(COMMITTED_WRITE_WARNING);
+        await f.hook.result.current.cancelNativeMutation(token, (error as Error).message);
+      }
+    });
+    assertFault();
+    expect(f.hook.result.current.projectRevision).toBeNull();
+    expect(f.hook.result.current.hasPendingProjectMetadata()).toBe(false);
+    await expect(f.hook.result.current.getSavedContext(f.source.project.collections[0].id)).rejects.toThrow(
+      'Reload and review',
+    );
+    const warning = f.hook.result.current.externalChange!.message;
+    await act(async () => {
+      expect(await f.hook.result.current.flush()).toBe(true);
+      expect(await f.hook.result.current.flushProjectMetadata()).toBe(true);
+      const token = f.hook.result.current.beginNativeMutation();
+      const created = await f.createContent(kind);
+      expect(await f.hook.result.current.acceptMutationSnapshot(created, undefined, token)).toBe(true);
+    });
+    const adopted = f.onSnapshot.mock.calls[0][0];
+    expect(adopted.project.contentItems).toEqual([expect.objectContaining({ kind })]);
+    expect(f.hook.result.current.projectRevision).toBe(
+      projectRevisionForSource(await fs.readFile(f.projectFile)),
+    );
+    expect(f.hook.result.current.externalChange?.message).toBe(warning);
+    await expect(f.hook.result.current.getSavedContext(f.source.project.collections[0].id)).resolves.toEqual({
+      snapshot: expect.objectContaining({ project: adopted.project }),
+      collectionId: f.source.project.collections[0].id,
+    });
+    await act(async () => {
+      expect(
+        await f.hook.result.current.saveProjectMetadata({
+          ...adopted.project,
+          name: 'Allowed metadata save',
+        }),
+      ).toBe(true);
+    });
+    expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+    expect((await f.readProject()).name).toBe('Allowed metadata save');
+    expect(f.hook.result.current.externalChange?.message).toBe(warning);
+    for (const [index, member] of f.members.entries())
+      expect(await fs.readFile(path.join(f.projectPath, member))).toEqual(f.bytes[index]);
+
+    const changeFile = async (name: string) => {
+      const foreign = Buffer.from(JSON.stringify({ ...(await f.readProject()), name }, null, 2));
+      await fs.writeFile(f.projectFile, foreign);
+      await waitFor(() =>
+        expect(f.events).toContainEqual(
+          expect.objectContaining({
+            kind: 'external-change',
+            projectRevision: projectRevisionForSource(foreign),
+          }),
+        ),
+      );
+      act(() => f.deliverWatchEvents());
+    };
+    act(() => f.hook.result.current.dismissExternalChange());
+    expect(f.hook.result.current.externalChange).toBeNull();
+    await changeFile('Foreign after successful mutation');
+    expect(f.hook.result.current.externalChange?.message).toContain(warning);
+    expect(f.hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+    f.bridge.reloadWatchedProject.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'io-failure', message: 'Reload unavailable', retryable: false },
+    });
+    await act(async () => expect(await f.hook.result.current.reloadExternal()).toBe(false));
+    expect(f.hook.result.current.externalChange?.message).toContain(warning);
+    await act(async () => expect(await f.hook.result.current.reloadExternal()).toBe(true));
+    expect(f.hook.result.current.externalChange).toBeNull();
+    await changeFile('Foreign after explicit reload');
+    expect(f.hook.result.current.externalChange?.message).not.toContain(COMMITTED_WRITE_WARNING);
+    expect((await fs.stat(f.journal)).isDirectory()).toBe(true);
+  },
+);
+
 it.each(kinds)(
   'rejects changed %s member readback and preserves the foreign member and journal',
   async (kind) => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 import type { ProjectWatchEvent } from '../../shared/workflow-bridge';
 import type {
   Annotation,
@@ -403,12 +404,16 @@ export function useProjectPersistence({
   }, []);
 
   const publishExternalChange = useCallback(
-    (change: ExternalProjectChange | null, warnings: string[] = []) => {
+    (
+      change: ExternalProjectChange | null,
+      warnings: string[] = [],
+      { clearWarnings = false }: { clearWarnings?: boolean } = {},
+    ) => {
       // Warning evidence and recovery guidance survive either ordering of a native
       // result and watcher notifications, independently of the notice's priority.
-      pendingExternalWarnings.current = change
-        ? [...new Set([...pendingExternalWarnings.current, ...warnings])]
-        : [];
+      pendingExternalWarnings.current = clearWarnings
+        ? []
+        : [...new Set([...pendingExternalWarnings.current, ...warnings])];
       // Losing monitoring must never downgrade an already observed external edit/conflict.
       if (
         change?.kind === 'watch-error' &&
@@ -419,11 +424,18 @@ export function useProjectPersistence({
         change = pendingExternalChange.current;
       }
       pendingExternalChange.current = change;
+      // Resolving a conflict restores its existing save authority, but does not
+      // resolve a prior durability warning. A warning-only notice is display state.
+      const notice =
+        change ??
+        (pendingExternalWarnings.current.length ? { kind: 'watch-error' as const, message: '' } : null);
       setExternalChange(
-        change
+        notice
           ? {
-              ...change,
-              message: [...new Set([...pendingExternalWarnings.current, change.message])].join(' '),
+              ...notice,
+              message: [...new Set([...pendingExternalWarnings.current, notice.message])]
+                .filter(Boolean)
+                .join(' '),
             }
           : null,
       );
@@ -794,7 +806,7 @@ export function useProjectPersistence({
     const projectPath = snapshot?.projectPath;
     let cancelled = false;
     publishAcceptedRevision(null);
-    publishExternalChange(null);
+    publishExternalChange(null, [], { clearWarnings: true });
     let resolveReady!: (ready: boolean) => void;
     watchReady.current = new Promise((resolve) => {
       resolveReady = resolve;
@@ -1055,9 +1067,14 @@ export function useProjectPersistence({
     (token: number, unconfirmedRestore?: string): Promise<boolean> => {
       if (unconfirmedRestore) {
         publishAcceptedRevision(null);
-        publishExternalChange({ kind: 'metadata-conflict', message: unconfirmedRestore }, [
-          unconfirmedRestore,
-        ]);
+        const message = unconfirmedRestore.split(COMMITTED_WRITE_WARNING).join(' ').trim();
+        publishExternalChange(
+          { kind: 'metadata-conflict', message },
+          [
+            unconfirmedRestore.includes(COMMITTED_WRITE_WARNING) ? COMMITTED_WRITE_WARNING : '',
+            message,
+          ].filter(Boolean),
+        );
       }
       return finishNativeMutation(token, !unconfirmedRestore);
     },
@@ -1114,7 +1131,7 @@ export function useProjectPersistence({
         snapshotRef.current = latest.snapshot;
         lastSavedSnapshot.current = latest.snapshot;
         callbacks.current.onSnapshot(latest.snapshot);
-        publishExternalChange(null);
+        publishExternalChange(null, [], { clearWarnings: true });
         return true;
       } catch (reason) {
         if (!isCurrent()) return false;
@@ -1213,7 +1230,7 @@ export function useProjectPersistence({
         await finishNativeMutation(nativeMutationToken, false);
         return false;
       }
-      publishExternalChange(null);
+      publishExternalChange(null, [], { clearWarnings: !sameProject });
       if (sameProject && !(await finishNativeMutation(nativeMutationToken, true))) return false;
       return !sameProject || revision !== null;
     },
@@ -1411,7 +1428,7 @@ export function useProjectPersistence({
       setError('');
       setWarning('');
       publishAcceptedRevision(null);
-      publishExternalChange(null);
+      publishExternalChange(null, [], { clearWarnings: true });
     },
     async getSavedContext(requestedCollectionId) {
       await watchReady.current;
