@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Profiler, type ProfilerOnRenderCallback } from 'react';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { WorkflowBridge } from '../shared/workflow-bridge';
+import type { ProjectWatchEvent, WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import type { AnnotationCanvasProps } from './components/AnnotationCanvas';
@@ -912,6 +912,306 @@ describe('feedback controls', () => {
     expect(within(dialog).getByRole('alert')).toHaveTextContent(message);
     expect(undoDeleteScreenshot).toHaveBeenCalledOnce();
     expect(saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  });
+
+  it.each(['screenshot', 'drawing', 'text'] as const)(
+    'allows retrying %s Restore after Duplicate resolves the conflict while retaining the warning',
+    async (kind) => {
+      const deleted = {
+        kind,
+        undoToken: 'delete-token',
+        itemId: 'deleted',
+        title: 'Unconfirmed item',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      const message = `${COMMITTED_WRITE_WARNING} ${RESTORE_CONFIRMATION_FAILURE} Reload and compare the project before saving or restoring again.`;
+      const restore = vi.fn().mockRejectedValueOnce(new Error(message));
+      const duplicateScreenshot = vi.fn<ImnotaBridge['duplicateScreenshot']>();
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>();
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const { editingSnapshot } = await renderEditingProject({
+        listRecentlyDeleted,
+        undoDeleteScreenshot: restore,
+        undoDeleteContentItem: restore,
+        duplicateScreenshot,
+        reloadWatchedProject,
+      });
+      const duplicated = {
+        ...editingSnapshot,
+        project: {
+          ...editingSnapshot.project,
+          screenshots: [
+            ...editingSnapshot.project.screenshots,
+            { ...editingSnapshot.project.screenshots[0], id: 'duplicate', title: 'Duplicated screen' },
+          ],
+        },
+      };
+      duplicateScreenshot.mockResolvedValue(duplicated);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: duplicated, projectRevision: 'project-2' },
+      });
+      restore.mockResolvedValue(duplicated);
+      const restoreLabel = `Restore ${kind === 'text' ? 'text block' : kind}: Unconfirmed item`;
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      let dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+      fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+      await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('duplicate'));
+      expect(duplicateScreenshot).toHaveBeenCalledOnce();
+      expect(reloadWatchedProject).toHaveBeenCalledOnce();
+      const banner = screen.getByTestId('external-change-banner');
+      expect(banner).toHaveTextContent(message);
+      expect(within(banner).getByRole('button', { name: 'Reload project' })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      await waitFor(() => expect(restore).toHaveBeenCalledTimes(2));
+      expect(restore).toHaveBeenLastCalledWith({
+        projectPath: snapshot.projectPath,
+        undoToken: 'delete-token',
+      });
+      await waitFor(() =>
+        expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Unconfirmed item”.'),
+      );
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+    },
+  );
+
+  it.each(
+    (['screenshot', 'drawing', 'text'] as const).flatMap((kind) =>
+      (['external-change', 'watch-error'] as const).map((noticeKind) => ({ kind, noticeKind })),
+    ),
+  )(
+    'reveals recovery for $kind Restore after dismissing a real $noticeKind and allows retry after reload',
+    async ({ kind, noticeKind }) => {
+      const deleted = {
+        kind,
+        undoToken: 'delete-token',
+        itemId: 'deleted',
+        title: 'Deleted item',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      let onWatchEvent!: (event: ProjectWatchEvent) => void;
+      const restore = vi.fn();
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>();
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const { editingSnapshot } = await renderEditingProject({
+        listRecentlyDeleted,
+        undoDeleteScreenshot: restore,
+        undoDeleteContentItem: restore,
+        reloadWatchedProject,
+        onProjectWatchEvent: (callback) => {
+          onWatchEvent = callback;
+          return () => {};
+        },
+      });
+      const reloaded = { ...editingSnapshot, projectRevision: 'foreign-revision' };
+      const restored = { ...editingSnapshot, projectRevision: 'restored-revision' };
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: reloaded, projectRevision: reloaded.projectRevision },
+      });
+      restore.mockResolvedValue(restored);
+      act(() =>
+        onWatchEvent({
+          watchId: 'watch',
+          projectPath: snapshot.projectPath,
+          kind: noticeKind,
+          projectRevision: 'foreign-revision',
+          changedPaths: ['project.json'],
+        }),
+      );
+      const banner = await screen.findByTestId('external-change-banner');
+      const message = banner.querySelector('span')!.textContent!;
+      const restoreLabel = `Restore ${kind === 'text' ? 'text block' : kind}: Deleted item`;
+      for (const dismiss of [false, true]) {
+        if (dismiss) {
+          fireEvent.click(screen.getByRole('button', { name: 'Dismiss external change notice' }));
+          expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument();
+        }
+        fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+        fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+        expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+          dismiss ? 'Reload and compare the project before restoring again.' : message,
+        );
+        expect(restore).not.toHaveBeenCalled();
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+        expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Reload project' }));
+      await waitFor(() => expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument());
+      expect(reloadWatchedProject).toHaveBeenCalledExactlyOnceWith({ watchId: 'watch' });
+      expect(useAppStore.getState().snapshot).toBe(reloaded);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: restored, projectRevision: restored.projectRevision },
+      });
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      await waitFor(() =>
+        expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Deleted item”.'),
+      );
+      expect(restore).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        undoToken: deleted.undoToken,
+      });
+      expect(useAppStore.getState().snapshot?.projectRevision).toBe(restored.projectRevision);
+    },
+  );
+
+  it.each(['external-change', 'watch-error'] as const)(
+    'reveals recovery for deletion Undo after dismissing a real %s and allows Restore after reload',
+    async (noticeKind) => {
+      let onWatchEvent!: (event: ProjectWatchEvent) => void;
+      const deleted = {
+        kind: 'screenshot' as const,
+        undoToken: 'delete-token',
+        itemId: 'shot',
+        title: 'Screen',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>();
+      const removed = { ...snapshot, projectRevision: 'deleted-revision' };
+      const reloaded = { ...snapshot, projectRevision: 'foreign-revision' };
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>(async () => ({
+        ok: true,
+        value: { snapshot: removed, projectRevision: removed.projectRevision },
+      }));
+      const { editingSnapshot } = await renderEditingProject({
+        deleteScreenshot: async () => ({ snapshot: removed, undoToken: deleted.undoToken }),
+        undoDeleteScreenshot,
+        listRecentlyDeleted,
+        reloadWatchedProject,
+        onProjectWatchEvent: (callback) => {
+          onWatchEvent = callback;
+          return () => {};
+        },
+      });
+      const restored = { ...editingSnapshot, projectRevision: 'restored-revision' };
+      undoDeleteScreenshot.mockResolvedValue(restored);
+      act(() =>
+        useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } })),
+      );
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+      const undo = await screen.findByRole('button', { name: 'Undo' });
+      reloadWatchedProject.mockClear();
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: reloaded, projectRevision: reloaded.projectRevision },
+      });
+      act(() =>
+        onWatchEvent({
+          watchId: 'watch',
+          projectPath: snapshot.projectPath,
+          kind: noticeKind,
+          projectRevision: reloaded.projectRevision,
+          changedPaths: ['project.json'],
+        }),
+      );
+      const message = screen.getByTestId('external-change-banner').querySelector('span')!.textContent!;
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss external change notice' }));
+      expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument();
+      fireEvent.click(undo);
+      expect(await screen.findByTestId('error-toast')).toHaveTextContent(
+        'Reload and compare the project before restoring again.',
+      );
+      expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      fireEvent.click(screen.getByRole('button', { name: 'Reload project' }));
+      await waitFor(() => expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument());
+      expect(reloadWatchedProject).toHaveBeenCalledExactlyOnceWith({ watchId: 'watch' });
+      expect(useAppStore.getState().snapshot).toBe(reloaded);
+      expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+
+      // The immediate Undo offer is consumed; retry the same token through Recently deleted.
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: restored, projectRevision: restored.projectRevision },
+      });
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Restore screenshot: Screen' }));
+      await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Screen”.'));
+      expect(undoDeleteScreenshot).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        undoToken: deleted.undoToken,
+      });
+      expect(useAppStore.getState().snapshot?.projectRevision).toBe('restored-revision');
+    },
+  );
+
+  it('allows immediate deletion Undo while a retained Restore warning is visible', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'old-delete-token',
+      itemId: 'deleted',
+      title: 'Unconfirmed item',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    const message = `${COMMITTED_WRITE_WARNING} ${RESTORE_CONFIRMATION_FAILURE} Reload and compare.`;
+    const undoDeleteScreenshot = vi
+      .fn<ImnotaBridge['undoDeleteScreenshot']>()
+      .mockRejectedValueOnce(new Error(message))
+      .mockImplementation(async () => persisted);
+    const duplicateScreenshot = vi.fn<ImnotaBridge['duplicateScreenshot']>(async () => persisted);
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot: persisted,
+      undoToken: 'new-delete-token',
+    }));
+    const { editingSnapshot: persisted } = await renderEditingProject({
+      listRecentlyDeleted: async () => [deleted],
+      undoDeleteScreenshot,
+      duplicateScreenshot,
+      deleteScreenshot,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-2' },
+      }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+    fireEvent.click(
+      await within(dialog).findByRole('button', { name: 'Restore screenshot: Unconfirmed item' }),
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(duplicateScreenshot).toHaveBeenCalledOnce());
+    // Wait for adoption, then use the normal confirmed deletion and its Undo offer.
+    await waitFor(() => expect(useAppStore.getState().snapshot).not.toBe(persisted));
+    act(() =>
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } })),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    const undo = await screen.findByRole('button', { name: 'Undo' });
+    expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+    fireEvent.click(undo);
+    await waitFor(() => expect(undoDeleteScreenshot).toHaveBeenCalledTimes(2));
+    expect(undoDeleteScreenshot).toHaveBeenLastCalledWith({
+      projectPath: snapshot.projectPath,
+      undoToken: 'new-delete-token',
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument());
+    expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
   });
 
   it('restores from Recently deleted through the Undo bridge and shows an Undo conflict in the dialog', async () => {
