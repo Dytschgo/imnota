@@ -1,7 +1,10 @@
-/* The body portal escapes filtered glass panels and their overflow clipping. */
+/* The body portal escapes filtered glass panels and their overflow clipping.
+   Window drag regions (top bar, sidebar header) ignore stacking order, so the
+   backdrop opts out; otherwise clicks near the top of the window drag it. */
 .modal-backdrop.modal-viewport {
   z-index: 100;
   padding: clamp(8px, 2vw, 20px);
+  -webkit-app-region: no-drag;
 }
 
 .modal-viewport[hidden] {
@@ -62,4 +65,11 @@
 .modal-preview .modal-header {
   align-items: center;
   padding: 10px 14px;
+}
+
+/* macOS draws the traffic lights over the top-left corner of the window, where
+   the full-window preview header starts. Clear them like the app top bar does:
+   the 80px window-controls inset less the 8px preview backdrop padding. */
+:root:has(.platform-mac) .modal-preview .modal-header {
+  padding-left: 72px;
 }

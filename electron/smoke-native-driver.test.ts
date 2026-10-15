@@ -693,6 +693,102 @@ describe('native smoke driver', () => {
     },
   );
 
+  it.each([
+    'missing-canvas',
+    'loading',
+    'missing-stage',
+    'zero-width',
+    'zero-height',
+    'wrong-screenshot',
+    'wrong-dimensions',
+  ])('waits for the intended screenshot after a canvas remount: %s', async (initial) => {
+    let state = initial;
+    let check!: () => void;
+    const disconnect = vi.fn();
+    const canvas = {
+      querySelector: (selector: string) => {
+        if (selector.includes('canvas-load-state'))
+          return state === 'loading' ? { dataset: { state: 'loading' } } : null;
+        if (selector.includes('canvas-meta'))
+          return { textContent: state === 'wrong-dimensions' ? '100 × 100' : '1920 × 1080' };
+        if (state === 'missing-stage') return null;
+        return {
+          width: state === 'zero-width' ? 0 : 800,
+          height: state === 'zero-height' ? 0 : 600,
+        };
+      },
+    };
+    const executeJavaScript = vi.fn((source: string) =>
+      runInNewContext(source, {
+        document: {
+          body: {},
+          querySelectorAll: () => (state === 'missing-canvas' ? [] : [canvas]),
+          querySelector: (selector: string) => {
+            expect(selector).toBe('.shot-item.active [data-testid="screenshot-fixture"]');
+            return state === 'wrong-screenshot' ? null : {};
+          },
+        },
+        MutationObserver: class {
+          constructor(callback: () => void) {
+            check = callback;
+          }
+          observe() {}
+          disconnect = disconnect;
+        },
+      }),
+    );
+    const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+    let settled = false;
+    const ready = new NativeUiDriver(window).waitForScreenshotCanvas({
+      id: 'fixture',
+      originalWidth: 1920,
+      originalHeight: 1080,
+    });
+    void ready.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    check(); // Repeated DOM changes cannot make an incomplete screenshot ready.
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    state = 'ready';
+    check();
+    await ready;
+    expect(settled).toBe(true);
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it.each(['failed', 'loading'])('fails loudly when the screenshot stays %s', async (state) => {
+    vi.useFakeTimers();
+    try {
+      const executeJavaScript = vi.fn((source: string) =>
+        runInNewContext(source, {
+          document: {
+            body: {},
+            querySelectorAll: () => [{ querySelector: () => ({ dataset: { state } }) }],
+          },
+          MutationObserver: class {
+            observe() {}
+            disconnect() {}
+          },
+        }),
+      );
+      const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+      const ready = new NativeUiDriver(window, 50).waitForScreenshotCanvas();
+      const failure = expect(ready).rejects.toThrow(
+        state === 'failed'
+          ? 'selected screenshot failed to load'
+          : 'Selected screenshot canvas did not render within 50ms',
+      );
+      await vi.advanceTimersByTimeAsync(50);
+      await failure;
+      expect(executeJavaScript).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails a viewport matrix entry when the OS clamps its content size', async () => {
     const window = {
       setContentSize: vi.fn(),
