@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Annotation, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type { WorkflowBridge } from '../../shared/workflow-bridge';
 import { useProjectPersistence } from './useProjectPersistence';
+import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
 
 function shot(id: string, description = 'Original'): ScreenshotRecord {
   return {
@@ -88,7 +89,9 @@ function bridge(overrides: Record<string, unknown> = {}) {
       watchHandler = handler;
       return () => undefined;
     }),
-    reloadWatchedProject: vi.fn(async () => ok({ snapshot: snapshot(), projectRevision: 'project-reload' })),
+    reloadWatchedProject: vi.fn<WorkflowBridge['reloadWatchedProject']>(async () =>
+      ok({ snapshot: snapshot(), projectRevision: 'project-reload' }),
+    ),
     saveProjectCompareAndSwap: vi.fn(async ({ project: next }: { project: ProjectData }) =>
       ok({ snapshot: { ...snapshot(next.screenshots), project: next }, projectRevision: 'project-2' }),
     ),
@@ -109,6 +112,240 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each(
+    (['mutation', 'reload', 'reopen'] as const).flatMap((operation) =>
+      (['project', 'session'] as const).flatMap((switchKind) =>
+        [false, true].map((fails) => ({ operation, switchKind, fails })),
+      ),
+    ),
+  )(
+    'ignores stale $operation readback after a $switchKind switch (failure=$fails)',
+    async ({ operation, switchKind, fails }) => {
+      const source = snapshot();
+      const destination = switchKind === 'project' ? { ...source, projectPath: '/workspace/other' } : source;
+      let settle!: (value: Awaited<ReturnType<WorkflowBridge['reloadWatchedProject']>>) => void;
+      const readback = new Promise<Awaited<ReturnType<WorkflowBridge['reloadWatchedProject']>>>((resolve) => {
+        settle = resolve;
+      });
+      const mock = bridge({ reloadWatchedProject: vi.fn(() => readback) });
+      window.imnota = mock.value as never;
+      const onSnapshot = vi.fn();
+      const selected = vi.fn();
+      const hook = renderHook(
+        ({ current, generation }) =>
+          useProjectPersistence({
+            snapshot: current,
+            sessionGeneration: generation,
+            activeScreenshot: null,
+            onProject: vi.fn(),
+            onSnapshot,
+            onSelectScreenshot: selected,
+          }),
+        { initialProps: { current: source, generation: 0 } },
+      );
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+      let accepting!: Promise<boolean>;
+      act(() => {
+        if (operation === 'mutation') {
+          accepting = hook.result.current.acceptMutationSnapshot(
+            { ...source, warnings: [COMMITTED_WRITE_WARNING] },
+            'one',
+            hook.result.current.beginNativeMutation(),
+            undefined,
+            'restored',
+          );
+        } else if (operation === 'reload') accepting = hook.result.current.reloadExternal();
+        else accepting = hook.result.current.adoptAuthoritativeSnapshot(source);
+      });
+      await waitFor(() => expect(mock.value.reloadWatchedProject).toHaveBeenCalledOnce());
+      mock.value.startProjectWatch.mockResolvedValueOnce(
+        ok({
+          watchId: 'destination-watch',
+          projectPath: destination.projectPath,
+          projectRevision: 'destination-revision',
+        }),
+      );
+      hook.rerender({ current: destination, generation: switchKind === 'session' ? 1 : 0 });
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('destination-revision'));
+      await act(async () => {
+        settle(
+          fails
+            ? {
+                ok: false,
+                error: { code: 'io-failure', message: 'Old readback failed', retryable: false },
+              }
+            : ok({ snapshot: source, projectRevision: 'restored' }),
+        );
+        expect(await accepting).toBe(false);
+      });
+      expect(hook.result.current.projectRevision).toBe('destination-revision');
+      expect(hook.result.current.externalChange).toBeNull();
+      expect(hook.result.current.error).toBe('');
+      expect(onSnapshot).not.toHaveBeenCalled();
+      expect(selected).not.toHaveBeenCalled();
+      // The old mutation must release its suspension without saving queued metadata
+      // into the new session. A later explicit save in that session can still run.
+      await act(async () =>
+        expect(await hook.result.current.saveProjectMetadata(destination.project)).toBe(true),
+      );
+      expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
+      act(() =>
+        mock.emit({
+          watchId: 'destination-watch',
+          projectPath: destination.projectPath,
+          kind: 'external-change',
+          projectRevision: 'foreign',
+          changedPaths: ['project.json'],
+        }),
+      );
+      expect(hook.result.current.externalChange?.message).toContain('This project changed outside Imnota.');
+      expect(hook.result.current.externalChange?.message).not.toContain(COMMITTED_WRITE_WARNING);
+      expect(hook.result.current.externalChange?.message).not.toContain('Old readback failed');
+      hook.unmount();
+    },
+  );
+
+  it('ignores a stale watcher startup failure after switching projects', async () => {
+    const source = snapshot();
+    let reject!: (reason: Error) => void;
+    const startup = new Promise<never>((_resolve, fail) => {
+      reject = fail;
+    });
+    const mock = bridge();
+    mock.value.startProjectWatch.mockReturnValueOnce(startup);
+    window.imnota = mock.value as never;
+    const hook = renderHook(
+      ({ current }) =>
+        useProjectPersistence({
+          snapshot: current,
+          activeScreenshot: null,
+          onProject: vi.fn(),
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      { initialProps: { current: source } },
+    );
+    hook.rerender({ current: { ...source, projectPath: '/workspace/other' } });
+    await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+    await act(async () => {
+      reject(new Error('Old watcher failed'));
+      await startup.catch(() => undefined);
+    });
+    expect(hook.result.current.externalChange).toBeNull();
+    hook.unmount();
+  });
+
+  it('retains Restore warnings and flush guidance when an edit made during Restore cannot save', async () => {
+    const source = snapshot();
+    const mock = bridge({
+      saveScreenshotContent: vi.fn().mockRejectedValue(new Error('Screenshot save failed')),
+    });
+    window.imnota = mock.value as never;
+    const onSnapshot = vi.fn();
+    const hook = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: source.project.screenshots[0],
+        onProject: vi.fn(),
+        onSnapshot,
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.loadedScreenshotId).toBe('one'));
+    await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+    const token = hook.result.current.beginNativeMutation();
+    act(() =>
+      hook.result.current.markScreenshotDirty({
+        ...source.project.screenshots[0],
+        description: 'Edited during Restore',
+      }),
+    );
+    await act(async () =>
+      expect(
+        await hook.result.current.acceptMutationSnapshot(
+          { ...source, warnings: [COMMITTED_WRITE_WARNING] },
+          'one',
+          token,
+          undefined,
+          'restored',
+        ),
+      ).toBe(false),
+    );
+    expect(hook.result.current.externalChange?.message).toContain(COMMITTED_WRITE_WARNING);
+    expect(hook.result.current.externalChange?.message).toContain('could not be saved');
+    expect(hook.result.current.externalChange?.message).toContain('reload');
+    expect(hook.result.current.error).toContain('Screenshot save failed');
+    expect(hook.result.current.hasUnsavedChanges).toBe(true);
+    expect(hook.result.current.projectRevision).toBe('project-1');
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(mock.value.reloadWatchedProject).not.toHaveBeenCalled();
+    act(() => hook.result.current.dismissExternalChange());
+    act(() =>
+      mock.emit({
+        watchId: 'watch',
+        projectPath: source.projectPath,
+        kind: 'external-change',
+        projectRevision: 'foreign',
+        changedPaths: ['project.json'],
+      }),
+    );
+    expect(hook.result.current.externalChange?.message).toContain(COMMITTED_WRITE_WARNING);
+    expect(hook.result.current.externalChange?.message).toContain('could not be saved');
+    hook.unmount();
+  });
+
+  it('retains individual Restore warning sentences once across dismissed readback failures X and Y', async () => {
+    const source = snapshot();
+    const mock = bridge();
+    window.imnota = mock.value as never;
+    const hook = renderHook(() =>
+      useProjectPersistence({
+        snapshot: source,
+        activeScreenshot: null,
+        onProject: vi.fn(),
+        onSnapshot: vi.fn(),
+        onSelectScreenshot: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+    for (const message of [
+      'Readback error X. Reload and compare.',
+      'Readback error Y. Reload and compare.',
+    ]) {
+      act(() => hook.result.current.dismissExternalChange());
+      mock.value.reloadWatchedProject.mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'io-failure', message, retryable: false },
+      });
+      await act(async () =>
+        expect(
+          await hook.result.current.acceptMutationSnapshot({
+            ...source,
+            warnings: [COMMITTED_WRITE_WARNING, 'Additional Restore warning.'],
+          }),
+        ).toBe(false),
+      );
+    }
+    const message = hook.result.current.externalChange!.message;
+    expect(message.split(COMMITTED_WRITE_WARNING)).toHaveLength(2);
+    expect(message.split('Additional Restore warning.')).toHaveLength(2);
+    expect(message).toContain('Readback error X.');
+    expect(message).toContain('Readback error Y.');
+    act(() =>
+      mock.emit({
+        watchId: 'watch',
+        projectPath: source.projectPath,
+        kind: 'external-change',
+        projectRevision: 'foreign',
+        changedPaths: ['project.json'],
+      }),
+    );
+    expect(hook.result.current.externalChange!.message.split(COMMITTED_WRITE_WARNING)).toHaveLength(2);
+    expect(hook.result.current.externalChange?.message).toContain('Readback error X.');
+    expect(hook.result.current.externalChange?.message).toContain('Readback error Y.');
+    hook.unmount();
+  });
+
   it.each([false, true])(
     'recovers metadata after unmount without accepting a changed CAS baseline (%s)',
     async (externalEdit) => {

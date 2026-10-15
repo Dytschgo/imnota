@@ -342,6 +342,14 @@ export function useProjectPersistence({
   const inFlight = useRef(new Map<string, Promise<boolean>>());
   const accessCounter = useRef(0);
   const snapshotRef = useRef<ProjectSnapshot | null>(snapshot);
+  // Path and caller-owned session generation identify an open workspace, even
+  // when the same path is reopened while an older readback is still pending.
+  const projectSession = useRef({ projectPath: snapshot?.projectPath, generation: sessionGeneration });
+  if (
+    projectSession.current.projectPath !== snapshot?.projectPath ||
+    projectSession.current.generation !== sessionGeneration
+  )
+    projectSession.current = { projectPath: snapshot?.projectPath, generation: sessionGeneration };
   const lastPropSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   const lastSavedSnapshot = useRef<ProjectSnapshot | null>(snapshot);
   if (snapshot !== lastPropSnapshot.current) {
@@ -820,6 +828,7 @@ export function useProjectPersistence({
       })
       .catch((reason) => {
         resolveReady(false);
+        if (cancelled) return;
         publishExternalChange({
           kind: 'watch-error',
           message: workflowMessage(reason, 'External project changes cannot be monitored right now.'),
@@ -1058,10 +1067,13 @@ export function useProjectPersistence({
   const reloadExternal = useCallback(
     async (options?: { discardLocalChanges?: boolean }) => {
       if (!watchId.current) return false;
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session;
       const discardLocalChanges = options?.discardLocalChanges === true;
       if (discardLocalChanges) {
         if (metadataSave.current) await metadataSave.current;
         await Promise.allSettled([...inFlight.current.values()]);
+        if (!isCurrent()) return false;
         const projectPath = snapshotRef.current?.projectPath;
         if (projectPath) {
           for (const [key, retained] of drafts.current) {
@@ -1079,13 +1091,16 @@ export function useProjectPersistence({
         metadataDirty.current ||
         hasDirtyDrafts(snapshotRef.current?.projectPath)
       ) {
+        if (!isCurrent()) return false;
         setError('Reload was cancelled so your unsaved project details stay open. Save or undo them first.');
         return false;
       }
+      if (!isCurrent()) return false;
       try {
         const latest = workflowValue(
           await getRendererBridge().reloadWatchedProject({ watchId: watchId.current }),
         );
+        if (!isCurrent()) return false;
         const reloadedProjectPath = latest.snapshot.projectPath;
         for (const [key, retained] of drafts.current) {
           if (
@@ -1102,6 +1117,7 @@ export function useProjectPersistence({
         publishExternalChange(null);
         return true;
       } catch (reason) {
+        if (!isCurrent()) return false;
         setError(workflowMessage(reason, 'The project could not be reloaded.'));
         return false;
       }
@@ -1113,8 +1129,14 @@ export function useProjectPersistence({
     async (
       authoritativeSnapshot: ProjectSnapshot,
       nativeMutationToken?: number,
-      isCurrent: () => boolean = () => true,
+      isRequestCurrent: () => boolean = () => true,
     ): Promise<boolean> => {
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session && isRequestCurrent();
+      const cancelAdoption = async (): Promise<false> => {
+        await finishNativeMutation(nativeMutationToken, false);
+        return false;
+      };
       if (
         nativeMutationTokens.current.size &&
         (nativeMutationToken === undefined || !nativeMutationTokens.current.has(nativeMutationToken))
@@ -1123,14 +1145,15 @@ export function useProjectPersistence({
         return false;
       }
       if (!(await flush())) {
-        await finishNativeMutation(nativeMutationToken, false);
-        return false;
+        return cancelAdoption();
       }
+      if (!isCurrent()) return cancelAdoption();
 
       const sameProject = snapshotRef.current?.projectPath === authoritativeSnapshot.projectPath;
       if (!sameProject && !(await finishNativeMutation(nativeMutationToken, true))) return false;
       if (nativeMutationToken === undefined && metadataDirty.current && !(await flushProjectMetadata()))
         return false;
+      if (!isCurrent()) return cancelAdoption();
       if (!sameProject && (pendingMetadata.current || metadataInFlight.current || hasDirtyDrafts())) {
         setError('The reopened project was not adopted because newer local edits are still waiting to save.');
         return false;
@@ -1142,6 +1165,7 @@ export function useProjectPersistence({
       // now be stale, so same-project adoption always starts from a fresh disk snapshot.
       if (sameProject) {
         const ready = await watchReady.current;
+        if (!isCurrent()) return cancelAdoption();
         const id = watchId.current;
         if (!ready || !id) {
           await finishNativeMutation(nativeMutationToken, false);
@@ -1168,8 +1192,7 @@ export function useProjectPersistence({
       // Navigation may have changed during flush, watch setup, or reload. Never publish
       // that older snapshot (or clear its drafts) over the later destination.
       if (!isCurrent()) {
-        await finishNativeMutation(nativeMutationToken, false);
-        return false;
+        return cancelAdoption();
       }
       if (sameProject) {
         for (const [key, retained] of drafts.current) {
@@ -1254,9 +1277,16 @@ export function useProjectPersistence({
       transition,
       restoredRevision,
     ) {
+      const session = projectSession.current;
+      const isCurrent = () => projectSession.current === session;
+      const cancelAdoption = async (): Promise<false> => {
+        await finishNativeMutation(nativeMutationToken, false);
+        return false;
+      };
       const mutatesCurrentProject = snapshotRef.current?.projectPath === mutationSnapshot.projectPath;
       if (!mutatesCurrentProject) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         snapshotRef.current = mutationSnapshot;
         lastSavedSnapshot.current = mutationSnapshot;
         callbacks.current.onSnapshot(mutationSnapshot, selectScreenshotId);
@@ -1272,24 +1302,35 @@ export function useProjectPersistence({
       if (recovering.current) acceptRecoveryTransition(transition);
       if (!(await flush())) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
+        if (mutationSnapshot.warnings?.length) {
+          const message =
+            'Restore completed, but your newer screenshot edits could not be saved. Your open edits were preserved; resolve the save failure, then reload and compare before continuing.';
+          publishExternalChange({ kind: 'watch-error', message }, [...mutationSnapshot.warnings, message]);
+        }
         return false;
       }
+      if (!isCurrent()) return cancelAdoption();
       const ready = await watchReady.current;
+      if (!isCurrent()) return cancelAdoption();
       const id = watchId.current;
       if (!ready || !id) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         publishAcceptedRevision(null);
-        publishExternalChange({
-          kind: 'watch-error',
-          message:
-            'The project changed, but safe change monitoring is not ready. Your open edits were preserved; reconnect the workspace and reload before continuing.',
-        });
+        const message =
+          'The project changed, but safe change monitoring is not ready. Your open edits were preserved; reconnect the workspace and reload before continuing.';
+        publishExternalChange(
+          { kind: 'watch-error', message },
+          mutationSnapshot.warnings?.length ? [...mutationSnapshot.warnings, message] : [],
+        );
         return false;
       }
       try {
         // Always reload after a native mutation. Its response can be older than edits saved while the
         // native request was in flight, whereas the watcher returns the latest authoritative snapshot.
         const latest = workflowValue(await getRendererBridge().reloadWatchedProject({ watchId: id }));
+        if (!isCurrent()) return cancelAdoption();
         if (restoredRevision && latest.projectRevision !== restoredRevision)
           throw new Error(
             'The project changed again after Restore. Your edits remain open; reload, compare, and save again.',
@@ -1326,6 +1367,7 @@ export function useProjectPersistence({
         )
           publishExternalChange(null);
         if (!(await finishNativeMutation(nativeMutationToken, true))) return false;
+        if (!isCurrent()) return false;
         if (
           selectScreenshotId &&
           [
@@ -1337,17 +1379,15 @@ export function useProjectPersistence({
         return acceptedRevision.current !== null && !pendingExternalChange.current;
       } catch (reason) {
         await finishNativeMutation(nativeMutationToken, false);
+        if (!isCurrent()) return false;
         publishAcceptedRevision(null);
-        const message = [
-          ...(mutationSnapshot.warnings ?? []),
-          workflowMessage(
-            reason,
-            'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
-          ),
-        ].join(' ');
+        const message = workflowMessage(
+          reason,
+          'The project changed, but its latest safe version could not be reloaded. Your open edits were preserved; reconnect the workspace before continuing.',
+        );
         publishExternalChange(
           { kind: 'watch-error', message },
-          mutationSnapshot.warnings?.length ? [message] : [],
+          mutationSnapshot.warnings?.length ? [...mutationSnapshot.warnings, message] : [],
         );
         return false;
       }
