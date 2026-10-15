@@ -1,11 +1,28 @@
 // @vitest-environment node
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { withCreatedFileCleanup } from './created-file-cleanup.js';
 import { atomicWrite, CommittedWriteError } from './files.js';
 
+// Windows does not export these POSIX flags. Supply test-only values so the
+// injected POSIX-open branch is still checked on Windows without native I/O.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    constants: {
+      ...actual.constants,
+      O_NOFOLLOW: actual.constants.O_NOFOLLOW ?? 0x20000,
+      O_NONBLOCK: actual.constants.O_NONBLOCK ?? 0x800,
+    },
+  };
+});
+
+const platform = process.platform;
 let directory: string;
 const originalError = new Error('Injected metadata save failure');
 beforeEach(async () => {
@@ -13,8 +30,64 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  Object.defineProperty(process, 'platform', { value: platform });
   await fs.rm(directory, { recursive: true, force: true });
 });
+
+it.each(['linux', 'win32'])(
+  'preserves a non-regular opened descriptor without reading it (%s flags)',
+  async (system) => {
+    const target = path.join(directory, 'created.png');
+    const read = vi.fn();
+    const close = vi.fn(async () => undefined);
+    let open: ReturnType<typeof vi.spyOn> | undefined;
+    await expect(
+      withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+        await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+        const stat = await fs.lstat(target, { bigint: true });
+        Object.defineProperty(process, 'platform', { value: system });
+        open = vi.spyOn(fs, 'open').mockResolvedValue({
+          stat: vi.fn(async () => Object.assign(stat, { isFile: () => false })),
+          read,
+          close,
+        } as unknown as Awaited<ReturnType<typeof fs.open>>);
+        throw originalError;
+      }),
+    ).rejects.toBe(originalError);
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      target,
+      fsConstants.O_RDONLY | (system === 'win32' ? 0 : fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK),
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(await fs.readFile(target, 'utf8')).toBe('OURS');
+  },
+);
+
+it.skipIf(platform === 'win32')(
+  'preserves a FIFO swapped in just before cleanup open (requires POSIX mkfifo; unavailable on Windows)',
+  async () => {
+    const target = path.join(directory, 'created.png');
+    const open = fs.open.bind(fs);
+    let openedFlags: number | undefined;
+    await expect(
+      withCreatedFileCleanup(path.join(directory, 'project.json'), async (create) => {
+        await create(target, (capture) => atomicWrite(target, 'OURS', capture));
+        vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+          await fs.unlink(target);
+          execFileSync('mkfifo', [target]);
+          openedFlags = Number(args[1]);
+          // Fail a regression without stranding a worker in a blocking FIFO open.
+          if (!(openedFlags & fsConstants.O_NONBLOCK)) throw new Error('Blocking FIFO open refused');
+          return open(...args);
+        });
+        throw originalError;
+      }),
+    ).rejects.toBe(originalError);
+    expect(openedFlags).toBe(fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    expect((await fs.lstat(target)).isFIFO()).toBe(true);
+  },
+);
 
 it.each(['before capture', 'after capture'])(
   'preserves a same-size edit with restored mtime %s',

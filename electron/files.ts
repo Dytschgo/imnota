@@ -206,14 +206,6 @@ async function writeFileAtomically(
   content: string | Uint8Array,
   captureIdentity: boolean,
 ): Promise<WrittenFileEvidence | undefined> {
-  // Snapshot caller-owned bytes so mutation during asynchronous I/O cannot make
-  // the hash describe different bytes from the write. Noncapturing writes are unchanged.
-  const bytes = captureIdentity
-    ? typeof content === 'string'
-      ? Buffer.from(content, 'utf8')
-      : Buffer.from(content)
-    : content;
-  const sha256 = captureIdentity ? createHash('sha256').update(bytes).digest('hex') : undefined;
   await assertNoLinks(filePath);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
@@ -223,7 +215,29 @@ async function writeFileAtomically(
     // shortly after the rename can leave an empty or truncated file under the final name.
     const handle = await fs.open(temporary, 'wx');
     try {
-      await handle.writeFile(bytes);
+      let sha256: string | undefined;
+      if (captureIdentity) {
+        const hash = createHash('sha256');
+        if (typeof content === 'string') {
+          // Strings are immutable; both APIs encode the same UTF-8 bytes.
+          hash.update(content, 'utf8');
+          await handle.writeFile(content);
+        } else {
+          // Keep only one bounded private chunk. Copy and hash synchronously,
+          // then finish writing before reusing it. Caller mutation can affect
+          // future chunks, but never makes the hash differ from the written bytes.
+          const buffer = Buffer.alloc(Math.min(64 * 1024, content.byteLength));
+          for (let offset = 0; offset < content.byteLength; offset += buffer.length) {
+            const chunk = buffer.subarray(0, Math.min(buffer.length, content.byteLength - offset));
+            chunk.set(content.subarray(offset, offset + chunk.length));
+            hash.update(chunk);
+            await handle.writeFile(chunk);
+          }
+        }
+        sha256 = hash.digest('hex');
+      } else {
+        await handle.writeFile(content);
+      }
       await handle.sync();
       if (sha256) {
         const stat = await handle

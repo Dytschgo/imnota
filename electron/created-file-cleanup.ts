@@ -24,9 +24,12 @@ async function removeIfUnchanged(target: string, evidence: WrittenFileEvidence):
   // Reject a different identity/size before reading. Bound reads even if a file grows.
   if (!current || !sameFile(current, evidence) || evidence.size >= BigInt(Number.MAX_SAFE_INTEGER)) return;
   await assertNoLinks(target);
-  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
-  const handle = await fs.open(target, fsConstants.O_RDONLY | noFollow);
+  // POSIX O_NOFOLLOW also permits FIFOs: avoid blocking if one replaces the
+  // validated path before open. Windows has neither flag; keep its open unchanged.
+  const flags = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
+  const handle = await fs.open(target, fsConstants.O_RDONLY | flags);
   try {
+    // writtenFileIdentity requires a regular file before any content read.
     const before = writtenFileIdentity(await handle.stat({ bigint: true }));
     if (!before || !sameSample(before, current)) return;
     const hash = createHash('sha256');
