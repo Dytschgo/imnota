@@ -96,9 +96,11 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
       }
     }
     let rendererState: unknown;
+    let windowFocused: boolean | undefined;
     const diagnosticStarted = Date.now();
     const failedWindow = host.mainWindow();
     if (failedWindow && !failedWindow.isDestroyed()) {
+      windowFocused = failedWindow.isFocused();
       rendererState = await boundedSmokeDiagnostic(() =>
         failedWindow.webContents.executeJavaScript(SMOKE_RENDERER_DIAGNOSTIC),
       );
@@ -114,6 +116,7 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
       error: failureMessage,
       rendererResponsiveness,
       rendererState,
+      windowFocused,
       diagnosticsHealth,
     };
     if (failureArtifactDirectory) {

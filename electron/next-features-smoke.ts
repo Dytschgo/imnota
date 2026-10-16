@@ -84,6 +84,8 @@ export async function exerciseNextFeatures(
   if (project.schemaVersion !== 4 || project.contentItems?.length !== 5)
     throw new Error('Bug report template did not create five ordered Markdown blocks.');
   driver.setWindow(await host.reopenWindow());
+  if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+  driver.browserWindow.focus();
   await driver.waitFor({ selector: '[data-testid="markdown-input"]' });
   const reopened = await driver.evaluate<string>(
     'document.querySelector("[data-testid=markdown-input]").value',

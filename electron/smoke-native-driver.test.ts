@@ -38,6 +38,7 @@ describe('native smoke driver', () => {
         document: {
           body: { innerText: 'Synthetic library' },
           activeElement: null,
+          hasFocus: () => false,
           querySelectorAll: () =>
             mode === 'missing'
               ? []
@@ -71,6 +72,7 @@ describe('native smoke driver', () => {
       expect(sample).toMatchObject({
         sampledAt: expect.any(String),
         eventLoopLagMs: 7,
+        documentHasFocus: false,
         wait: { locator: { selector: '.library' }, sampledAt: expect.any(String) },
       });
       expect(sample.wait.target).toEqual(

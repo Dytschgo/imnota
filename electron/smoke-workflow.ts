@@ -614,6 +614,8 @@ async function exerciseWhatsNew(
     await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   }
   driver.setWindow(await host.reopenWindow());
+  if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+  driver.browserWindow.focus();
   await driver.waitFor({ selector: '.workspace' });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   const acknowledgedVersion = await driver.evaluate<string | undefined>(`(async () => {
@@ -2829,6 +2831,8 @@ export async function runSmokeWorkflow(
     await importImages(driver, projectPath, sources, 3);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     await driver.click({ selector: '.shot-select', text: path.basename(sources[0].path) });
     await driver.waitFor({ selector: 'textarea[aria-label="Description"]' });
@@ -3095,6 +3099,8 @@ export async function runSmokeWorkflow(
   assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
+  if (!activeWindow.isVisible()) activeWindow.show();
+  activeWindow.focus();
   await driver.waitFor({ selector: '.konvajs-content' });
   const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
     artifactDirectory,
@@ -3122,6 +3128,8 @@ export async function runSmokeWorkflow(
   const deterministic = await installDeterministicExportAnnotations(driver, pixelFixture.projectPath, true);
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
+  if (!activeWindow.isVisible()) activeWindow.show();
+  activeWindow.focus();
   await driver.waitFor({ selector: '.konvajs-content' });
   const debuggerApi = driver.browserWindow.webContents.debugger;
   debuggerApi.attach('1.3');
@@ -3288,6 +3296,8 @@ export async function runSmokeWorkflow(
     if (mode === 'stress' && count === 20) {
       activeWindow = await host.reopenWindow();
       driver.setWindow(activeWindow);
+      if (!activeWindow.isVisible()) activeWindow.show();
+      activeWindow.focus();
       await driver.waitFor({ selector: '.konvajs-content' });
       const openedTitle = await driver.evaluate<string>(
         `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
@@ -3316,6 +3326,8 @@ export async function runSmokeWorkflow(
     await driver.evaluate(`window.imnota.loadProject(${JSON.stringify(stressProject)}).then(() => true)`);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     const openedTitle = await driver.evaluate<string>(
       `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
@@ -3347,6 +3359,8 @@ export async function runSmokeWorkflow(
     await installDenseTextAnnotations(driver, denseBenchmark.projectPath);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     const denseTitle = await driver.evaluate<string>(
       `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
