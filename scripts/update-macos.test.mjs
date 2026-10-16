@@ -107,9 +107,73 @@ test('ACL observation reads entries and propagates a nonzero ls exit', { skip: !
   const result = runBash(
     `
 /bin/ls() { printf '%s\\n' 'drwxrwxr-x+ 2 root admin 64 Oct 16 /Applications' ' 0: group:everyone deny delete' ' 1: user:other allow list,file_inherit'; }
-[[ "$(directory_acl_entries /Applications)" == $' 0: group:everyone deny delete\\n 1: user:other allow list,file_inherit' ]]
+[[ "$(directory_acl_entries /Applications)" == $'+\\n 0: group:everyone deny delete\\n 1: user:other allow list,file_inherit' ]]
 /bin/ls() { return 1; }
 if directory_acl_entries /Applications; then exit 1; fi
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+for (const [name, header, row, lsStatus, accepted] of [
+  ['ACL indicator without rows', 'drwxrwxr-x+', '', 0, false],
+  ['ACL indicator with rows', 'drwxrwxr-x+', ' 0: group:everyone deny delete', 0, false],
+  ['xattr indicator without rows', 'drwxrwxr-x@', '', 0, true],
+  ['ordinary header', 'drwxrwxr-x', '', 0, true],
+  ['failed ls with ordinary header', 'drwxrwxr-x', '', 1, false],
+]) {
+  test(`real ACL observer gates creation: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_header=$2 fixture_row=$3 fixture_status=$4
+/bin/ls() {
+  printf '%s 2 root admin 64 Oct 16 /Applications\\n' "$fixture_header"
+  if [[ -n "$fixture_row" ]]; then printf '%s\\n' "$fixture_row"; fi
+  return "$fixture_status"
+}
+# Supply parent metadata through the source-only seam, retaining the real observer.
+app_parent_status() {
+  local acl
+  acl="$(directory_acl_entries "$1")" || return 2
+  app_parent_policy "$1" 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+}
+/bin/mkdir() { printf unexpected-mkdir; return 1; }
+/usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
+${accepted ? 'validate_app_parent /Applications' : 'acquire_lock /Applications; /usr/bin/mktemp -d /Applications/.imnota-update.XXXXXX'}
+`,
+      [header, row, String(lsStatus)],
+      { realAcl: true },
+    );
+    assert.equal(result.status === 0, accepted, result.stderr);
+    assert.equal(result.stdout, '', 'No mkdir or mktemp calls are allowed');
+    if (!accepted) {
+      assert.match(result.stderr, lsStatus ? /ownership requirements/ : /extra access rules \(an ACL\)/);
+    }
+  });
+}
+
+test('ACL observation ignores plus signs in directory names', { skip: !bash }, () => {
+  const result = runBash(
+    `
+/bin/ls() { printf '%s\\n' 'drwx------@ 2 user staff 64 Oct 16 /tmp/private+directory'; }
+[[ -z "$(directory_acl_entries /tmp/private+directory)" ]]
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('private directory verification refuses an ACL indicator without rows', { skip: !bash }, () => {
+  const result = runBash(
+    `
+safe_physical_directory() { return 0; }
+/bin/chmod() { return 0; }
+directory_mode() { printf 700; }
+/bin/ls() { printf '%s\\n' 'drwx------+ 2 user staff 64 Oct 16 /tmp/private'; }
+if secure_private_directory /tmp/private; then exit 1; fi
 `,
     [],
     { realAcl: true },

@@ -262,7 +262,10 @@ directory_mode() {
 }
 
 directory_acl_entries() {
-  /bin/ls -led "$1" | /usr/bin/awk '/^[[:space:]]*[0-9]+:/ { print }'
+  /bin/ls -led "$1" | /usr/bin/awk '
+    NR == 1 && substr($1, 11, 1) == "+" { print "+" }
+    /^[[:space:]]*[0-9]+:/ { print }
+  '
 }
 
 secure_private_directory() {
@@ -760,8 +763,8 @@ swap_and_launch() {
 
   # Another local admin already controls /Applications and can race path operations.
   # ACL changes require ownership/root or delegated security rights. Refuse any
-  # observed ACL on /Applications. This ls-based observation cannot distinguish a
-  # silent ACL-read failure from no ACL; native API observers exist but are not used.
+  # observed ACL row or + mode indicator on /Applications. This ls-based observation
+  # cannot distinguish a silent ACL-read failure from no ACL; native API observers exist but are not used.
   # If that read silently fails while an inheritable ACL exists, new transaction
   # directories briefly inherit another principal's access before ACL stripping.
   # Emptiness checks and re-verification do not revoke retained descriptors, undo
