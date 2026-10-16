@@ -350,6 +350,7 @@ export const SMOKE_RENDERER_DIAGNOSTIC = `(async () => {
     wait: globalThis.__imnotaSmokeWaitDiagnostic?.(),
     text: document.body.innerText.slice(-12000),
     active: document.activeElement?.outerHTML.slice(0, 1000),
+    documentHasFocus: document.hasFocus(),
     pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry
   };
 })()`;
