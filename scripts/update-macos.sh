@@ -298,7 +298,7 @@ app_parent_policy() {
   done
   [[ "$uid" == 0 && "$group" == admin && "$admin" == 1 && "$mode" =~ ^[0-7]{3,4}$ ]] || return 2
   (( (8#$mode & 2) == 0 )) || return 2
-  [[ ! "$acl" =~ (^|[[:space:],])(file_inherit|directory_inherit)([[:space:],]|$) ]] || return 3
+  [[ -z "$acl" ]] || return 3
 }
 
 app_parent_status() {
@@ -322,7 +322,7 @@ validate_app_parent() {
   case "$status" in
     0) return 0 ;;
     1) die "The app folder is not writable and searchable by you. Move Imnota to a writable folder you own, such as ~/Applications, then try again." ;;
-    3) die "The /Applications folder has inheritable access permissions. Move Imnota to ~/Applications, or ask an administrator to review that folder's ACL before updating." ;;
+    3) die "The /Applications folder has extra access rules (an ACL). Move Imnota to ~/Applications, or install the update manually." ;;
     *) die "The app folder does not meet the ownership requirements: it must be owned by you or be the standard /Applications folder available to an admin user. Move Imnota to ~/Applications, or ask an administrator to restore the standard /Applications ownership and permissions, then try again." ;;
   esac
 }
@@ -759,12 +759,18 @@ swap_and_launch() {
   [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
   # Another local admin already controls /Applications and can race path operations.
-  # Setting inheritable ACLs on root:admin /Applications requires admin rights,
-  # inside that trust boundary. Its ls ACL check is a best-effort misconfiguration
-  # guard: stock tools cannot distinguish a silent ACL-read failure from no ACL.
-  # Inherited ACLs can expose new directories until stripping completes, including
-  # under user-controlled parents. Strip ACLs, verify privacy and require new
-  # directories to be empty before use; preserve unexpected contents on refusal.
+  # ACL changes require ownership/root or delegated security rights. Refuse any
+  # observed ACL on /Applications. This ls-based observation cannot distinguish a
+  # silent ACL-read failure from no ACL; native API observers exist but are not used.
+  # If that read silently fails while an inheritable ACL exists, new transaction
+  # directories briefly inherit another principal's access before ACL stripping.
+  # Emptiness checks and re-verification do not revoke retained descriptors, undo
+  # observed names or transient entries, or clear xattrs. The owner accepts this
+  # unresolved residual risk for nightly builds; a private same-volume transaction
+  # root or a verified native ACL observer is required before stable.
+  # Inheritance can also expose new directories under user-controlled parents.
+  # Strip ACLs, recheck permissions and require new directories to be empty before
+  # use; preserve unexpected contents on refusal.
   # Recheck physical paths and the shared-parent app owner before renames. Checks
   # cannot make rename atomic with validation; never deliberately follow symlinks.
   validate_app_parent "${app_path%/*}"

@@ -117,10 +117,11 @@ if directory_acl_entries /Applications; then exit 1; fi
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('best-effort parent ACL guard accepts the silent ACL-read-failure shape', { skip: !bash }, () => {
+test('nightly owner-accepted residual risk: silent ACL-read failure is accepted', { skip: !bash }, () => {
   const result = runBash(
     `
 # macOS ls can succeed with only a header when its native ACL read fails.
+# Acceptance is an unresolved, owner-accepted nightly residual risk, not fail-closed behavior.
 /bin/ls() { printf '%s\\n' 'drwxrwxr-x 2 root admin 64 Oct 16 /Applications'; }
 acl="$(directory_acl_entries /Applications)"
 [[ -z "$acl" ]]
@@ -160,7 +161,8 @@ app_parent_policy /Applications 1 0 1 1 0 admin 775 "$2" "$(/usr/bin/id -G)" ''
 
 for (const [acl, accepted] of [
   ['', true],
-  [' 0: group:everyone deny delete', true],
+  [' 0: group:everyone deny delete', false],
+  [' 0: user:other allow writesecurity', false],
   [' 0: user:other allow list,file_inherit', false],
   [' 0: user:other allow list,directory_inherit,only_inherit', false],
 ]) {
@@ -174,7 +176,10 @@ validate_app_parent /Applications
       [acl],
     );
     assert.equal(result.status === 0, accepted, result.stderr);
-    if (!accepted) assert.match(result.stderr, /\/Applications folder has inheritable access permissions/);
+    if (!accepted) {
+      assert.match(result.stderr, /\/Applications folder has extra access rules \(an ACL\)/);
+      assert.match(result.stderr, /Move Imnota to ~\/Applications, or install the update manually/);
+    }
   });
 }
 
@@ -186,7 +191,7 @@ acquire_lock /Applications
 `);
   assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /inheritable access permissions/);
+  assert.match(result.stderr, /extra access rules \(an ACL\)/);
 });
 
 for (const failure of ['none', 'strip', 'remaining-acl', 'acl-observation', 'mode']) {
