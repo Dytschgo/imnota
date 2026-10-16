@@ -12,6 +12,10 @@ The roadmap is ordered by user value and implementation risk. The mixed-content 
 
 ## Now: validate the shipped foundation
 
+### Decision: macOS support
+
+Owner decision, 2026-10-15: Intel Macs are no longer tested or supported. Apple Silicon is the only macOS acceptance target. Mac builds remain universal (x86_64 + arm64) until a separate packaging decision; including Intel binaries does not imply Intel testing or support. Windows and Linux remain supported platforms.
+
 ### Approved scope: optional local agent access
 
 The September 21 PR review and nightly request includes the optional local MCP interface in PR #104. Its scope is read-only access to the selected local workspace and already prepared bundles, enabled explicitly in Settings. It adds no hosted model calls, account, upload, telemetry, capture command, or editor configuration changes. Browser-origin and non-loopback requests are rejected; workspace containment, links, recovery files and sharing secrets remain guarded. A busy port must leave access disabled with an actionable error. Users can turn access off to close the listener; existing workspace files and exports remain unchanged.
