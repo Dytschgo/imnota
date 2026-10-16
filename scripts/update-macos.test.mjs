@@ -154,6 +154,53 @@ ${accepted ? 'validate_app_parent /Applications' : 'acquire_lock /Applications; 
   });
 }
 
+for (const [name, listing] of [
+  ['empty output', ''],
+  ['malformed header', 'malformed header+\n'],
+  ['leading blank line', '\ndrwxrwxr-x+ 2 root admin 64 Oct 16 /Applications\n'],
+  ['non-directory mode', '-rwxr-xr-x 2 root admin 64 Oct 16 /Applications\n'],
+  ['unsupported mode suffix', 'drwxrwxr-x. 2 root admin 64 Oct 16 /Applications\n'],
+]) {
+  test(`invalid ACL listing refuses creation: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_listing=$2
+/bin/ls() { printf '%s' "$fixture_listing"; }
+app_parent_status() {
+  local acl
+  acl="$(directory_acl_entries "$1")" || return 2
+  app_parent_policy "$1" 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+}
+/bin/mkdir() { printf unexpected-mkdir; return 1; }
+/usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
+acquire_lock /Applications
+/usr/bin/mktemp -d /Applications/.imnota-update.XXXXXX
+`,
+      [listing],
+      { realAcl: true },
+    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '', 'No mkdir or mktemp calls are allowed');
+    assert.match(result.stderr, /ownership requirements/);
+  });
+
+  test(`private directory verification refuses invalid ACL listing: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_listing=$2
+safe_physical_directory() { return 0; }
+/bin/chmod() { return 0; }
+directory_mode() { printf 700; }
+/bin/ls() { printf '%s' "$fixture_listing"; }
+if secure_private_directory /tmp/private; then exit 1; fi
+`,
+      [listing],
+      { realAcl: true },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  });
+}
+
 test('ACL observation ignores plus signs in directory names', { skip: !bash }, () => {
   const result = runBash(
     `

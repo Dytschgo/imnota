@@ -263,8 +263,12 @@ directory_mode() {
 
 directory_acl_entries() {
   /bin/ls -led "$1" | /usr/bin/awk '
-    NR == 1 && substr($1, 11, 1) == "+" { print "+" }
+    NR == 1 {
+      if ($1 !~ /^d[rwxsStT-]{9}[@+]?$/) exit 1
+      if (substr($1, 11, 1) == "+") print "+"
+    }
     /^[[:space:]]*[0-9]+:/ { print }
+    END { if (NR == 0) exit 1 }
   '
 }
 
