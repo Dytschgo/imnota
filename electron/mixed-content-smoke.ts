@@ -359,6 +359,8 @@ export async function exerciseMixedContent(
       })),
     );
     driver.setWindow(await host.reopenWindow());
+    if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+    driver.browserWindow.focus();
     for (const id of ids) {
       await driver.waitFor({ selector: `[data-testid="item-delete-${id}"]` });
       await driver.click({ selector: `[data-testid="item-delete-${id}"]` });
@@ -406,6 +408,8 @@ export async function exerciseMixedContent(
       if (!(await fs.readFile(path.join(projectPath, relative))).equals(bytes))
         throw new Error(`Recently deleted changed restored bytes: ${relative}`);
     driver.setWindow(await host.reopenWindow());
+    if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+    driver.browserWindow.focus();
     const reopened = await host.readProject(projectPath);
     const reopenedIds = [...reopened.screenshots, ...(reopened.contentItems ?? [])].map((item) => item.id);
     if (ids.some((id) => !reopenedIds.includes(id)))
