@@ -251,6 +251,80 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
 });
 
+test('keeps markdown-it 14.3.1 recipient HTML and sanitizes rendered links', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const cases = [
+    {
+      name: 'bare domain and email',
+      markdown: 'Visit example.com and contact hello@example.com.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a> and contact <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a>.</p>\n',
+    },
+    {
+      name: 'explicit URL and punctuation',
+      markdown: 'Visit example.com, then https://example.com/path. Also example.com、next.',
+      html: '<p>Visit <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>, then <a href="https://example.com/path" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path</a>. Also <a href="http://example.com" rel="nofollow noreferrer noopener" target="_blank">example.com</a>、next.</p>\n',
+    },
+    {
+      name: 'URL authentication',
+      markdown: 'Open http://user:pass@example.com/path.',
+      html: '<p>Open <a href="http://user:pass@example.com/path" rel="nofollow noreferrer noopener" target="_blank">http://user:pass@example.com/path</a>.</p>\n',
+    },
+    {
+      name: 'unsafe schemes',
+      markdown: '[script](javascript:alert(1)) [data](data:text/html,hello) [safe](https://example.com)',
+      html: '<p>[script](javascript:alert(1)) [data](data:text/html,hello) <a href="https://example.com" rel="nofollow noreferrer noopener" target="_blank">safe</a></p>\n',
+    },
+    {
+      name: 'raw HTML',
+      markdown: '<script>alert(1)</script> <img src=x onerror=alert(2)>',
+      html: '<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(2)&gt;</p>\n',
+    },
+    {
+      name: 'autolinks',
+      markdown:
+        '<https://example.com/path?q=1> <hello@example.com> <javascript:alert(1)> <data:text/html,hello>',
+      html: '<p><a href="https://example.com/path?q=1" rel="nofollow noreferrer noopener" target="_blank">https://example.com/path?q=1</a> <a href="mailto:hello@example.com" rel="nofollow noreferrer noopener" target="_blank">hello@example.com</a> &lt;javascript:alert(1)&gt; &lt;data:text/html,hello&gt;</p>\n',
+    },
+    {
+      name: 'post-render scheme allowlist',
+      markdown: '[file](ftp://example.com/path)',
+      html: '<p><a rel="nofollow noreferrer noopener" target="_blank">file</a></p>\n',
+    },
+  ];
+
+  for (const { name, markdown, html } of cases) {
+    const created = await share(instance, { markdown, images: [], includeArchive: false });
+    assert.equal(created.status, 201, `${name}: ${created.text}`);
+    const publicToken = created.body.url.split('/').at(-1);
+    const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+    const rendered = page.text.match(
+      /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
+    )?.[1];
+    assert.equal(rendered, html, name);
+  }
+});
+
+test('renders IPv6 links with markdown-it 15 bracket normalization', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const created = await share(instance, {
+    markdown: '<http://[::1]/path> and http://[::1]/path',
+    images: [],
+    includeArchive: false,
+  });
+  assert.equal(created.status, 201, created.text);
+  const publicToken = created.body.url.split('/').at(-1);
+  const page = await instance.api.get(`/s/${publicToken}`).expect(200);
+  const rendered = page.text.match(
+    /<section class="legacy-prompt">[\s\S]*?<article tabindex="0">([\s\S]*?)<\/article>/,
+  )?.[1];
+  assert.equal(
+    rendered,
+    '<p><a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a> and <a href="http://[::1]/path" rel="nofollow noreferrer noopener" target="_blank">http://[::1]/path</a></p>\n',
+  );
+});
+
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {
   const instance = await fixture();
   t.after(() => instance.destroy());
