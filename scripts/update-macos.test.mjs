@@ -32,15 +32,609 @@ function bashPath(value) {
   return value.replaceAll('\\', '/');
 }
 
-function runBash(body, args = []) {
+function runBash(body, args = [], { realAcl = false } = {}) {
   assert.ok(bash, 'Bash is required for this test');
   const portableStat =
     process.platform === 'darwin' ? '' : 'stat_identity() { /usr/bin/stat -c "%d:%i" "$1"; }';
+  // Git Bash cannot model POSIX mode bits; native macOS retains the real check.
+  const portableMode =
+    process.platform === 'darwin'
+      ? ''
+      : process.platform === 'win32'
+        ? 'directory_mode() { printf 700; }'
+        : 'directory_mode() { /usr/bin/stat -c "%a" "$1"; }';
+  // Other hosts cannot model macOS ACLs. Native tests keep ls/chmod unchanged.
+  const portableAcl =
+    process.platform === 'darwin' || realAcl
+      ? ''
+      : 'directory_acl_entries() { :; }; /bin/chmod() { if [[ "$1" == -N ]]; then return 0; fi; command /bin/chmod "$@"; }';
   return spawnSync(
     bash,
-    ['-c', `source "$1"\n${portableStat}\n${body}`, 'test', bashPath(scriptPath), ...args],
+    [
+      '-c',
+      `source "$1"\n${portableStat}\n${portableMode}\n${portableAcl}\n${body}`,
+      'test',
+      bashPath(scriptPath),
+      ...args,
+    ],
     {
       encoding: 'utf8',
+    },
+  );
+}
+
+// Exercise the production policy with synthetic observations, without adding a
+// production flag, environment override or alternate Applications path.
+for (const [name, facts, status] of [
+  ['user-owned parent', ['/Users/test/Applications', 1, 1, 1, 1, 501, 'staff', '755', 0], 0],
+  ['standard system Applications', ['/Applications', 1, 0, 1, 1, 0, 'admin', '775', 1], 0],
+  ['system Applications without admin membership', ['/Applications', 1, 0, 1, 1, 0, 'admin', '775', 0], 2],
+  ['world-writable system Applications', ['/Applications', 1, 0, 1, 1, 0, 'admin', '777', 1], 2],
+  ['another group-writable folder', ['/Shared/Apps', 1, 0, 1, 1, 0, 'admin', '775', 1], 2],
+  ['non-writable system Applications', ['/Applications', 1, 0, 0, 1, 0, 'admin', '755', 1], 1],
+  ['non-searchable parent', ['/Applications', 1, 0, 1, 0, 0, 'admin', '775', 1], 1],
+  ['symlinked system Applications', ['/Applications', 0, 0, 1, 1, 0, 'admin', '775', 1], 2],
+  ['system Applications with another owner', ['/Applications', 1, 0, 1, 1, 502, 'admin', '775', 1], 2],
+  [
+    'user-owned but nonstandard system Applications',
+    ['/Applications', 1, 1, 1, 1, 501, 'admin', '775', 1],
+    2,
+  ],
+  ['system Applications with another group', ['/Applications', 1, 0, 1, 1, 0, 'staff', '775', 1], 2],
+  ['system Applications with unreadable mode', ['/Applications', 1, 0, 1, 1, 0, 'admin', '', 1], 2],
+]) {
+  test(`app parent policy: ${name}`, { skip: !bash }, () => {
+    const observations = [...facts.slice(0, -1), 80, facts.at(-1) ? '20 80' : '20', ''];
+    const result = runBash('app_parent_policy "${@:2}"', observations.map(String));
+    assert.equal(result.status, status, result.stderr);
+    if (status !== 0) {
+      const message = runBash(
+        'app_parent_status() { app_parent_policy "${facts[@]}"; }; facts=("${@:2}"); validate_app_parent "${facts[0]}"',
+        observations.map(String),
+      );
+      assert.notEqual(message.status, 0);
+      assert.match(
+        message.stderr,
+        status === 1
+          ? /not writable and searchable by you/
+          : /ownership requirements.*standard \/Applications/,
+      );
+    }
+  });
+}
+
+test('ACL observation reads entries and propagates a nonzero ls exit', { skip: !bash }, () => {
+  const result = runBash(
+    `
+/bin/ls() { printf '%s\\n' 'drwxrwxr-x+ 2 root admin 64 Oct 16 /Applications' ' 0: group:everyone deny delete' ' 1: user:other allow list,file_inherit'; }
+[[ "$(directory_acl_entries /Applications)" == $'+\\n 0: group:everyone deny delete\\n 1: user:other allow list,file_inherit' ]]
+/bin/ls() { return 1; }
+if directory_acl_entries /Applications; then exit 1; fi
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+for (const [name, header, row, lsStatus, accepted] of [
+  ['ACL indicator without rows', 'drwxrwxr-x+', '', 0, false],
+  ['ACL indicator with rows', 'drwxrwxr-x+', ' 0: group:everyone deny delete', 0, false],
+  ['xattr indicator without rows', 'drwxrwxr-x@', '', 0, true],
+  ['ordinary header', 'drwxrwxr-x', '', 0, true],
+  ['failed ls with ordinary header', 'drwxrwxr-x', '', 1, false],
+]) {
+  test(`real ACL observer gates creation: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_header=$2 fixture_row=$3 fixture_status=$4
+/bin/ls() {
+  printf '%s 2 root admin 64 Oct 16 /Applications\\n' "$fixture_header"
+  if [[ -n "$fixture_row" ]]; then printf '%s\\n' "$fixture_row"; fi
+  return "$fixture_status"
+}
+# Supply parent metadata through the source-only seam, retaining the real observer.
+app_parent_status() {
+  local acl
+  acl="$(directory_acl_entries "$1")" || return 2
+  app_parent_policy "$1" 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+}
+/bin/mkdir() { printf unexpected-mkdir; return 1; }
+/usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
+${accepted ? 'validate_app_parent /Applications' : 'acquire_lock /Applications; /usr/bin/mktemp -d /Applications/.imnota-update.XXXXXX'}
+`,
+      [header, row, String(lsStatus)],
+      { realAcl: true },
+    );
+    assert.equal(result.status === 0, accepted, result.stderr);
+    assert.equal(result.stdout, '', 'No mkdir or mktemp calls are allowed');
+    if (!accepted) {
+      assert.match(result.stderr, lsStatus ? /ownership requirements/ : /extra access rules \(an ACL\)/);
+    }
+  });
+}
+
+for (const [name, listing] of [
+  ['empty output', ''],
+  ['malformed header', 'malformed header+\n'],
+  ['leading blank line', '\ndrwxrwxr-x+ 2 root admin 64 Oct 16 /Applications\n'],
+  ['non-directory mode', '-rwxr-xr-x 2 root admin 64 Oct 16 /Applications\n'],
+  ['unsupported mode suffix', 'drwxrwxr-x. 2 root admin 64 Oct 16 /Applications\n'],
+]) {
+  test(`invalid ACL listing refuses creation: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_listing=$2
+/bin/ls() { printf '%s' "$fixture_listing"; }
+app_parent_status() {
+  local acl
+  acl="$(directory_acl_entries "$1")" || return 2
+  app_parent_policy "$1" 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+}
+/bin/mkdir() { printf unexpected-mkdir; return 1; }
+/usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
+acquire_lock /Applications
+/usr/bin/mktemp -d /Applications/.imnota-update.XXXXXX
+`,
+      [listing],
+      { realAcl: true },
+    );
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '', 'No mkdir or mktemp calls are allowed');
+    assert.match(result.stderr, /ownership requirements/);
+  });
+
+  test(`private directory verification refuses invalid ACL listing: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_listing=$2
+safe_physical_directory() { return 0; }
+/bin/chmod() { return 0; }
+directory_mode() { printf 700; }
+/bin/ls() { printf '%s' "$fixture_listing"; }
+if secure_private_directory /tmp/private; then exit 1; fi
+`,
+      [listing],
+      { realAcl: true },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  });
+}
+
+test('ACL observation ignores plus signs in directory names', { skip: !bash }, () => {
+  const result = runBash(
+    `
+/bin/ls() { printf '%s\\n' 'drwx------@ 2 user staff 64 Oct 16 /tmp/private+directory'; }
+[[ -z "$(directory_acl_entries /tmp/private+directory)" ]]
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('private directory verification refuses an ACL indicator without rows', { skip: !bash }, () => {
+  const result = runBash(
+    `
+safe_physical_directory() { return 0; }
+/bin/chmod() { return 0; }
+directory_mode() { printf 700; }
+/bin/ls() { printf '%s\\n' 'drwx------+ 2 user staff 64 Oct 16 /tmp/private'; }
+if secure_private_directory /tmp/private; then exit 1; fi
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('nightly owner-accepted residual risk: silent ACL-read failure is accepted', { skip: !bash }, () => {
+  const result = runBash(
+    `
+# macOS ls can succeed with only a header when its native ACL read fails.
+# Acceptance is an unresolved, owner-accepted nightly residual risk, not fail-closed behavior.
+/bin/ls() { printf '%s\\n' 'drwxrwxr-x 2 root admin 64 Oct 16 /Applications'; }
+acl="$(directory_acl_entries /Applications)"
+[[ -z "$acl" ]]
+app_parent_policy /Applications 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+`,
+    [],
+    { realAcl: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+for (const [name, gid, gids, accepted] of [
+  ['owning admin GID', '812', '20 812 999', true],
+  ['embedded GID', '80', '20 180 801', false],
+  ['embedded admin word in a group name', '80', '20 501', false],
+  ['missing numeric GID', '', '20 80', false],
+]) {
+  test(`admin membership uses numeric tokens: ${name}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+fixture_gids=$3
+/usr/bin/id() {
+  case "$1" in
+    -G) printf '%s' "$fixture_gids" ;;
+    -Gn) printf 'staff Mac admin users' ;;
+    *) return 1 ;;
+  esac
+}
+# Ambiguous display names cannot establish membership in the owning GID.
+app_parent_policy /Applications 1 0 1 1 0 admin 775 "$2" "$(/usr/bin/id -G)" ''
+`,
+      [gid, gids],
+    );
+    assert.equal(result.status === 0, accepted, result.stderr);
+  });
+}
+
+for (const [acl, accepted] of [
+  ['', true],
+  [' 0: group:everyone deny delete', false],
+  [' 0: user:other allow writesecurity', false],
+  [' 0: user:other allow list,file_inherit', false],
+  [' 0: user:other allow list,directory_inherit,only_inherit', false],
+]) {
+  test(`system Applications ACL policy: ${acl || 'no entries'}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+acl=$2
+app_parent_status() { app_parent_policy /Applications 1 0 1 1 0 admin 775 80 '20 80' "$acl"; }
+validate_app_parent /Applications
+`,
+      [acl],
+    );
+    assert.equal(result.status === 0, accepted, result.stderr);
+    if (!accepted) {
+      assert.match(result.stderr, /\/Applications folder has extra access rules \(an ACL\)/);
+      assert.match(result.stderr, /Move Imnota to ~\/Applications, or install the update manually/);
+    }
+  });
+}
+
+test('inheritable system ACL refusal precedes every transaction directory creation', { skip: !bash }, () => {
+  const result = runBash(`
+app_parent_status() { app_parent_policy /Applications 1 0 1 1 0 admin 775 80 '20 80' '0: user:other allow file_inherit'; }
+/bin/mkdir() { printf unexpected-creation; return 1; }
+acquire_lock /Applications
+`);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /extra access rules \(an ACL\)/);
+});
+
+for (const failure of ['none', 'strip', 'remaining-acl', 'acl-observation', 'mode']) {
+  test(`private directory strips and verifies ACLs: ${failure}`, { skip: !bash }, () => {
+    const result = runBash(
+      `
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+failure=$2
+/bin/chmod() {
+  printf '%s\\n' "$1" >> "$root/calls"
+  [[ "$1" != -N || "$failure" != strip ]] || return 1
+}
+directory_mode() { if [[ "$failure" == mode ]]; then printf 755; else printf 700; fi; }
+directory_acl_entries() {
+  [[ "$failure" != acl-observation ]] || return 1
+  if [[ "$failure" == remaining-acl ]]; then printf ' 0: user:other allow list'; fi
+}
+mkdir "$root/private"
+status=0
+secure_private_directory "$root/private" || status=$?
+printf '%s|' "$status"
+cat "$root/calls"
+`,
+      [failure],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${failure === 'none' ? 0 : 1}|-N\n${failure === 'strip' ? '' : '700\n'}`);
+  });
+}
+
+test('foreign-owned apps keep user-parent validation, swap and rollback behaviour', { skip: !bash }, () => {
+  const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+mkdir "$root/Imnota.app"
+bundle_is_user_owned() { [[ "$1" != "$app_path" && "$1" != */.rollback-*.app ]] || [[ -f "$1/marker" && "$(cat "$1/marker")" == new ]]; }
+plist_value() { if [[ "$2" == CFBundleIdentifier ]]; then printf com.dytschgo.imnota; else printf 1.2.2; fi; }
+validate_app_path "$root/Imnota.app" 1.2.2
+assert_original_app_unchanged
+stage_dir="$root/stage"
+mkdir -p "$stage_dir/new.app"
+printf old > "$app_path/marker"
+printf new > "$stage_dir/new.app/marker"
+verify_signature() { return 1; }
+output=$( ( trap cleanup EXIT; swap_and_launch "$stage_dir/new.app" ) 2>&1 ) && exit 1
+[[ "$(cat "$app_path/marker")" == old ]]
+[[ "$output" == *'final signature check'* ]]
+`);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('foreign-owned system Applications app gets installer guidance', { skip: !bash }, () => {
+  const result = runBash(`
+bundle_is_user_owned() { return 1; }
+validate_existing_app_owner /Applications/Imnota.app /Applications
+`);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /belongs to another account.*Ask its installer.*~\/Applications/);
+});
+
+for (const shared of [false, true]) {
+  for (const managed of [false, true]) {
+    test(
+      `foreign-owned ${managed ? 'managed' : 'legacy'} backup is ${shared ? 'kept with warning in Applications' : 'attempted with failure warning in user folder'}`,
+      { skip: !bash },
+      () => {
+        const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'command /bin/rm -rf "$root"' EXIT
+parent=${shared ? '/Applications' : '"$root"'}
+backup_root="$parent/.imnota-backups.noindex"
+fixture_backup="${managed ? '$backup_root/Imnota.app' : '$parent/Imnota-backup-20260101-010101.app'}"
+# Observe foreign ownership and paths without writing to system Applications.
+app_parent_status() { return 0; }
+safe_physical_directory() { return 0; }
+bundle_is_direct_child() { [[ "$1" == "$fixture_backup" && "$2" == "${managed ? '$backup_root' : '$parent'}" ]]; }
+bundle_is_user_owned() { return 1; }
+plist_value() { printf com.dytschgo.imnota; }
+is_imnota_bundle() { [[ "$1" == "$fixture_backup" ]]; }
+/usr/bin/find() { printf '%s\\0' "$fixture_backup"; }
+/bin/rm() { printf attempted > "$root/removal"; return 1; }
+/bin/rmdir() { return 1; }
+${managed ? 'cleanup_rollback_backups' : 'cleanup_legacy_backups "$parent"'}
+[[ ${shared ? '! ' : ''}-e "$root/removal" ]]
+`);
+        assert.equal(result.status, 0, result.stderr);
+        assert.match(
+          result.stderr,
+          shared ? /Left an old.*belonging to another account/ : /Could not retire/,
+        );
+      },
+    );
+  }
+}
+
+const syntheticMainFixture = `
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+mkdir "$root/Imnota.app"
+require_macos() { :; }
+plist_value() { if [[ "$2" == CFBundleIdentifier ]]; then printf com.dytschgo.imnota; else printf 1.2.3; fi; }
+download_file() { printf archive > "$2"; }
+read_expected_checksum() { EXPECTED_CHECKSUM=test; }
+sha256_file() { printf test; }
+validate_archive_entries() { :; }
+validate_extracted_bundle() { :; }
+wait_for_app_to_quit() { :; }
+verify_signature() { :; }
+launch_app() { :; }
+wait_for_replacement() { :; }
+run_main() {
+  main v1.2.3 \\
+    https://github.com/Dytschgo/imnota/releases/download/v1.2.3/Imnota-1.2.3-universal-mac.zip \\
+    https://github.com/Dytschgo/imnota/releases/download/v1.2.3/SHA256SUMS.txt \\
+    "$root/Imnota.app" 1.2.3
+}
+`;
+
+for (const [directory, entry] of [
+  ['lock', 'pid'],
+  ['staging', '.unexpected'],
+  ['backup-root', 'unexpected'],
+]) {
+  test(
+    `main preserves an entry planted during ${directory} creation and aborts before use`,
+    { skip: !bash },
+    () => {
+      const result = runBash(
+        `${syntheticMainFixture}
+printf old > "$root/Imnota.app/marker"
+directory=$2
+entry=$3
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  case "$directory:$1" in
+    lock:*/.imnota-update.lock|staging:*/.imnota-update.*|backup-root:*/.imnota-backups.noindex)
+      # Model an entry created through an inherited ACL before it is stripped.
+      printf '%s' "$1" > "$root/planted-path"
+      printf planted > "$1/$entry"
+      ;;
+  esac
+  original_secure_private_directory "$1"
+}
+extract_archive() { mkdir "$2/Imnota.app"; printf new > "$2/Imnota.app/marker"; }
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+planted_path=$(cat "$root/planted-path")
+[[ "$output" == *'changed while it was being created'* && "$output" == *"Contents were preserved at: $planted_path"* ]]
+[[ "$(cat "$planted_path/$entry")" == planted ]]
+[[ "$(/usr/bin/find "$planted_path" -mindepth 1 -maxdepth 1 -print)" == "$planted_path/$entry" ]]
+[[ "$(cat "$root/Imnota.app/marker")" == old ]]
+`,
+        [directory, entry],
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    },
+  );
+}
+
+test('main preserves staging contents when the emptiness inspection fails', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then
+    printf '%s' "$1" > "$root/planted-path"
+    printf planted > "$1/.unexpected"
+  fi
+  original_secure_private_directory "$1"
+}
+/usr/bin/find() {
+  if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then return 1; fi
+  command /usr/bin/find "$@"
+}
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+planted_path=$(cat "$root/planted-path")
+[[ "$output" == *'could not be checked for unexpected contents'* && "$output" == *"Contents were preserved at: $planted_path"* ]]
+[[ "$(cat "$planted_path/.unexpected")" == planted ]]
+[[ "$(command /usr/bin/find "$planted_path" -mindepth 1 -maxdepth 1 -print)" == "$planted_path/.unexpected" ]]
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('main secures a pre-existing backup root without refusing its contents', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+mkdir "$root/.imnota-backups.noindex"
+printf retained > "$root/.imnota-backups.noindex/.unknown"
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  original_secure_private_directory "$1" || return $?
+  if [[ "$1" == */.imnota-backups.noindex ]]; then printf secured > "$root/backup-secured"; fi
+}
+extract_archive() { mkdir "$2/Imnota.app"; printf installed > "$2/Imnota.app/marker"; }
+( run_main )
+[[ "$(cat "$root/backup-secured")" == secured ]]
+[[ "$(cat "$root/.imnota-backups.noindex/.unknown")" == retained ]]
+[[ "$(cat "$root/Imnota.app/marker")" == installed ]]
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('main preserves caller umask and secures all three directories before use', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+umask 022
+directory_acl_entries() {
+  case "$1" in
+    */.imnota-update.lock) [[ ! -e "$1/pid" ]] || return 1; printf lock >> "$root/secured" ;;
+    */.imnota-update.*) [[ -z "$(ls -A "$1")" ]] || return 1; printf stage >> "$root/secured" ;;
+    */.imnota-backups.noindex) [[ -z "$(ls -A "$1")" ]] || return 1; printf backup >> "$root/secured" ;;
+    *) return 1 ;;
+  esac
+}
+extract_archive() {
+  [[ "$(umask)" == 0022 ]] || return 1
+  mkdir "$2/Imnota.app"
+  printf installed > "$2/Imnota.app/marker"
+}
+( run_main )
+[[ "$(cat "$root/secured")" == lockstagebackup ]]
+[[ "$(cat "$root/Imnota.app/marker")" == installed ]]
+[[ "$(umask)" == 0022 ]]
+`);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test(
+  'native inherited ACLs are stripped from lock, staging and managed rollback directories',
+  {
+    skip: process.platform !== 'darwin' && 'Requires real macOS ACL inheritance and chmod -N',
+  },
+  () => {
+    const result = runBash(`${syntheticMainFixture}
+/bin/chmod +a 'everyone allow list,add_file,search,add_subdirectory,file_inherit,directory_inherit' "$root"
+[[ "$(directory_acl_entries "$root")" == *file_inherit* ]]
+mkdir "$root/inheritance-probe"
+[[ "$(directory_acl_entries "$root/inheritance-probe")" == *inherited* ]]
+extract_archive() { mkdir "$2/Imnota.app"; }
+# Keep the real ACL operations; inspect all secured directories just before use.
+/bin/chmod() {
+  if [[ "$1" == -N ]]; then
+    basename "$2" >> "$root/stripped"
+  fi
+  command /bin/chmod "$@" || return $?
+  if [[ "$1" == 700 ]]; then
+    [[ -O "$2" && ! -L "$2" && "$(directory_mode "$2")" == 700 && -z "$(directory_acl_entries "$2")" ]] || return 1
+    basename "$2" >> "$root/secured"
+  fi
+}
+( run_main )
+[[ "$(wc -l < "$root/secured")" -eq 3 ]]
+[[ "$(wc -l < "$root/stripped")" -eq 3 ]]
+[[ -z "$(directory_acl_entries "$root/Imnota.app")" ]]
+`);
+    assert.equal(result.status, 0, result.stderr);
+  },
+);
+
+test(
+  'native extracted and installed modes match the base ditto path under caller umask',
+  {
+    skip: process.platform !== 'darwin' && 'Requires macOS ditto and native POSIX mode preservation',
+  },
+  () => {
+    const result = runBash(`${syntheticMainFixture}
+umask 022
+mkdir -p "$root/source/Imnota.app/Contents/MacOS" "$root/base-extracted"
+printf executable > "$root/source/Imnota.app/Contents/MacOS/Imnota"
+printf plist > "$root/source/Imnota.app/Contents/Info.plist"
+chmod 755 "$root/source/Imnota.app" "$root/source/Imnota.app/Contents" "$root/source/Imnota.app/Contents/MacOS" "$root/source/Imnota.app/Contents/MacOS/Imnota"
+chmod 644 "$root/source/Imnota.app/Contents/Info.plist"
+/usr/bin/ditto -c -k --keepParent "$root/source/Imnota.app" "$root/app.zip"
+# Base b30a2d5 used this ditto invocation and inherited the caller's mask.
+/usr/bin/ditto -x -k "$root/app.zip" "$root/base-extracted"
+download_file() { cp "$root/app.zip" "$2"; }
+compare_bundle_modes() {
+  local candidate=$1 relative
+  for relative in '' /Contents /Contents/MacOS /Contents/MacOS/Imnota /Contents/Info.plist; do
+    [[ "$(directory_mode "$candidate$relative")" == "$(directory_mode "$root/base-extracted/Imnota.app$relative")" ]] || return 1
+  done
+}
+validate_extracted_bundle() {
+  [[ "$(directory_mode "$1")" == "$(directory_mode "$root/base-extracted")" ]] && compare_bundle_modes "$1/Imnota.app"
+}
+( run_main )
+compare_bundle_modes "$root/Imnota.app"
+[[ "$(directory_mode "$root/Imnota.app")" == 755 ]]
+[[ "$(directory_mode "$root/Imnota.app/Contents/Info.plist")" == 644 ]]
+`);
+    assert.equal(result.status, 0, result.stderr);
+  },
+);
+
+for (const succeeds of [true, false]) {
+  test(
+    `system Applications policy permits transaction ${succeeds ? 'commit and backup retirement' : 'rollback'}`,
+    { skip: !bash },
+    () => {
+      const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+trap 'rm -rf "$root"' EXIT
+app_path="$root/Imnota.app"
+stage_dir="$root/.imnota-update.test"
+mkdir -p "$app_path" "$stage_dir/new.app" "$root/Imnota-backup-20260101-010101.app"
+printf old > "$app_path/marker"
+printf new > "$stage_dir/new.app/marker"
+# Model only the parent via policy facts; transaction paths still use real
+# directories and the strict ownership checks. This override is test-local.
+app_parent_status() { [[ "$1" == "$root" ]] && app_parent_policy /Applications 1 0 1 1 0 admin 775 80 '20 80' ''; }
+plist_value() { printf com.dytschgo.imnota; }
+verify_signature() { return ${succeeds ? 0 : 1}; }
+launch_app() { return 0; }
+wait_for_replacement() { return 0; }
+acquire_lock "$root"
+[[ -O "$lock_dir" && ! -L "$lock_dir" ]]
+set +e
+( trap cleanup EXIT; swap_and_launch "$stage_dir/new.app" )
+status=$?
+set -e
+[[ "$status" ${succeeds ? '-eq 0' : '-ne 0'} ]]
+[[ "$(cat "$app_path/marker")" == ${succeeds ? 'new' : 'old'} ]]
+[[ ! -e "$root/.imnota-backups.noindex" && ! -e "$stage_dir" && ! -e "$lock_dir" ]]
+[[ ${succeeds ? '! ' : ''}-d "$root/Imnota-backup-20260101-010101.app" ]]
+`);
+      assert.equal(result.status, 0, result.stderr);
     },
   );
 }

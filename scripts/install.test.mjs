@@ -861,11 +861,26 @@ test(
     const rollback = macBackup(parent, '.imnota-backups.noindex/.rollback-123.app');
     publishPortableMacBundle(directories);
     const updater = fileURLToPath(new URL('./update-macos.sh', import.meta.url));
+    // Match update-macos.test.mjs: retain native macOS mode/ACL checks, use GNU
+    // modes on Linux, and model mode bits on Git Bash (which cannot enforce them).
+    const privateDirectoryShims =
+      process.platform === 'darwin'
+        ? ''
+        : `
+directory_mode() { ${process.platform === 'win32' ? 'printf 700' : '/usr/bin/stat -c "%a" "$1"'}; }
+directory_acl_entries() { :; }
+/bin/chmod() { if [[ "$1" == -N ]]; then return 0; fi; command /bin/chmod "$@"; }
+`;
     const holder = spawn(
       bash,
       [
         '-c',
-        'source "$1"; trap cleanup EXIT; acquire_lock "$(cd "$2" && pwd -P)"; printf "locked\\n"; read -r release',
+        `source "$1"
+${privateDirectoryShims}
+trap cleanup EXIT
+acquire_lock "$(cd "$2" && pwd -P)"
+printf "locked\\n"
+read -r release`,
         'holder',
         slashes(updater),
         slashes(parent),
