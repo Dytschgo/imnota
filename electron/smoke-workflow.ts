@@ -1826,7 +1826,7 @@ async function exercisePreferencesAndChannel(
       selector: '.floating-update-popover > strong',
       text: 'No newer update · nightly',
     });
-    await driver.press('ArrowDown');
+    await driver.press('Down');
     await driver.waitFor({ selector: '.floating-update-popover:focus' });
     const refreshOnly = await driver.evaluate<boolean>(`(() => {
       const indicator = document.querySelector('[data-testid="update-indicator"]');
