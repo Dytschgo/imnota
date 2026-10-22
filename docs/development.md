@@ -34,6 +34,16 @@ corepack pnpm build
 
 `tsconfig.electron.json` type-checks the Electron sources together with their tests; `tsconfig.electron.build.json` extends it and excludes `electron/**/*.test.ts`, so `build`, `dev`, and the `package:*` scripts emit only application code into `dist-electron` and the packaged asar. Package scripts and `test` invoke `tsc`, `vite`, and `node --test` directly rather than a nested `corepack pnpm`, which avoided a cold corepack resolution on every hosted Windows job.
 
+### Packaged dependencies and contents
+
+Renderer libraries are build-time dependencies: Vite bundles their production code into `dist`, including lazy chunks, styles and local drawing fonts. They must remain installed for development and packaging; their original package trees do not belong in the shipped Node runtime. The compiled main/shared code still loads `electron-updater`, `jszip` and `zod` from production dependencies. Windows also loads its architecture-specific optional Koffi module. Keep new unbundled runtime imports in production dependencies.
+
+The renderer build emits `dist/THIRD-PARTY-NOTICES.txt` from imported packages' license/notice files, including nested font licenses. Missing license text fails the build. This preserves attribution when the source package trees are omitted. The application's own `LICENSE` is also packaged.
+
+Packaging omits dependency source maps and the unused JSZip/Pako browser distributions; application source maps remain available. Removed demos and development distributions belong to the redundant renderer package trees. No runtime feature, local font, artwork, locale, architecture or verification harness is removed.
+
+`scripts/after-pack.mjs` checks the actual ASAR before the existing macOS capture-helper/signing hook. It rejects redundant renderer trees and excluded material, checks Node/native runtime dependencies, and compares every built frontend file byte-for-byte with the archive. Existing packaged walkthroughs still establish behavior. Each invocation writes `release/package-contents-<output-folder>.json` with version, architecture, ASAR hash/bytes, dependency bytes and renderer inventory counts; Validate retains these alongside review installers. Other packaging workflows log the same report without adding diagnostics to published release assets. Compare like-for-like architectures/toolchains and actual installer bytes; uncompressed ASAR savings are not download savings.
+
 For documentation-only changes, run Prettier against the owned Markdown files. Do not rewrite unrelated files merely to satisfy broad formatting output.
 
 `format:check` checks the repository except the generated `pnpm-lock.yaml` and `share-service/package-lock.json` files, which are excluded in `.prettierignore`.
