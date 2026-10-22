@@ -53,12 +53,44 @@ test('verifies a real archive with lazy assets, local fonts and native runtime f
 
 for (const [label, mutate, message] of [
   ['a dropped lazy chunk', (files) => delete files['dist/assets/lazy.js'], /Missing built renderer asset/],
-  ['a changed font', (files) => { files['dist/excalidraw/fonts/fixture.woff2'] = 'different'; }, /Changed built renderer asset/],
-  ['a redundant renderer tree', (files) => { files['node_modules/mermaid/index.js'] = 'duplicate'; }, /Redundant renderer package/],
-  ['a dependency source map', (files) => { files['node_modules/jszip/lib/index.js.map'] = '{}'; }, /Dependency source maps/],
-  ['an unused browser distribution', (files) => { files['node_modules/jszip/dist/jszip.js'] = 'browser bundle'; }, /Unused browser ZIP/],
-  ['a missing runtime dependency', (files) => delete files['node_modules/jszip/package.json'], /Missing Node runtime dependency/],
-  ['a missing native module', (files) => delete files['node_modules/@koromix/koffi-win32-x64/koffi.node'], /Missing Windows native/],
+  [
+    'a changed font',
+    (files) => {
+      files['dist/excalidraw/fonts/fixture.woff2'] = 'different';
+    },
+    /Changed built renderer asset/,
+  ],
+  [
+    'a redundant renderer tree',
+    (files) => {
+      files['node_modules/mermaid/index.js'] = 'duplicate';
+    },
+    /Redundant renderer package/,
+  ],
+  [
+    'a dependency source map',
+    (files) => {
+      files['node_modules/jszip/lib/index.js.map'] = '{}';
+    },
+    /Dependency source maps/,
+  ],
+  [
+    'an unused browser distribution',
+    (files) => {
+      files['node_modules/jszip/dist/jszip.js'] = 'browser bundle';
+    },
+    /Unused browser ZIP/,
+  ],
+  [
+    'a missing runtime dependency',
+    (files) => delete files['node_modules/jszip/package.json'],
+    /Missing Node runtime dependency/,
+  ],
+  [
+    'a missing native module',
+    (files) => delete files['node_modules/@koromix/koffi-win32-x64/koffi.node'],
+    /Missing Windows native/,
+  ],
 ]) {
   test(`rejects ${label}`, async (t) => {
     const verify = await fixture(t, mutate);

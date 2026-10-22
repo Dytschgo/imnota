@@ -61,24 +61,33 @@ export async function verifyPackageContents(archive, distDirectory, platform, ar
     const nativeArch = { 1: 'x64', 3: 'arm64' }[architecture];
     assert.ok(nativeArch, `Unsupported Windows packaging architecture ${architecture}`);
     assert.ok(
-      files.some((entry) => entry.startsWith(`node_modules/@koromix/koffi-win32-${nativeArch}/`) && entry.endsWith('.node')),
+      files.some(
+        (entry) =>
+          entry.startsWith(`node_modules/@koromix/koffi-win32-${nativeArch}/`) && entry.endsWith('.node'),
+      ),
       'Missing Windows native capture/clipboard module',
     );
   }
   const distFiles = await filesBelow(distDirectory);
-  assert.ok(distFiles.some((entry) => entry.startsWith('excalidraw/fonts/') && entry.endsWith('.woff2')), 'Missing local drawing fonts');
+  assert.ok(
+    distFiles.some((entry) => entry.startsWith('excalidraw/fonts/') && entry.endsWith('.woff2')),
+    'Missing local drawing fonts',
+  );
   for (const entry of distFiles) {
     const expected = await readFile(path.join(distDirectory, entry));
     assert.ok(has(`dist/${entry}`), `Missing built renderer asset ${entry}`);
     assert.ok(expected.equals(extract(`dist/${entry}`)), `Changed built renderer asset ${entry}`);
   }
-  const total = (prefix) => files.filter((entry) => entry.startsWith(prefix)).reduce((sum, entry) => sum + info(entry).size, 0);
+  const total = (prefix) =>
+    files.filter((entry) => entry.startsWith(prefix)).reduce((sum, entry) => sum + info(entry).size, 0);
   return {
     version: manifest.version,
     platform,
     architecture,
     asarBytes: (await stat(archive)).size,
-    asarSha256: createHash('sha256').update(await readFile(archive)).digest('hex'),
+    asarSha256: createHash('sha256')
+      .update(await readFile(archive))
+      .digest('hex'),
     nodeModuleBytes: total('node_modules/'),
     rendererBytes: total('dist/'),
     rendererFilesVerified: distFiles.length,
@@ -87,16 +96,25 @@ export async function verifyPackageContents(archive, distDirectory, platform, ar
 }
 
 export default async function afterPack(context) {
-  const resources = context.electronPlatformName === 'darwin'
-    ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
-    : path.join(context.appOutDir, 'resources');
+  const resources =
+    context.electronPlatformName === 'darwin'
+      ? path.join(
+          context.appOutDir,
+          `${context.packager.appInfo.productFilename}.app`,
+          'Contents',
+          'Resources',
+        )
+      : path.join(context.appOutDir, 'resources');
   const report = await verifyPackageContents(
     path.join(resources, 'app.asar'),
     path.join(context.packager.projectDir, 'dist'),
     context.electronPlatformName,
     context.arch,
   );
-  await writeFile(path.join(path.dirname(context.appOutDir), `package-contents-${path.basename(context.appOutDir)}.json`), `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(
+    path.join(path.dirname(context.appOutDir), `package-contents-${path.basename(context.appOutDir)}.json`),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
   console.log('Verified packaged contents:', JSON.stringify(report));
   // Preserve the existing native-helper/signature order; nothing edits the app afterward.
   await adhocSign(context);

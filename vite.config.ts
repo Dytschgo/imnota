@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rendererNotices } from './scripts/renderer-licenses';
+import rendererLicenseSupplements from './build/renderer-license-supplements.json';
 
 const fontRoot = fileURLToPath(
   new URL('./node_modules/@excalidraw/excalidraw/dist/prod/fonts/', import.meta.url),
@@ -18,7 +19,7 @@ export default defineConfig({
         this.emitFile({
           type: 'asset',
           fileName: 'THIRD-PARTY-NOTICES.txt',
-          source: await rendererNotices(this.getModuleIds()),
+          source: await rendererNotices(this.getModuleIds(), rendererLicenseSupplements),
         });
       },
     },
