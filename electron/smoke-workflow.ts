@@ -1822,11 +1822,12 @@ async function exercisePreferencesAndChannel(
     const refresh = { selector: 'button[aria-label="No newer update. Check again."]' };
     await driver.waitFor(refresh);
     await driver.evaluate(`document.querySelector('[data-testid="update-indicator"] button').focus()`);
-    await driver.press('ArrowDown');
     await driver.waitFor({
       selector: '.floating-update-popover > strong',
       text: 'No newer update · nightly',
     });
+    await driver.press('ArrowDown');
+    await driver.waitFor({ selector: '.floating-update-popover:focus' });
     const refreshOnly = await driver.evaluate<boolean>(`(() => {
       const indicator = document.querySelector('[data-testid="update-indicator"]');
       return !indicator.querySelector('.lucide-download') &&
