@@ -1823,7 +1823,7 @@ async function exercisePreferencesAndChannel(
     await driver.waitFor(refresh);
     await driver.evaluate(`document.querySelector('[data-testid="update-indicator"] button').focus()`);
     await driver.press('ArrowDown');
-    await driver.waitFor({ selector: '.floating-update-popover', text: 'No newer update · nightly' });
+    await driver.waitFor({ selector: '.floating-update-popover > strong', text: 'No newer update · nightly' });
     const refreshOnly = await driver.evaluate<boolean>(`(() => {
       const indicator = document.querySelector('[data-testid="update-indicator"]');
       return !indicator.querySelector('.lucide-download') &&
