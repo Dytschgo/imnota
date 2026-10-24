@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rendererNotices } from './scripts/renderer-licenses';
+import rendererLicenseSupplements from './build/renderer-license-supplements.json';
 
 const fontRoot = fileURLToPath(
   new URL('./node_modules/@excalidraw/excalidraw/dist/prod/fonts/', import.meta.url),
@@ -11,6 +13,16 @@ const fontRoot = fileURLToPath(
 export default defineConfig({
   plugins: [
     react(),
+    {
+      name: 'renderer-license-notices',
+      async generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'THIRD-PARTY-NOTICES.txt',
+          source: await rendererNotices(this.getModuleIds(), rendererLicenseSupplements),
+        });
+      },
+    },
     {
       name: 'development-content-security-policy',
       transformIndexHtml: {

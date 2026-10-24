@@ -339,6 +339,7 @@ jobs:
             release/*.blockmap
             release/latest*.yml
             release/builder-debug.yml
+            release/package-contents-*.json
             release/builder-effective-config.yaml
           if-no-files-found: error
           compression-level: 0
