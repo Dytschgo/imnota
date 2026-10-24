@@ -79,3 +79,7 @@ The Windows packaged smoke now creates a real Chromium renderer selection, verif
 ## Windows clipboard-history flags — 2026-09-27
 
 Windows Copy files and Copy files + text/image failed with “Clipboard format “CanUploadToCloudClipboard” cannot be restored safely” when the previous clipboard came from an app that marks content for clipboard history or cloud sync. `CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard` and `ExcludeClipboardContentFromMonitorProcessing` are [documented policy flags](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats#cloud-clipboard-and-clipboard-history-formats) stored as small values in global memory. They now use the bounded byte snapshot path, and a partial write restores them with the original content. Other unknown registered formats still stop the transaction before the clipboard is cleared.
+
+## Windows .NET bitmap handle — 2026-10-10
+
+Windows Copy files + text/image failed with “Clipboard format “System.Drawing.Bitmap” cannot be restored safely” when an earlier paste had left a bitmap on the clipboard. .NET and Paint publish `System.Drawing.Bitmap` as a bitmap handle, the same kind of object as `CF_BITMAP`, not as global memory. It now uses the bounded `CF_BITMAP` snapshot path: its dimensions are checked against the same size limits, it is copied before the clipboard is cleared, and a partial write restores it with the original content. Other unknown registered formats still stop the transaction before the clipboard is cleared.
