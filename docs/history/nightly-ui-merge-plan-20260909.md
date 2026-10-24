@@ -6,7 +6,7 @@ Status at final PR preparation: execution authorized on 2026-09-09; #44 through 
 
 Land the eight UI-feedback PRs separately, resolve the integration findings, and publish one verified nightly from the final immutable main commit. Preserve the original girl backgrounds alongside the four generic backgrounds. Keep stable publication, dependency upgrades and data-format changes outside this work.
 
-The source review is Grok's `grok-review-24d3e61d.md`, supplied from `C:/Users/DYLANF~1/AppData/Local/Temp/grok-DylanFerraro/`. The original feedback and implementation evidence remain in [the UI improvements record](ui-improvements-20260909.md).
+The source review is Grok's `grok-review-24d3e61d.md`, supplied from a local temp directory. The original feedback and implementation evidence remain in [the UI improvements record](ui-improvements-20260909.md).
 
 ## Current evidence
 
