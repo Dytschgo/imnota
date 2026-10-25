@@ -9,7 +9,7 @@ import type {
   WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
 import { atomicWrite } from './files.js';
-import { NativeWorkflowError } from './workflow-errors.js';
+import { filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
 
 const MAX_ACTIVE_HANDOFF_GRANTS = 4;
 const RETIRED_HANDOFF_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -119,7 +119,7 @@ export class TemporaryFileHandoffStore {
       return grant;
     } catch (error) {
       await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
-      throw error;
+      throw filesystemFailure(error);
     }
   }
 
@@ -131,7 +131,12 @@ export class TemporaryFileHandoffStore {
       const root = path.join(canonicalParent, path.basename(this.root));
       await fs.mkdir(root, { recursive: true });
       const rootStat = await fs.lstat(root);
-      if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+      if (rootStat.isSymbolicLink())
+        throw new NativeWorkflowError(
+          'linked-path',
+          'The temporary file handoff root must be a regular directory. Choose a folder without links.',
+        );
+      if (!rootStat.isDirectory())
         throw new NativeWorkflowError(
           'io-failure',
           'The temporary file handoff root must be a regular directory.',
@@ -161,8 +166,20 @@ export class TemporaryFileHandoffStore {
         'The temporary file handoff is no longer available.',
       );
     for (const target of [grant.markdownPath, grant.pngPath]) {
-      const stat = await fs.lstat(target).catch(() => undefined);
-      if (!stat?.isFile() || stat.isSymbolicLink())
+      const stat = await fs.lstat(target).catch((error) => {
+        throw new NativeWorkflowError(
+          'io-failure',
+          'A generated temporary handoff file is unavailable.',
+          false,
+          filesystemFailure(error).details,
+        );
+      });
+      if (stat?.isSymbolicLink())
+        throw new NativeWorkflowError(
+          'linked-path',
+          'Generated handoff files must not be linked. Export them again.',
+        );
+      if (!stat?.isFile())
         throw new NativeWorkflowError('io-failure', 'A generated temporary handoff file is unavailable.');
     }
     const [markdown, png] = await Promise.all([

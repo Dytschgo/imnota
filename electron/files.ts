@@ -1,8 +1,9 @@
 import { COMMITTED_WRITE_WARNING } from '../src/shared/write-outcome.js';
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { NativeWorkflowError } from './workflow-errors.js';
 
 export function isWithin(parent: string, target: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
@@ -21,7 +22,10 @@ export async function assertNoLinks(target: string): Promise<void> {
       throw error;
     });
     if (stat?.isSymbolicLink())
-      throw new Error('Linked workspace paths are not supported. Choose a regular folder.');
+      throw new NativeWorkflowError(
+        'linked-path',
+        'Linked workspace paths are not supported. Choose a regular folder.',
+      );
     const parent = path.dirname(current);
     if (parent === current) return;
     current = parent;
@@ -144,31 +148,104 @@ export async function afterFileCommit(
   if (warning) throw warning;
 }
 
-const writes = new Map<string, Promise<void>>();
-export async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
+export interface WrittenFileIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+export interface WrittenFileEvidence extends WrittenFileIdentity {
+  readonly sha256: string;
+}
+
+export type CaptureWrittenFileIdentity = (identity: WrittenFileEvidence | undefined) => void;
+
+/** Missing/unsupported identity fields cannot authorize destructive cleanup. */
+export function writtenFileIdentity(stat: BigIntStats): WrittenFileIdentity | undefined {
+  const { dev, ino, size, mtimeNs, ctimeNs } = stat;
+  if (
+    !stat.isFile() ||
+    typeof dev !== 'bigint' ||
+    dev <= 0n ||
+    typeof ino !== 'bigint' ||
+    ino <= 0n ||
+    typeof size !== 'bigint' ||
+    size < 0n ||
+    typeof mtimeNs !== 'bigint' ||
+    mtimeNs <= 0n ||
+    typeof ctimeNs !== 'bigint' ||
+    ctimeNs <= 0n
+  )
+    return undefined;
+  return { dev, ino, size, mtimeNs, ctimeNs };
+}
+
+const writes = new Map<string, Promise<WrittenFileEvidence | undefined>>();
+export async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+): Promise<void> {
   const key = path.resolve(filePath);
   const operation = (writes.get(key) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => writeFileAtomically(key, content));
+    .then(() => writeFileAtomically(key, content, !!captureIdentity));
   writes.set(key, operation);
   try {
-    await operation;
+    const identity = await operation;
+    captureIdentity?.(identity);
   } finally {
     if (writes.get(key) === operation) writes.delete(key);
   }
 }
 
-async function writeFileAtomically(filePath: string, content: string | Uint8Array): Promise<void> {
+async function writeFileAtomically(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity: boolean,
+): Promise<WrittenFileEvidence | undefined> {
   await assertNoLinks(filePath);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
+  let identity: WrittenFileEvidence | undefined;
   try {
     // Flush the candidate before it replaces the destination. Without this a power loss
     // shortly after the rename can leave an empty or truncated file under the final name.
     const handle = await fs.open(temporary, 'wx');
     try {
-      await handle.writeFile(content);
+      let sha256: string | undefined;
+      if (captureIdentity) {
+        const hash = createHash('sha256');
+        if (typeof content === 'string') {
+          // Strings are immutable; both APIs encode the same UTF-8 bytes.
+          hash.update(content, 'utf8');
+          await handle.writeFile(content);
+        } else {
+          // Keep only one bounded private chunk. Copy and hash synchronously,
+          // then finish writing before reusing it. Caller mutation can affect
+          // future chunks, but never makes the hash differ from the written bytes.
+          const buffer = Buffer.alloc(Math.min(64 * 1024, content.byteLength));
+          for (let offset = 0; offset < content.byteLength; offset += buffer.length) {
+            const chunk = buffer.subarray(0, Math.min(buffer.length, content.byteLength - offset));
+            chunk.set(content.subarray(offset, offset + chunk.length));
+            hash.update(chunk);
+            await handle.writeFile(chunk);
+          }
+        }
+        sha256 = hash.digest('hex');
+      } else {
+        await handle.writeFile(content);
+      }
       await handle.sync();
+      if (sha256) {
+        const stat = await handle
+          .stat({ bigint: true })
+          .then(writtenFileIdentity)
+          .catch(() => undefined);
+        if (stat) identity = { ...stat, sha256 };
+      }
     } finally {
       await handle.close();
     }
@@ -206,6 +283,7 @@ async function writeFileAtomically(filePath: string, content: string | Uint8Arra
   } catch (error) {
     throw new CommittedWriteError(filePath, error);
   }
+  return identity;
 }
 
 /**

@@ -2,13 +2,31 @@
 
 Imnota turns screenshots, Markdown text blocks and drawings in one collection into local Markdown + PNG prompt bundles. Local copy/export works offline. Optional hosted links upload approved final artifacts; Imnota does not synchronize editable projects or call an AI provider.
 
+## Installing and updating
+
+On macOS, the quick installer and **Run update in Terminal** keep the previous app only during replacement. Both allow at most 60 seconds for the running app to quit, including the quit request itself, and abort before replacement if it cannot close safely. On copy, final signature check, launch or replacement-observation failure, both attempt to restore the previous app. The rollback copy is retired only after installed signature verification and observation of the same running replacement process from the installed bundle on two polls at least one second apart, within 30 seconds. An accepted open request alone does not commit the installation. Before restoring, they ask the replacement to quit, wait, then send TERM only to processes whose executable is verified inside that replacement bundle. This shutdown has a 10-second bound. If shutdown cannot be confirmed, they preserve the failed replacement at a reported recovery path and restore the old app; quit the remaining replacement process before reopening the restored app. A successful installation removes the temporary rollback copy and recognized older app backups in the same installation folder (`Imnota-backup-<timestamp>.app`, `Imnota Backup <version> <timestamp> <number>.app`, and managed Imnota bundles under `.imnota-backups.noindex`). Cleanup requires the Imnota bundle identifier; unrelated folders and project snapshots are preserved. Cleanup failures report a warning without undoing a successful installation. If automatic restore fails, the terminal reports the preserved recovery path so you can move the previous app back before reopening it.
+
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the Terminal updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
+
+Windows installers and Linux AppImage updates replace the app without creating a history of app backup folders. Native updates can retain download metadata and a reusable installer cache; these are separate from project backups. See the [installer audit](development.md#installer-and-updater-storage-audit) for paths and native verification limits. To return to an older release after a successful installation, download its installer and check [project migration compatibility](data-format.md).
+
 ## Start a project and collection
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.
 
 Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
 
-The sidebar holds Projects and the Recent quick list. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+The sidebar holds Projects, your **Pinned** projects and the Recent quick list. Pin a project with the pin on any Recent row; pinned projects are the same as favourites. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+
+If a pin change to a closed project fails, Imnota shows an error even if you opened the project or navigated elsewhere while it was saving. The error gives a suggested next step without exposing private paths or system error details. It refreshes the project list to show the saved pin state; if that refresh also fails, the error tells you.
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
@@ -57,7 +75,9 @@ Deleting a screenshot moves its source image, annotations and description to the
 
 Open **Recently deleted** below the collection rail's Add controls to see this project's deleted screenshots, drawings and text blocks from the last 30 days. Each row identifies the item, its collection and deletion time. **Restore** uses the same protected recovery as immediate Undo and puts the item back in its original collection. If a restore or list refresh fails, the dialog explains the error and lets you retry. Opening another project closes the dialog.
 
-If Restore reports that a file was replaced but durability could not be confirmed, check the restored item and warning before continuing. Imnota confirms the restored metadata and content before adopting the snapshot and keeps the Undo journal for later recovery. If the project changes again or confirmation cannot read it, Restore keeps recovery files and pending edits, blocks another Restore or metadata save, and asks you to reload and compare. A member-file warning alone does not mean the entire item was restored. These checks do not guarantee survival across power loss or lock out another application writing the same workspace.
+If Restore reports that a file was replaced but durability could not be confirmed, check the restored item and warning before continuing. Imnota confirms the restored metadata and content before adopting the snapshot and keeps the Undo journal for later recovery. If the project changes again or confirmation cannot read it, Restore keeps recovery files and pending edits and asks you to reload and compare. Unresolved workspace conflicts or monitoring failures block Restore and deletion Undo; unresolved conflicts also pause metadata saves and prompt preparation. Dismissing the notice only hides it; it does not resolve the conflict. A blocked Restore or deletion Undo shows the recovery banner again so you can reload; a later notification can also show it again.
+
+Another successful operation may safely refresh the project and resolve the conflict, but keeps the durability warning and recovery guidance visible. This retained warning is a reminder, not an unresolved workspace change: by itself it does not block Restore, deletion Undo, metadata saves or prompt preparation. While the banner is visible, **Reload project** lets you compare the saved project and clear the warning; with unsaved edits, **Discard local edits & reload** explicitly discards those edits first. A failed reload retains the warning. Dismissal hides it; a successful explicit reload, switching projects, starting a new project session or closing the app clears it. Warning retention is in memory and does not survive an app restart. A member-file warning alone does not mean the entire item was restored. These checks do not guarantee survival across power loss or lock out another application writing the same workspace.
 
 After 30 days, opening the project permanently expires eligible recovery copies. The boundary is an `expired-*` rename immediately before file removal; after that, the item is no longer offered for Undo even if disk cleanup fails. The system trash and separate backups have their own retention policies. Do not rely on Recently deleted as a backup.
 
@@ -97,7 +117,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem. Select a card's preview to inspect the full-resolution image; it opens at **Fit width**, and **Fit image** or **Actual size** change the scale. While bundles are prepared or copied, a light travels along the top of the dialog and around the bundle in progress; a finished copy gets a brief green ring. Problems hold still: a red outline marks a failed bundle and an amber outline a file-only or warned one. With reduced motion turned on in your system settings, the colours stay and the movement stops.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 

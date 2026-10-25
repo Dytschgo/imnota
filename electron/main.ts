@@ -15,6 +15,12 @@ import {
   Tray,
 } from 'electron';
 import { nativeClipboard } from './native-clipboard.js';
+import {
+  assertClipboardText,
+  clipboardImage,
+  nativeClipboardOwnerHandle,
+  validateDecodedPromptPng,
+} from './clipboard-input.js';
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
@@ -47,9 +53,15 @@ import type {
   ProjectWatchEvent,
   WindowsCopyVariantId,
 } from '../src/shared/workflow-bridge.js';
-import { DEFAULT_EXPORT_PREFERENCES, nowIso, sanitizeFilename, slugify } from '../src/shared/utils.js';
+import {
+  DEFAULT_EXPORT_PREFERENCES,
+  nowIso,
+  portableFilename,
+  sanitizeFilename,
+  slugify,
+} from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
-import { assertNoLinks, CommittedWriteError, isWithin } from './files.js';
+import { assertNoLinks, CommittedWriteError, isWithin, type CaptureWrittenFileIdentity } from './files.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
@@ -69,14 +81,14 @@ import {
   prepareRecoveryRestoreTransaction,
 } from './screenshot-transaction-adapter.js';
 import { normalizeRecoveredProject } from './recovery.js';
-import { clipboardContextHtml, clipboardPngDimensions } from '../src/shared/clipboard-context.js';
+import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { UpdateController } from './update-controller.js';
 import { discoverRelease } from './releases.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { prepareTerminalUpdate } from './terminal-update.js';
-import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { HostedShareClient } from './hosted-share-client.js';
-import { PromptBundleStore, type PromptBundleManifestItem } from './prompt-bundle-store.js';
+import { PromptBundleStore } from './prompt-bundle-store.js';
 import { type OcrCropRect } from './windows-ocr.js';
 import { ProjectWatchManager, projectRevisionForSource } from './project-watch.js';
 import { workflowOutcome } from './workflow-errors.js';
@@ -88,6 +100,7 @@ import { registerPromptExportIpc } from './ipc-prompt-export.js';
 import { registerPreferenceIpc } from './ipc-preferences.js';
 import { registerSystemIpc } from './ipc-system.js';
 import { registerContentIpc } from './ipc-content.js';
+import { importScreenshot } from './screenshot-import.js';
 import { registerScreenshotIpc } from './ipc-screenshots.js';
 import { registerProjectIpc } from './ipc-projects.js';
 import { registerSettingsIpc } from './ipc-settings.js';
@@ -328,15 +341,24 @@ function resolvedWindowBackground(
   return theme === 'light' ? '#eceef2' : '#0b0d12';
 }
 
-async function atomicWrite(filePath: string, content: string | Uint8Array): Promise<void> {
-  await writeApplicationFile(filePath, content, {
-    diagnostics,
-    recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
-    invalidate: (target) => {
-      projectSearchService?.invalidateForPath(target);
-      contentSearch.invalidatePath(target);
+async function atomicWrite(
+  filePath: string,
+  content: string | Uint8Array,
+  captureIdentity?: CaptureWrittenFileIdentity,
+): Promise<void> {
+  await writeApplicationFile(
+    filePath,
+    content,
+    {
+      diagnostics,
+      recordSelfWrite: (target, source) => projectWatchManager?.recordSelfWrite(target, source),
+      invalidate: (target) => {
+        projectSearchService?.invalidateForPath(target);
+        contentSearch.invalidatePath(target);
+      },
     },
-  });
+    captureIdentity,
+  );
 }
 
 async function copyFile(filePath: string, targetPath: string): Promise<void> {
@@ -812,7 +834,7 @@ async function openWithRecovery(projectPath: string, forcedChoice?: 'restore'): 
 }
 
 async function uniqueProjectFolder(workspace: string, name: string): Promise<string> {
-  const base = slugify(name);
+  const base = portableFilename(slugify(name));
   let folder = path.join(workspace, base);
   let n = 2;
   while (existsSync(folder)) folder = path.join(workspace, `${base}-${n++}`);
@@ -836,18 +858,23 @@ async function withinProjectCreationQueue<T>(operation: () => Promise<T>): Promi
 
 async function uniqueStoredName(projectPath: string, original: string): Promise<string> {
   const ext = path.extname(original).toLowerCase() || '.png';
-  const base = sanitizeFilename(path.basename(original, ext), 'screenshot');
+  const base = sanitizeFilename(portableFilename(path.basename(original, ext)), 'screenshot');
   const project = await readProject(projectPath);
   const existing = new Set(project.screenshots.map((s) => s.storedFilename));
   const occupied = (candidate: string) =>
     existing.has(candidate) ||
-    project.collections.some((collection) =>
-      existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)),
+    project.collections.some(
+      (collection) =>
+        existsSync(path.join(projectPath, 'collections', collection.id, 'screenshots', candidate)) ||
+        existsSync(
+          path.join(projectPath, 'collections', collection.id, 'annotations', `${candidate}.json`),
+        ) ||
+        existsSync(path.join(projectPath, 'collections', collection.id, 'descriptions', `${candidate}.md`)),
     );
-  let candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`;
+  let candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}${ext}`);
   let n = 2;
   while (occupied(candidate))
-    candidate = `${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`;
+    candidate = portableFilename(`${String(existing.size + 1).padStart(3, '0')}-${base}-${n++}${ext}`);
   return candidate;
 }
 
@@ -906,46 +933,13 @@ async function importOne(
   originalFilename = path.basename(sourcePath),
   collectionId?: string,
 ): Promise<void> {
-  const ext = path.extname(originalFilename).toLowerCase();
-  if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext))
-    throw new Error(`Unsupported screenshot format: ${originalFilename}. Use PNG, JPEG or WebP.`);
-  const image = nativeImage.createFromPath(sourcePath);
-  if (image.isEmpty()) throw new Error(`Imnota could not read ${originalFilename}. The file may be damaged.`);
-  const project = await readProject(projectPath);
-  const collection = project.collections.find(
-    (item) => item.id === (collectionId ?? project.collections.find((candidate) => !candidate.archived)?.id),
-  );
-  if (!collection) throw new Error('Choose a collection before importing.');
-  await ensureCollection(projectPath, collection.id);
-  const storedFilename = await uniqueStoredName(projectPath, originalFilename);
-  await atomicWrite(
-    path.join(projectPath, 'collections', collection.id, 'screenshots', storedFilename),
-    await fs.readFile(sourcePath),
-  );
-  const timestamp = nowIso();
-  project.screenshots.push({
-    collectionId: collection.id,
-    id: `shot_${crypto.randomUUID()}`,
+  await importScreenshot(
+    { atomicWrite, readProject, uniqueStoredName, nextScreenshotPosition },
+    projectPath,
+    sourcePath,
     originalFilename,
-    storedFilename,
-    title: originalFilename,
-    description: '',
-    position: nextScreenshotPosition(project, collection.id),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    priority: 'medium',
-    annotationFile: `collections/${collection.id}/annotations/${storedFilename}.json`,
-    descriptionFile: `collections/${collection.id}/descriptions/${storedFilename}.md`,
-    originalWidth: image.getSize().width,
-    originalHeight: image.getSize().height,
-    includeInExport: true,
-  });
-  const added = project.screenshots.at(-1)!;
-  await atomicWrite(path.join(projectPath, added.annotationFile), '[]');
-  await atomicWrite(path.join(projectPath, added.descriptionFile), '');
-  project.updatedAt = timestamp;
-  collection.archived = false;
-  await atomicWrite(path.join(projectPath, 'project.json'), JSON.stringify(project, null, 2));
+    collectionId,
+  );
 }
 
 async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Promise<ImagePayload> {
@@ -964,8 +958,7 @@ async function loadImage(projectPath: string, screenshot: ScreenshotRecord): Pro
 }
 
 async function copyTextToClipboard(text: string): Promise<void> {
-  if (typeof text !== 'string' || text.length > 2_000_000)
-    throw new Error('Context is too large to copy. Export the Markdown file instead.');
+  assertClipboardText(text);
   await nativeClipboard.writeText(text);
 }
 
@@ -977,33 +970,13 @@ function cropPngForOcr(png: Uint8Array, crop: OcrCropRect): Uint8Array {
   return cropped.toPNG();
 }
 
-function clipboardImage(imageDataUrl: string) {
-  const size = clipboardPngDimensions(imageDataUrl);
-  const image = nativeImage.createFromDataURL(imageDataUrl);
-  if (image.isEmpty() || image.getSize().width !== size.width || image.getSize().height !== size.height)
-    throw new Error('The annotated image could not be decoded. Use the exported PNG instead.');
-  return image;
-}
-
-function validateDecodedPromptPng(
-  png: Uint8Array,
-  expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
-): void {
-  const image = nativeImage.createFromBuffer(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
-  const size = image.getSize();
-  if (image.isEmpty() || size.width !== expected.width || size.height !== expected.height)
-    throw new Error('Prompt PNG could not be fully decoded at its reserved dimensions.');
-}
-
 async function copyImageToClipboard(imageDataUrl: string): Promise<void> {
   await nativeClipboard.writeImage(clipboardImage(imageDataUrl));
 }
 
 function clipboardOwnerHandle(): Buffer {
   const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (!owner || owner.isDestroyed())
-    throw new Error('A live Imnota window is required for clipboard access.');
-  return owner.getNativeWindowHandle();
+  return nativeClipboardOwnerHandle(owner);
 }
 
 async function copyBundleToClipboard(
@@ -1966,13 +1939,7 @@ function registerIpc(): void {
       authorize: async (projectPath, collectionId) => {
         const safePath = await assertProjectPath(projectPath);
         const project = await readProjectMetadata(safePath);
-        const collection = project.collections.find((candidate) => candidate.id === collectionId);
-        if (!collection) throw new Error('Collection does not belong to this project.');
-        return {
-          projectPath: safePath,
-          collectionId: collection.id,
-          collectionName: collection.name,
-        };
+        return promptCollectionGrant(safePath, collectionId, project.collections);
       },
       copyContext: (markdown, imageDataUrl, filePaths, variant) =>
         copyBundleToClipboard(markdown, imageDataUrl, filePaths, variant),

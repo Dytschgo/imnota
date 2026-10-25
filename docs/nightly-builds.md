@@ -6,7 +6,17 @@ Imnota has two update channels in the same public GitHub repository. Stable is t
 
 Open **Settings → App updates → Update channel**. Selecting **Nightly (preview)** asks you to confirm and back up your workspace. **Keep Stable** cancels without changing preferences. The selected channel is saved locally and used by both Settings and the sidebar refresh button.
 
-Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit, replaces the app and retains a backup. It does not require Developer ID signing, administrator privileges or removal of quarantine.
+Checks do not automatically download or install anything. Use **Download update**, then **Restart to install** on supported native-updating builds. macOS offers **Run update in Terminal** and a copyable command. The bundled helper downloads the exact selected release, verifies it, requests a graceful quit within one 60-second bound (including the quit request), replaces the app and reopens it. The previous app remains available for automatic rollback until final signature verification succeeds and the same replacement process is observed running from the installed bundle on successive polls within 30 seconds. An accepted open request alone does not commit the update; missing or exited replacement processes trigger rollback. Before restoring, it requests quit of the verified replacement, waits, then sends TERM only to PIDs still verified inside its physical bundle. If that 10-second shutdown cannot be confirmed, it preserves the failed replacement at a reported path while restoring the previous app; quit that remaining process before reopening the restored app. After success it removes the rollback copy and recognized older Imnota app backups in that installation folder. If automatic restoration fails, the helper reports the preserved old app path for manual recovery. It does not require Developer ID signing, administrator privileges or removal of quarantine.
+
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the Terminal updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
 
 Channel switching is disabled while checking, downloading or awaiting native installation. Failed checks/downloads allow retry. Nightly checks compare the latest nightly with the latest stable release and offer the newer version. For example, stable `0.2.2` supersedes `0.2.2-nightly.20260905.1234`; a later `0.2.3-nightly` becomes eligible again. The preference remains Nightly throughout, and an already newer installed version is never downgraded.
 
@@ -20,7 +30,7 @@ The **Build nightly prerelease** workflow runs daily at 02:17 UTC (04:17 in Zuri
 
 After each scheduled or manual attempt, the workflow checks for staleness. If `main` differs from the latest published nightly and that nightly is more than 48 hours old, it opens or comments on the **Nightly is stale** issue. This check depends on the workflow running; it cannot detect GitHub disabling a schedule after prolonged repository inactivity.
 
-Current branch protection enforces an up-to-date `quality` check, but does not enforce approving reviews or every platform job. For this release process, the release owner must also obtain an independent review and verify all PR platform package and security checks for the exact head before merging. Do not use an administrator bypass. The nightly workflow separately gates publication on quality and all three platform builds. Stronger remote enforcement is a separate repository-policy change, not part of publishing a nightly.
+Current branch protection enforces an up-to-date `quality` check. Validate's aggregate now requires every applicable job in that workflow, including all platform package and service/security jobs, under the [explicit docs-only and event skip policy](ci-routing.md). Branch protection does not enforce approving reviews. For this release process, the release owner must also obtain an independent review and verify all PR platform package and security checks for the exact head before merging. Do not use an administrator bypass. The nightly workflow separately gates publication on quality and all three platform builds. Stronger remote review enforcement is a separate repository-policy change, not part of publishing a nightly.
 
 An authorised maintainer can dispatch a build for an exact reviewed main commit:
 
@@ -34,6 +44,10 @@ That command **publishes a prerelease after validation succeeds**. Run it only w
 Versions use the next patch of the candidate's stable package version: for example, `0.2.0` produces `0.2.1-nightly.20260905.1234`. A retried run adds a numeric attempt, such as `.2`. These are examples, not available downloads. The package's embedded version is overridden for that build without committing a version bump to main.
 
 The workflow runs quality tests, including the tracked-file secret scan, and builds Windows, macOS and Linux artifacts. Every job has a time limit, recorded with the [pinned-action policy](ci-routing.md#pinned-actions-time-limits-and-least-privilege). Packaged smoke tests must confirm success from inside the application, including its expected nightly version. The collected `nightly.yml`, `nightly-linux.yml` and `nightly-mac.yml` manifests must match the version, filenames and SHA-512 hashes of staged assets. SHA-256 checksums are also generated.
+
+Nightly and stable macOS package jobs run **Verify native Mac installer transactions** against that candidate's exact universal ZIP; nightly uses the overridden nightly version for the fixture's release metadata and version assertions (the stable-only quick installer uses a stable-shaped fixture URL redirected to the same ZIP). The archive must exist and the native transactions must pass before publication. These native filesystem/signature/process tests simulate GUI startup; the packaged walkthrough and public-download checks remain separate gates.
+
+Failed packaged walkthroughs on all three platforms retain screenshots, `verification-failure.json` (including renderer diagnostics when available), and progress/capture files in Actions artifacts for 7 days: `smoke-failure-evidence-nightly-<platform>` or `smoke-failure-evidence-release-<platform>`. The stable public Mac check uses `smoke-failure-evidence-public-mac-release` with the same retention. These names stay outside the `nightly-*` / `release-*` distributable download patterns. See [development](development.md) for evidence limits and [release readiness](release-readiness.md) for the first-run checks.
 
 Publication first stages a draft, then publishes a GitHub prerelease with `make_latest: false`. Stable update metadata and the stable installer's Latest alias are untouched. Download a nightly through the app's selected-channel link or the repository's prereleases, not the stable one-command installer.
 

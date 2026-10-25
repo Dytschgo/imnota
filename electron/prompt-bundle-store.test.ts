@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { workflowOutcome } from './workflow-errors.js';
 import { atomicWrite } from './files.js';
 import {
   budgetPromptCollectionName,
@@ -490,7 +491,7 @@ describe('prompt bundle store', () => {
         png: invalidIdat,
         markdown: '# Invalid image data\n',
       }),
-    ).rejects.toThrow(/scanlines|header check/);
+    ).rejects.toThrow(/could not be fully decoded/);
     await store.commitBundle({
       sessionId: session.sessionId,
       bundleNumber: 1,
@@ -583,6 +584,7 @@ describe('prompt export names', () => {
     expect(formatPromptTimestamp(new Date(2026, 8, 7, 18, 42, 5))).toBe('260907-184205');
     expect(sanitizePromptCollectionName('UX / Zürich: checkout. ')).toBe('UX - Zürich- checkout');
     expect(sanitizePromptCollectionName('CON')).toBe('_CON');
+    expect(sanitizePromptCollectionName('a\u007f\u0085b')).toBe('ab');
   });
 
   it('budgets duplicated set and file names against the actual exports path', () => {
@@ -598,5 +600,181 @@ describe('prompt export names', () => {
         120,
       ),
     ).toThrow(/workspace path is too long/);
+  });
+});
+
+describe('explicit prompt export failures', () => {
+  it('rejects noncontiguous manifests and exhausted path budgets explicitly', async () => {
+    const input = await fixture();
+    await expect(
+      workflowOutcome(() =>
+        promptStore().startSession({
+          ...startInput(input, 'Test'),
+          bundles: [{ bundleNumber: 2, width: 1, height: 1 }],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid-input', retryable: false },
+    });
+    await expect(
+      workflowOutcome(() =>
+        budgetPromptCollectionName(path.resolve('nested/'.repeat(40)), 'Test', '260907-120000', 120),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'path-too-long', retryable: false },
+    });
+  });
+
+  it.each([
+    'invalid PNG',
+    'dimension mismatch',
+    'decode failure',
+    'Markdown limit',
+    'already stored',
+    'would overwrite',
+  ])('classifies %s as invalid renderer input', async (failure) => {
+    const input = await fixture();
+    const store = promptStore({
+      randomId: () => 'input-test',
+      validateDecodedPng: () => {
+        if (failure === 'decode failure') throw new Error('Decoder internals');
+      },
+    });
+    const session = await store.startSession(startInput(input, 'Test'));
+    const bundle = { sessionId: session.sessionId, bundleNumber: 1, png: png(), markdown: '# Context' };
+    if (failure === 'invalid PNG') bundle.png = new Uint8Array(1);
+    if (failure === 'dimension mismatch') await store.cancelSession(session.sessionId);
+    if (failure === 'Markdown limit') bundle.markdown = 'a'.repeat(2_000_001);
+    if (failure === 'already stored') await store.commitBundle(bundle);
+    if (failure === 'would overwrite') {
+      const staging = path.join(
+        input.projectPath,
+        'collections',
+        input.collectionId,
+        'exports',
+        '.prompt-staging-input-test',
+      );
+      await fs.writeFile(path.join(staging, `${session.setName} - 01.md`), 'existing');
+    }
+    const operation =
+      failure === 'dimension mismatch'
+        ? () => validatePromptBundlePng(png(), { width: 2, height: 1 })
+        : () => store.commitBundle(bundle);
+    await expect(workflowOutcome(operation)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid-input', retryable: false },
+    });
+  });
+
+  it.each(['ENOSPC', 'EACCES', 'EPERM', 'EBUSY', 'ENOENT', 'EROFS'])(
+    'preserves %s after bundle write cleanup',
+    async (errno) => {
+      const input = await fixture();
+      const store = promptStore({
+        writeAtomically: async () => {
+          throw Object.assign(new Error(`${errno}: Cancelled ideas`), { code: errno });
+        },
+      });
+      const session = await store.startSession(startInput(input, 'Test'));
+      await expect(
+        workflowOutcome(() =>
+          store.commitBundle({
+            sessionId: session.sessionId,
+            bundleNumber: 1,
+            png: png(),
+            markdown: '# Context',
+          }),
+        ),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'io-failure', retryable: false, details: { errno } },
+      });
+      await expect(store.cancelSession(session.sessionId)).resolves.toMatchObject({
+        published: false,
+        bundles: [],
+      });
+    },
+  );
+
+  it('reports linked export folders and unknown sessions explicitly', async () => {
+    const input = await fixture();
+    const target = path.join(input.projectPath, 'target');
+    await fs.mkdir(target);
+    const exportsPath = path.join(input.projectPath, 'collections', input.collectionId, 'exports');
+    await fs.symlink(target, exportsPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const store = promptStore();
+    await expect(workflowOutcome(() => store.startSession(startInput(input, 'Test')))).resolves.toMatchObject(
+      { ok: false, error: { code: 'linked-path', retryable: false } },
+    );
+    await expect(
+      workflowOutcome(() =>
+        store.commitBundle({ sessionId: 'unknown', bundleNumber: 1, png: png(), markdown: '# Text' }),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: 'session-not-found', retryable: false } });
+  });
+});
+
+it('keeps intentional session cancellation explicit while the PNG decoder is pending', async () => {
+  const input = await fixture();
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const store = promptStore({
+    validateDecodedPng: async () => {
+      enter();
+      await held;
+    },
+  });
+  const session = await store.startSession(startInput(input, 'Test'));
+  const write = workflowOutcome(() =>
+    store.commitBundle({ sessionId: session.sessionId, bundleNumber: 1, png: png(), markdown: '# Text' }),
+  );
+  await entered;
+  const cancel = store.cancelSession(session.sessionId);
+  release();
+  await expect(write).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'session-cancelled', retryable: false },
+  });
+  await expect(cancel).resolves.toMatchObject({ status: 'cancelled', published: false });
+});
+
+it('preserves publication errno and leaves finalization available for an explicit retry', async () => {
+  const input = await fixture();
+  const store = promptStore();
+  const session = await store.startSession(startInput(input, 'Test'));
+  await store.commitBundle({ sessionId: session.sessionId, bundleNumber: 1, png: png(), markdown: '# Text' });
+  const spy = vi
+    .spyOn(fs, 'rename')
+    .mockRejectedValueOnce(Object.assign(new Error('EROFS: Cancelled ideas'), { code: 'EROFS' }));
+  try {
+    await expect(workflowOutcome(() => store.finishSession(session.sessionId))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'io-failure', retryable: false, details: { errno: 'EROFS' } },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+  await expect(store.finishSession(session.sessionId)).resolves.toMatchObject({
+    status: 'completed',
+    published: true,
+  });
+});
+
+it('reports a missing collection folder as collection-not-found so recovery reopens the project', async () => {
+  const input = await fixture();
+  await fs.rmdir(path.join(input.projectPath, 'collections', input.collectionId));
+  await expect(
+    workflowOutcome(() => promptStore().startSession(startInput(input, 'Test'))),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'collection-not-found', retryable: false, details: { errno: 'ENOENT' } },
   });
 });

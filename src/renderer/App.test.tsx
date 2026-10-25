@@ -2,9 +2,10 @@ import { COMMITTED_WRITE_WARNING, RESTORE_CONFIRMATION_FAILURE } from '../shared
 import { reloadWindow, setReloadProtection } from './app/reload-guard';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Profiler, type ProfilerOnRenderCallback } from 'react';
 import type { ImnotaBridge, ProjectSnapshot } from '../shared/types';
 import type { ContentSearchResult } from '../shared/content-search';
-import type { WorkflowBridge } from '../shared/workflow-bridge';
+import type { ProjectWatchEvent, WorkflowBridge } from '../shared/workflow-bridge';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../shared/preferences';
 import { CANVAS_COMMAND_EVENT, type CanvasCommand } from './canvas/commands';
 import type { AnnotationCanvasProps } from './components/AnnotationCanvas';
@@ -97,7 +98,7 @@ describe('feedback controls', () => {
   function renderApp(
     overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
     narrowViewport = false,
-    { resumeRecent = false }: { resumeRecent?: boolean } = {},
+    { resumeRecent = false, onRender }: { resumeRecent?: boolean; onRender?: ProfilerOnRenderCallback } = {},
   ) {
     // Launch resumes the most recent project unless a saved session names another page.
     // Most tests start from the Library, so they save that page first.
@@ -190,8 +191,126 @@ describe('feedback controls', () => {
             removeEventListener() {},
           },
     ) as unknown as typeof window.matchMedia;
-    return render(<App />);
+    return render(
+      onRender ? (
+        <Profiler id="startup" onRender={onRender}>
+          <App />
+        </Profiler>
+      ) : (
+        <App />
+      ),
+    );
   }
+
+  it.each([null, '/tmp/imnota-smoke-fresh'])(
+    'settles fresh-profile startup without pin or settings writes (workspace: %s)',
+    async (workspacePath) => {
+      const previousState = useAppStore.getState();
+      const previousStorage = { ...localStorage };
+      localStorage.clear();
+      useAppStore.setState({
+        snapshot: null,
+        projects: [],
+        recentCollections: [],
+        view: 'projects',
+        search: '',
+        navigationOpen: true,
+        settings: { ...previousState.settings, workspacePath: null },
+      });
+      const getSettings = vi.fn<ImnotaBridge['getSettings']>(async () => ({
+        ...previousState.settings,
+        workspacePath,
+      }));
+      const listProjects = vi.fn<ImnotaBridge['listProjects']>(async () => []);
+      const getPreferenceSettings = vi.fn<ImnotaBridge['getPreferenceSettings']>(async () => ({
+        ok: true,
+        value: {
+          settings: DEFAULT_PREFERENCE_SETTINGS,
+          profile: { settingsFileExists: false, migratedFromLegacyProfile: false },
+        },
+      }));
+      const idleProjectCalls = {
+        loadProject: vi.fn<ImnotaBridge['loadProject']>(),
+        startProjectWatch: vi.fn<ImnotaBridge['startProjectWatch']>(),
+        onProjectWatchEvent: vi.fn<ImnotaBridge['onProjectWatchEvent']>(),
+        reloadWatchedProject: vi.fn<ImnotaBridge['reloadWatchedProject']>(),
+        updateProjectMetadata: vi.fn<ImnotaBridge['updateProjectMetadata']>(),
+        saveProject: vi.fn<ImnotaBridge['saveProject']>(),
+        saveProjectCompareAndSwap: vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(),
+        saveScreenshotContent: vi.fn<ImnotaBridge['saveScreenshotContent']>(),
+        setSettings: vi.fn<ImnotaBridge['setSettings']>(),
+        setPreferenceSettings: vi.fn<ImnotaBridge['setPreferenceSettings']>(),
+      };
+      const onRender = vi.fn<ProfilerOnRenderCallback>(() => {
+        // Fail at the render boundary rather than letting an effect loop run until the test deadline.
+        if (onRender.mock.calls.length > 100)
+          throw new Error('Fresh-profile startup exceeded 100 commits; possible render/effect loop.');
+      });
+      let view!: ReturnType<typeof renderApp>;
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          view = renderApp(
+            {
+              getSettings,
+              listProjects,
+              getPreferenceSettings,
+              getNativePerformanceProfile: async () => ({
+                ok: true,
+                value: {
+                  platform: 'linux',
+                  performanceClass: 'standard',
+                  reducedEffectsRecommended: false,
+                  reasons: [],
+                },
+              }),
+              ...idleProjectCalls,
+            },
+            false,
+            { resumeRecent: true, onRender },
+          );
+        });
+        expect(screen.getByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.getByText('No recently opened collections.')).toBeInTheDocument();
+        if (workspacePath) {
+          expect(document.querySelector('.library')).toBeInTheDocument();
+          expect(screen.getByText('Your project library is empty')).toBeInTheDocument();
+          expect(screen.getByTestId('onboarding-dialog')).toBeInTheDocument();
+        } else {
+          expect(screen.getByRole('button', { name: 'Choose workspace' })).toBeInTheDocument();
+        }
+        // Drain scheduled work once; this advances virtual time without sleeps or retrying assertions.
+        await act(async () => {
+          await vi.runOnlyPendingTimersAsync();
+        });
+        await act(async () => {
+          view.rerender(
+            <Profiler id="startup" onRender={onRender}>
+              <App />
+            </Profiler>,
+          );
+        });
+        await act(async () => {
+          await vi.runOnlyPendingTimersAsync();
+        });
+        expect(screen.getByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.getByText('No recently opened collections.')).toBeInTheDocument();
+        expect(useAppStore.getState().settings.workspacePath).toBe(workspacePath);
+        expect(getSettings).toHaveBeenCalledOnce();
+        expect(getPreferenceSettings).toHaveBeenCalledOnce();
+        expect(listProjects).toHaveBeenCalledTimes(workspacePath ? 1 : 0);
+        for (const call of Object.values(idleProjectCalls)) expect(call).not.toHaveBeenCalled();
+        expect(localStorage.getItem('imnota:sidenav-disclosures')).toBeNull();
+        expect(useAppStore.getState().snapshot).toBeNull();
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+        useAppStore.setState(previousState);
+        localStorage.clear();
+        for (const [key, value] of Object.entries(previousStorage)) localStorage.setItem(key, value);
+      }
+    },
+  );
 
   async function renderEditingProject(
     overrides: Partial<ImnotaBridge & WorkflowBridge> = {},
@@ -255,6 +374,37 @@ describe('feedback controls', () => {
     return { save, note, editingSnapshot };
   }
 
+  it('shows prompt-open failures once in the sharing dialog without an App error toast', async () => {
+    const loadScreenshotContent = vi.fn<ImnotaBridge['loadScreenshotContent']>(async () => ({
+      image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+      annotations: [],
+      description: 'Original note',
+      contentRevision: 'a'.repeat(64),
+    }));
+    await renderEditingProject({ loadScreenshotContent });
+    loadScreenshotContent.mockRejectedValue(new Error('IPC rejected D:/private/screenshot.png'));
+    fireEvent.click(screen.getByTestId('share-prompt-bundles'));
+    const dialog = await screen.findByRole('dialog', { name: 'Share bundles' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Rebuild bundles');
+    expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Rebuild bundles' })).toBeEnabled();
+  });
+
+  it('keeps prompt shortcut failures in the App toast when the sharing dialog is closed', async () => {
+    const loadScreenshotContent = vi.fn<ImnotaBridge['loadScreenshotContent']>(async () => ({
+      image: { filename: 'screen.png', dataUrl: '', width: 100, height: 100 },
+      annotations: [],
+      description: 'Original note',
+      contentRevision: 'a'.repeat(64),
+    }));
+    await renderEditingProject({ loadScreenshotContent });
+    loadScreenshotContent.mockRejectedValue(new Error('IPC rejected D:/private/screenshot.png'));
+    fireEvent.keyDown(window, { key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId('error-toast')).toHaveTextContent('Rebuild bundles');
+    expect(screen.queryByRole('dialog', { name: 'Share bundles' })).not.toBeInTheDocument();
+  });
+
   it('switches between all, favourite and archived projects from the Library filter', async () => {
     renderApp({
       listProjects: async () => [
@@ -279,8 +429,9 @@ describe('feedback controls', () => {
       }),
     );
     expect(await screen.findByRole('heading', { name: 'Favourite projects' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
+    const library = within(document.querySelector<HTMLElement>('.library')!);
+    expect(library.getByRole('button', { name: /^Loved/ })).toBeInTheDocument();
+    expect(library.queryByRole('button', { name: /^Old/ })).not.toBeInTheDocument();
   });
 
   it('resumes the most recent project when no session page is saved', async () => {
@@ -384,7 +535,8 @@ describe('feedback controls', () => {
       expect(document.querySelector('.crumb-current')).toHaveTextContent(label);
       expect(screen.getByTestId('collection-picker')).toHaveTextContent(label);
       const recent = within(document.getElementById('quick-access-collections')!);
-      expect(recent.getByRole('button', { name: /Imnota Feedback/ })).toHaveAttribute('title', label);
+      // The row's pin button also names the project, so match the collection row by its label.
+      expect(recent.getByTitle(label)).toHaveAccessibleName(expect.stringContaining('Imnota Feedback'));
       fireEvent.click(screen.getByTestId('collection-picker'));
       expect(
         within(screen.getByRole('menu', { name: 'Collections' })).getByRole('menuitemradio', {
@@ -791,6 +943,306 @@ describe('feedback controls', () => {
     expect(within(dialog).getByRole('alert')).toHaveTextContent(message);
     expect(undoDeleteScreenshot).toHaveBeenCalledOnce();
     expect(saveProjectCompareAndSwap).not.toHaveBeenCalled();
+  });
+
+  it.each(['screenshot', 'drawing', 'text'] as const)(
+    'allows retrying %s Restore after Duplicate resolves the conflict while retaining the warning',
+    async (kind) => {
+      const deleted = {
+        kind,
+        undoToken: 'delete-token',
+        itemId: 'deleted',
+        title: 'Unconfirmed item',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      const message = `${COMMITTED_WRITE_WARNING} ${RESTORE_CONFIRMATION_FAILURE} Reload and compare the project before saving or restoring again.`;
+      const restore = vi.fn().mockRejectedValueOnce(new Error(message));
+      const duplicateScreenshot = vi.fn<ImnotaBridge['duplicateScreenshot']>();
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>();
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const { editingSnapshot } = await renderEditingProject({
+        listRecentlyDeleted,
+        undoDeleteScreenshot: restore,
+        undoDeleteContentItem: restore,
+        duplicateScreenshot,
+        reloadWatchedProject,
+      });
+      const duplicated = {
+        ...editingSnapshot,
+        project: {
+          ...editingSnapshot.project,
+          screenshots: [
+            ...editingSnapshot.project.screenshots,
+            { ...editingSnapshot.project.screenshots[0], id: 'duplicate', title: 'Duplicated screen' },
+          ],
+        },
+      };
+      duplicateScreenshot.mockResolvedValue(duplicated);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: duplicated, projectRevision: 'project-2' },
+      });
+      restore.mockResolvedValue(duplicated);
+      const restoreLabel = `Restore ${kind === 'text' ? 'text block' : kind}: Unconfirmed item`;
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      let dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+      fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+      await waitFor(() => expect(useAppStore.getState().activeScreenshotId).toBe('duplicate'));
+      expect(duplicateScreenshot).toHaveBeenCalledOnce();
+      expect(reloadWatchedProject).toHaveBeenCalledOnce();
+      const banner = screen.getByTestId('external-change-banner');
+      expect(banner).toHaveTextContent(message);
+      expect(within(banner).getByRole('button', { name: 'Reload project' })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      await waitFor(() => expect(restore).toHaveBeenCalledTimes(2));
+      expect(restore).toHaveBeenLastCalledWith({
+        projectPath: snapshot.projectPath,
+        undoToken: 'delete-token',
+      });
+      await waitFor(() =>
+        expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Unconfirmed item”.'),
+      );
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+    },
+  );
+
+  it.each(
+    (['screenshot', 'drawing', 'text'] as const).flatMap((kind) =>
+      (['external-change', 'watch-error'] as const).map((noticeKind) => ({ kind, noticeKind })),
+    ),
+  )(
+    'reveals recovery for $kind Restore after dismissing a real $noticeKind and allows retry after reload',
+    async ({ kind, noticeKind }) => {
+      const deleted = {
+        kind,
+        undoToken: 'delete-token',
+        itemId: 'deleted',
+        title: 'Deleted item',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      let onWatchEvent!: (event: ProjectWatchEvent) => void;
+      const restore = vi.fn();
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>();
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const { editingSnapshot } = await renderEditingProject({
+        listRecentlyDeleted,
+        undoDeleteScreenshot: restore,
+        undoDeleteContentItem: restore,
+        reloadWatchedProject,
+        onProjectWatchEvent: (callback) => {
+          onWatchEvent = callback;
+          return () => {};
+        },
+      });
+      const reloaded = { ...editingSnapshot, projectRevision: 'foreign-revision' };
+      const restored = { ...editingSnapshot, projectRevision: 'restored-revision' };
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: reloaded, projectRevision: reloaded.projectRevision },
+      });
+      restore.mockResolvedValue(restored);
+      act(() =>
+        onWatchEvent({
+          watchId: 'watch',
+          projectPath: snapshot.projectPath,
+          kind: noticeKind,
+          projectRevision: 'foreign-revision',
+          changedPaths: ['project.json'],
+        }),
+      );
+      const banner = await screen.findByTestId('external-change-banner');
+      const message = banner.querySelector('span')!.textContent!;
+      const restoreLabel = `Restore ${kind === 'text' ? 'text block' : kind}: Deleted item`;
+      for (const dismiss of [false, true]) {
+        if (dismiss) {
+          fireEvent.click(screen.getByRole('button', { name: 'Dismiss external change notice' }));
+          expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument();
+        }
+        fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+        fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+        expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+          dismiss ? 'Reload and compare the project before restoring again.' : message,
+        );
+        expect(restore).not.toHaveBeenCalled();
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+        expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Reload project' }));
+      await waitFor(() => expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument());
+      expect(reloadWatchedProject).toHaveBeenCalledExactlyOnceWith({ watchId: 'watch' });
+      expect(useAppStore.getState().snapshot).toBe(reloaded);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: restored, projectRevision: restored.projectRevision },
+      });
+      fireEvent.click(await within(dialog).findByRole('button', { name: restoreLabel }));
+      await waitFor(() =>
+        expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Deleted item”.'),
+      );
+      expect(restore).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        undoToken: deleted.undoToken,
+      });
+      expect(useAppStore.getState().snapshot?.projectRevision).toBe(restored.projectRevision);
+    },
+  );
+
+  it.each(['external-change', 'watch-error'] as const)(
+    'reveals recovery for deletion Undo after dismissing a real %s and allows Restore after reload',
+    async (noticeKind) => {
+      let onWatchEvent!: (event: ProjectWatchEvent) => void;
+      const deleted = {
+        kind: 'screenshot' as const,
+        undoToken: 'delete-token',
+        itemId: 'shot',
+        title: 'Screen',
+        collectionId: snapshot.project.collections[0].id,
+        deletedAt: '2026-01-05T10:00:00.000Z',
+      };
+      const listRecentlyDeleted = vi.fn<ImnotaBridge['listRecentlyDeleted']>(async () => [deleted]);
+      const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>();
+      const removed = { ...snapshot, projectRevision: 'deleted-revision' };
+      const reloaded = { ...snapshot, projectRevision: 'foreign-revision' };
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>(async () => ({
+        ok: true,
+        value: { snapshot: removed, projectRevision: removed.projectRevision },
+      }));
+      const { editingSnapshot } = await renderEditingProject({
+        deleteScreenshot: async () => ({ snapshot: removed, undoToken: deleted.undoToken }),
+        undoDeleteScreenshot,
+        listRecentlyDeleted,
+        reloadWatchedProject,
+        onProjectWatchEvent: (callback) => {
+          onWatchEvent = callback;
+          return () => {};
+        },
+      });
+      const restored = { ...editingSnapshot, projectRevision: 'restored-revision' };
+      undoDeleteScreenshot.mockResolvedValue(restored);
+      act(() =>
+        useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } })),
+      );
+      fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+      const undo = await screen.findByRole('button', { name: 'Undo' });
+      reloadWatchedProject.mockClear();
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: reloaded, projectRevision: reloaded.projectRevision },
+      });
+      act(() =>
+        onWatchEvent({
+          watchId: 'watch',
+          projectPath: snapshot.projectPath,
+          kind: noticeKind,
+          projectRevision: reloaded.projectRevision,
+          changedPaths: ['project.json'],
+        }),
+      );
+      const message = screen.getByTestId('external-change-banner').querySelector('span')!.textContent!;
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss external change notice' }));
+      expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument();
+      fireEvent.click(undo);
+      expect(await screen.findByTestId('error-toast')).toHaveTextContent(
+        'Reload and compare the project before restoring again.',
+      );
+      expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+      expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+      fireEvent.click(screen.getByRole('button', { name: 'Reload project' }));
+      await waitFor(() => expect(screen.queryByTestId('external-change-banner')).not.toBeInTheDocument());
+      expect(reloadWatchedProject).toHaveBeenCalledExactlyOnceWith({ watchId: 'watch' });
+      expect(useAppStore.getState().snapshot).toBe(reloaded);
+      expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+
+      // The immediate Undo offer is consumed; retry the same token through Recently deleted.
+      fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+      listRecentlyDeleted.mockResolvedValue([]);
+      reloadWatchedProject.mockResolvedValue({
+        ok: true,
+        value: { snapshot: restored, projectRevision: restored.projectRevision },
+      });
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Restore screenshot: Screen' }));
+      await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Restored “Screen”.'));
+      expect(undoDeleteScreenshot).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        undoToken: deleted.undoToken,
+      });
+      expect(useAppStore.getState().snapshot?.projectRevision).toBe('restored-revision');
+    },
+  );
+
+  it('allows immediate deletion Undo while a retained Restore warning is visible', async () => {
+    const deleted = {
+      kind: 'screenshot' as const,
+      undoToken: 'old-delete-token',
+      itemId: 'deleted',
+      title: 'Unconfirmed item',
+      collectionId: snapshot.project.collections[0].id,
+      deletedAt: '2026-01-05T10:00:00.000Z',
+    };
+    const message = `${COMMITTED_WRITE_WARNING} ${RESTORE_CONFIRMATION_FAILURE} Reload and compare.`;
+    const undoDeleteScreenshot = vi
+      .fn<ImnotaBridge['undoDeleteScreenshot']>()
+      .mockRejectedValueOnce(new Error(message))
+      .mockImplementation(async () => persisted);
+    const duplicateScreenshot = vi.fn<ImnotaBridge['duplicateScreenshot']>(async () => persisted);
+    const deleteScreenshot = vi.fn<ImnotaBridge['deleteScreenshot']>(async () => ({
+      snapshot: persisted,
+      undoToken: 'new-delete-token',
+    }));
+    const { editingSnapshot: persisted } = await renderEditingProject({
+      listRecentlyDeleted: async () => [deleted],
+      undoDeleteScreenshot,
+      duplicateScreenshot,
+      deleteScreenshot,
+      reloadWatchedProject: async () => ({
+        ok: true,
+        value: { snapshot: persisted, projectRevision: 'project-2' },
+      }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recently deleted' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Recently deleted' });
+    fireEvent.click(
+      await within(dialog).findByRole('button', { name: 'Restore screenshot: Unconfirmed item' }),
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+    await waitFor(() => expect(duplicateScreenshot).toHaveBeenCalledOnce());
+    // Wait for adoption, then use the normal confirmed deletion and its Undo offer.
+    await waitFor(() => expect(useAppStore.getState().snapshot).not.toBe(persisted));
+    act(() =>
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } })),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }));
+    const undo = await screen.findByRole('button', { name: 'Undo' });
+    expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
+    fireEvent.click(undo);
+    await waitFor(() => expect(undoDeleteScreenshot).toHaveBeenCalledTimes(2));
+    expect(undoDeleteScreenshot).toHaveBeenLastCalledWith({
+      projectPath: snapshot.projectPath,
+      undoToken: 'new-delete-token',
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument());
+    expect(screen.getByTestId('external-change-banner')).toHaveTextContent(message);
   });
 
   it('restores from Recently deleted through the Undo bridge and shows an Undo conflict in the dialog', async () => {
@@ -2161,7 +2613,7 @@ describe('feedback controls', () => {
     await waitFor(() => expect(repeatLastRegionCapture).toHaveBeenCalledOnce());
   });
 
-  it('starts a cancellable 3s capture delay from the Add menu', async () => {
+  it.each([3, 5] as const)('starts a cancellable %ss capture delay from the Add menu', async (seconds) => {
     Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
     const startRegionCapture = vi.fn(async () => ({
       ok: false as const,
@@ -2181,46 +2633,16 @@ describe('feedback controls', () => {
       startRegionCapture,
     });
     await screen.findByTestId('add-screenshot');
-    takeDelayedScreenshot(3);
+    takeDelayedScreenshot(seconds);
     await waitFor(() =>
       expect(startRegionCapture).toHaveBeenCalledWith({
         projectPath: '/workspace/project',
         collectionId: '001-collection',
-        delaySeconds: 3,
+        delaySeconds: seconds,
         overlayMode: 'region',
       }),
     );
     expect(screen.queryByText('Screen capture cancelled.')).not.toBeInTheDocument();
-  });
-
-  it('starts a 5s capture delay from the Add menu', async () => {
-    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
-    const startRegionCapture = vi.fn(async () => ({
-      ok: false as const,
-      error: { code: 'capture-cancelled' as const, message: 'Screen capture cancelled.', retryable: false },
-    }));
-    await renderEditingProject({
-      getPreferenceSettings: async () => ({
-        ok: true,
-        value: {
-          settings: {
-            ...DEFAULT_PREFERENCE_SETTINGS,
-            capture: { experimentalRegionCapture: true },
-          },
-          profile: { settingsFileExists: true, migratedFromLegacyProfile: false },
-        },
-      }),
-      startRegionCapture,
-    });
-    takeDelayedScreenshot(5);
-    await waitFor(() =>
-      expect(startRegionCapture).toHaveBeenCalledWith({
-        projectPath: '/workspace/project',
-        collectionId: '001-collection',
-        delaySeconds: 5,
-        overlayMode: 'region',
-      }),
-    );
   });
 
   it('starts capture from the global hotkey IPC', async () => {
@@ -3397,6 +3819,434 @@ describe('feedback controls', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Project metadata is unavailable');
     expect(screen.queryByRole('dialog', { name: 'Edit project' })).not.toBeInTheDocument();
   });
+
+  it('unpins a project that is not open through a revision-checked metadata update', async () => {
+    let favourite = true;
+    const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async (input) => {
+      favourite = input.patch.favourite ?? favourite;
+      return { ...snapshot, projectRevision: 'project-2', project: { ...snapshot.project, favourite } };
+    });
+    renderApp({
+      listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, favourite }],
+      loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+      updateProjectMetadata,
+    });
+    const unpin = await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` });
+    const pinned = within(document.getElementById('pinned-projects')!);
+    expect(pinned.getByRole('button', { name: `Unpin ${snapshot.project.name}` })).toBe(unpin);
+    fireEvent.click(unpin);
+
+    expect(await pinned.findByText(/Pin a project from Recent/)).toBeInTheDocument();
+    expect(updateProjectMetadata).toHaveBeenCalledExactlyOnceWith({
+      projectPath: snapshot.projectPath,
+      expectedRevision: 'project-1',
+      patch: { favourite: false },
+    });
+    expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+  });
+  describe.each([true, false])('safe closed-project pin errors (initially pinned: %s)', (favourite) => {
+    const privatePath = 'C:\\Users\\PrivateName\\PrivateWorkspace\\project\\project.json';
+    it.each<[string, string, string, string?]>([
+      [
+        'EACCES',
+        `EACCES: permission denied, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EPERM',
+        `EPERM: operation not permitted, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EROFS',
+        `EROFS: read-only file system, open '${privatePath}'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'revision conflict',
+        'The project changed before this update. Reload it and try again.',
+        'The project changed. Try again.',
+      ],
+      [
+        'ENOSPC',
+        `ENOSPC: no space left on device, write '${privatePath}'`,
+        'The disk is full. Free up space and try again.',
+      ],
+      [
+        'ENOSPC with EACCES in the path',
+        `ENOSPC: no space left on device, write '${privatePath}\\EACCES\\project.json'`,
+        'The disk is full. Free up space and try again.',
+      ],
+      [
+        'EACCES with ENOSPC in the path',
+        `EACCES: permission denied, open '${privatePath}\\ENOSPC\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'EACCES with ENOENT in the path',
+        `EACCES: permission denied, open '${privatePath}\\ENOENT\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+      ],
+      [
+        'structured ENOSPC with EACCES in the path',
+        `Storage failure at '${privatePath}\\EACCES\\project.json'`,
+        'The disk is full. Free up space and try again.',
+        'ENOSPC',
+      ],
+      [
+        'structured EACCES with ENOSPC in the path',
+        `Storage failure at '${privatePath}\\ENOSPC\\project.json'`,
+        "The project folder can't be written. Check its permissions.",
+        'EACCES',
+      ],
+      [
+        'ENOENT',
+        `ENOENT: no such file or directory, open '${privatePath}'`,
+        'The project is no longer available.',
+      ],
+      ['project gone', 'The selected project folder is unavailable.', 'The project is no longer available.'],
+      [
+        'unknown',
+        `Unexpected storage failure at '${privatePath}'`,
+        `The project could not be ${favourite ? 'unpinned' : 'pinned'}. Try again.`,
+      ],
+      ...[
+        'EACCES',
+        'ENOENT',
+        'not found',
+        'missing',
+        'no such file',
+        'revision-conflict',
+        'The project changed before this update',
+        'The project changed while the save was prepared',
+        'The selected project folder is unavailable',
+      ].map<[string, string, string]>((pathToken) => [
+        `unknown with ${pathToken} only in the path`,
+        `Unexpected storage failure at '${privatePath}\\${pathToken}\\project.json'`,
+        `The project could not be ${favourite ? 'unpinned' : 'pinned'}. Try again.`,
+      ]),
+    ])('shows safe, actionable feedback for %s', async (_kind, detail, expectedMessage, code) => {
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(async () => {
+        throw Object.assign(
+          new Error(`Error invoking remote method 'project:update-metadata': Error: ${detail}`),
+          code ? { code } : {},
+        );
+      });
+      if (!favourite)
+        useAppStore.setState({
+          recentCollections: [
+            { projectPath: snapshot.projectPath, collectionId: '001-collection', openedAt: '2026-01-01' },
+          ],
+        });
+      renderApp({
+        listProjects: async () => [{ ...snapshot.project, projectPath: snapshot.projectPath, favourite }],
+        loadProject: async () => ({ ...snapshot, projectRevision: 'project-1' }),
+        updateProjectMetadata,
+      });
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: `${favourite ? 'Unpin' : 'Pin'} ${snapshot.project.name}`,
+        }),
+      );
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(expectedMessage);
+      expect(alert).not.toHaveTextContent(
+        /PrivateName|PrivateWorkspace|project\.json|[A-Z]:\\|EACCES|EPERM|EROFS|ENOSPC|ENOENT/,
+      );
+      expect(document.body).not.toHaveTextContent(detail);
+      expect(updateProjectMetadata).toHaveBeenCalledExactlyOnceWith({
+        projectPath: snapshot.projectPath,
+        expectedRevision: 'project-1',
+        patch: { favourite: !favourite },
+      });
+    });
+  });
+
+  it.each(['failure', 'success'] as const)(
+    'reports a closed-project unpin outcome after opening it mid-request (%s)',
+    async (outcome) => {
+      let disk = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      let rejectUpdate!: (reason: Error) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveUpdate = resolve;
+            rejectUpdate = reject;
+          }),
+      );
+      const listProjects = vi.fn(async () => [{ ...disk.project, projectPath: disk.projectPath }]);
+      renderApp({
+        listProjects,
+        loadProject: async () => disk,
+        updateProjectMetadata,
+        reloadWatchedProject: async () => ({
+          ok: true,
+          value: { snapshot: disk, projectRevision: disk.projectRevision },
+        }),
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+      const pinned = within(document.getElementById('pinned-projects')!);
+      fireEvent.click(pinned.getByRole('button', { name: `${snapshot.project.name} 1 collection` }));
+      await screen.findByRole('textbox', { name: 'Overall context' });
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(true);
+      const listCallsBeforeCompletion = listProjects.mock.calls.length;
+
+      await act(async () => {
+        if (outcome === 'failure')
+          rejectUpdate(
+            new Error(
+              "Error invoking remote method 'project:update-metadata': Error: Project metadata is unavailable.",
+            ),
+          );
+        else {
+          disk = {
+            ...disk,
+            projectRevision: 'project-2',
+            project: { ...disk.project, favourite: false },
+          };
+          resolveUpdate(disk);
+        }
+      });
+
+      if (outcome === 'failure') {
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'The project could not be unpinned. Try again.',
+        );
+        expect(pinned.getByRole('button', { name: `Unpin ${snapshot.project.name}` })).toBeInTheDocument();
+      } else {
+        expect(await pinned.findByText(/Pin a project from Recent/)).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      }
+      await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(listCallsBeforeCompletion + 1));
+      expect(useAppStore.getState().snapshot?.projectPath).toBe(snapshot.projectPath);
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(disk.project.favourite);
+      expect(screen.getByRole('textbox', { name: 'Overall context' })).toBeInTheDocument();
+    },
+  );
+
+  it('finishes an in-flight editor save before starting a closed-project pin mutation', async () => {
+    const closed = {
+      ...snapshot,
+      projectPath: '/workspace/closed',
+      projectRevision: 'closed-1',
+      project: { ...snapshot.project, id: 'closed', name: 'Closed project', favourite: true },
+    };
+    let resolveSave!: (value: Awaited<ReturnType<ImnotaBridge['saveProjectCompareAndSwap']>>) => void;
+    const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const loadProject = vi.fn(async () => closed);
+    const updateProjectMetadata = vi.fn(async () => ({
+      ...closed,
+      projectRevision: 'closed-2',
+      project: { ...closed.project, favourite: false },
+    }));
+    const { editingSnapshot } = await renderEditingProject({
+      listProjects: async () => [{ ...closed.project, projectPath: closed.projectPath }],
+      loadProject,
+      updateProjectMetadata,
+      saveProjectCompareAndSwap: saveMetadata,
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Overall context' }), {
+      target: { value: 'Already saving' },
+    });
+    fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+    await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Unpin Closed project' })));
+    expect(loadProject).not.toHaveBeenCalled();
+    expect(updateProjectMetadata).not.toHaveBeenCalled();
+    await act(async () =>
+      resolveSave({
+        ok: true,
+        value: {
+          snapshot: { ...editingSnapshot, project: saveMetadata.mock.calls[0]![0].project },
+          projectRevision: 'project-saved',
+        },
+      }),
+    );
+    await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+    expect(useAppStore.getState().snapshot?.projectPath).toBe(editingSnapshot.projectPath);
+    expect(useAppStore.getState().snapshot?.project.collections[0]?.overallContext).toBe('Already saving');
+  });
+
+  it.each(['before', 'after', 'toolbar repin', 'sidebar unpin', 'navigation during reload'] as const)(
+    'reconciles a closed-project unpin with an open editor (%s)',
+    async (editTiming) => {
+      const pinnedSnapshot = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let disk = {
+        ...pinnedSnapshot,
+        projectRevision: 'project-2',
+        project: { ...snapshot.project, favourite: false },
+      };
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve) => {
+            resolveUpdate = resolve;
+          }),
+      );
+      const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(async (input) => {
+        expect(input.expectedRevision).toBe(disk.projectRevision);
+        disk = { ...disk, project: input.project, projectRevision: 'project-3' };
+        return { ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } };
+      });
+      let resolveReload!: (value: Awaited<ReturnType<WorkflowBridge['reloadWatchedProject']>>) => void;
+      const reloadWatchedProject = vi.fn<WorkflowBridge['reloadWatchedProject']>(async () => {
+        if (editTiming === 'navigation during reload')
+          return new Promise((resolve) => {
+            resolveReload = resolve;
+          });
+        return { ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } };
+      });
+      renderApp({
+        listProjects: async () => [{ ...pinnedSnapshot.project, projectPath: snapshot.projectPath }],
+        loadProject: async () => pinnedSnapshot,
+        updateProjectMetadata,
+        startProjectWatch: async ({ projectPath }) => ({
+          ok: true,
+          value: { watchId: 'watch', projectPath, projectRevision: 'project-2' },
+        }),
+        reloadWatchedProject,
+        openProjectDialog: async () => disk,
+        saveProjectCompareAndSwap: saveMetadata,
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+      fireEvent.click(
+        within(document.getElementById('pinned-projects')!).getByRole('button', {
+          name: `${snapshot.project.name} 1 collection`,
+        }),
+      );
+      let context = await screen.findByRole('textbox', { name: 'Overall context' });
+      if (editTiming === 'before') fireEvent.change(context, { target: { value: 'Context during unpin' } });
+      if (editTiming === 'toolbar repin')
+        fireEvent.click(screen.getByRole('button', { name: 'Remove from favourites' }));
+      if (editTiming === 'sidebar unpin')
+        fireEvent.click(
+          within(document.getElementById('pinned-projects')!).getByRole('button', {
+            name: `Unpin ${snapshot.project.name}`,
+          }),
+        );
+      await act(async () => resolveUpdate(disk));
+      if (editTiming === 'navigation during reload') {
+        await waitFor(() => expect(reloadWatchedProject).toHaveBeenCalledOnce());
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        await screen.findByTestId('settings-view');
+        await act(async () =>
+          resolveReload({ ok: true, value: { snapshot: disk, projectRevision: disk.projectRevision } }),
+        );
+        expect(useAppStore.getState().view).toBe('settings');
+        expect(useAppStore.getState().snapshot).toBeNull();
+        fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+        context = await screen.findByRole('textbox', { name: 'Overall context' });
+      }
+      if (editTiming !== 'before') fireEvent.change(context, { target: { value: 'Context during unpin' } });
+      fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+      await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+      expect(saveMetadata.mock.calls[0]![0].project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(disk.project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(disk.project.collections[0]?.overallContext).toBe('Context during unpin');
+      expect(useAppStore.getState().snapshot?.project.favourite).toBe(editTiming === 'toolbar repin');
+      expect(updateProjectMetadata).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['success', 'error', 'navigation during load', 'navigation during update'] as const)(
+    'releases the closed-project pin mutation so later editor saves can complete (%s)',
+    async (outcome) => {
+      const pinnedSnapshot = {
+        ...snapshot,
+        projectRevision: 'project-1',
+        project: { ...snapshot.project, favourite: true },
+      };
+      let resolveLoad!: (value: ProjectSnapshot) => void;
+      const loadProject = vi.fn<ImnotaBridge['loadProject']>(
+        () =>
+          new Promise((resolve) => {
+            resolveLoad = resolve;
+          }),
+      );
+      let resolveUpdate!: (value: ProjectSnapshot) => void;
+      let rejectUpdate!: (reason: Error) => void;
+      const updateProjectMetadata = vi.fn<ImnotaBridge['updateProjectMetadata']>(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveUpdate = resolve;
+            rejectUpdate = reject;
+          }),
+      );
+      const saveMetadata = vi.fn<ImnotaBridge['saveProjectCompareAndSwap']>(async ({ project }) => ({
+        ok: true,
+        value: { snapshot: { ...pinnedSnapshot, project }, projectRevision: 'project-saved' },
+      }));
+      const listProjects = vi.fn(async () => [
+        { ...pinnedSnapshot.project, projectPath: snapshot.projectPath },
+      ]);
+      renderApp({
+        listProjects,
+        loadProject,
+        updateProjectMetadata,
+        saveProjectCompareAndSwap: saveMetadata,
+        openProjectDialog: async () => pinnedSnapshot,
+      });
+      fireEvent.click(await screen.findByRole('button', { name: `Unpin ${snapshot.project.name}` }));
+      await waitFor(() => expect(loadProject).toHaveBeenCalledOnce());
+      if (outcome === 'navigation during load') {
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        await screen.findByTestId('settings-view');
+      }
+      await act(async () => resolveLoad(pinnedSnapshot));
+      if (outcome === 'navigation during load') {
+        expect(updateProjectMetadata).not.toHaveBeenCalled();
+      } else {
+        await waitFor(() => expect(updateProjectMetadata).toHaveBeenCalledOnce());
+        if (outcome === 'navigation during update') {
+          fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+          await screen.findByTestId('settings-view');
+        }
+        await act(async () => {
+          if (outcome === 'error') rejectUpdate(new Error('Pin update failed'));
+          else
+            resolveUpdate({
+              ...pinnedSnapshot,
+              projectRevision: 'project-2',
+              project: { ...pinnedSnapshot.project, favourite: false },
+            });
+        });
+      }
+      if (outcome.startsWith('navigation')) {
+        expect(useAppStore.getState().view).toBe('settings');
+        expect(useAppStore.getState().snapshot).toBeNull();
+      }
+      if (outcome === 'error')
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'The project could not be unpinned. Try again.',
+        );
+      if (outcome === 'success') expect(listProjects).toHaveBeenCalledTimes(2);
+      fireEvent.keyDown(window, { key: 'o', code: 'KeyO', ctrlKey: true });
+      const context = await screen.findByRole('textbox', { name: 'Overall context' });
+      fireEvent.change(context, { target: { value: 'Save after pin operation' } });
+      fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true });
+      await waitFor(() => expect(saveMetadata).toHaveBeenCalledOnce());
+      expect(saveMetadata.mock.calls[0]![0].project.collections[0]?.overallContext).toBe(
+        'Save after pin operation',
+      );
+    },
+  );
 
   it('archives a project and restores it from the Undo action with the returned revision', async () => {
     let archived = false;

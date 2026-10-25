@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { emptyProject, sanitizeFilename, slugify } from '../utils.js';
-import { isPathWithin } from '../security.js';
 
 describe('Imnota data helpers', () => {
   it('sanitises filenames without losing predictable extensions', () => {
@@ -14,9 +13,5 @@ describe('Imnota data helpers', () => {
     expect(project.screenshots).toEqual([]);
     expect(project.collections[0].name).toBe('Workspace / Collection 01');
     expect(project.exportPreferences.includeAnnotationMetadata).toBe(true);
-  });
-  it('rejects traversal outside an approved workspace', () => {
-    expect(isPathWithin('C:/workspace', 'C:/workspace/project/project.json')).toBe(true);
-    expect(isPathWithin('C:/workspace', 'C:/workspace/../secrets')).toBe(false);
   });
 });

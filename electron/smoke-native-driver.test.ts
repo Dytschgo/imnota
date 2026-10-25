@@ -11,11 +11,15 @@ import {
   boundedSmokeDiagnostic,
   withSmokeDeadline,
   SMOKE_CAPTURE_PREPARATION,
+  SMOKE_CANVAS_CAPTURE_PREPARATION,
+  locatorWaitScript,
+  SMOKE_RENDERER_DIAGNOSTIC,
   mapSourcePointToPromptPixel,
   pathIsWithin,
   safeArtifactPath,
   sourceBoxInteriorPoint,
   validateCreatedSmokeDirectory,
+  type SmokeCapture,
 } from './smoke-native-driver.js';
 
 const temporary: string[] = [];
@@ -24,6 +28,73 @@ afterEach(async () => {
 });
 
 describe('native smoke driver', () => {
+  it.each(['hidden', 'missing'])(
+    'samples failed-wait target geometry and post-failure event-loop lag: %s',
+    async (mode) => {
+      const renderer = {};
+      const context = {
+        window: renderer,
+        globalThis: renderer,
+        document: {
+          body: { innerText: 'Synthetic library' },
+          activeElement: null,
+          hasFocus: () => false,
+          querySelectorAll: () =>
+            mode === 'missing'
+              ? []
+              : [
+                  {
+                    getAttribute: () => null,
+                    textContent: 'Projects',
+                    matches: () => false,
+                    getBoundingClientRect: () => ({ x: 10, y: 20, width: 800, height: 600 }),
+                  },
+                ],
+          addEventListener() {},
+          removeEventListener() {},
+        },
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+        HTMLLabelElement: class {},
+        getComputedStyle: () => ({ visibility: 'hidden', display: 'block', opacity: '1' }),
+        requestAnimationFrame: () => {},
+        performance: { now: vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(17) },
+        setTimeout: (callback: () => void) => callback(),
+      };
+      let settled = false;
+      const waiting = runInNewContext(locatorWaitScript({ selector: '.library' }, {}), context);
+      void waiting.then(() => {
+        settled = true;
+      });
+      const sample = await runInNewContext(SMOKE_RENDERER_DIAGNOSTIC, context);
+      expect(sample).toMatchObject({
+        sampledAt: expect.any(String),
+        eventLoopLagMs: 7,
+        documentHasFocus: false,
+        wait: { locator: { selector: '.library' }, sampledAt: expect.any(String) },
+      });
+      expect(sample.wait.target).toEqual(
+        mode === 'missing'
+          ? null
+          : {
+              visible: false,
+              visibility: 'hidden',
+              display: 'block',
+              opacity: '1',
+              x: 10,
+              y: 20,
+              width: 800,
+              height: 600,
+              text: 'Projects',
+              disabled: false,
+            },
+      );
+      expect(settled).toBe(false); // Diagnostic sampling cannot satisfy readiness.
+    },
+  );
+
   it.each(['deferred', 'fast', 'failure', 'missing', 'wrong-action'] as const)(
     'observes only the new onboarding copy attempt (%s)',
     async (mode) => {
@@ -237,7 +308,9 @@ describe('native smoke driver', () => {
     const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
     temporary.push(parent);
     vi.mocked(window.webContents.executeJavaScript).mockResolvedValue(undefined);
-    await expect(driver.capture(parent, 'hung.png')).rejects.toThrow('Page capture hung.png timed out');
+    await expect(driver.capture(parent, 'hung.png', 'none')).rejects.toThrow(
+      'Page capture hung.png timed out',
+    );
     await expect(fs.stat(path.join(parent, 'hung.png'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -487,17 +560,304 @@ describe('native smoke driver', () => {
     expect(executeJavaScript).toHaveBeenCalledWith(expect.stringContaining('window.innerWidth'), true);
   });
 
-  it('retries locator polling when navigation replaces the renderer execution context', async () => {
+  it('reports a replaced renderer execution context without retrying the failed wait', async () => {
     const executeJavaScript = vi
       .fn()
       .mockRejectedValueOnce(new Error('Script failed to execute'))
       .mockResolvedValueOnce({ x: 4, y: 8, width: 20, height: 10, text: 'Ready', disabled: false });
     const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
 
-    await expect(new NativeUiDriver(window, 200).waitFor({ text: 'Ready' })).resolves.toEqual(
-      expect.objectContaining({ text: 'Ready' }),
+    await expect(new NativeUiDriver(window, 200).waitFor({ text: 'Ready' })).rejects.toThrow(
+      'Script failed to execute',
     );
-    expect(executeJavaScript).toHaveBeenCalledTimes(2);
+    expect(executeJavaScript).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits through startup in one renderer evaluation and resolves the first ready frame', async () => {
+    let frame: (() => void) | undefined;
+    let mounted = false;
+    const element = {
+      getAttribute: () => null,
+      textContent: 'Projects',
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      matches: () => false,
+    };
+    const executeJavaScript = vi.fn((source: string) =>
+      runInNewContext(source, {
+        document: {
+          querySelectorAll: () => (mounted ? [element] : []),
+          addEventListener() {},
+          removeEventListener() {},
+        },
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+        getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+        HTMLLabelElement: class {},
+        requestAnimationFrame: (callback: () => void) => {
+          frame = callback;
+        },
+      }),
+    );
+    const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+    const ready = new NativeUiDriver(window).waitFor({ selector: '.library' });
+    await Promise.resolve();
+    expect(frame).toBeTypeOf('function');
+    frame!(); // Healthy startup has not mounted the library yet.
+    mounted = true;
+    frame!();
+    await expect(ready).resolves.toMatchObject({ text: 'Projects', width: 800 });
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+  });
+
+  it('keeps absent and enabled locator conditions in the renderer wait', async () => {
+    const disabled = {
+      getAttribute: () => null,
+      textContent: 'Saving',
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 20, height: 20 }),
+      matches: () => true,
+    };
+    let elements = [disabled];
+    let frame!: () => void;
+    const context = {
+      document: { querySelectorAll: () => elements, addEventListener() {}, removeEventListener() {} },
+      MutationObserver: class {
+        observe() {}
+        disconnect() {}
+      },
+      getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+      HTMLLabelElement: class {},
+      requestAnimationFrame: (callback: () => void) => {
+        frame = callback;
+      },
+    };
+    const absent = runInNewContext(locatorWaitScript({ selector: '.saving' }, { absent: true }), context);
+    elements = [];
+    frame();
+    await expect(absent).resolves.toMatchObject({ width: 0 });
+    elements = [disabled];
+    const enabled = runInNewContext(locatorWaitScript({ text: 'Saving' }, { enabled: true }), context);
+    frame(); // A present but disabled control is not ready.
+    disabled.matches = () => false;
+    frame();
+    await expect(enabled).resolves.toMatchObject({ disabled: false });
+  });
+
+  it.each(['mutation', 'focus'])(
+    'observes %s readiness even when the window receives no animation frame',
+    async (signal) => {
+      let ready = false;
+      let mutation!: () => void;
+      const listeners = new Map<string, () => void>();
+      const disconnect = vi.fn();
+      const cancelFrame = vi.fn();
+      const element = {
+        getAttribute: () => null,
+        textContent: 'Ready',
+        getBoundingClientRect: () => ({ x: 0, y: 0, width: 200, height: 100 }),
+        matches: () => false,
+      };
+      const result = runInNewContext(
+        locatorWaitScript({ selector: signal === 'focus' ? 'summary:focus' : '.library' }, {}),
+        {
+          document: {
+            querySelectorAll: () => (ready ? [element] : []),
+            addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+            removeEventListener: (name: string) => listeners.delete(name),
+          },
+          MutationObserver: class {
+            constructor(callback: () => void) {
+              mutation = callback;
+            }
+            observe() {}
+            disconnect = disconnect;
+          },
+          getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+          HTMLLabelElement: class {},
+          requestAnimationFrame: () => 1,
+          cancelAnimationFrame: cancelFrame,
+        },
+      );
+      ready = true;
+      if (signal === 'mutation') mutation();
+      else listeners.get('focusin')!();
+      await expect(result).resolves.toMatchObject({ text: 'Ready' });
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(cancelFrame).toHaveBeenCalledWith(1);
+      expect(listeners.size).toBe(0);
+    },
+  );
+
+  it('fails a never-ready startup at the unchanged deadline with the locator and no evaluation retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const executeJavaScript = vi.fn((source: string) =>
+        runInNewContext(source, {
+          document: { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} },
+          MutationObserver: class {
+            observe() {}
+            disconnect() {}
+          },
+          requestAnimationFrame: () => {},
+        }),
+      );
+      const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+      const failure = expect(new NativeUiDriver(window).waitFor({ selector: '.library' })).rejects.toThrow(
+        'Failed waiting for {"selector":".library"} within 15000ms',
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      await failure;
+      expect(executeJavaScript).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['loading', 'failed', 'ready', 'no-canvas'])(
+    'checks off-DOM canvas readiness before capturing: %s',
+    async (state) => {
+      let check!: () => void;
+      const disconnect = vi.fn();
+      let loading = state === 'loading' || state === 'failed';
+      const canvas = {
+        querySelector: (selector: string) =>
+          selector.includes('canvas-load-state')
+            ? loading
+              ? { dataset: { state } }
+              : null
+            : loading
+              ? null
+              : { width: 1920, height: 1080 },
+      };
+      let settled = false;
+      const ready = runInNewContext(SMOKE_CANVAS_CAPTURE_PREPARATION, {
+        document: { body: {}, querySelectorAll: () => (state === 'no-canvas' ? [] : [canvas]) },
+        MutationObserver: class {
+          constructor(callback: () => void) {
+            check = callback;
+          }
+          observe() {}
+          disconnect = disconnect;
+        },
+      });
+      void ready.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      if (state === 'failed') {
+        await expect(ready).rejects.toThrow('selected screenshot failed to load');
+      } else {
+        if (state === 'loading') {
+          await Promise.resolve();
+          expect(settled).toBe(false);
+          loading = false;
+          check();
+        }
+        await ready;
+      }
+      expect(disconnect).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    'missing-canvas',
+    'loading',
+    'missing-stage',
+    'zero-width',
+    'zero-height',
+    'wrong-screenshot',
+    'wrong-dimensions',
+  ])('waits for the intended screenshot after a canvas remount: %s', async (initial) => {
+    let state = initial;
+    let check!: () => void;
+    const disconnect = vi.fn();
+    const canvas = {
+      querySelector: (selector: string) => {
+        if (selector.includes('canvas-load-state'))
+          return state === 'loading' ? { dataset: { state: 'loading' } } : null;
+        if (selector.includes('canvas-meta'))
+          return { textContent: state === 'wrong-dimensions' ? '100 × 100' : '1920 × 1080' };
+        if (state === 'missing-stage') return null;
+        return {
+          width: state === 'zero-width' ? 0 : 800,
+          height: state === 'zero-height' ? 0 : 600,
+        };
+      },
+    };
+    const executeJavaScript = vi.fn((source: string) =>
+      runInNewContext(source, {
+        document: {
+          body: {},
+          querySelectorAll: () => (state === 'missing-canvas' ? [] : [canvas]),
+          querySelector: (selector: string) => {
+            expect(selector).toBe('.shot-item.active [data-testid="screenshot-fixture"]');
+            return state === 'wrong-screenshot' ? null : {};
+          },
+        },
+        MutationObserver: class {
+          constructor(callback: () => void) {
+            check = callback;
+          }
+          observe() {}
+          disconnect = disconnect;
+        },
+      }),
+    );
+    const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+    let settled = false;
+    const ready = new NativeUiDriver(window).waitForScreenshotCanvas({
+      id: 'fixture',
+      originalWidth: 1920,
+      originalHeight: 1080,
+    });
+    void ready.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    check(); // Repeated DOM changes cannot make an incomplete screenshot ready.
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    state = 'ready';
+    check();
+    await ready;
+    expect(settled).toBe(true);
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it.each(['failed', 'loading'])('fails loudly when the screenshot stays %s', async (state) => {
+    vi.useFakeTimers();
+    try {
+      const executeJavaScript = vi.fn((source: string) =>
+        runInNewContext(source, {
+          document: {
+            body: {},
+            querySelectorAll: () => [{ querySelector: () => ({ dataset: { state } }) }],
+          },
+          MutationObserver: class {
+            observe() {}
+            disconnect() {}
+          },
+        }),
+      );
+      const window = { webContents: { executeJavaScript } } as unknown as BrowserWindow;
+      const ready = new NativeUiDriver(window, 50).waitForScreenshotCanvas();
+      const failure = expect(ready).rejects.toThrow(
+        state === 'failed'
+          ? 'selected screenshot failed to load'
+          : 'Selected screenshot canvas did not render within 50ms',
+      );
+      await vi.advanceTimersByTimeAsync(50);
+      await failure;
+      expect(executeJavaScript).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fails a viewport matrix entry when the OS clamps its content size', async () => {
@@ -526,14 +886,18 @@ describe('native smoke driver', () => {
           toPNG: () => png,
           getSize: () => ({ width: 2560, height: 1600 }),
         })),
-        executeJavaScript: vi.fn(async () => ({
-          cssViewport: { width: 1280, height: 800 },
-          devicePixelRatio: 2,
-        })),
+        executeJavaScript: vi.fn(async (source: string) =>
+          source.includes('cssViewport:')
+            ? {
+                cssViewport: { width: 1280, height: 800 },
+                devicePixelRatio: 2,
+              }
+            : undefined,
+        ),
       },
     } as unknown as BrowserWindow;
 
-    const capture = await new NativeUiDriver(window, 1_000).capture(artifacts, 'matrix.png');
+    const capture = await new NativeUiDriver(window, 1_000).capture(artifacts, 'matrix.png', 'none');
 
     expect(capture).toEqual({
       path: path.join(artifacts, 'matrix.png'),
@@ -543,6 +907,222 @@ describe('native smoke driver', () => {
     });
     expect(await fs.readFile(capture.path)).toEqual(png);
     expect(window.webContents.capturePage).toHaveBeenCalledTimes(3);
+    expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('const capture = true'),
+      true,
+    );
+    expect(window.webContents.executeJavaScript).toHaveBeenNthCalledWith(2, SMOKE_CAPTURE_PREPARATION, true);
+  });
+
+  it.each([
+    'before-frames',
+    'initial-gap',
+    'initial-loading',
+    'churning',
+    'third-frame',
+    'transient-remount',
+    'missing-canvas',
+    'wrong-screenshot',
+    'wrong-dimensions',
+    'deadline',
+    'failed',
+    'no-canvas',
+    'selected-text',
+    'selected-drawing',
+    'stage-replaced',
+    'settled-churn',
+  ])('guards captured pixels across canvas changes: %s', async (scenario) => {
+    const parent = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-driver-test-')));
+    temporary.push(parent);
+    const artifacts = path.join(parent, 'imnota-verification-artifacts-remount');
+    await fs.mkdir(artifacts);
+    vi.useFakeTimers();
+    try {
+      const expected = { id: 'fixture', originalWidth: 1920, originalHeight: 1080 };
+      const observers = new Set<() => void>();
+      const notify = () => {
+        for (const check of [...observers]) check();
+      };
+      let loading = false;
+      let failed = false;
+      let missing = false;
+      let wrongScreenshot = false;
+      let wrongDimensions = false;
+      let stage = { width: 800, height: 600 };
+      let recovered = false;
+      const canvasFree = ['no-canvas', 'selected-text', 'selected-drawing'].includes(scenario);
+      const selected = { getAttribute: () => `screenshot-${canvasFree ? scenario : 'fixture'}` };
+      const canvas = {
+        querySelector: (selector: string) => {
+          if (selector.includes('canvas-load-state'))
+            return loading ? { dataset: { state: failed ? 'failed' : 'loading' } } : null;
+          if (selector.includes('canvas-meta'))
+            return { textContent: wrongDimensions ? '100 × 100' : '1920 × 1080' };
+          return loading ? null : stage;
+        },
+      };
+      const renderer = {};
+      const context = {
+        window: renderer,
+        document: {
+          body: {},
+          fonts: { ready: Promise.resolve() },
+          images: [],
+          querySelectorAll: () => (canvasFree || missing ? [] : [canvas]),
+          querySelector: () => (wrongScreenshot || scenario === 'no-canvas' ? null : selected),
+        },
+        MutationObserver: class {
+          constructor(private check: () => void) {}
+          observe() {
+            observers.add(this.check);
+          }
+          disconnect() {
+            observers.delete(this.check);
+          }
+        },
+        requestAnimationFrame: (callback: () => void) => callback(),
+      };
+      const executeJavaScript = vi.fn((source: string) => {
+        if (source.includes('cssViewport:'))
+          return Promise.resolve({ cssViewport: { width: 1280, height: 800 }, devicePixelRatio: 1 });
+        return runInNewContext(source, context);
+      });
+      const capturePage = vi.fn(async () => {
+        const value = recovered || canvasFree ? 'loaded' : 'loading';
+        const changeAt = scenario === 'third-frame' || scenario === 'transient-remount' ? 3 : 1;
+        if (scenario === 'churning' || (scenario === 'settled-churn' && capturePage.mock.calls.length <= 2)) {
+          // Each new stage is already loaded by the post-frame check; none may
+          // extend the one capture budget or contribute to an accepted sequence.
+          vi.setSystemTime(Date.now() + 200);
+          stage = { width: 800, height: 600 };
+          notify();
+          if (scenario === 'settled-churn') recovered = true;
+        } else if (scenario === 'stage-replaced' && capturePage.mock.calls.length === 1) {
+          stage = { width: 800, height: 600 };
+          notify();
+          recovered = true;
+        } else if (
+          !canvasFree &&
+          scenario !== 'initial-gap' &&
+          scenario !== 'initial-loading' &&
+          capturePage.mock.calls.length === changeAt
+        ) {
+          loading = true;
+          missing = scenario === 'missing-canvas';
+          wrongScreenshot = scenario === 'wrong-screenshot';
+          wrongDimensions = scenario === 'wrong-dimensions';
+          failed = scenario === 'failed';
+          notify();
+          if (scenario === 'transient-remount') {
+            loading = false;
+            stage = { width: 800, height: 600 };
+            notify();
+            recovered = true;
+          }
+        }
+        return {
+          isEmpty: () => false,
+          toPNG: () => Buffer.from(value),
+          getSize: () => ({ width: 1280, height: 800 }),
+        };
+      });
+      const window = { webContents: { executeJavaScript, capturePage } } as unknown as BrowserWindow;
+      const driver = new NativeUiDriver(window, 1_000);
+      // Establish the same successful workflow wait that preceded the failed artifact.
+      if (!canvasFree) await driver.waitForScreenshotCanvas(expected);
+      if (scenario === 'initial-gap') missing = true;
+      if (scenario === 'initial-loading') loading = true;
+      const result = driver.capture(
+        artifacts,
+        'remount.png',
+        scenario === 'before-frames' || scenario === 'initial-gap' ? expected : 'none',
+      );
+      // Observe rejection immediately even when fake time advances before awaiting it.
+      void result.catch(() => undefined);
+      const failure =
+        scenario === 'deadline' || scenario === 'failed' || scenario === 'churning'
+          ? expect(result).rejects.toThrow(
+              scenario === 'failed'
+                ? 'selected screenshot failed to load'
+                : scenario === 'churning'
+                  ? 'Readiness restarts: 4 (stage-replaced=4)'
+                  : 'Readiness restarts: 1 (loading=1)',
+            )
+          : undefined;
+      void failure?.catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(200);
+      if (canvasFree) {
+        await vi.advanceTimersByTimeAsync(800);
+        const capture = await result;
+        expect(await fs.readFile(capture.path, 'utf8')).toBe('loaded');
+        expect(capture).not.toHaveProperty('readinessRestarts');
+        expect(capturePage).toHaveBeenCalledTimes(3);
+      } else if (failure) {
+        await vi.advanceTimersByTimeAsync(800);
+        await failure;
+        await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({ code: 'ENOENT' });
+      } else {
+        if (!['transient-remount', 'stage-replaced', 'settled-churn'].includes(scenario)) {
+          await expect(fs.stat(path.join(artifacts, 'remount.png'))).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
+          // The original identity and dimensions must remain required after a remount.
+          loading = false;
+          if (missing || wrongScreenshot || wrongDimensions) {
+            notify();
+            await vi.advanceTimersByTimeAsync(100);
+            expect(capturePage.mock.calls.length).toBe(scenario === 'initial-gap' ? 0 : 1);
+          }
+          missing = wrongScreenshot = wrongDimensions = false;
+          recovered = true;
+          stage = { width: 800, height: 600 };
+          notify();
+        }
+        await vi.advanceTimersByTimeAsync(200);
+        const capture = await result;
+        expect(await fs.readFile(capture.path, 'utf8')).toBe('loaded');
+        const reasons =
+          scenario === 'initial-gap' || scenario === 'initial-loading'
+            ? undefined
+            : scenario === 'missing-canvas'
+              ? { 'missing-canvas': 1 }
+              : scenario === 'wrong-screenshot'
+                ? { loading: 1, 'selection-changed': 1 }
+                : scenario === 'wrong-dimensions'
+                  ? { loading: 1, 'dimensions-changed': 1 }
+                  : scenario === 'stage-replaced'
+                    ? { 'stage-replaced': 1 }
+                    : scenario === 'settled-churn'
+                      ? { 'stage-replaced': 2 }
+                      : scenario === 'transient-remount'
+                        ? { loading: 1, 'stage-replaced': 1 }
+                        : { loading: 1 };
+        if (reasons) {
+          // Workflow reports serialize the full capture objects in artifacts.
+          const evidence = JSON.parse(JSON.stringify({ artifacts: [capture] })) as {
+            artifacts: SmokeCapture[];
+          };
+          expect(evidence.artifacts[0].readinessRestarts).toEqual({
+            count: scenario === 'settled-churn' ? 2 : 1,
+            reasons,
+          });
+        } else expect(capture).not.toHaveProperty('readinessRestarts');
+        expect(capturePage.mock.calls.length).toBe(
+          scenario === 'third-frame' || scenario === 'transient-remount'
+            ? 6
+            : scenario === 'settled-churn'
+              ? 5
+              : scenario === 'initial-gap' || scenario === 'initial-loading'
+                ? 3
+                : 4,
+        );
+      }
+      expect(renderer).not.toHaveProperty('__imnotaSmokeCanvasCapture');
+      expect(observers.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('discards partial compositor frames and requires three consecutive settled captures', async () => {
@@ -563,18 +1143,22 @@ describe('native smoke driver', () => {
     const window = {
       webContents: {
         capturePage,
-        executeJavaScript: vi.fn(async () => ({
-          cssViewport: { width: 1280, height: 800 },
-          devicePixelRatio: 1,
-        })),
+        executeJavaScript: vi.fn(async (source: string) =>
+          source.includes('cssViewport:')
+            ? {
+                cssViewport: { width: 1280, height: 800 },
+                devicePixelRatio: 1,
+              }
+            : undefined,
+        ),
       },
     } as unknown as BrowserWindow;
-    const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png');
+    const result = await new NativeUiDriver(window, 1_000).capture(artifacts, 'settled.png', 'none');
     expect(await fs.readFile(result.path)).toEqual(Buffer.from('settled'));
     expect(capturePage).toHaveBeenCalledTimes(5);
 
     capturePage.mockImplementation(async () => frame(String(capturePage.mock.calls.length)));
-    await expect(new NativeUiDriver(window, 100).capture(artifacts, 'moving.png')).rejects.toThrow(
+    await expect(new NativeUiDriver(window, 100).capture(artifacts, 'moving.png', 'none')).rejects.toThrow(
       'did not settle',
     );
     await expect(fs.stat(path.join(artifacts, 'moving.png'))).rejects.toMatchObject({ code: 'ENOENT' });

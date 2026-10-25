@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { atomicWrite, CommittedWriteError } from './files.js';
+import { atomicWrite, CommittedWriteError, type WrittenFileEvidence } from './files.js';
 
 const platform = process.platform;
 const rename = fs.rename.bind(fs);
@@ -23,6 +24,124 @@ afterEach(async () => {
   vi.restoreAllMocks();
   Object.defineProperty(process, 'platform', { value: platform });
   await fs.rm(directory, { recursive: true, force: true });
+});
+
+it('captures the exact binary write despite caller mutation, without reading the candidate', async () => {
+  const content = Uint8Array.from([0, 128, 255, 10]);
+  const expected = Buffer.from(content);
+  const open = fs.open.bind(fs);
+  const opened: unknown[] = [];
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    opened.push(args[1]);
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      const write = handle.writeFile.bind(handle);
+      vi.spyOn(handle, 'writeFile').mockImplementation(async (...options) => {
+        content.fill(42);
+        return write(...options);
+      });
+    }
+    return handle;
+  });
+  const read = vi.spyOn(fs, 'readFile');
+  let evidence: WrittenFileEvidence | undefined;
+  await atomicWrite(target, content, (value) => {
+    evidence = value;
+  });
+  expect(read).not.toHaveBeenCalled();
+  expect(opened).toEqual(platform === 'win32' ? ['wx'] : ['wx', 'r']);
+  expect(await fs.readFile(target)).toEqual(expected);
+  expect(evidence).toMatchObject({
+    size: BigInt(expected.length),
+    sha256: createHash('sha256').update(expected).digest('hex'),
+  });
+});
+
+it('bounds binary evidence allocations and hashes the chunks actually written during caller mutation', async () => {
+  const chunkSize = 64 * 1024;
+  const content = Buffer.alloc(2 * 1024 * 1024 + 17, 7);
+  const from = vi.spyOn(Buffer, 'from');
+  const alloc = vi.spyOn(Buffer, 'alloc');
+  const unsafe = vi.spyOn(Buffer, 'allocUnsafe');
+  const unsafeSlow = vi.spyOn(Buffer, 'allocUnsafeSlow');
+  const open = fs.open.bind(fs);
+  const writeSizes: number[] = [];
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      const write = handle.writeFile.bind(handle);
+      vi.spyOn(handle, 'writeFile').mockImplementation(async (data, ...options) => {
+        if (ArrayBuffer.isView(data)) writeSizes.push(data.byteLength);
+        // Mutation during each asynchronous write must not alter its private chunk.
+        content.fill(42);
+        return write(data, ...options);
+      });
+    }
+    return handle;
+  });
+  let evidence: WrittenFileEvidence | undefined;
+  try {
+    await atomicWrite(target, content, (value) => {
+      evidence = value;
+    });
+    const copiedSizes = from.mock.calls.flatMap(([value]) =>
+      ArrayBuffer.isView(value) ? [value.byteLength] : [],
+    );
+    const allocatedSizes = [...alloc.mock.calls, ...unsafe.mock.calls, ...unsafeSlow.mock.calls].map(
+      ([size]) => size,
+    );
+    expect([...copiedSizes, ...allocatedSizes].every((size) => size <= chunkSize)).toBe(true);
+  } finally {
+    from.mockRestore();
+    alloc.mockRestore();
+    unsafe.mockRestore();
+    unsafeSlow.mockRestore();
+  }
+  expect(writeSizes.length).toBe(Math.ceil(content.length / chunkSize));
+  expect(Math.max(...writeSizes)).toBe(chunkSize);
+  expect(writeSizes.reduce((sum, size) => sum + size, 0)).toBe(content.length);
+  const written = await fs.readFile(target);
+  expect(written.length).toBe(content.length);
+  expect(written.subarray(0, chunkSize).equals(Buffer.alloc(chunkSize, 7))).toBe(true);
+  expect(written.subarray(chunkSize).equals(Buffer.alloc(content.length - chunkSize, 42))).toBe(true);
+  expect(evidence).toMatchObject({
+    size: BigInt(written.length),
+    sha256: createHash('sha256').update(written).digest('hex'),
+  });
+});
+
+it.each(['Unicode: \u00e9\ud83d\ude00\ud800', '', Buffer.alloc(0)])(
+  'captures the exact UTF-8 or empty write: %j',
+  async (content) => {
+    let evidence: WrittenFileEvidence | undefined;
+    await atomicWrite(target, content, (value) => {
+      evidence = value;
+    });
+    const written = await fs.readFile(target);
+    expect(written).toEqual(Buffer.from(content));
+    expect(evidence).toMatchObject({
+      size: BigInt(written.length),
+      sha256: createHash('sha256').update(written).digest('hex'),
+    });
+  },
+);
+
+it('preserves the destination and captures no evidence when a later chunk fails', async () => {
+  const open = fs.open.bind(fs);
+  const error = failure('ENOSPC');
+  const capture = vi.fn();
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      const write = handle.writeFile.bind(handle);
+      vi.spyOn(handle, 'writeFile').mockImplementationOnce(write).mockRejectedValue(error);
+    }
+    return handle;
+  });
+  await expect(atomicWrite(target, Buffer.alloc(64 * 1024 + 1), capture)).rejects.toBe(error);
+  expect(capture).not.toHaveBeenCalled();
+  expect(await fs.readFile(target, 'utf8')).toBe('baseline');
+  expect(await fs.readdir(directory)).toEqual(['drawing.json']);
 });
 
 describe('durable replacement', () => {

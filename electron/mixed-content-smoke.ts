@@ -197,7 +197,7 @@ export async function exerciseMixedContent(
   );
   if (artifactDirectory) {
     await driver.resize({ width: 1440, height: 900 });
-    captures.push(await driver.capture(artifactDirectory, 'mixed-content-drawing.png'));
+    captures.push(await driver.capture(artifactDirectory, 'mixed-content-drawing.png', 'none'));
   }
   // Leaving the canvas flushes the source and PNG before selection can change.
   const savedTextId = (await host.readProject(projectPath)).contentItems?.find(
@@ -332,7 +332,7 @@ export async function exerciseMixedContent(
     await driver.evaluate(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
     );
-    captures.push(await driver.capture(artifactDirectory, 'mixed-content-text.png'));
+    captures.push(await driver.capture(artifactDirectory, 'mixed-content-text.png', 'none'));
   }
   // This project and all of its files were created by this smoke invocation.
   // Preserve the immediate Undo assertions above, then prove the later dialog path.
@@ -359,6 +359,8 @@ export async function exerciseMixedContent(
       })),
     );
     driver.setWindow(await host.reopenWindow());
+    if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+    driver.browserWindow.focus();
     for (const id of ids) {
       await driver.waitFor({ selector: `[data-testid="item-delete-${id}"]` });
       await driver.click({ selector: `[data-testid="item-delete-${id}"]` });
@@ -383,7 +385,7 @@ export async function exerciseMixedContent(
     await driver.click({ selector: '[data-testid="recently-deleted-open"]' });
     for (const id of ids) await driver.waitFor({ selector: `[data-testid="recently-deleted-${id}"]` });
     if (artifactDirectory)
-      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-three-kinds.png'));
+      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-three-kinds.png', 'none'));
     for (const id of ids) {
       await driver.click({ selector: `[data-testid="recently-deleted-${id}"] button` });
       await driver.waitFor({ selector: `[data-testid="recently-deleted-${id}"]` }, { absent: true });
@@ -399,13 +401,15 @@ export async function exerciseMixedContent(
     }
     await driver.waitFor({ selector: '.recently-deleted-empty' });
     if (artifactDirectory)
-      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-restored.png'));
+      captures.push(await driver.capture(artifactDirectory, 'recently-deleted-restored.png', 'none'));
     await driver.press('Escape');
     await driver.waitFor({ selector: '[data-testid="recently-deleted-dialog"]' }, { absent: true });
     for (const { relative, bytes } of before)
       if (!(await fs.readFile(path.join(projectPath, relative))).equals(bytes))
         throw new Error(`Recently deleted changed restored bytes: ${relative}`);
     driver.setWindow(await host.reopenWindow());
+    if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+    driver.browserWindow.focus();
     const reopened = await host.readProject(projectPath);
     const reopenedIds = [...reopened.screenshots, ...(reopened.contentItems ?? [])].map((item) => item.id);
     if (ids.some((id) => !reopenedIds.includes(id)))
@@ -432,7 +436,7 @@ export async function exerciseMixedContent(
         text: 'Unsafe journal token path',
       });
       if (artifactDirectory)
-        captures.push(await driver.capture(artifactDirectory, 'recently-deleted-list-error.png'));
+        captures.push(await driver.capture(artifactDirectory, 'recently-deleted-list-error.png', 'none'));
       const listed = await driver.evaluate<number>(
         `document.querySelectorAll('[data-testid="recently-deleted-dialog"] li').length`,
       );
