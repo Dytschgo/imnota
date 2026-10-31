@@ -27,11 +27,28 @@ int main(int argc, char **argv) {
     uuid_t owner_uuid;
     int result = 2;
     const char *observation = NULL;
-    if (lstatx_np(argv[2], &metadata, security) != 0 || !S_ISDIR(metadata.st_mode) ||
-        filesec_get_property(security, FILESEC_OWNER, &owner) != 0 || owner != metadata.st_uid ||
-        filesec_get_property(security, FILESEC_MODE, &mode) != 0 || mode != metadata.st_mode ||
-        filesec_get_property(security, FILESEC_UUID, &owner_uuid) != 0) {
-        fputs("Could not completely observe directory security.\n", stderr);
+    if (lstatx_np(argv[2], &metadata, security) != 0) {
+        perror("Could not read extended directory security");
+        goto done;
+    }
+    if (!S_ISDIR(metadata.st_mode)) {
+        fputs("Security observation target is not a physical directory.\n", stderr);
+        goto done;
+    }
+    if (filesec_get_property(security, FILESEC_OWNER, &owner) != 0) {
+        perror("Directory security result has no owner");
+        goto done;
+    }
+    if (filesec_get_property(security, FILESEC_MODE, &mode) != 0) {
+        perror("Directory security result has no mode");
+        goto done;
+    }
+    if (owner != metadata.st_uid || mode != metadata.st_mode) {
+        fputs("Directory security and stat metadata disagree.\n", stderr);
+        goto done;
+    }
+    if (filesec_get_property(security, FILESEC_UUID, &owner_uuid) != 0) {
+        perror("Directory security result has no owner UUID; ACL absence is unconfirmed");
         goto done;
     }
     /* Query presence without allocating/copying an ACL. Even an empty ACL is
