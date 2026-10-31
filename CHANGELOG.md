@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Pin projects to a dedicated Pinned section in the sidebar.
+- Restore screenshots, drawings and text from Recently deleted after the Undo toast expires. Recovery keeps the original item files and reports incomplete or uncertain saves.
+- Draw constrained shapes and use keyboard editing on the annotation canvas. Search keeps revealing a matching annotation until it is drawn.
+- Local agents can discover and read saved prompt bundles through the optional MCP connection. Access remains off by default.
+- Bundle creation uses compact rows with progress and cancellation feedback. Export failures identify a recovery step and clear busy cards; Markdown-only copies can reuse a finalized bundle.
+- macOS bundle previews clear the window chrome and open at the available width. Updates from `/Applications` support the standard administrator-owned installation folder, and verified installations retire their temporary app rollback copies.
+- Strengthened save flushing, journal preservation and rollback ownership checks. Failed imports and duplicate operations preserve files whose ownership cannot be established.
+- Improved editor loading and error feedback, keyboard shortcuts, sidebar navigation, and memory use during canvas editing.
+- macOS requires version 13 or later on Apple Silicon. Downloads remain ad-hoc signed, not Apple-notarised. Back up workspaces before upgrading; project snapshots and recovery files are separate from temporary app rollback copies.
+
 ## 0.4.0
 
 - macOS: Imnota hides completely before an immediate capture, so it no longer appears blurred in the screenshot. Window mode now works on macOS too. On Windows and macOS it attempts to capture the chosen window's own pixels; if the system cannot provide them, it uses the outlined area of the frozen screen instead.
