@@ -363,7 +363,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * Read one published export folder. Only regular files named exactly `<set> - NN.md|png` directly
  * inside the folder are considered; nothing in the folder can redirect a read elsewhere.
  */
-async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+async function preparedBundleFiles(set: PreparedSet) {
   await assertContainedFile(set.projectPath, set.folder);
   const prefix = `${set.setName} - `;
   const markdownFiles = new Map<number, string>();
@@ -383,6 +383,57 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
     (match[2] === 'md' ? markdownFiles : pngFiles).set(bundleNumber, entry.name);
   }
   if (!markdownFiles.size) return null;
+  return { markdownFiles, pngFiles };
+}
+
+/** File sizes describe an observation, not verified content or an immutable snapshot. */
+async function inspectPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+  const files = await preparedBundleFiles(set);
+  if (!files) return null;
+  const metadata = async (name: string) => {
+    try {
+      const target = await assertContainedFile(set.folder, path.join(set.folder, name));
+      const stat = await fs.lstat(target);
+      if (!stat.isFile() || stat.isSymbolicLink() || !Number.isSafeInteger(stat.size) || stat.size < 0)
+        throw new Error('Unavailable file metadata.');
+      await assertNoLinks(target);
+      return { status: 'not-read' as const, bytes: stat.size };
+    } catch {
+      return { status: 'unavailable' as const, bytes: null };
+    }
+  };
+  const bundles = [];
+  for (const [bundleNumber, name] of [...files.markdownFiles].sort(([left], [right]) => left - right)) {
+    const png = files.pngFiles.get(bundleNumber);
+    bundles.push({
+      bundleNumber,
+      markdown: await metadata(name),
+      image: png ? await metadata(png) : null,
+    });
+  }
+  return {
+    id: set.id,
+    setName: set.setName,
+    collectionId: set.collectionId,
+    sourceKind: 'saved-export',
+    preparedAt: set.preparedAt,
+    preparedAtBasis: 'filename-local-time',
+    freshness: 'unknown',
+    contentVerified: false,
+    bundles,
+    readLimits: { ...limits, maxTextResponseBytes: MAX_MCP_TEXT_RESPONSE_BYTES },
+    next: { tool: 'get_bundle', arguments: { id: set.id } },
+    notes: [
+      'Metadata only: no Markdown or PNG content was read. Sizes may change before retrieval.',
+      'The export filename is not publication provenance. Current edits, content integrity and redaction were not checked.',
+    ],
+  };
+}
+
+async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+  const files = await preparedBundleFiles(set);
+  if (!files) return null;
+  const { markdownFiles, pngFiles } = files;
 
   const images: McpImageContent[] = [];
   const bundles = [];
@@ -681,6 +732,30 @@ export function createMcpTools(
         const bundle = await firstReadable(matches);
         if (!bundle) throw new Error(BUNDLE_NOT_FOUND);
         return bundle;
+      },
+    },
+    {
+      name: 'inspect_bundle',
+      description:
+        'Inspect a saved export by its discovered bundle id before reading it. Returns ordered Markdown/image file sizes, read limits and unknown freshness; no text bodies or images. File content, redaction and integrity are not verified. Use get_bundle to read the export.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', pattern: '^b_[0-9a-f]{32}$' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = getBundleInput.parse(args);
+        const matches = (await workspaceSets(false)).filter((set) => set.id === input.id);
+        for (const set of matches.sort(compareLatest)) {
+          try {
+            const inspected = await inspectPreparedBundle(set, limits);
+            if (inspected) return inspected;
+          } catch {
+            // Removed or linked export folders cannot authorize another location.
+          }
+        }
+        throw new Error(BUNDLE_NOT_FOUND);
       },
     },
     {

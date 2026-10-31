@@ -313,7 +313,13 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(init.result.serverInfo.version, version);
             assert.equal(init.result.serverInfo.name, 'imnota');
             const tools = await request('tools/list', {});
-            for (const name of ['list_projects', 'list_collections', 'get_bundle', 'get_latest_bundle'])
+            for (const name of [
+              'list_projects',
+              'list_collections',
+              'get_bundle',
+              'get_latest_bundle',
+              'inspect_bundle',
+            ])
               assert.ok(
                 tools.result.tools.some((tool) => tool.name === name),
                 `Missing ${name}`,
@@ -329,6 +335,16 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(collections.length, 2);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
+            const inspected = await call('inspect_bundle', { id });
+            assert.equal(inspected.isError, false);
+            assert.equal(inspected.content.length, 1);
+            const inspection = JSON.parse(inspected.content[0].text);
+            assert.equal(inspection.sourceKind, 'saved-export');
+            assert.equal(inspection.freshness, 'unknown');
+            assert.equal(inspection.contentVerified, false);
+            assert.equal(inspection.bundles[0].markdown.bytes, Buffer.byteLength(markdown));
+            assert.equal(inspection.bundles[0].image.bytes, png.length);
+            assert.deepEqual(inspection.next, { tool: 'get_bundle', arguments: { id } });
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
@@ -344,6 +360,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             }
             for (const [name, args, error] of [
               ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
+              ['inspect_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
               ['get_latest_bundle', { projectPath, collectionId: '002-empty' }, 'bundle not prepared'],
             ]) {
               const result = await call(name, args);
