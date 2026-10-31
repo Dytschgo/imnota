@@ -458,6 +458,36 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
     expect(full.result?.content[1]?.data).toBe(TEST_PNG.toString('base64'));
   });
 
+  it('reports unavailable file metadata without hiding readable siblings or opening payloads', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const deniedPath = path.join(folder, `${path.basename(folder)} - 01.png`);
+    const lstat = fs.lstat.bind(fs);
+    vi.spyOn(fs, 'lstat').mockImplementation((candidate, options) => {
+      if (String(candidate) === deniedPath)
+        return Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+      return lstat(candidate, options);
+    });
+    const opens = vi.spyOn(fs, 'open');
+    const reads = vi.spyOn(fs, 'readFile');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(false);
+    expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+      bundles: [
+        {
+          bundleNumber: 1,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength('# Saved bundle') },
+          image: { status: 'unavailable', bytes: null },
+        },
+      ],
+    });
+    for (const [target] of [...opens.mock.calls, ...reads.mock.calls])
+      expect(String(target).startsWith(folder + path.sep)).toBe(false);
+  });
+
   it('does not certify invalid image bytes and rejects stale or disabled inspection', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());
