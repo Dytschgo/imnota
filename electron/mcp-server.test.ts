@@ -219,6 +219,7 @@ describe('local MCP server lifecycle', () => {
       'list_collection_items',
       'get_latest_bundle',
       'get_bundle',
+      'inspect_bundle',
       'get_item',
       'search_saved_text',
     ]);
@@ -410,6 +411,127 @@ async function savedFiles(root: string) {
 }
 
 describe('prepared MCP bundle discovery and read boundaries', () => {
+  it('inspects ordered saved file sizes without opening payloads, changing files or claiming freshness', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const markdown = '# Saved ünicode';
+    const folder = await writeBundle(projectPath, undefined, markdown);
+    const setName = path.basename(folder);
+    await fs.writeFile(path.join(folder, `${setName} - 02.md`), '# Text only');
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const before = await savedFiles(root);
+    const opens = vi.spyOn(fs, 'open');
+    const reads = vi.spyOn(fs, 'readFile');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(false);
+    expect(response.result?.content).toHaveLength(1);
+    const result = JSON.parse(response.result!.content[0]!.text!);
+    expect(result).toMatchObject({
+      id,
+      sourceKind: 'saved-export',
+      preparedAtBasis: 'filename-local-time',
+      freshness: 'unknown',
+      contentVerified: false,
+      bundles: [
+        {
+          bundleNumber: 1,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength(markdown) },
+          image: { status: 'not-read', bytes: TEST_PNG.length },
+        },
+        {
+          bundleNumber: 2,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength('# Text only') },
+          image: null,
+        },
+      ],
+      readLimits: { maxImages: 10, maxImageBytes: 5_000_000, maxTotalImageBytes: 20_000_000 },
+      next: { tool: 'get_bundle', arguments: { id } },
+    });
+    expect(JSON.stringify(result)).not.toContain(markdown);
+    for (const [target] of [...opens.mock.calls, ...reads.mock.calls])
+      expect(String(target).startsWith(folder + path.sep)).toBe(false);
+    opens.mockRestore();
+    reads.mockRestore();
+    expect(await savedFiles(root)).toEqual(before);
+    const full = await protocolCall(toolsFor(root), 'get_bundle', { id });
+    expect(full.result?.content[1]?.data).toBe(TEST_PNG.toString('base64'));
+  });
+
+  it('reports unavailable file metadata without hiding readable siblings or opening payloads', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const deniedPath = path.join(folder, `${path.basename(folder)} - 01.png`);
+    const lstat = fs.lstat.bind(fs);
+    vi.spyOn(fs, 'lstat').mockImplementation((candidate, options) => {
+      if (String(candidate) === deniedPath)
+        return Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+      return lstat(candidate, options);
+    });
+    const opens = vi.spyOn(fs, 'open');
+    const reads = vi.spyOn(fs, 'readFile');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(false);
+    expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+      bundles: [
+        {
+          bundleNumber: 1,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength('# Saved bundle') },
+          image: { status: 'unavailable', bytes: null },
+        },
+      ],
+    });
+    for (const [target] of [...opens.mock.calls, ...reads.mock.calls])
+      expect(String(target).startsWith(folder + path.sep)).toBe(false);
+  });
+
+  it('does not certify invalid image bytes and rejects stale or disabled inspection', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath, undefined, '# Saved', Buffer.from('not PNG'));
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    let enabled = true;
+    const tools = createMcpTools({
+      enabled: () => enabled,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+    });
+    const response = await protocolCall(tools, 'inspect_bundle', { id });
+    expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+      contentVerified: false,
+      bundles: [{ image: { status: 'not-read', bytes: 7 } }],
+    });
+    enabled = false;
+    expect((await protocolCall(tools, 'inspect_bundle', { id })).result?.isError).toBe(true);
+    enabled = true;
+    await fs.rename(folder, folder + '-removed');
+    expect((await protocolCall(tools, 'inspect_bundle', { id })).result?.content[0]?.text).toBe(
+      'bundle not found',
+    );
+    expect((await protocolCall(tools, 'inspect_bundle', { id: '../outside' })).result?.isError).toBe(true);
+  });
+
+  it('does not inspect a saved export replaced by a link outside the workspace', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const foreign = await workspace();
+    await fs.writeFile(path.join(foreign, `${path.basename(folder)} - 01.md`), MANAGEMENT_SECRET);
+    await fs.rename(folder, folder + '-old');
+    await fs.symlink(foreign, folder, process.platform === 'win32' ? 'junction' : 'dir');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(true);
+    expect(response.result?.content[0]?.text).toBe('bundle not found');
+    expect(JSON.stringify(response)).not.toContain(MANAGEMENT_SECRET);
+    expect(JSON.stringify(response)).not.toContain(foreign);
+  });
+
   it('lists active projects and all collection states, with stable discoverable bundle ids and no writes', async () => {
     const root = await workspace();
     const project = projectData();

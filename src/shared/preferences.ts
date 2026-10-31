@@ -141,6 +141,7 @@ export function agentAccessSetupPrompt(url = localAgentAccessUrl()): string {
     '- list_collection_items: ordered items of a collection (id, kind, title, includeInExport, priority).',
     '- get_latest_bundle: the latest saved export as Markdown text plus PNG image blocks. No arguments searches active projects and collections; projectPath narrows to a project; projectPath and collectionId select a collection. Returns "bundle not prepared" when no readable export exists; it never generates an export.',
     '- get_bundle: pass an id from list_collections or get_latest_bundle to read that saved export. Returns "bundle not found" if it was removed or is no longer accessible.',
+    '- inspect_bundle: pass a discovered id to inspect ordered file sizes and read limits without receiving Markdown or images. Content and freshness are not verified; use get_bundle to read it.',
     '- get_item: one item as Markdown plus its image path for screenshots and drawings.',
     '- search_saved_text: search saved descriptions, annotation text, Markdown blocks and drawing text.',
     'Prepared bundles are saved snapshots and may predate current edits. Read the returned omission notes: each call returns at most 10 PNGs, 5 MB per PNG, 20 MB of PNGs total, and 4 MB of Markdown. Paths identify omitted files; no export is regenerated.',
