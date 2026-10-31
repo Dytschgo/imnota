@@ -32,7 +32,7 @@ function bashPath(value) {
   return value.replaceAll('\\', '/');
 }
 
-function runBash(body, args = [], { realAcl = false } = {}) {
+function runBash(body, args = [], { realAcl = false, sourcePath = scriptPath } = {}) {
   assert.ok(bash, 'Bash is required for this test');
   const portableStat =
     process.platform === 'darwin' ? '' : 'stat_identity() { /usr/bin/stat -c "%d:%i" "$1"; }';
@@ -54,7 +54,7 @@ function runBash(body, args = [], { realAcl = false } = {}) {
       '-c',
       `source "$1"\n${portableStat}\n${portableMode}\n${portableAcl}\n${body}`,
       'test',
-      bashPath(scriptPath),
+      bashPath(sourcePath),
       ...args,
     ],
     {
@@ -62,6 +62,63 @@ function runBash(body, args = [], { realAcl = false } = {}) {
     },
   );
 }
+
+for (const [name, body, status] of [
+  ['confirmed absence', "printf 'no-acl\\n'", 0],
+  ['present ACL', "printf 'acl\\n'", 3],
+  ['empty successful observation', ':', 4],
+  ['failed observation', "printf 'no-acl\\n'; exit 2", 4],
+  ['extra tokens', "printf 'no-acl extra\\n'", 4],
+  ['stderr only', "printf 'no-acl\\n' >&2", 4],
+  ['missing helper', null, 4],
+]) {
+  test(`native ACL gate refuses before creation: ${name}`, { skip: !bash }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'imnota-observer-gate-'));
+    const copiedScript = path.join(root, 'update-macos.sh');
+    fs.copyFileSync(scriptPath, copiedScript);
+    if (body !== null)
+      fs.writeFileSync(path.join(root, 'imnota-security-observer'), `#!/bin/bash\n${body}\n`, {
+        mode: 0o700,
+      });
+    try {
+      const result = runBash(
+        `
+# Only parent metadata is synthetic; retain native_acl_entries and its fixed sibling lookup.
+app_parent_status() {
+  local acl
+  acl="$(native_acl_entries "$1")" || return 4
+  app_parent_policy "$1" 1 0 1 1 0 admin 775 80 '20 80' "$acl"
+}
+/bin/mkdir() { printf unexpected-mkdir; return 1; }
+/usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
+validate_app_parent /Applications
+`,
+        [],
+        { sourcePath: copiedScript },
+      );
+      assert.equal(result.status === 0, status === 0, result.stderr);
+      assert.equal(result.stdout, '', 'Parent validation must not create any directory');
+      if (status !== 0)
+        assert.match(
+          result.stderr,
+          status === 3 ? /extra access rules/ : /could not confirm the access rules/,
+        );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('shared-parent child ACLs refuse before stripping or writing contents', { skip: !bash }, () => {
+  const result = runBash(`
+app_parent_status() { return 0; }
+native_acl_entries() { printf acl; }
+/bin/chmod() { printf unexpected-chmod; return 1; }
+if secure_private_directory /Applications/.imnota-update.fixture; then exit 1; fi
+`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
 
 // Exercise the production policy with synthetic observations, without adding a
 // production flag, environment override or alternate Applications path.
@@ -124,7 +181,7 @@ for (const [name, header, row, lsStatus, accepted] of [
   ['ordinary header', 'drwxrwxr-x', '', 0, true],
   ['failed ls with ordinary header', 'drwxrwxr-x', '', 1, false],
 ]) {
-  test(`real ACL observer gates creation: ${name}`, { skip: !bash }, () => {
+  test(`legacy listing parser and synthetic ACL policy: ${name}`, { skip: !bash }, () => {
     const result = runBash(
       `
 fixture_header=$2 fixture_row=$3 fixture_status=$4
@@ -133,7 +190,7 @@ fixture_header=$2 fixture_row=$3 fixture_status=$4
   if [[ -n "$fixture_row" ]]; then printf '%s\\n' "$fixture_row"; fi
   return "$fixture_status"
 }
-# Supply parent metadata through the source-only seam, retaining the real observer.
+# Exercise the legacy parser in isolation; shared-parent production uses the native observer.
 app_parent_status() {
   local acl
   acl="$(directory_acl_entries "$1")" || return 2
@@ -489,6 +546,28 @@ planted_path=$(cat "$root/planted-path")
 [[ "$output" == *'could not be checked for unexpected contents'* && "$output" == *"Contents were preserved at: $planted_path"* ]]
 [[ "$(cat "$planted_path/.unexpected")" == planted ]]
 [[ "$(command /usr/bin/find "$planted_path" -mindepth 1 -maxdepth 1 -print)" == "$planted_path/.unexpected" ]]
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('main preserves staging when privacy confirmation fails', { skip: !bash }, () => {
+  const result = runBash(`${syntheticMainFixture}
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then
+    printf '%s' "$1" > "$root/preserved-path"
+    printf untouched > "$1/.unexpected"
+    return 1
+  fi
+  original_secure_private_directory "$1"
+}
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+preserved_path=$(cat "$root/preserved-path")
+[[ "$output" == *"Recovery files were preserved at: $preserved_path"* ]]
+[[ "$(cat "$preserved_path/.unexpected")" == untouched ]]
+[[ "$(cat "$root/Imnota.app/marker")" == old ]]
 `);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });

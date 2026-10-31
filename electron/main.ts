@@ -2021,6 +2021,7 @@ function configureAutoUpdates(): void {
               path.join(app.getAppPath(), 'scripts/update-macos.sh'),
               app.getPath('temp'),
               app.getVersion(),
+              path.join(process.resourcesPath, 'imnota-security-observer'),
             )
         : undefined,
     download: () => autoUpdater.downloadUpdate(),
