@@ -8,6 +8,7 @@
 - Local agents can discover and read saved prompt bundles through the optional MCP connection. Access remains off by default.
 - Bundle creation uses compact rows with progress and cancellation feedback. Export failures identify a recovery step and clear busy cards; Markdown-only copies can reuse a finalized bundle.
 - macOS bundle previews clear the window chrome and open at the available width. Updates from `/Applications` support the standard administrator-owned installation folder, and verified installations retire their temporary app rollback copies.
+- Terminal updates from `/Applications` require a complete native no-ACL check. Older installed nightlies keep their existing updater for the hop to this build; the new check governs updates from this build onward.
 - Strengthened save flushing, journal preservation and rollback ownership checks. Failed imports and duplicate operations preserve files whose ownership cannot be established.
 - Improved editor loading and error feedback, keyboard shortcuts, sidebar navigation, and memory use during canvas editing.
 - macOS requires version 13 or later on Apple Silicon. Downloads remain ad-hoc signed, not Apple-notarised. Back up workspaces before upgrading; project snapshots and recovery files are separate from temporary app rollback copies.
