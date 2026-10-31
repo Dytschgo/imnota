@@ -1463,6 +1463,7 @@ async function captureWorkspaceMatrix(
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
     await driver.waitFor({ selector: '#capture-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
       const heading = document.querySelector('#capture-title');
@@ -1481,6 +1482,7 @@ async function captureWorkspaceMatrix(
     );
     await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
     await driver.waitFor({ selector: '#workspace-settings-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const field = document.querySelector('#workspace-settings-title')?.parentElement?.querySelector('.workspace-path');
       if (!field) throw new Error('Workspace path field is missing.');
@@ -1499,8 +1501,36 @@ async function captureWorkspaceMatrix(
         'none',
       ),
     );
+    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.waitFor({ selector: '.whats-new-settings' });
+    await assertSettingsCardSpacing(driver);
+    await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
+    artifacts.push(
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-updates.png`,
+        'none',
+      ),
+    );
   }
   await driver.click({ selector: '.settings-navigation button', text: 'Appearance', exact: true });
+}
+
+async function assertSettingsCardSpacing(driver: NativeUiDriver): Promise<void> {
+  await driver.evaluate(`(() => {
+    const grid = document.querySelector('.settings-view > .settings-grid');
+    const group = grid.querySelector(':scope > div:not([hidden])');
+    const cards = [...group.children].filter(child => child.getBoundingClientRect().height > 0);
+    if (cards.length < 2) throw new Error('Settings spacing fixture needs adjacent cards.');
+    for (let index = 1; index < cards.length; index++) {
+      if (cards[index].getBoundingClientRect().top <= cards[index - 1].getBoundingClientRect().bottom)
+        throw new Error('Adjacent settings cards touch or overlap.');
+    }
+    if (grid.scrollWidth > grid.clientWidth)
+      throw new Error('Settings cards overflow horizontally.');
+    if ([...grid.querySelectorAll(':scope > [hidden]')].some(group => group.getBoundingClientRect().height > 0))
+      throw new Error('An inactive settings category is visible.');
+  })()`);
 }
 
 async function assertMacSettingsTitlebarClearance(driver: NativeUiDriver): Promise<void> {
@@ -1768,6 +1798,54 @@ async function exercisePreferencesAndChannel(
     }
   })()`);
   if (!workspaceRejected) throw new Error('Settings IPC accepted an untrusted workspace replacement.');
+  // Replay a discovery result through the real preload subscription. Smoke keeps
+  // discovery offline; this verifies presentation and native interaction only.
+  const previousStatus = await driver.evaluate(`window.imnota.getUpdateStatus()`);
+  try {
+    driver.browserWindow.webContents.send('update:status', {
+      state: 'not-available',
+      channel: 'nightly',
+      sourceChannel: 'stable',
+      version: '0.3.9',
+      manualDownload: true,
+      message:
+        'Installed version is newer than stable 0.3.9. Automatic downgrades are disabled. Nightly remains selected for future checks.',
+      releaseUrl: 'https://github.com/Dytschgo/imnota/releases/tag/v0.3.9',
+    });
+    await driver.waitFor({ selector: '.update-status', text: 'Automatic downgrades are disabled.' });
+    await driver.waitFor({
+      selector: '.update-settings button',
+      text: 'Open selected channel download',
+      exact: true,
+    });
+    await driver.click({ selector: '.settings-exit' });
+    const refresh = { selector: 'button[aria-label="No newer update. Check again."]' };
+    await driver.waitFor(refresh);
+    await driver.evaluate(`document.querySelector('[data-testid="update-indicator"] button').focus()`);
+    await driver.waitFor({
+      selector: '.floating-update-popover > strong',
+      text: 'No newer update · nightly',
+    });
+    await driver.press('Down');
+    await driver.waitFor({ selector: '.floating-update-popover:focus' });
+    const refreshOnly = await driver.evaluate<boolean>(`(() => {
+      const indicator = document.querySelector('[data-testid="update-indicator"]');
+      return !indicator.querySelector('.lucide-download') &&
+        document.activeElement?.matches('.floating-update-popover') &&
+        !!document.querySelector('.floating-update-popover a');
+    })()`);
+    if (!refreshOnly)
+      throw new Error('Older stable release was presented as a pending update or lost keyboard access.');
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, 'feedback-no-newer-update.png', screenshot));
+    await driver.press('Escape');
+    await driver.waitFor({ selector: '.floating-update-popover' }, { absent: true });
+    await driver.click(refresh);
+    await driver.waitFor({ selector: '.floating-update-idle' });
+  } finally {
+    driver.browserWindow.webContents.send('update:status', previousStatus);
+  }
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
 }
 
 async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {

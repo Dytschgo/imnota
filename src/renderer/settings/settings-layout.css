@@ -192,6 +192,12 @@
   min-width: 0;
 }
 
+.settings-view > .settings-grid > div:not([hidden]) {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
 .settings-view > .settings-grid .settings-section,
 .settings-view > .settings-grid .imnota-preference-section,
 .settings-view > .settings-grid .imnota-backup-settings,

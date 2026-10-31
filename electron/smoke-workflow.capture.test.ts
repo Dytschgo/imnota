@@ -113,6 +113,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '1440x900-settings.png',
       '`${viewport.width}x${viewport.height}-settings-features.png`',
       '`${viewport.width}x${viewport.height}-settings-workspace.png`',
+      '`${viewport.width}x${viewport.height}-settings-updates.png`',
       '`backdrop-${preset}-settings.png`',
       'backdrop-settings.png',
       'sharing-settings.png',

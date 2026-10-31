@@ -216,6 +216,42 @@ describe('AppShell navigation', () => {
     expect(screen.getByRole('button', { name: 'Hide navigation' })).toHaveFocus();
   });
 
+  it('lets the update popover handle Arrow Down without moving sidebar focus', () => {
+    render(
+      <AppShell
+        searchShortcut="Ctrl+F"
+        onNavigate={vi.fn()}
+        onNewProject={vi.fn()}
+        onOpenProject={vi.fn()}
+        onOpenCollection={vi.fn()}
+        onSearch={vi.fn()}
+        onOpenPromptBundles={vi.fn()}
+        onToggleFavourite={vi.fn()}
+        onAbout={vi.fn()}
+        renderUpdateControl={(placement) => (
+          <FloatingUpdateControl
+            status={{ state: 'not-available', channel: 'nightly', manualDownload: true }}
+            placement={placement}
+            onCheck={vi.fn()}
+            onDownload={vi.fn()}
+            onInstall={vi.fn()}
+            onRetry={vi.fn()}
+          />
+        )}
+      >
+        <div>Workbench</div>
+      </AppShell>,
+    );
+    const trigger = screen.getByRole('button', { name: 'No newer update. Check again.' });
+    fireEvent.pointerEnter(screen.getByTestId('update-indicator'));
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const panel = screen.getByRole('dialog', { name: 'Update status' });
+    expect(panel).toHaveFocus();
+    fireEvent.keyDown(panel, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+  });
+
   it('skips controls inside collapsed regions when moving shortcut focus', () => {
     render(
       <AppShell

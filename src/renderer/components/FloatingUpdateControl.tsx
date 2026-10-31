@@ -36,10 +36,10 @@ export function FloatingUpdateControl({
   const downloaded = current.state === 'downloaded';
   const failed = current.state === 'error';
   const available = current.state === 'available';
-  const manualDownload = current.manualDownload === true;
-  const latest = current.state === 'not-available' && !manualDownload;
+  const noNewerUpdate = current.state === 'not-available';
+  const olderRelease = noNewerUpdate && current.manualDownload === true;
   const percent = Math.round(current.percent ?? 0);
-  const channelLabel = current.sourceChannel ?? current.channel;
+  const channelLabel = noNewerUpdate ? current.channel : (current.sourceChannel ?? current.channel);
   const label = failed
     ? 'Retry update check'
     : downloaded
@@ -48,13 +48,15 @@ export function FloatingUpdateControl({
         ? 'Checking for updates'
         : downloading
           ? `Downloading update, ${percent}% complete`
-          : current.terminalCommand
+          : available && current.terminalCommand
             ? 'Run update in Terminal'
-            : manualDownload
-              ? 'Open download'
-              : available
-                ? 'Download update'
-                : latest
+            : available
+              ? current.manualDownload
+                ? 'Open download'
+                : 'Download update'
+              : olderRelease
+                ? 'No newer update. Check again.'
+                : noNewerUpdate
                   ? 'You’re on the latest version. Check again.'
                   : 'Check for updates';
 
@@ -149,13 +151,7 @@ export function FloatingUpdateControl({
           aria-controls={open ? popoverId : undefined}
           disabled={checking || downloading || current.installing === true}
           onClick={() =>
-            void (failed
-              ? onRetry()
-              : downloaded
-                ? onInstall()
-                : available || manualDownload
-                  ? onDownload()
-                  : onCheck())
+            void (failed ? onRetry() : downloaded ? onInstall() : available ? onDownload() : onCheck())
           }
         >
           {failed ? (
@@ -168,7 +164,7 @@ export function FloatingUpdateControl({
             </span>
           ) : checking ? (
             <LoaderCircle className="spin" size={18} aria-hidden="true" />
-          ) : available || manualDownload ? (
+          ) : available ? (
             <Download size={18} aria-hidden="true" />
           ) : (
             <RefreshCw size={18} aria-hidden="true" />
@@ -213,7 +209,11 @@ export function FloatingUpdateControl({
             }}
           >
             <strong>
-              {current.version ? `Update ${current.version}` : 'Imnota updates'}
+              {noNewerUpdate
+                ? 'No newer update'
+                : current.version
+                  ? `Update ${current.version}`
+                  : 'Imnota updates'}
               {channelLabel ? ` · ${channelLabel}` : ''}
             </strong>
             <p>
@@ -226,7 +226,7 @@ export function FloatingUpdateControl({
                     : checking
                       ? 'Checking for updates…'
                       : (current.message ??
-                        (available || manualDownload
+                        (available
                           ? `A newer ${channelLabel ?? ''} version is available. Nothing downloads until you choose to.`
                           : 'Check for a newer version of Imnota.'))}
             </p>

@@ -22,6 +22,8 @@ Channel switching is disabled while checking, downloading or awaiting native ins
 
 Switching back to Stable never automatically downgrades. If the installed nightly is newer, Imnota explains that and offers the selected stable release page. Back up before manually replacing a newer app; an older version may not understand a future project's schema.
 
+An older release is not a pending update: the sidebar control checks again and reports “No newer update.” Its release-details link remains available, and Settings retains the explicit manual download option.
+
 Current builds migrate schema 1/2 projects to schema 3 when opened. Adding a drawing or text block upgrades schema 3 to schema 4 while retaining a versioned metadata backup. Back up the whole workspace folder before trying a newer build. Reinstalling an older app does not reverse migration; see the [migration and rollback procedure](data-format.md) before returning to an older version.
 
 ## Build a nightly after merge
