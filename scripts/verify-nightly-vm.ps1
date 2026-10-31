@@ -19,8 +19,10 @@ $report = [ordered]@{
 $exitCode = 1
 try {
     $nodeVersion = & node --version
-    if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion -replace '^v(\d+).*$', '$1') -lt 24) {
-        throw 'Existing Node.js 24+ is required for the installed Windows MCP relay.'
+    $report.nodeVersion = $nodeVersion
+    $report.nodePath = (Get-Command node).Source
+    if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion -replace '^v(\d+).*$', '$1') -lt 22) {
+        throw 'Existing Node.js 22+ is required for the UI verifier dependencies.'
     }
     $env:CI = 'true'
     & corepack pnpm install --frozen-lockfile
@@ -48,13 +50,17 @@ try {
     $env:IMNOTA_MCP_CLIENT_NODE = (Get-Command node).Source
     $env:IMNOTA_MCP_ARTIFACT_DIR = Join-Path $evidence 'imnota-verification-artifacts-mcp'
     $env:IMNOTA_SMOKE_ARTIFACT_DIR = $evidence
-    & node scripts/verify-mcp.mjs $executable $download
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP verification failed.' }
-    $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'passed' }
-
     & node scripts/smoke.mjs $executable
     if ($LASTEXITCODE -ne 0) { throw 'Installed application feature walkthrough failed.' }
     $report.steps += @{ name = 'installed-feature-ui-walkthrough'; status = 'passed' }
+
+    if ([int]($nodeVersion -replace '^v(\d+).*$', '$1') -lt 24) {
+        $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'blocked'; reason = 'Existing Node.js 24+ is required for the Windows relay.' }
+        throw 'UI verification completed; MCP relay verification remains blocked by the guest Node runtime.'
+    }
+    & node scripts/verify-mcp.mjs $executable $download
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP verification failed.' }
+    $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'passed' }
     $report.status = 'passed'
     $exitCode = 0
 } catch {
