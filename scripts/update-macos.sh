@@ -5,6 +5,8 @@ set -Eeuo pipefail
 readonly APP_ID="com.dytschgo.imnota"
 readonly APP_NAME="Imnota"
 readonly RELEASE_ROOT="https://github.com/Dytschgo/imnota/releases/download"
+SECURITY_OBSERVER_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
+readonly SECURITY_OBSERVER="$SECURITY_OBSERVER_DIRECTORY/imnota-security-observer"
 
 stage_dir=""
 lock_dir=""
@@ -183,7 +185,7 @@ acquire_lock() {
   lock_dir="${parent}/.imnota-update.lock"
 
   if (umask 077; /bin/mkdir -- "$lock_dir") 2>/dev/null; then
-    secure_private_directory "$lock_dir" || die "The update lock is not a private physical directory owned by you."
+    secure_private_directory "$lock_dir" || die "The update lock could not be confirmed private. Preserved at: $lock_dir"
     require_empty_created_directory "$lock_dir" "update lock"
     lock_owned=1
     printf '%s\n' "$$" > "$lock_dir/pid" || die "The update lock could not be recorded."
@@ -272,11 +274,29 @@ directory_acl_entries() {
   '
 }
 
+native_acl_entries() {
+  [[ -f "$SECURITY_OBSERVER" && ! -L "$SECURITY_OBSERVER" && -O "$SECURITY_OBSERVER" && -x "$SECURITY_OBSERVER" ]] || return 1
+  local observation
+  observation="$("$SECURITY_OBSERVER" acl "$1")" || return 1
+  case "$observation" in
+    no-acl) return 0 ;;
+    acl) printf 'acl\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 secure_private_directory() {
   local acl
+  if [[ "${1%/*}" == /Applications ]]; then
+    # Inspect before stripping inheritance, while there are no private contents.
+    app_parent_status /Applications && acl="$(native_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  fi
   safe_physical_directory "$1" && /bin/chmod -N "$1" && /bin/chmod 700 "$1" &&
     safe_physical_directory "$1" && [[ "$(directory_mode "$1")" == 700 ]] &&
-    acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]]
+    acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  if [[ "${1%/*}" == /Applications ]]; then
+    app_parent_status /Applications && acl="$(native_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  fi
 }
 
 require_empty_created_directory() {
@@ -315,10 +335,10 @@ app_parent_status() {
   [[ ! -w "$parent" ]] || writable=1
   [[ ! -x "$parent" ]] || searchable=1
   if [[ "$parent" == /Applications && "$physical" == 1 && "$writable" == 1 && "$searchable" == 1 ]]; then
-    metadata="$(/usr/bin/stat -f '%u:%g:%Sg:%OLp' "$parent")" || return 2
+    metadata="$(/usr/bin/stat -f '%u:%g:%Sg:%OLp' "$parent")" || return 4
     IFS=: read -r uid gid group mode <<< "$metadata"
     gids="$(/usr/bin/id -G)" || return 2
-    acl="$(directory_acl_entries "$parent")" || return 2
+    acl="$(native_acl_entries "$parent")" || return 4
   fi
   app_parent_policy "$parent" "$physical" "$owned" "$writable" "$searchable" "$uid" "$group" "$mode" "$gid" "$gids" "$acl"
 }
@@ -330,6 +350,7 @@ validate_app_parent() {
     0) return 0 ;;
     1) die "The app folder is not writable and searchable by you. Move Imnota to a writable folder you own, such as ~/Applications, then try again." ;;
     3) die "The /Applications folder has extra access rules (an ACL). Move Imnota to ~/Applications, or install the update manually." ;;
+    4) die "Imnota could not confirm the access rules on /Applications. Move Imnota to ~/Applications, or install the update manually." ;;
     *) die "The app folder does not meet the ownership requirements: it must be owned by you or be the standard /Applications folder available to an admin user. Move Imnota to ~/Applications, or ask an administrator to restore the standard /Applications ownership and permissions, then try again." ;;
   esac
 }
@@ -756,7 +777,7 @@ swap_and_launch() {
     (umask 077; /bin/mkdir -- "$backup_root") || die "The managed rollback folder could not be created."
     backup_root_created=1
   fi
-  secure_private_directory "$backup_root" || die "The managed rollback folder is not a private physical directory owned by you."
+  secure_private_directory "$backup_root" || die "The managed rollback folder could not be confirmed private. Preserved at: $backup_root"
   # Earlier runs may have left legitimate backups; only a new root must be empty.
   if (( backup_root_created != 0 )); then
     require_empty_created_directory "$backup_root" "managed rollback folder"
@@ -766,15 +787,10 @@ swap_and_launch() {
   [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
   # Another local admin already controls /Applications and can race path operations.
-  # ACL changes require ownership/root or delegated security rights. Refuse any
-  # observed ACL row or + mode indicator on /Applications. This ls-based observation
-  # cannot distinguish a silent ACL-read failure from no ACL; native API observers exist but are not used.
-  # If that read silently fails while an inheritable ACL exists, new transaction
-  # directories briefly inherit another principal's access before ACL stripping.
-  # Emptiness checks and re-verification do not revoke retained descriptors, undo
-  # observed names or transient entries, or clear xattrs. The owner accepts this
-  # unresolved residual risk for nightly builds; a private same-volume transaction
-  # root or a verified native ACL observer is required before stable.
+  # A complete native no-ACL observation is required before creating shared-parent
+  # directories. A security-read failure is never interpreted as absence. Parent
+  # and child are observed again before storing contents. Root can still change
+  # ACLs between observations; root is outside this transaction's trust boundary.
   # Inheritance can also expose new directories under user-controlled parents.
   # Strip ACLs, recheck permissions and require new directories to be empty before
   # use; preserve unexpected contents on refusal.
@@ -839,8 +855,10 @@ main() {
   validate_app_parent "$app_parent"
   stage_dir="$(umask 077; /usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
     die "A same-folder update staging area could not be created."
+  keep_staging=1
   secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you."
   require_empty_created_directory "$stage_dir" "staging area"
+  keep_staging=0
 
   local archive="$stage_dir/$ARCHIVE_NAME"
   local sums="$stage_dir/SHA256SUMS.txt"
