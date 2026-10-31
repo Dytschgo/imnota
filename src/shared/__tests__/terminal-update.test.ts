@@ -22,23 +22,32 @@ const release = {
 };
 
 describe('terminal updates', () => {
-  it('copies the security observer beside the updater and tolerates a missing older-bundle helper', async () => {
+  it('copies a regular observer and keeps user-folder preparation available for missing or unsafe sources', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-prepare-test-'));
     try {
       const helper = path.join(root, 'update-macos.sh');
       const observer = path.join(root, 'observer');
       await fs.writeFile(helper, '#!/bin/bash\n');
       await fs.writeFile(observer, 'synthetic observer bytes');
-      for (const present of [true, false]) {
-        const cache = path.join(root, present ? 'present' : 'missing');
+      const directory = path.join(root, 'directory');
+      await fs.mkdir(directory);
+      const sources = [observer, path.join(root, 'absent'), directory];
+      if (process.platform !== 'win32') {
+        const linked = path.join(root, 'linked');
+        await fs.symlink(observer, linked);
+        sources.push(linked);
+      }
+      for (const [index, source] of sources.entries()) {
+        const present = source === observer;
+        const cache = path.join(root, `cache-${index}`);
         await fs.mkdir(cache);
         const prepared = await prepareTerminalUpdate(
           release,
-          '/Applications/Imnota.app',
+          present ? '/Applications/Imnota.app' : '/Users/test/Applications/Imnota.app',
           helper,
           cache,
           '0.4.0',
-          present ? observer : path.join(root, 'absent'),
+          source,
         );
         expect(prepared.command).toContain('Update Imnota.command');
         const [name] = await fs.readdir(cache);

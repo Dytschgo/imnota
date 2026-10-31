@@ -49,6 +49,6 @@ int main(int argc, char **argv) {
     result = 0;
 done:
     filesec_free(security);
-    if (result == 0 && puts(observation) == EOF) return 2;
+    if (result == 0 && (puts(observation) == EOF || fflush(stdout) != 0 || ferror(stdout))) return 2;
     return result;
 }

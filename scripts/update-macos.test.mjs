@@ -32,7 +32,11 @@ function bashPath(value) {
   return value.replaceAll('\\', '/');
 }
 
-function runBash(body, args = [], { realAcl = false, sourcePath = scriptPath } = {}) {
+function runBash(
+  body,
+  args = [],
+  { realAcl = false, sourcePath = scriptPath, environment = process.env } = {},
+) {
   assert.ok(bash, 'Bash is required for this test');
   const portableStat =
     process.platform === 'darwin' ? '' : 'stat_identity() { /usr/bin/stat -c "%d:%i" "$1"; }';
@@ -59,9 +63,70 @@ function runBash(body, args = [], { realAcl = false, sourcePath = scriptPath } =
     ],
     {
       encoding: 'utf8',
+      env: environment,
     },
   );
 }
+
+for (const kind of ['symlink', 'non-executable', 'foreign-owned']) {
+  test(
+    `native observer rejects a ${kind} helper`,
+    {
+      skip:
+        !bash || process.platform === 'win32' || (kind === 'foreign-owned' && process.platform !== 'darwin'),
+    },
+    () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'imnota-helper-trust-'));
+      const sourcePath = path.join(root, 'update-macos.sh');
+      const observer = path.join(root, 'imnota-security-observer');
+      fs.copyFileSync(scriptPath, sourcePath);
+      try {
+        if (kind === 'symlink') {
+          const target = path.join(root, 'target');
+          fs.writeFileSync(target, "#!/bin/bash\nprintf 'no-acl\\n'\n", { mode: 0o700 });
+          fs.symlinkSync(target, observer);
+        } else {
+          fs.writeFileSync(observer, "#!/bin/bash\nprintf 'no-acl\\n'\n", {
+            mode: kind === 'foreign-owned' ? 0o755 : 0o600,
+          });
+          if (kind === 'foreign-owned') {
+            const ownership = spawnSync('/usr/bin/sudo', ['-n', '/usr/sbin/chown', '0', observer], {
+              encoding: 'utf8',
+            });
+            assert.equal(ownership.status, 0, ownership.stderr);
+            assert.notEqual(fs.statSync(observer).uid, process.getuid());
+          }
+        }
+        const result = runBash('native_acl_entries /Applications', [], { sourcePath });
+        assert.equal(result.status, 1, result.stderr);
+        assert.equal(result.stdout, '');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}
+
+test('environment cannot supply the security helper and a sixth argument is refused', { skip: !bash }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'imnota-helper-binding-'));
+  const sourcePath = path.join(root, 'update-macos.sh');
+  fs.copyFileSync(scriptPath, sourcePath);
+  const override = path.join(root, 'override');
+  fs.writeFileSync(override, "#!/bin/bash\nprintf 'no-acl\\n'\n", { mode: 0o700 });
+  try {
+    const result = runBash('native_acl_entries /Applications', [], {
+      sourcePath,
+      environment: { ...process.env, SECURITY_OBSERVER: override, SECURITY_OBSERVER_DIRECTORY: root },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    const args = runBash('main one two three four five "$2"', [override], { sourcePath });
+    assert.notEqual(args.status, 0);
+    assert.match(args.stderr, /Usage: update-macos.sh/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 for (const [name, body, status] of [
   ['confirmed absence', "printf 'no-acl\\n'", 0],
@@ -69,6 +134,7 @@ for (const [name, body, status] of [
   ['empty successful observation', ':', 4],
   ['failed observation', "printf 'no-acl\\n'; exit 2", 4],
   ['extra tokens', "printf 'no-acl extra\\n'", 4],
+  ['second output line', "printf 'no-acl\\nextra\\n'", 4],
   ['stderr only', "printf 'no-acl\\n' >&2", 4],
   ['missing helper', null, 4],
 ]) {
@@ -91,7 +157,7 @@ app_parent_status() {
 }
 /bin/mkdir() { printf unexpected-mkdir; return 1; }
 /usr/bin/mktemp() { printf unexpected-mktemp; return 1; }
-validate_app_parent /Applications
+${status === 0 ? 'validate_app_parent /Applications' : 'acquire_lock /Applications; /usr/bin/mktemp -d /Applications/.imnota-update.XXXXXX'}
 `,
         [],
         { sourcePath: copiedScript },
@@ -552,6 +618,7 @@ planted_path=$(cat "$root/planted-path")
 
 test('main preserves staging when privacy confirmation fails', { skip: !bash }, () => {
   const result = runBash(`${syntheticMainFixture}
+printf old > "$root/Imnota.app/marker"
 eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
 secure_private_directory() {
   if [[ "$1" == */.imnota-update.* && "$1" != */.imnota-update.lock ]]; then
@@ -571,6 +638,35 @@ preserved_path=$(cat "$root/preserved-path")
 `);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
+
+for (const existing of [false, true]) {
+  test(
+    `backup privacy refusal preserves and reports the ${existing ? 'existing' : 'new'} root`,
+    { skip: !bash },
+    () => {
+      const result = runBash(`${syntheticMainFixture}
+printf old > "$root/Imnota.app/marker"
+${existing ? 'mkdir "$root/.imnota-backups.noindex"; printf retained > "$root/.imnota-backups.noindex/.unknown"' : ''}
+eval "$(declare -f secure_private_directory | sed '1s/secure_private_directory/original_secure_private_directory/')"
+secure_private_directory() {
+  if [[ "$1" == */.imnota-backups.noindex ]]; then
+    printf untouched > "$1/.unexpected"
+    return 1
+  fi
+  original_secure_private_directory "$1"
+}
+extract_archive() { mkdir "$2/Imnota.app"; }
+status=0
+output=$( ( run_main ) 2>&1 ) || status=$?
+[[ "$status" -ne 0 ]]
+[[ "$output" == *"Preserved at: $root/.imnota-backups.noindex"* ]]
+[[ "$(cat "$root/.imnota-backups.noindex/.unexpected")" == untouched ]]
+[[ "$(cat "$root/Imnota.app/marker")" == old ]]
+`);
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    },
+  );
+}
 
 test('main secures a pre-existing backup root without refusing its contents', { skip: !bash }, () => {
   const result = runBash(`${syntheticMainFixture}

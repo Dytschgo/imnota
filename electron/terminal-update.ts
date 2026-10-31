@@ -43,17 +43,19 @@ export async function prepareTerminalUpdate(
   await fs.copyFile(helperPath, helper);
   await fs.chmod(helper, 0o700);
   if (observerPath) {
+    const observer = path.join(directory, 'imnota-security-observer');
     try {
       const source = await fs.lstat(observerPath);
       if (!source.isFile() || source.isSymbolicLink())
         throw new Error('The update security observer must be a regular file.');
-      const observer = path.join(directory, 'imnota-security-observer');
       await fs.copyFile(observerPath, observer);
       await fs.chmod(observer, 0o700);
     } catch (error) {
-      // Older/development bundles may lack it. The script refuses /Applications
-      // without a valid observer; user-owned installation folders still work.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      // Never leave a partial executable behind after a copy/mode failure.
+      // The script refuses /Applications without it; user-owned folders work.
+      await fs.rm(observer, { force: true });
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        console.warn('The update security observer could not be prepared.', error);
     }
   }
   const script = `#!/bin/bash\n/bin/bash ${[helper, ...args].map(shellQuote).join(' ')}\nresult=$?\nif [ "$result" -ne 0 ]; then\n  printf '\\nUpdate stopped. Press Return to close this window.'\n  read -r _\nfi\nexit "$result"\n`;

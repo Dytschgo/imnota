@@ -5,7 +5,8 @@ set -Eeuo pipefail
 readonly APP_ID="com.dytschgo.imnota"
 readonly APP_NAME="Imnota"
 readonly RELEASE_ROOT="https://github.com/Dytschgo/imnota/releases/download"
-readonly SECURITY_OBSERVER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/imnota-security-observer"
+SECURITY_OBSERVER_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
+readonly SECURITY_OBSERVER="$SECURITY_OBSERVER_DIRECTORY/imnota-security-observer"
 
 stage_dir=""
 lock_dir=""
@@ -776,7 +777,7 @@ swap_and_launch() {
     (umask 077; /bin/mkdir -- "$backup_root") || die "The managed rollback folder could not be created."
     backup_root_created=1
   fi
-  secure_private_directory "$backup_root" || die "The managed rollback folder is not a private physical directory owned by you."
+  secure_private_directory "$backup_root" || die "The managed rollback folder could not be confirmed private. Preserved at: $backup_root"
   # Earlier runs may have left legitimate backups; only a new root must be empty.
   if (( backup_root_created != 0 )); then
     require_empty_created_directory "$backup_root" "managed rollback folder"
