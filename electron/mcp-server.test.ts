@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { crc32 } from 'node:zlib';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
@@ -453,12 +454,22 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
       const projectPath = await writeProject(root, projectData());
       const folder = await writeBundle(projectPath);
       const setName = path.basename(folder);
+      // A valid ancillary chunk makes part 3's bytes distinct, so swapped payloads fail.
+      const marker = Buffer.from('tEXtfixture\0part-three');
+      const chunk = Buffer.alloc(marker.length + 8);
+      chunk.writeUInt32BE(marker.length - 4, 0);
+      marker.copy(chunk, 4);
+      chunk.writeUInt32BE(crc32(marker), chunk.length - 4);
+      const thirdPng = Buffer.concat([TEST_PNG.subarray(0, -12), chunk, TEST_PNG.subarray(-12)]);
       for (const number of ['02', '03']) {
         await fs.writeFile(
           path.join(folder, `${setName} - ${number}.md`),
           number === '02' ? MANAGEMENT_SECRET : '# Third',
         );
-        await fs.writeFile(path.join(folder, `${setName} - ${number}.png`), TEST_PNG);
+        await fs.writeFile(
+          path.join(folder, `${setName} - ${number}.png`),
+          number === '03' ? thirdPng : TEST_PNG,
+        );
       }
       const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
       const id = listed.collections[0]!.preparedBundles[0]!.id;
@@ -476,7 +487,9 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
       ]);
       expect(response.result?.content).toHaveLength(3);
       for (const row of result.bundles)
-        expect(response.result!.content[row.imageContentIndex]!.data).toBe(TEST_PNG.toString('base64'));
+        expect(response.result!.content[row.imageContentIndex]!.data).toBe(
+          (row.bundleNumber === 1 ? TEST_PNG : thirdPng).toString('base64'),
+        );
       expect(JSON.stringify(response)).not.toContain(MANAGEMENT_SECRET);
       for (const [file] of [...opens.mock.calls, ...reads.mock.calls])
         expect(String(file)).not.toMatch(/ - 02\.(md|png)$/);
