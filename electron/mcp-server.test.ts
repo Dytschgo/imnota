@@ -466,6 +466,8 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
   it('resolves project identity once when browsing many collections', async () => {
     const root = await workspace();
     const project = projectData();
+    project.screenshots = [];
+    project.contentItems = [];
     project.collections = Array.from({ length: 40 }, (_, index) => ({
       ...project.collections[0]!,
       id: `collection-${index}`,
