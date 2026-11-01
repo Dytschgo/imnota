@@ -467,6 +467,12 @@ export async function exerciseMixedContent(
     if (!item) throw new Error(`Keyboard fixture lacks its ${kind} item.`);
     await driver.click({ selector: `[data-testid="screenshot-${item.id}"]` });
     await driver.waitFor({ selector: '.content-inspector button', text: `Duplicate ${kind}`, exact: true });
+    if (kind === 'drawing') {
+      // The lazy engine performs an initial autofocus after it mounts. Start the
+      // inspector journey once that actual readiness state has occurred.
+      await driver.waitFor({ selector: '.drawing-editor .excalidraw:focus' });
+      await driver.waitFor({ selector: '[data-testid="drawing-tool-select"]:not(:disabled)' });
+    }
     await driver.click({
       selector: kind === 'text' ? '[data-testid="markdown-input"]' : '[aria-label="Drawing description"]',
     });
@@ -488,6 +494,11 @@ export async function exerciseMixedContent(
           : 'drawing-inspector-keyboard-duplicate.png';
       captures.push(await driver.capture(artifactDirectory, filename, 'none'));
     }
+    const stillFocused = await driver.evaluate<boolean>(`(() => {
+      const focused = document.activeElement;
+      return focused?.matches('.content-inspector button') && focused.textContent.trim() === ${JSON.stringify(`Duplicate ${kind}`)};
+    })()`);
+    if (!stillFocused) throw new Error(`${kind} inspector Duplicate lost native focus before Enter.`);
     await driver.press('Enter');
     expectedItems += 1;
     await driver.evaluate(`new Promise((resolve, reject) => {

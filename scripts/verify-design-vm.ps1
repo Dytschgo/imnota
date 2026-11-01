@@ -2,7 +2,9 @@
 param()
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-# Managed guest only; never execute project checks on the coding PC.
+# Lab Manager requires a short invocation of a checked-in guest script. This
+# entry point orchestrates the existing project commands without replacing them.
+# Never execute project checks on the coding PC.
 if (-not $env:AGENTLAB_EVIDENCE_DIR) { throw 'Run only through the managed Windows guest.' }
 $evidence = $env:AGENTLAB_EVIDENCE_DIR
 $report = [ordered]@{ status = 'running'; stage = 'prepare'; steps = @(); error = $null }
@@ -38,6 +40,11 @@ try {
     $env:IMNOTA_SMOKE_ARTIFACT_DIR = Join-Path $evidence 'imnota-verification-artifacts-design'
     # UI verification is independent of the Node 24 prerequisite for strict MCP relay acceptance.
     Invoke-ProjectStep 'packaged-ui-walkthrough' { node scripts/smoke.mjs $executable }
+    $differences = Join-Path $evidence 'design-visual-differences'
+    Invoke-ProjectStep 'visual-baseline-comparison' {
+        node scripts/visual-regression.mjs tests/visual/win32 $env:IMNOTA_SMOKE_ARTIFACT_DIR $differences |
+            Tee-Object -FilePath (Join-Path $evidence 'design-visual-comparison.json')
+    }
     $report.status = 'passed'
     $exitCode = 0
 } catch {
