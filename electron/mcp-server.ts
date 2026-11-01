@@ -110,7 +110,11 @@ interface McpTool {
 const projectPathSchema = z.string().min(1).max(2000);
 const collectionIdSchema = filenameSchema;
 const itemIdSchema = z.string().min(1).max(200);
-const searchQuerySchema = z.string().min(1).max(500);
+const searchQuerySchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine((query) => query.trim().length > 0, 'Enter a search term.');
 
 const listProjectsInput = z.object({}).strict();
 const listCollectionItemsInput = z
