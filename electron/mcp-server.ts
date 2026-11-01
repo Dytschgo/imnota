@@ -112,7 +112,7 @@ const collectionIdSchema = filenameSchema;
 const itemIdSchema = z.string().min(1).max(200);
 const searchQuerySchema = z.string().min(1).max(500);
 
-const listProjectsInput = z.object({}).strict();
+const listProjectsInput = z.object({ scope: z.enum(['active', 'archived', 'all']).optional() }).strict();
 const listCollectionItemsInput = z
   .object({ projectPath: projectPathSchema, collectionId: collectionIdSchema })
   .strict();
@@ -448,6 +448,17 @@ async function inspectPreparedBundle(set: PreparedSet, limits: McpBundleLimits) 
       },
     });
   }
+  const totalBytes = (entries: Array<{ bytes: number | null }>) => {
+    let total = 0;
+    for (const entry of entries) {
+      if (entry.bytes === null || !Number.isSafeInteger(total + entry.bytes)) return null;
+      total += entry.bytes;
+    }
+    return total;
+  };
+  const images = bundles.flatMap((bundle) => (bundle.image ? [bundle.image] : []));
+  const totalMarkdownBytes = totalBytes(bundles.map((bundle) => bundle.markdown));
+  const totalImageBytes = totalBytes(images);
   return {
     id: set.id,
     setName: set.setName,
@@ -457,6 +468,13 @@ async function inspectPreparedBundle(set: PreparedSet, limits: McpBundleLimits) 
     preparedAtBasis: 'filename-local-time',
     freshness: 'unknown',
     contentVerified: false,
+    summary: {
+      bundleCount: bundles.length,
+      imageCount: images.length,
+      markdownBytes: totalMarkdownBytes,
+      imageBytes: totalImageBytes,
+      sizeMetadataComplete: totalMarkdownBytes !== null && totalImageBytes !== null,
+    },
     bundles,
     readLimits: { ...limits, maxTextResponseBytes: MAX_MCP_TEXT_RESPONSE_BYTES },
     next: { tool: 'get_bundle', arguments: { id: set.id } },
@@ -665,10 +683,15 @@ export function createMcpTools(
   return [
     {
       name: 'list_projects',
-      description: 'List active Imnota projects in the selected workspace.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description:
+        'List Imnota projects in the selected workspace. Defaults to active; scope archived or all discovers saved projects without guessing search terms.',
+      inputSchema: {
+        type: 'object',
+        properties: { scope: { type: 'string', enum: ['active', 'archived', 'all'] } },
+        additionalProperties: false,
+      },
       async handle(args) {
-        listProjectsInput.parse(args);
+        const input = listProjectsInput.parse(args);
         const workspace = workspaceOrThrow();
         await assertNoLinks(workspace);
         const projects = await listWorkspaceProjects(workspace, undefined, {
@@ -677,7 +700,7 @@ export function createMcpTools(
         });
         return {
           projects: projects
-            .filter((project) => project.status === 'active')
+            .filter((project) => input.scope === 'all' || project.status === (input.scope ?? 'active'))
             .map((project) => ({
               path: project.projectPath,
               name: project.name,
@@ -702,18 +725,29 @@ export function createMcpTools(
         const projectPath = await authorize(input.projectPath);
         const project = await readProjectDocument(projectPath);
         const collections = [];
+        // Resolve the authorized project identity once, rather than twice per collection.
+        const key = await projectKey(projectPath);
         for (const collection of project.collections) {
-          const sets = await projectSets(projectPath, project, (candidate) => candidate === collection);
+          const sets = await preparedSets(projectPath, key, collection.id, latestAllowed());
           collections.push({
             id: collection.id,
             name: collection.name,
             archived: collection.archived,
             updatedAt: collection.updatedAt,
             itemCount: orderedCollectionItems(project, collection.id).length,
+            preparedBundlesTotal: sets.length,
+            preparedBundlesTruncated: sets.length > MAX_LISTED_BUNDLES_PER_COLLECTION,
             preparedBundles: sets
               .sort(compareLatest)
               .slice(0, MAX_LISTED_BUNDLES_PER_COLLECTION)
-              .map((set) => ({ id: set.id, setName: set.setName, preparedAt: set.preparedAt })),
+              .map((set) => ({
+                id: set.id,
+                setName: set.setName,
+                preparedAt: set.preparedAt,
+                sourceKind: 'saved-export',
+                preparedAtBasis: 'filename-local-time',
+                freshness: 'unknown',
+              })),
           });
         }
         return { projectPath, projectName: project.name, collections };
@@ -745,6 +779,7 @@ export function createMcpTools(
             kind: item.kind,
             title: item.kind === 'text' ? item.preview || 'Text block' : item.title,
             includeInExport: item.includeInExport,
+            next: { tool: 'get_item', arguments: { projectPath, itemId: item.id } },
             ...(item.kind === 'screenshot' ? { priority: item.priority } : {}),
           })),
         };
