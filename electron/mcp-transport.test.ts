@@ -103,6 +103,41 @@ describe('MCP HTTP reliability', () => {
 });
 
 describe('MCP stdio reliability', () => {
+  it('preserves the exact byte limit with CRLF split across input chunks', async () => {
+    const frames = [];
+    for await (const frame of readMcpFrames(
+      Readable.from(['12345678', '\r', '\n', '123456789\n', 'next\r\n']),
+      8,
+    ))
+      frames.push(frame);
+    expect(frames).toEqual([{ text: '12345678' }, { error: 'too-large' }, { text: 'next' }]);
+  });
+  it('returns wire errors for oversized and malformed input, then processes a valid request', async () => {
+    const chunks: string[] = [];
+    const input = Readable.from([
+      Buffer.from('x'.repeat(1_000_001) + '\n'),
+      Buffer.concat([
+        Buffer.from('{"jsonrpc":"2.0","id":9,"method":"ping","params":{"x":"'),
+        Buffer.from([0xc3, 0x28]),
+        Buffer.from('"}}\n'),
+      ]),
+      Buffer.from(JSON.stringify(ping) + '\n'),
+    ]);
+    await new LocalMcpServer(context).startStdio(
+      input,
+      new Writable({
+        write(chunk, _encoding, done) {
+          chunks.push(String(chunk));
+          done();
+        },
+      }),
+    );
+    expect(chunks.map((chunk) => JSON.parse(chunk))).toMatchObject([
+      { id: null, error: { code: -32600 } },
+      { id: null, error: { code: -32700 } },
+      { id: 1, result: {} },
+    ]);
+  });
   it('discards an oversized unfinished frame and recovers at the next newline', async () => {
     const frames = [];
     for await (const frame of readMcpFrames(Readable.from([Buffer.alloc(32, 120), Buffer.from('\nOK\n')]), 8))

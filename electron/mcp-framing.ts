@@ -19,7 +19,9 @@ export async function* readMcpFrames(input: NodeJS.ReadableStream, maximum: numb
   let oversized = false;
   const finish = (): Frame => {
     try {
-      return oversized ? { error: 'too-large' } : { text: decodeMcpUtf8(Buffer.concat(parts, size)) };
+      if (oversized) return { error: 'too-large' };
+      const bytes = Buffer.concat(parts, size);
+      return { text: decodeMcpUtf8(bytes.at(-1) === 13 ? bytes.subarray(0, -1) : bytes) };
     } catch {
       return { error: 'invalid-utf8' };
     } finally {
@@ -36,7 +38,12 @@ export async function* readMcpFrames(input: NodeJS.ReadableStream, maximum: numb
       const end = newline < 0 ? bytes.length : newline;
       const length = end - offset;
       if (!oversized) {
-        if (size + length > maximum) {
+        // CRLF is framing, just as with the previous readline transport. Permit
+        // one extra byte only when it is a possible terminal CR.
+        if (
+          size + length > maximum + 1 ||
+          (size + length === maximum + 1 && bytes[end - 1] !== 13 && length > 0)
+        ) {
           oversized = true;
           parts = [];
           size = 0;
