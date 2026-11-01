@@ -231,7 +231,7 @@ describe('CollectionRail', () => {
         createdAt: 'now',
         updatedAt: 'now',
         markdownFilename: 'text.md',
-        preview: 'Architecture overview',
+        preview: '# Architecture overview',
       },
       {
         id: 'drawing',
@@ -262,9 +262,13 @@ describe('CollectionRail', () => {
       'screenshot-drawing',
       'screenshot-gamma',
     ]);
+    // The stored preview is raw Markdown; the rail names the block without its heading marker.
+    expect(screen.getByTestId('screenshot-text')).toHaveTextContent(/^\d+Architecture overviewMarkdown$/);
+    expect(screen.getByRole('button', { name: 'Exclude Architecture overview from prompt' })).toBeVisible();
+    // The tooltip names the whole item, which the rail may clamp, before the reorder keys.
     expect(screen.getByTestId('screenshot-text')).toHaveAttribute(
       'title',
-      'Alt + ArrowUp / Alt + ArrowDown to reorder',
+      'Architecture overview\nAlt + ArrowUp / Alt + ArrowDown to reorder',
     );
     fireEvent.keyDown(screen.getByTestId('screenshot-text'), { key: 'ArrowUp', altKey: true });
     await waitFor(() => expect(onSaveProject).toHaveBeenCalledOnce());
@@ -292,7 +296,7 @@ describe('CollectionRail', () => {
       />,
     );
     const alpha = screen.getByTestId('screenshot-alpha');
-    expect(alpha).toHaveAttribute('title', 'Ctrl + Shift + ArrowDown to reorder');
+    expect(alpha.title).toMatch(/\nCtrl \+ Shift \+ ArrowDown to reorder$/);
     // Only the current item's delete button advertises the shortcut that acts on the current item.
     expect(screen.getByTestId('item-delete-alpha')).toHaveAttribute('title', 'Delete (Ctrl + Delete)');
     expect(screen.getByTestId('item-delete-beta').title).toMatch(/^Delete screenshot: /);

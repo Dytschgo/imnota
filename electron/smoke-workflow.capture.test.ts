@@ -142,6 +142,8 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       'recently-deleted-three-kinds.png', // Dialog after all three items are deleted.
       'recently-deleted-restored.png', // Dialog after restoring Markdown last.
       'recently-deleted-list-error.png', // Dialog over the reopened Markdown editor.
+      'text-inspector-keyboard-duplicate.png', // Markdown inspector with native keyboard focus.
+      'drawing-inspector-keyboard-duplicate.png', // Drawing inspector with native keyboard focus.
     ]),
   ],
   [
@@ -166,10 +168,14 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '1080x800-feedback-template-collection-picker.png', // Picker over a Markdown template.
       '1080x800-feedback-paste-error.png', // Clipboard error over a Markdown template.
       'feedback-search.png', // Search dialog over a Markdown template.
+      'feedback-search-no-match.png', // No active matches over a Markdown template.
+      'feedback-search-archive-no-match.png', // Archive scope after the no-match action.
       'feedback-projects.png', // Project library.
       'feedback-project-delete-confirm.png', // Confirmation dialog over the library.
       'workspace-local-diagnostics.png', // Workspace settings.
       'agent-access-setup-prompt.png', // Features settings.
+      'agent-access-copy-failed.png', // Features settings after rejected native clipboard write.
+      'settings-incomplete-guide.png', // Updates & about, incomplete-guide state.
       '900x800-110pct-feedback-agent-access.png', // Features settings at 110% zoom.
       'feedback-dark-backdrop.png', // Appearance settings.
       'feedback-light-backdrop.png', // Appearance settings.

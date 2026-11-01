@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import { useAppStore } from '../store';
@@ -45,7 +45,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ snapshot: null, activeScreenshotId: null, rightPanelOpen: true });
+  useAppStore.setState({
+    snapshot: null,
+    activeScreenshotId: null,
+    activeCollectionId: '001-collection',
+    rightPanelOpen: true,
+  });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -183,6 +188,44 @@ test('a read failure exposes Retry through Workspace and a decode failure can be
   fireEvent.load(images.at(-1)!);
   expect(props.stageRef.current).not.toBeNull();
   expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+});
+
+test('the text inspector names the rail position and keeps Duplicate under Actions', () => {
+  openShot();
+  const snapshot = useAppStore.getState().snapshot!;
+  act(() =>
+    useAppStore.setState({
+      snapshot: {
+        ...snapshot,
+        project: {
+          ...snapshot.project,
+          contentItems: [
+            {
+              id: 'text-1',
+              kind: 'text',
+              collectionId: 'collection',
+              position: 1,
+              includeInExport: true,
+              createdAt: '',
+              updatedAt: '',
+              markdownFilename: 'text.md',
+              preview: '# Notes',
+            },
+          ],
+        },
+      },
+      activeCollectionId: 'collection',
+      activeScreenshotId: 'text-1',
+      rightPanelOpen: true,
+    }),
+  );
+  const onDuplicateContent = vi.fn();
+  render(<Workspace {...canvasProps()} image={null} onDuplicateContent={onDuplicateContent} />);
+  const inspector = screen.getByRole('complementary', { name: 'Content details' });
+  expect(inspector).toHaveTextContent(/^TEXT 02Text context/);
+  const actions = within(inspector).getByRole('region', { name: 'Actions' });
+  fireEvent.click(within(actions).getByRole('button', { name: 'Duplicate text' }));
+  expect(onDuplicateContent).toHaveBeenCalledOnce();
 });
 
 test('a canvas render failure stays inside the workspace and another screenshot resets the panel', () => {

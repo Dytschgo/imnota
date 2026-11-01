@@ -48,7 +48,7 @@ The new-project dialog also has five optional templates: Bug report, UI review, 
 
 The toolbar **Back** button returns to earlier app locations. Settings has its own category rail and a back arrow beside its title; that arrow returns to the prior location, including the project, collection and item you were viewing. **Forward** becomes available after going back; navigating somewhere new clears the forward history. Navigation saves pending work before leaving it.
 
-Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope.
+Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope; when a search finds nothing, **Search the archive** (or **Search active projects**) repeats it in the other scope.
 
 Search reports when its limits or unavailable files prevent complete results. Content files over 2 MB are skipped; each request also limits the number of projects, file operations and total bytes read. Project files remain unchanged by searching.
 
@@ -158,7 +158,7 @@ Off by default. The beta **Settings → Features → MCP access** toggle lets an
 
 Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
 
-Choose **Copy prompt** in Settings and paste it into your agent; the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
+Choose **Copy prompt** in Settings and paste it into your agent (if the clipboard is unavailable, the button reads **Copy failed** and you can select the prompt text instead); the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
 
 ## Share a hosted link
 
