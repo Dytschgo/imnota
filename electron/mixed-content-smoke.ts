@@ -450,5 +450,60 @@ export async function exerciseMixedContent(
       `window.imnota.setSettings({confirmBeforeDeletion:${JSON.stringify(previousSettings.confirmBeforeDeletion)}})`,
     );
   }
+  // Separate disposable fixture: duplicated items must not alter the three-kind
+  // Recently deleted screenshots or the mixed export assertions above.
+  const keyboardFixture = await driver.evaluate<ProjectSnapshot>(`(async () => {
+    let snapshot = await window.imnota.createProject({name:'Inspector keyboard verification',description:''});
+    for (const kind of ['text','drawing']) snapshot = await window.imnota.createContentItem({
+      projectPath:snapshot.projectPath,collectionId:snapshot.project.collections[0].id,kind,
+    });
+    return snapshot;
+  })()`);
+  await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
+  await driver.click({ selector: '.project-row-main', text: 'Inspector keyboard verification' });
+  let expectedItems = 2;
+  for (const kind of ['text', 'drawing'] as const) {
+    const item = keyboardFixture.project.contentItems?.find((candidate) => candidate.kind === kind);
+    if (!item) throw new Error(`Keyboard fixture lacks its ${kind} item.`);
+    await driver.click({ selector: `[data-testid="screenshot-${item.id}"]` });
+    await driver.waitFor({ selector: '.content-inspector button', text: `Duplicate ${kind}`, exact: true });
+    await driver.click({
+      selector: kind === 'text' ? '[data-testid="markdown-input"]' : '[aria-label="Drawing description"]',
+    });
+    let reachedDuplicate = false;
+    // Traverse the actual native Tab order; do not focus the target in script.
+    for (let step = 0; step < 40; step += 1) {
+      await driver.press('Tab');
+      reachedDuplicate = await driver.evaluate<boolean>(`(() => {
+        const focused = document.activeElement;
+        return focused?.matches('.content-inspector button') && focused.textContent.trim() === ${JSON.stringify(`Duplicate ${kind}`)};
+      })()`);
+      if (reachedDuplicate) break;
+    }
+    if (!reachedDuplicate) throw new Error(`${kind} inspector Duplicate was unreachable through native Tab.`);
+    if (artifactDirectory) {
+      const filename =
+        kind === 'text'
+          ? 'text-inspector-keyboard-duplicate.png'
+          : 'drawing-inspector-keyboard-duplicate.png';
+      captures.push(await driver.capture(artifactDirectory, filename, 'none'));
+    }
+    await driver.press('Enter');
+    expectedItems += 1;
+    await driver.evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      const check = async () => {
+        try {
+          const snapshot = await window.imnota.loadProject(${JSON.stringify(keyboardFixture.projectPath)});
+          const items = snapshot.project.contentItems ?? [];
+          if (items.length === ${expectedItems} && items.filter(item => item.kind === ${JSON.stringify(kind)}).length === 2)
+            return resolve(true);
+          if (Date.now() >= deadline) return reject(new Error('Native Enter did not persist the inspector duplicate.'));
+          setTimeout(check, 50);
+        } catch (error) { reject(error); }
+      };
+      check();
+    })`);
+  }
   return captures;
 }

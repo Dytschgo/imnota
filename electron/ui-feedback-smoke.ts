@@ -505,6 +505,39 @@ export async function exerciseUiFeedback(
   await driver.resize({ width: 1280, height: 800 });
   await driver.click({ selector: '[data-testid="search-trigger"]' });
   await waitForEmptySearch(driver);
+  const noMatchQuery = 'design-smoke-no-match-2dc53e4a';
+  await driver.fill({ selector: '[data-testid="global-search-input"]' }, noMatchQuery);
+  await driver.waitFor({
+    selector: '[data-testid="global-search-other-scope"]',
+    text: 'Search the archive',
+    exact: true,
+  });
+  await driver.press('Tab');
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-search-no-match.png', 'none'));
+  await driver.click({ selector: '[data-testid="global-search-other-scope"]' });
+  await driver.waitFor({
+    selector: '[data-testid="global-search-other-scope"]',
+    text: 'Search active projects',
+    exact: true,
+  });
+  const otherScope = await driver.evaluate<boolean>(`(() => {
+    const input = document.querySelector('[data-testid="global-search-input"]');
+    return input?.value === ${JSON.stringify(noMatchQuery)} && document.activeElement === input &&
+      [...document.querySelectorAll('.project-search-scope button')].some(button =>
+        button.textContent.trim() === 'Archive' && button.getAttribute('aria-pressed') === 'true');
+  })()`);
+  if (!otherScope) throw new Error('No-match archive action lost its query, selected scope or input focus.');
+  // Capture after observing focus, with the caret stopped by a real Tab.
+  await driver.press('Tab');
+  if (artifactDirectory)
+    captures.push(await driver.capture(artifactDirectory, 'feedback-search-archive-no-match.png', 'none'));
+  await driver.click({ selector: '[data-testid="global-search-other-scope"]' });
+  await driver.waitFor({
+    selector: '[data-testid="global-search-other-scope"]',
+    text: 'Search the archive',
+    exact: true,
+  });
   await driver.fill({ selector: '[data-testid="global-search-input"]' }, 'quartzmarkdownprobe');
   await driver.waitFor({ selector: '[data-testid="global-search-result"][data-kind="text"]' });
   if (artifactDirectory) {
@@ -546,6 +579,25 @@ export async function exerciseUiFeedback(
   })`);
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'feedback-annotation-target.png', screenshot));
+  try {
+    driver.browserWindow.webContents.setZoomFactor(1.1);
+    await driver.waitForScreenshotCanvas(screenshot);
+    const hintFits = await driver.evaluate<boolean>(`(() => {
+      const hint = document.querySelector('.canvas-hint');
+      if (!hint || hint.hidden) return false;
+      const host = hint.parentElement.getBoundingClientRect();
+      const box = hint.getBoundingClientRect();
+      const visibleTips = [...hint.children].filter(tip => getComputedStyle(tip).display !== 'none');
+      return visibleTips.length >= 2 && box.left >= host.left && box.right <= host.right &&
+        box.top >= host.top && box.bottom <= host.bottom && hint.scrollWidth <= hint.clientWidth &&
+        visibleTips.every(tip => tip.scrollWidth <= tip.clientWidth && tip.getClientRects().length === 1);
+    })()`);
+    if (!hintFits) throw new Error('Canvas hint clipped or escaped the canvas at 110% zoom.');
+    if (artifactDirectory)
+      captures.push(await driver.capture(artifactDirectory, '1280x800-110pct-canvas-hint.png', screenshot));
+  } finally {
+    driver.browserWindow.webContents.setZoomFactor(1);
+  }
 
   await driver.click({ selector: '[data-testid="settings-button"]' });
   await driver.click({ selector: '.settings-navigation button', text: 'Shortcuts', exact: true });
@@ -647,9 +699,34 @@ export async function exerciseUiFeedback(
   await driver.waitFor({ selector: '[data-testid="agent-access-prompt"]' });
   await driver.resize({ width: 1080, height: 800 });
   await captureAgentAccess(driver, artifactDirectory, captures, 'agent-access-setup-prompt.png');
+  const writeText = nativeClipboard.writeText;
+  try {
+    nativeClipboard.writeText = async () => {
+      throw new Error('Synthetic clipboard unavailable');
+    };
+    await driver.click({
+      selector: '[aria-labelledby="agent-access-title"] button',
+      text: 'Copy prompt',
+      exact: true,
+    });
+    await driver.waitFor({
+      selector: '[aria-labelledby="agent-access-title"] button',
+      text: 'Copy failed',
+      exact: true,
+    });
+    await driver.waitFor({
+      selector: '[aria-labelledby="agent-access-title"] [role="status"]',
+      text: 'Setup prompt could not be copied. Select the text and copy it instead.',
+      exact: true,
+    });
+    if (artifactDirectory)
+      captures.push(await driver.capture(artifactDirectory, 'agent-access-copy-failed.png', 'none'));
+  } finally {
+    nativeClipboard.writeText = writeText;
+  }
   await driver.click({
     selector: '[aria-labelledby="agent-access-title"] button',
-    text: 'Copy prompt',
+    text: 'Copy failed',
     exact: true,
   });
   await driver.waitFor({
@@ -701,5 +778,37 @@ export async function exerciseUiFeedback(
   })()`);
   if (artifactDirectory)
     captures.push(await driver.capture(artifactDirectory, 'feedback-light-backdrop.png', 'none'));
+  const onboarding = await driver.evaluate<{ completed: boolean; completedVersion: number }>(`(async () => {
+    const current = await window.imnota.getPreferenceSettings();
+    if (!current.ok || !current.value.settings.onboarding.completedVersion)
+      throw new Error('Guide fixture needs the completed version from the preceding native guide.');
+    return current.value.settings.onboarding;
+  })()`);
+  try {
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({onboarding:{completed:false}});
+      if (!result.ok) throw new Error(result.error.message);
+    })()`);
+    driver.setWindow(await host.reopenWindow());
+    await driver.click({ selector: '[data-testid="settings-button"]' });
+    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.waitFor({
+      selector: '.imnota-completion-state:not([data-completed])',
+      text: 'The guide has not been completed on this profile.',
+      exact: true,
+    });
+    await driver.waitFor({ selector: '.imnota-completion-state:not([data-completed]) svg.lucide-circle' });
+    await driver.evaluate(
+      `document.querySelector('#onboarding-settings-title').scrollIntoView({block:'center'})`,
+    );
+    if (artifactDirectory)
+      captures.push(await driver.capture(artifactDirectory, 'settings-incomplete-guide.png', 'none'));
+  } finally {
+    await driver.evaluate(`(async () => {
+      const result = await window.imnota.setPreferenceSettings({onboarding:${JSON.stringify(onboarding)}});
+      if (!result.ok) throw new Error(result.error.message);
+    })()`);
+    driver.setWindow(await host.reopenWindow());
+  }
   return captures;
 }
