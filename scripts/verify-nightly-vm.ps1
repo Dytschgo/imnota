@@ -88,7 +88,13 @@ try {
     Write-Host $report.error
 } finally {
     # Do not retain an installer binary in the bounded text/screenshot evidence transfer.
-    if ($download -and (Test-Path -LiteralPath $download)) { Remove-Item -LiteralPath $download -Force }
-    Save-Checkpoint $report.stage
+    try {
+        if ($download -and (Test-Path -LiteralPath $download)) { Remove-Item -LiteralPath $download -Force }
+    } catch {
+        # Cleanup failure must not replace the command outcome or skip its final report.
+        $report.cleanupWarning = $_.Exception.Message
+    } finally {
+        Save-Checkpoint $report.stage
+    }
 }
 exit $exitCode
