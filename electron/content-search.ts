@@ -119,7 +119,7 @@ async function* projectSearchDocuments(
           itemId: item.id,
           kind: item.kind,
           label: item.title,
-          fields: { title: item.title },
+          fields: { title: item.title, description: item.description ?? '' },
         };
       } else {
         yield {

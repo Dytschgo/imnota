@@ -233,6 +233,44 @@ describe('local MCP server lifecycle', () => {
 });
 
 describe('local MCP tools', () => {
+  it('rejects whitespace-only search before scanning while preserving valid queries', async () => {
+    const root = await workspace();
+    const search = vi.fn(async () => ({ results: [], warnings: [], totalMatches: 0 }));
+    const tools = createMcpTools({
+      enabled: () => true,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+      search,
+    });
+    for (const query of [' ', '\t\n', '\u2003']) {
+      const result = await handleMcpJsonRpc(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'search_saved_text', arguments: { query } },
+        },
+        tools,
+        'test',
+      );
+      expect(result).toMatchObject({
+        result: { isError: true, content: [{ text: 'Invalid tool arguments: query.' }] },
+      });
+    }
+    expect(search).not.toHaveBeenCalled();
+    await handleMcpJsonRpc(
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'search_saved_text', arguments: { query: ' queue ' } },
+      },
+      tools,
+      'test',
+    );
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: ' queue ' }));
+  });
+
   it('rejects path traversal and reserved backup folders', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());
