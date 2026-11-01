@@ -171,7 +171,7 @@ jobs:
       - name: Retain application coverage report
         if: ${{ !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: application-coverage
           path: coverage/
@@ -262,7 +262,7 @@ jobs:
 
       - name: Retain Mac walkthrough evidence
         if: env.RUN_APPLICATION == 'true' && (!cancelled() && matrix.os == 'macos-latest')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac-walkthrough-evidence-ci
           path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
@@ -292,7 +292,7 @@ jobs:
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
         if: env.RUN_APPLICATION == 'true' && (!cancelled() && matrix.os == 'windows-latest')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-visual-evidence
           path: |
@@ -311,7 +311,7 @@ jobs:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-clipboard
       - name: Retain bundle copy evidence
         if: env.RUN_APPLICATION == 'true' && !cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: clipboard-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-clipboard/
@@ -319,14 +319,14 @@ jobs:
       # Diagnostic artifacts must never match the publication asset pattern.
       - name: Retain packaged smoke failure evidence
         if: env.RUN_APPLICATION == 'true' && failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-failure-evidence-ci-${{ matrix.os }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-*/
           if-no-files-found: ignore
           retention-days: 7
       - name: Retain review installers and build diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: env.RUN_APPLICATION == 'true'
         with:
           name: imnota-${{ matrix.os }}
@@ -344,7 +344,7 @@ jobs:
           compression-level: 0
       - name: Retain packaged MCP evidence
         if: env.RUN_APPLICATION == 'true' && !cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-evidence-${{ matrix.os }}
           path: release/imnota-verification-artifacts-mcp/

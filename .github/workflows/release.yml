@@ -136,7 +136,7 @@ jobs:
           node --test scripts/install.native-mac.test.mjs
       - name: Retain Mac walkthrough evidence
         if: always() && matrix.platform == 'macos'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac-walkthrough-evidence-release
           path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
@@ -153,7 +153,7 @@ jobs:
       # The artifact name must stay outside the publish job's release-* download pattern.
       - name: Retain Windows visual evidence
         if: always() && matrix.platform == 'windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-visual-evidence-release
           path: |
@@ -164,7 +164,7 @@ jobs:
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-release-linux
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.platform }}
           path: |
@@ -178,7 +178,7 @@ jobs:
       # Diagnostic artifacts must never match the publication asset pattern.
       - name: Retain packaged smoke failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-failure-evidence-release-${{ matrix.platform }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-*/
@@ -187,7 +187,7 @@ jobs:
       # Evidence must remain outside the publish job's release-* artifact pattern.
       - name: Retain packaged MCP evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-evidence-${{ matrix.platform }}
           path: release/imnota-verification-artifacts-mcp/
@@ -255,7 +255,7 @@ jobs:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-public-mac-release
       - name: Retain public Mac smoke failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-failure-evidence-public-mac-release
           path: ${{ runner.temp }}/imnota-verification-artifacts-public-mac-release/
