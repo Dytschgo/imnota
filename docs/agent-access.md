@@ -17,16 +17,16 @@ Enabling access first checks that the listener can bind. If the port is occupied
 
 ## What agents can read
 
-| Tool                    | Arguments                              | Result                                                                           |
-| ----------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `list_projects`         | None                                   | Active projects (path, name, updated time)                                       |
-| `list_collections`      | `projectPath`                          | Collections, including archived ones, and up to ten recent saved bundle ids each |
-| `list_collection_items` | `projectPath`, `collectionId`          | Ordered items (id, kind, title, includeInExport, priority)                       |
-| `get_latest_bundle`     | Optional `projectPath`, `collectionId` | Latest readable saved export: Markdown text and PNG image blocks                 |
-| `get_bundle`            | `id`                                   | One saved export identified by a discovered bundle id                            |
-| `inspect_bundle`        | `id`                                   | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
-| `get_item`              | `projectPath`, `itemId`                | One item's Markdown plus image path for screenshots and drawings                 |
-| `search_saved_text`     | `query`, optional search filters       | Existing saved-text search results                                               |
+| Tool                    | Arguments                               | Result                                                                           |
+| ----------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| `list_projects`         | Optional `scope`: active, archived, all | Projects in the chosen scope; active by default (path, name, updated time)       |
+| `list_collections`      | `projectPath`                           | Collections, including archived ones, and up to ten recent saved bundle ids each |
+| `list_collection_items` | `projectPath`, `collectionId`           | Ordered items (id, kind, title, includeInExport, priority)                       |
+| `get_latest_bundle`     | Optional `projectPath`, `collectionId`  | Latest readable saved export: Markdown text and PNG image blocks                 |
+| `get_bundle`            | `id`                                    | One saved export identified by a discovered bundle id                            |
+| `inspect_bundle`        | `id`                                    | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
+| `get_item`              | `projectPath`, `itemId`                 | One item's Markdown plus image path for screenshots and drawings                 |
+| `search_saved_text`     | `query`, optional search filters        | Existing saved-text search results                                               |
 
 `get_latest_bundle` without arguments searches active projects and active collections. Supplying only `projectPath` narrows it to that project's active collections; supplying both `projectPath` and `collectionId` selects that collection, including an archived one. `collectionId` alone is invalid. Timestamp ties use a stable project-path, collection-id and folder-name order.
 
@@ -45,6 +45,8 @@ Per call, bundle reads return at most **10 PNGs**, **5,000,000 raw bytes per PNG
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Linked project or export paths are rejected, and reads recheck file identity and size. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed. MCP performs no migrations, recovery, capture, export generation or file writes. Access remains controlled by the explicit local opt-in. HTTP uses the running UI's settings. Before each stdio tool call, the existing session reads `settings.json` once and validates it using the shared settings schemas: access off refuses the call, and a changed workspace takes effect for that call. Missing, unreadable or malformed settings fail closed rather than retaining enabled access. Invalid workspace values cannot authorize a root. This does not cancel a read already in progress; initialization and tool discovery do not read workspace content.
 
 ## Selective saved bundle reads
+
+Discovery reports its limits explicitly. Each collection includes `preparedBundlesTotal` and `preparedBundlesTruncated`; the returned window is still the ten most recent recognized exports. Listed exports carry the same saved-export / filename-local-time / unknown-freshness fields as full reads. `inspect_bundle.summary` reports observed part/image counts and aggregate Markdown/image file bytes; a byte total is `null` if any contributing size is unavailable or the sum cannot be represented safely. `sizeMetadataComplete` refers only to these size observations, never content integrity or freshness. Item listings supply `get_item` actions, which recheck opt-in and workspace authorization when followed. Use `list_projects` with `scope: "archived"` or `scope: "all"` to browse archived projects explicitly.
 
 Both bundle readers accept `includeImages: false` for Markdown-only retrieval, without opening PNG payloads, and `bundleNumbers: [1, 3]` to read selected parts in saved numeric order. Selection accepts 1–100 unique integers from 1 to 999; missing parts return an error, including when an older export happens to contain them. Defaults still read the full export with images. Each inspection row supplies a text-only `get_bundle` action for that part.
 
