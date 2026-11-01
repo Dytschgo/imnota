@@ -345,6 +345,10 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(inspection.bundles[0].markdown.bytes, Buffer.byteLength(markdown));
             assert.equal(inspection.bundles[0].image.bytes, png.length);
             assert.deepEqual(inspection.next, { tool: 'get_bundle', arguments: { id } });
+            assert.deepEqual(inspection.bundles[0].next, {
+              tool: 'get_bundle',
+              arguments: { id, bundleNumbers: [1], includeImages: false },
+            });
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
@@ -357,6 +361,19 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
                 mimeType: 'image/png',
                 data: png.toString('base64'),
               });
+              assert.equal(JSON.parse(bundle.content[0].text).bundles[0].imageContentIndex, 1);
+              const textOnly = await call(name, { ...args, includeImages: false, bundleNumbers: [1] });
+              assert.equal(textOnly.isError, false);
+              assert.equal(textOnly.content.length, 1);
+              const textResult = JSON.parse(textOnly.content[0].text);
+              assert.equal(textResult.sourceKind, 'saved-export');
+              assert.equal(textResult.freshness, 'unknown');
+              assert.equal(textResult.bundles[0].markdown, markdown);
+              assert.equal(textResult.bundles[0].markdownBytes, Buffer.byteLength(markdown));
+              assert.equal(textResult.bundles[0].image, 'not-requested');
+              const missing = await call(name, { ...args, bundleNumbers: [2] });
+              assert.equal(missing.isError, true);
+              assert.match(missing.content[0].text, /not present in this saved export/);
             }
             for (const [name, args, error] of [
               ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
