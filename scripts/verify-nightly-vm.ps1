@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 # Guest-only orchestration. The application and existing verifiers stay at b80ef9f.
 if (-not $env:AGENTLAB_EVIDENCE_DIR) { throw 'Run only through the managed Windows guest.' }
 $version = '0.4.1-nightly.20261031.41222265922'
@@ -17,7 +18,13 @@ $report = [ordered]@{
     error = $null
 }
 $exitCode = 1
+function Save-Checkpoint([string]$Stage) {
+    $report.stage = $Stage
+    $report.updatedUtc = [DateTime]::UtcNow.ToString('o')
+    [IO.File]::WriteAllText((Join-Path $evidence 'vm-report.json'), ($report | ConvertTo-Json -Depth 8))
+}
 try {
+    Save-Checkpoint 'guest-dependencies'
     $nodeVersion = & node --version
     $report.nodeVersion = $nodeVersion
     $report.nodePath = (Get-Command node).Source
@@ -31,12 +38,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Guest verifier Electron dependency preparation failed.' }
     $report.steps += @{ name = 'guest-dependencies'; status = 'passed'; nodeVersion = $nodeVersion }
 
+    Save-Checkpoint 'public-installer-download'
     $download = Join-Path $evidence $asset
-    Invoke-WebRequest -Uri "https://github.com/Dytschgo/imnota/releases/download/$tag/$asset" -OutFile $download -UseBasicParsing
+    Invoke-WebRequest -Uri "https://github.com/Dytschgo/imnota/releases/download/$tag/$asset" -OutFile $download -UseBasicParsing -TimeoutSec 300 -MaximumRedirection 5
     $actualHash = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -cne $expectedHash) { throw 'Published installer checksum mismatch; refusing execution.' }
     $report.steps += @{ name = 'public-installer-checksum'; status = 'passed'; sha256 = $actualHash }
 
+    Save-Checkpoint 'install-published-nsis'
     $installDirectory = Join-Path (Get-Location).Path 'nightly-vm-install'
     if (Test-Path -LiteralPath $installDirectory) { throw 'Private install target already exists; refusing replacement.' }
     $installer = Start-Process -FilePath $download -ArgumentList "/S /D=$installDirectory" -WindowStyle Hidden -PassThru
@@ -49,20 +58,30 @@ try {
     $env:IMNOTA_EXPECT_VERSION = $version
     $env:IMNOTA_MCP_CLIENT_NODE = (Get-Command node).Source
     $env:IMNOTA_MCP_ARTIFACT_DIR = Join-Path $evidence 'imnota-verification-artifacts-mcp'
-    $env:IMNOTA_SMOKE_ARTIFACT_DIR = $evidence
+    $env:IMNOTA_SMOKE_ARTIFACT_DIR = Join-Path $evidence 'imnota-verification-artifacts-ui'
+    Save-Checkpoint 'installed-feature-ui-walkthrough'
     & node scripts/smoke.mjs $executable
     if ($LASTEXITCODE -ne 0) { throw 'Installed application feature walkthrough failed.' }
     $report.steps += @{ name = 'installed-feature-ui-walkthrough'; status = 'passed' }
 
     if ([int]($nodeVersion -replace '^v(\d+).*$', '$1') -lt 24) {
         $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'blocked'; reason = 'Existing Node.js 24+ is required for the Windows relay.' }
-        throw 'UI verification completed; MCP relay verification remains blocked by the guest Node runtime.'
+        $report.status = 'partial'
+        $exitCode = 2
+    } else {
+        Save-Checkpoint 'mcp-verifier-fixture-build'
+        # The MCP verifier imports canonical fixture constructors from dist-electron.
+        # This prepares fixtures only; the executable under test remains the downloaded install.
+        & corepack pnpm build
+        if ($LASTEXITCODE -ne 0) { throw 'MCP verifier fixture build failed.' }
+        $report.steps += @{ name = 'mcp-verifier-fixture-build'; status = 'passed' }
+        Save-Checkpoint 'mcp-inspection-relay-readonly-boundaries'
+        & node scripts/verify-mcp.mjs $executable $download
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP verification failed.' }
+        $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'passed' }
+        $report.status = 'passed'
+        $exitCode = 0
     }
-    & node scripts/verify-mcp.mjs $executable $download
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged MCP verification failed.' }
-    $report.steps += @{ name = 'mcp-inspection-relay-readonly-boundaries'; status = 'passed' }
-    $report.status = 'passed'
-    $exitCode = 0
 } catch {
     $report.status = 'failed'
     $report.error = $_.Exception.Message
@@ -70,6 +89,6 @@ try {
 } finally {
     # Do not retain an installer binary in the bounded text/screenshot evidence transfer.
     if ($download -and (Test-Path -LiteralPath $download)) { Remove-Item -LiteralPath $download -Force }
-    [IO.File]::WriteAllText((Join-Path $evidence 'vm-report.json'), ($report | ConvertTo-Json -Depth 8))
+    Save-Checkpoint $report.stage
 }
 exit $exitCode
