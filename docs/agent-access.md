@@ -44,6 +44,12 @@ Per call, bundle reads return at most **10 PNGs**, **5,000,000 raw bytes per PNG
 
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Linked project or export paths are rejected, and reads recheck file identity and size. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed. MCP performs no migrations, recovery, capture, export generation or file writes. Access remains controlled by the explicit local opt-in. HTTP uses the running UI's settings. Before each stdio tool call, the existing session reads `settings.json` once and validates it using the shared settings schemas: access off refuses the call, and a changed workspace takes effect for that call. Missing, unreadable or malformed settings fail closed rather than retaining enabled access. Invalid workspace values cannot authorize a root. This does not cancel a read already in progress; initialization and tool discovery do not read workspace content.
 
+## Selective saved bundle reads
+
+Both bundle readers accept `includeImages: false` for Markdown-only retrieval, without opening PNG payloads, and `bundleNumbers: [1, 3]` to read selected parts in saved numeric order. Selection accepts 1–100 unique integers from 1 to 999; missing parts return an error, including when an older export happens to contain them. Defaults still read the full export with images. Each inspection row supplies a text-only `get_bundle` action for that part.
+
+Full reads identify `sourceKind: saved-export`, unknown freshness and the filename-local-time timestamp basis. `markdownBytes` counts returned UTF-8 text bytes; omitted Markdown has zero returned bytes and a targeted retry action. That action can recover a part omitted by the shared call budget, but cannot bypass an individual file limit. Images skipped intentionally have `image: not-requested`; actual count/byte omissions carry `imageOmissionReason`. Included images name their zero-based `imageContentIndex` in the MCP content array (JSON metadata occupies index 0).
+
 ## Install a skill or rule
 
 Imnota never writes agent or editor configuration. The setup prompt already tells the agent to prefer these tools over guessing from chat images; copy one of these files yourself if your agent supports installable skills or rules:
