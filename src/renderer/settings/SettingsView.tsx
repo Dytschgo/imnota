@@ -190,9 +190,8 @@ export function SettingsView({
             </p>
           )}
           {group === 'Backups & history' && (
-            <p>
-              Keep validated project snapshots on this device. Exports and recovery caches are not duplicated.
-            </p>
+            // The Local history card below explains what a snapshot contains; this line says why to be here.
+            <p>Snapshot projects on this device and restore an earlier version when you need it.</p>
           )}
           {group === 'Updates & about' && (
             <p>Keep Imnota up to date, learn what’s new, and find helpful resources.</p>
@@ -428,6 +427,13 @@ export function SettingsView({
   );
 }
 
+type CopyTarget = 'prompt' | 'http' | 'stdio';
+const COPY_TARGET_NAMES: Record<CopyTarget, string> = {
+  prompt: 'Setup prompt',
+  http: 'HTTP configuration',
+  stdio: 'Stdio configuration',
+};
+
 function AgentAccessSettings({
   value,
   disabled,
@@ -437,17 +443,27 @@ function AgentAccessSettings({
   disabled: boolean;
   onChange(value: PreferenceSettings['agentAccess']): void | Promise<void>;
 }) {
-  const [copied, setCopied] = useState('');
-  const copySnippet = async (label: string, snippet: string) => {
+  const [copy, setCopy] = useState<{ label: CopyTarget; ok: boolean } | null>(null);
+  const copySnippet = async (label: CopyTarget, snippet: string) => {
     try {
       await window.imnota.copyText(snippet);
-      setCopied(label);
+      setCopy({ label, ok: true });
     } catch {
-      setCopied('');
+      // A failed copy used to look like nothing happened; say so and keep the text selectable.
+      setCopy({ label, ok: false });
     }
   };
+  const copyLabel = (label: CopyTarget, idle: string) =>
+    copy?.label === label ? (copy.ok ? 'Copied' : 'Copy failed') : idle;
   return (
     <section className="settings-section" aria-labelledby="agent-access-title">
+      <p className="sr-only" role="status">
+        {copy
+          ? copy.ok
+            ? `${COPY_TARGET_NAMES[copy.label]} copied.`
+            : `${COPY_TARGET_NAMES[copy.label]} could not be copied. Select the text and copy it instead.`
+          : ''}
+      </p>
       <h2 id="agent-access-title">
         MCP access <span className="feature-status beta">Beta</span>
       </h2>
@@ -473,7 +489,7 @@ function AgentAccessSettings({
           <strong>Setup prompt for any agent</strong>
           <Button variant="ghost" onClick={() => void copySnippet('prompt', agentAccessSetupPrompt())}>
             <Copy size={14} aria-hidden="true" />
-            {copied === 'prompt' ? 'Copied' : 'Copy prompt'}
+            {copyLabel('prompt', 'Copy prompt')}
           </Button>
         </div>
         <p className="settings-snippet-note">
@@ -492,7 +508,7 @@ function AgentAccessSettings({
             <strong>HTTP</strong>
             <Button variant="ghost" onClick={() => void copySnippet('http', localAgentAccessHttpSnippet())}>
               <Copy size={14} aria-hidden="true" />
-              {copied === 'http' ? 'Copied' : 'Copy'}
+              {copyLabel('http', 'Copy')}
             </Button>
           </div>
           <pre>{localAgentAccessHttpSnippet()}</pre>
@@ -502,7 +518,7 @@ function AgentAccessSettings({
             <strong>Stdio</strong>
             <Button variant="ghost" onClick={() => void copySnippet('stdio', localAgentAccessStdioSnippet())}>
               <Copy size={14} aria-hidden="true" />
-              {copied === 'stdio' ? 'Copied' : 'Copy'}
+              {copyLabel('stdio', 'Copy')}
             </Button>
           </div>
           <pre>{localAgentAccessStdioSnippet()}</pre>
