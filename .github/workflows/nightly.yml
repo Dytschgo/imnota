@@ -160,7 +160,7 @@ jobs:
           node --test scripts/install.native-mac.test.mjs
       - name: Retain Mac walkthrough evidence
         if: always() && matrix.platform == 'macos'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac-walkthrough-evidence-nightly
           path: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}/
@@ -177,7 +177,7 @@ jobs:
         run: pnpm test:visual tests/visual/win32 "${{ runner.temp }}/imnota-verification-artifacts-nightly-windows" "${{ runner.temp }}/imnota-visual-differences"
       - name: Retain Windows visual evidence
         if: always() && matrix.platform == 'windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-visual-evidence-nightly
           path: |
@@ -192,7 +192,7 @@ jobs:
       # Diagnostic artifacts must never match the publication asset pattern.
       - name: Retain packaged smoke failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-failure-evidence-nightly-${{ matrix.platform }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-*/
@@ -201,12 +201,12 @@ jobs:
       # Evidence must remain outside the publish job's nightly-* artifact pattern.
       - name: Retain packaged MCP evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-evidence-${{ matrix.platform }}
           path: release/imnota-verification-artifacts-mcp/
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-${{ matrix.platform }}
           path: |
