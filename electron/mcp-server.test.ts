@@ -953,7 +953,7 @@ describe('MCP wire protocol for prepared data', () => {
       method: 'POST',
       body: JSON.stringify({ padding: 'x'.repeat(1_000_001) }),
     });
-    expect(huge.status).toBe(400);
+    expect(huge.status).toBe(413);
     // Undici may replace Host; send the wire header explicitly to exercise DNS-rebinding protection.
     const foreignHostStatus = await new Promise<number | undefined>((resolve, reject) => {
       const request = httpRequest(
