@@ -158,6 +158,8 @@ Off by default. The beta **Settings → Features → MCP access** toggle lets an
 
 Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
 
+The setup diagram shows saved bundles flowing to your agent; it is an explanation, not a live connection indicator. Copy actions announce success or an error; if copying fails, retry or select and copy the displayed text.
+
 Choose **Copy prompt** in Settings and paste it into your agent; the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
 
 ## Share a hosted link
