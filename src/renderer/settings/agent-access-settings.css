@@ -1,0 +1,57 @@
+.agent-access-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-block: 16px;
+  border-block: 1px solid var(--line);
+  margin-block-end: 16px;
+}
+.agent-access-flow svg {
+  flex: 0 1 150px;
+  inline-size: 150px;
+  max-inline-size: 100%;
+  block-size: auto;
+  fill: none;
+  stroke: var(--imnota-accent-hover);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.agent-access-flow > div {
+  flex: 1 1 220px;
+  min-inline-size: 0;
+}
+.agent-access-flow strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.agent-access-flow p,
+.agent-access-copy-feedback p {
+  margin-block: 6px 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-access-copy-feedback {
+  margin-block-end: 12px;
+}
+.agent-access-copy-feedback .imnota-preference-error {
+  color: var(--danger);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-access-flow-route {
+    animation: agent-access-reveal 600ms var(--ease-out, ease-out) both;
+  }
+}
+@keyframes agent-access-reveal {
+  from {
+    stroke-dasharray: 170;
+    stroke-dashoffset: 170;
+  }
+  to {
+    stroke-dasharray: 170;
+    stroke-dashoffset: 0;
+  }
+}
