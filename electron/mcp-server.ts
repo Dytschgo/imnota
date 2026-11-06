@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { promptBundleId } from './prompt-bundle-identity.js';
 import {
   afterFileCommit,
   CommittedWriteError,
@@ -279,11 +279,6 @@ function preparedTimestamp(setName: string, latestAllowed: number) {
   return { timestamp, preparedAt: `20${year}-${month}-${day}T${hour}:${minute}:${second}` };
 }
 
-function bundleId(projectKey: string, collectionId: string, setName: string): string {
-  const digest = createHash('sha256').update([projectKey, collectionId, setName].join('\0')).digest('hex');
-  return `b_${digest.slice(0, 32)}`;
-}
-
 /** A published set must contain a canonical regular Markdown file; staging or empty folders are not ready. */
 async function hasPreparedMarkdown(projectPath: string, folder: string, setName: string): Promise<boolean> {
   await assertContainedFile(projectPath, folder);
@@ -323,7 +318,7 @@ async function preparedSets(
     if (blockedAgentPath(folder) || !isWithin(exportsDirectory, folder)) continue;
     if (!(await hasPreparedMarkdown(projectPath, folder, entry.name).catch(() => false))) continue;
     sets.push({
-      id: bundleId(projectKey, collectionId, entry.name),
+      id: promptBundleId(projectKey, collectionId, entry.name),
       projectPath,
       collectionId,
       setName: entry.name,

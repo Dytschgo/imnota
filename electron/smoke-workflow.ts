@@ -23,6 +23,7 @@ import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import { exerciseAgentHandoff } from './agent-handoff-smoke.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
@@ -3199,6 +3200,18 @@ export async function runSmokeWorkflow(
   });
   assertions.push(
     'first prompt copy publishes complete PNG/Markdown grants; repeat and Windows variants reuse the set with exact clipboard content',
+  );
+  artifacts.push(
+    ...(await exerciseAgentHandoff(
+      driver,
+      host,
+      projectPath,
+      promptTiming.latestSet.directory,
+      artifactDirectory,
+    )),
+  );
+  assertions.push(
+    'native exact saved agent instruction, off-by-default setup guidance, local MCP Markdown/PNG equality and changed-content handoff retention',
   );
   await closePromptDialog(driver);
 

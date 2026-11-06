@@ -588,6 +588,8 @@ const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
 
 /** Channels that mention a project path but whose authorization this file cannot observe. */
 const authorizedElsewhere: Record<string, string> = {
+  'workflow:prompt-export:agent-handoff':
+    'Finalized prompt grant authorizes its project; current workspace is rechecked before deriving the exact MCP id',
   'projects:open-dialog': 'authorizes the folder chosen in a native dialog, not a renderer argument',
   'projects:update-metadata': 'main.ts mutateProjectMetadata authorizes the path',
   'projects:set-archived': 'main.ts mutateProjectMetadata authorizes the path',
@@ -994,6 +996,16 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['workflow:prompt-export:finish', 'an unknown field', [{ sessionId, target: anyPath }]],
     ['workflow:prompt-export:cancel', 'a session id with separators', [{ sessionId: 'a/b' }]],
     ['workflow:prompt-export:read', 'a fractional bundle number', [{ sessionId, bundleNumber: 1.5 }]],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'a renderer-supplied path',
+      [{ sessionId, bundleNumber: 1, projectPath: '../outside' }],
+    ],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'an invalid session',
+      [{ sessionId: '../outside', bundleNumber: 1 }],
+    ],
     ['workflow:prompt-export:copy', 'an unknown target', [{ sessionId, bundleNumber: 1, target: 'shell' }]],
     ['workflow:prompt-export:copy-markdown', 'non-text Markdown', [{ markdown: 'a' }]],
     ['workflow:prompt-export:copy-markdown', 'an extra argument', ['a', 'b']],

@@ -9,8 +9,10 @@ import {
   type HostedShareArtifacts,
   type PromptBundleControllerError,
   type SavedPromptExportContext,
+  type AgentHandoffReviewResult,
 } from './prompt-export-controller-core';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
+import type { PromptBundleActionRequest } from './PromptBundleCard';
 
 export interface UsePromptBundleControllerOptions {
   /** Must flush UI edits and return the CAS-confirmed latest saved snapshot. */
@@ -24,6 +26,9 @@ export interface UsePromptBundleControllerOptions {
 }
 
 export interface PromptBundleController {
+  savedHandoff?: ReturnType<PromptBundleControllerEngine['getState']>['savedHandoff'];
+  inspectAgentHandoff(selection: PromptBundleActionRequest): Promise<AgentHandoffReviewResult>;
+  openSavedFiles(selection: PromptBundleActionRequest): Promise<PromptBundleControllerActionResult>;
   cards: ReturnType<PromptBundleControllerEngine['getState']>['cards'];
   progress?: ReturnType<PromptBundleControllerEngine['getState']>['progress'];
   error?: ReturnType<PromptBundleControllerEngine['getState']>['error'];
@@ -146,6 +151,8 @@ export function usePromptBundleController(options: UsePromptBundleControllerOpti
     };
     return {
       ...state,
+      inspectAgentHandoff: (selection: PromptBundleActionRequest) => engine.inspectAgentHandoff(selection),
+      openSavedFiles: (selection: PromptBundleActionRequest) => run(() => engine.openSavedFiles(selection)),
       canRetry: Boolean(state.error && retryTarget?.error === state.error),
       isErrorShowing: (error: PromptBundleControllerError) => {
         const current = engine.getState();
