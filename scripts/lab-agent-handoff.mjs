@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 
 const root = process.cwd();
 const require = createRequire(path.join(root, 'package.json'));
+const packageVersion = require('./package.json').version;
 const runtimeCandidates = [
   process.env.IMNOTA_PLAYWRIGHT_MODULE,
   'playwright',
@@ -76,7 +77,11 @@ try {
     path.join(profile, 'settings.json'),
     JSON.stringify({
       workspacePath: workspace,
-      preferences: { ...DEFAULT_PREFERENCE_SETTINGS, onboarding: { completed: true, completedVersion: 1 } },
+      preferences: {
+        ...DEFAULT_PREFERENCE_SETTINGS,
+        onboarding: { completed: true, completedVersion: 1 },
+        updates: { whatsNewAcknowledgedVersion: packageVersion },
+      },
     }),
   );
   const bootstrap = path.join(fixture, 'bootstrap.cjs');
