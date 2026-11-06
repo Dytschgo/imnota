@@ -22,6 +22,12 @@ verify_universal "$destination/Imnota.app/Contents/MacOS/Imnota"
 capture_helper="$destination/Imnota.app/Contents/Resources/imnota-capture-helper"
 test -x "$capture_helper"
 verify_universal "$capture_helper"
+security_observer="$destination/Imnota.app/Contents/Resources/imnota-security-observer"
+test -x "$security_observer"
+verify_universal "$security_observer"
+codesign --verify --strict "$security_observer"
+chmod -N "$destination"
+test "$("$security_observer" acl "$destination")" = no-acl
 "$capture_helper" windows 0 | node -e 'let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => { if (!Array.isArray(JSON.parse(text))) process.exit(1); });'
 if [[ "${IMNOTA_SMOKE_MODE:-smoke}" != "clipboard" ]]; then
   node scripts/verify-mcp.mjs "$destination/Imnota.app/Contents/MacOS/Imnota" "$archive"
