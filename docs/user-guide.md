@@ -93,6 +93,8 @@ On Windows and macOS, choose **Settings → Features → Quick capture cards** a
 
 Each card offers **Copy image**, **Annotate**, **Drag PNG**, an explicit collection choice, **Add**, and **Discard**. Apply in the editor updates that card's image; Add saves its original image and editable annotations to the chosen active collection. Other pending cards stay unchanged. Copy and drag use the applied image, including crops and redaction. If drag fails, use Copy or Add. Acceptance by another application's drop target depends on that application.
 
+If the destination project is already open, Add shows a notice with **Reload project** so you can review the saved capture. Unsaved work stays in memory; resolve it before reloading. The notice does not replace your current edits automatically.
+
 Focus a card and press Enter to copy, E to annotate, or Escape to hide the window. Hide and closing the floating window keep its cards. Reopen them with **Pending captures** in the tray/menu-bar menu or **Show pending captures** in Features. New cards appear without taking focus; reopen or choose Annotate to work with them.
 
 Quick access holds at most three captures and 200 MB of encoded original/applied PNG data, with a 100 MB limit per PNG. A full queue refuses another capture and keeps existing cards. Add failures keep the card for retry at the same destination, so an uncertain save cannot create another item in a different collection. Discard removes only the selected pending card; it does not remove an already saved project item.

@@ -44,6 +44,34 @@ async function fixture() {
 }
 
 describe('project file watch and compare-and-swap', () => {
+  it('notifies the open project after another surface commits a known self-write without accepting its revision', async () => {
+    const { manager, projectPath, projectFile, project, events } = await fixture();
+    const grant = await manager.start(projectPath);
+    const source = JSON.stringify({ ...project, name: 'Capture added' });
+    await fs.writeFile(projectFile, source);
+    manager.recordSelfProjectWrite(projectFile, source);
+    await manager.notifyProjectChanged(path.join(projectPath, '.'), 'A pending capture was added.');
+    expect(events).toEqual([
+      {
+        watchId: grant.watchId,
+        projectPath,
+        kind: 'external-change',
+        projectRevision: projectRevisionForSource(source),
+        changedPaths: ['project.json'],
+        message: 'A pending capture was added.',
+      },
+    ]);
+    await expect(manager.compareAndSwap(grant.watchId, grant.projectRevision, project)).rejects.toMatchObject(
+      {
+        code: 'project-changed',
+      },
+    );
+    await manager.notifyProjectChanged(path.join(projectPath, 'other'), 'Other project');
+    manager.stopAll();
+    await manager.notifyProjectChanged(projectPath, 'Closed project');
+    expect(events).toHaveLength(1);
+  });
+
   it('ignores internal export, trash, recovery, and screenshot transaction paths', () => {
     expect(ignoredProjectWatchPath('collections/001/exports/set/prompt.png')).toBe(true);
     expect(ignoredProjectWatchPath('.imnota-undo/token/manifest.json')).toBe(true);

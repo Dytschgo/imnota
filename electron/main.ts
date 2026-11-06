@@ -1910,8 +1910,8 @@ function registerIpc(): void {
         );
     },
     insert: (item, destination) =>
-      router.enqueue(() =>
-        commitQuickCapture(item, destination, {
+      router.enqueue(async () => {
+        await commitQuickCapture(item, destination, {
           authorize: assertProjectPath,
           read: readProjectMetadata,
           snapshot: makeSnapshot,
@@ -1919,8 +1919,12 @@ function registerIpc(): void {
           assertAdmission: () => {
             if (updateInstallPending) throw new Error('Imnota is preparing an update. Your capture is kept.');
           },
-        }),
-      ),
+        });
+        await projectWatchManager?.notifyProjectChanged(
+          await assertProjectPath(destination.projectPath),
+          'A pending capture was added to this project.',
+        );
+      }),
   });
   quickCaptureAccess.registerIpc();
   const handleCaptureWorkflow = captureWorkflowRegistrar(router);

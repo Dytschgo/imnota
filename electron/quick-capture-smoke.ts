@@ -216,6 +216,12 @@ export async function exerciseQuickCaptures(
     // project write, while the two older pending captures remain intact.
     main.browserWindow.show();
     main.browserWindow.focus();
+    await main.waitFor({
+      selector: '[data-testid="external-change-banner"]',
+      text: 'A pending capture was added to this project.',
+    });
+    await main.click({ selector: 'button', text: 'Reload project', exact: true });
+    await main.waitFor({ selector: `[data-testid="screenshot-${second.id}"]` });
     if (process.platform === 'win32' || process.platform === 'darwin') {
       const overlay = await startCapture(main);
       const viewport = await overlay.evaluate<{ width: number; height: number }>(
