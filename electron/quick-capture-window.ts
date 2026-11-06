@@ -162,7 +162,9 @@ export class QuickCaptureWindow {
         },
       });
       this.window = window;
-      window.setAlwaysOnTop(true, 'floating');
+      // Windows' below-taskbar levels can drop topmost when that taskbar is not
+      // topmost. Bounds stay inside the work area, so this level does not cover it.
+      window.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
       if (process.platform === 'darwin')
         window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

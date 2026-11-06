@@ -21,6 +21,7 @@ export async function exerciseQuickCaptures(
   artifactDirectory?: string,
 ): Promise<SmokeCapture[]> {
   const artifacts: SmokeCapture[] = [];
+  const floatingStates: { count: number; alwaysOnTop: boolean; visible: boolean }[] = [];
   const manager = host.quickCaptures();
   let dragFailure: Error | undefined;
   const verifyDrag = async (card: ReturnType<typeof manager.store.cards>[number]) => {
@@ -71,13 +72,28 @@ export async function exerciseQuickCaptures(
         () => manager.store.size === index + 1 && Boolean(manager.browserWindow?.isVisible()),
         'The selected capture did not appear in a persistent card.',
       );
+      floatingStates.push({
+        count: manager.store.size,
+        alwaysOnTop: manager.browserWindow!.isAlwaysOnTop(),
+        visible: manager.browserWindow!.isVisible(),
+      });
     }
     if ((await host.readProject(projectPath)).screenshots.length !== before.screenshots.length)
       throw new Error('Quick capture wrote to the project before an explicit Add.');
     const window = manager.browserWindow!;
     if (window.isFocused()) throw new Error('Showing quick capture stole focus after capture.');
     if (window.isModal() || !window.isAlwaysOnTop())
-      throw new Error('Quick capture is not a nonmodal floating window.');
+      throw new Error(
+        `Quick capture is not a nonmodal floating window: ${JSON.stringify({
+          modal: window.isModal(),
+          alwaysOnTop: window.isAlwaysOnTop(),
+          visible: window.isVisible(),
+          focused: window.isFocused(),
+          url: window.webContents.getURL(),
+          bounds: window.getBounds(),
+          floatingStates,
+        })}`,
+      );
     const bounds = window.getBounds(),
       workArea = screen.getDisplayMatching(bounds).workArea;
     if (
@@ -91,6 +107,9 @@ export async function exerciseQuickCaptures(
     window.show();
     window.focus();
     const cards = manager.store.cards();
+    // The native store can fill before React paints, especially when Linux adds
+    // synthetic PNGs without the intervening real capture-overlay interaction.
+    for (const card of cards) await driver.waitFor({ selector: `[data-testid="quick-capture-${card.id}"]` });
     await verifyDrag(cards[0]);
     const second = cards[1];
     const expectedPixels = nativeImage
