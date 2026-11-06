@@ -117,6 +117,16 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ## Copy prompt bundles
 
+### Compare two screenshots
+
+Choose **Compare screenshots** beside the Collection heading to pair two screenshots in the active collection. Use **Current / Expected** to explain an intended result, or **Before / After** to review a change. Each collection can keep one optional pair. **Save comparison** saves the relationship; **Done** closes the preview. Screenshots keep their existing order, descriptions and independent annotations.
+
+The viewer uses the same annotated, cropped and redacted rendering as prompt export. Equal rendered dimensions allow linked zoom and scrolling. Different dimensions are shown explicitly and use independent views; Imnota does not stretch or automatically align them. Zoom sliders and focused image regions support keyboard operation. Narrow windows stack the views.
+
+Saved comparison roles appear in prompt Markdown and PNG labels, including split bundles. Excluding a screenshot still excludes its pixels from export. A deleted counterpart is shown as unavailable; Undo or Recently deleted can restore its original relationship. Choose another screenshot or **Remove comparison** to change it. Removing a comparison preserves the screenshots. A failed save keeps your selections and reports a retry route.
+
+### Create a bundle
+
 Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem. Select a card's preview to inspect the full-resolution image; it opens at **Fit width**, and **Fit image** or **Actual size** change the scale. While bundles are prepared or copied, a light travels along the top of the dialog and around the bundle in progress; a finished copy gets a brief green ring. Problems hold still: a red outline marks a failed bundle and an amber outline a file-only or warned one. With reduced motion turned on in your system settings, the colours stay and the movement stops.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
