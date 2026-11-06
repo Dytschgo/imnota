@@ -2900,7 +2900,7 @@ export async function runSmokeWorkflow(
     // Focus the existing isolated runner on the new native window and its real
     // capture/clipboard/filesystem paths. The full walkthrough remains a gate.
     await driver.evaluate(
-      `(async()=>{const result=await window.imnota.setPreferenceSettings({onboarding:{completed:true},updates:{whatsNewAcknowledgedVersion:${JSON.stringify(options.version)}}});if(!result.ok)throw new Error(result.error.message);})()`,
+      `(async()=>{const result=await window.imnota.setPreferenceSettings({onboarding:{completed:true},updates:{whatsNewAcknowledgedVersion:${smokeStringLiteral(options.version)}}});if(!result.ok)throw new Error(result.error.message);})()`,
     );
     driver.setWindow(await host.reopenWindow());
     await driver.waitFor({ selector: '.library' });
@@ -2929,7 +2929,7 @@ export async function runSmokeWorkflow(
     await driver.evaluate(`(async () => {
       const result = await window.imnota.setPreferenceSettings({
         onboarding: { completed: true },
-        updates: { whatsNewAcknowledgedVersion: ${smokeStringLiteral(options.version)} },
+        updates: { whatsNewAcknowledgedVersion: ${JSON.stringify(options.version)} },
       });
       if (!result.ok) throw new Error(result.error.message);
     })()`);
