@@ -162,6 +162,12 @@ The setup diagram shows saved bundles flowing to your agent; it is an explanatio
 
 Choose **Copy prompt** in Settings and paste it into your agent; the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
 
+## Hand off an exact saved export to an agent
+
+After copying a bundle or choosing **Copy options → Prepare fresh files**, choose **Send saved bundle to agent** on its saved card. Review the collection, included picture numbers and text count. **Copy agent instruction** identifies that exact saved export for a configured local agent. When access is off, the dialog points to **Settings → Features** for setup.
+
+The review reports whether the saved collection matched when checked, changed afterward, or could not be compared. **Last saved handoff** retains the last saved receipt during this app session. **Open saved files** opens those original files even after collection edits; it does not silently create a newer export. Missing files or grants report their unavailable state. See [local agent access](agent-access.md#send-an-exact-saved-bundle) for setup, receipt lifetime and identity limits.
+
 ## Share a hosted link
 
 Choose **Share online**, check the bundle, and optionally enter your name. Imnota remembers the name on this device; you can edit or clear it in **Settings → Sharing**. New links expire after **1 day** by default; 7, 14 and 30 days are also available. Every new desktop share includes a downloadable ZIP. Turn on **I understand** to confirm that everyone with the link can open the bundle. This acknowledgement resets for each share.

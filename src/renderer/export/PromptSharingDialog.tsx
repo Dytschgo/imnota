@@ -41,6 +41,9 @@ export interface PromptSharingDialogProps {
   onRetry?(): void | Promise<void>;
   onRetryCleanup?(): void | Promise<void>;
   onShareHosted?(): void | Promise<void>;
+  savedHandoffLabel?: string;
+  onSavedAgentHandoff?(): void | Promise<void>;
+  onAgentHandoff?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
 function progressLabel(progress: PromptBundleProgress): string {
@@ -88,6 +91,9 @@ export function PromptSharingDialog({
   onRebuild,
   onRetry,
   onShareHosted,
+  savedHandoffLabel,
+  onSavedAgentHandoff,
+  onAgentHandoff,
 }: PromptSharingDialogProps) {
   const busy = progress
     ? ['checking', 'planning', 'rendering', 'writing', 'copying'].includes(progress.phase)
@@ -234,6 +240,7 @@ export function PromptSharingDialog({
                 onOpenFiles={onOpenFiles}
                 onCopyPaths={onCopyPaths}
                 onLoadPreview={onLoadPreview}
+                onAgentHandoff={onAgentHandoff}
               />
             ))}
           </div>
@@ -250,6 +257,17 @@ export function PromptSharingDialog({
             </p>
           </details>
           <div>
+            {savedHandoffLabel && onSavedAgentHandoff && (
+              <Button
+                variant="ghost"
+                data-testid="last-saved-handoff"
+                title={savedHandoffLabel}
+                disabled={busy}
+                onClick={() => void onSavedAgentHandoff()}
+              >
+                Last saved handoff
+              </Button>
+            )}
             {onOpenExportFolder && (
               <Button variant="ghost" disabled={busy} onClick={() => void onOpenExportFolder()}>
                 <FolderOpen size={14} aria-hidden="true" /> Open export folder

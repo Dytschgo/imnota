@@ -104,6 +104,13 @@ const fixtureFunctions = program.getSourceFile(fixturesPath)!.statements.filter(
 // generic parameter name (for example, `filename`).
 const canvasFreeByModule = new Map<string, Set<string>>([
   [
+    'agent-handoff-smoke.ts',
+    new Set([
+      'agent-handoff-exact.png', // Saved-handoff text dialog; the canvas is behind hidden sharing UI.
+      'agent-handoff-changed.png', // Same dialog showing changed collection state.
+    ]),
+  ],
+  [
     'smoke-workflow.ts',
     new Set([
       // Settings replace the canvas; intro/copy/What's new never display one.

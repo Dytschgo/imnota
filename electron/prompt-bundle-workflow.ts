@@ -212,6 +212,54 @@ export class PromptBundleWorkflow {
     };
   }
 
+  /** Describes only an existing finalized grant; never generates or chooses another export. */
+  async describeSaved(
+    sessionId: string,
+    bundleNumber: number,
+  ): Promise<{
+    projectPath: string;
+    collectionId: string;
+    collectionName: string;
+    setName: string;
+  }> {
+    const bundle = this.bundleGrant(sessionId, bundleNumber);
+    const grant = this.finalGrant(sessionId);
+    const authorized = await this.dependencies.authorize(grant.projectPath, grant.collectionId);
+    if (
+      path.resolve(authorized.projectPath) !== path.resolve(grant.projectPath) ||
+      authorized.collectionId !== grant.collectionId
+    )
+      throw new NativeWorkflowError(
+        'permission-denied',
+        'The saved export is outside the selected collection.',
+      );
+    for (const target of [bundle.markdownPath, ...(bundle.pngFilename ? [bundle.pngPath] : [])]) {
+      try {
+        await this.assertGrantedPath(grant, target);
+        if (!(await fs.stat(target)).isFile())
+          throw new NativeWorkflowError(
+            'bundle-not-found',
+            'A saved export file is no longer available. Prepare files again.',
+          );
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
+          throw new NativeWorkflowError(
+            'bundle-not-found',
+            'A saved export file is no longer available. Prepare files again.',
+          );
+        throw error;
+      }
+    }
+    if (!grant.folderPath)
+      throw new NativeWorkflowError('bundle-not-found', 'The saved export is no longer available.');
+    return {
+      projectPath: grant.projectPath,
+      collectionId: grant.collectionId,
+      collectionName: authorized.collectionName,
+      setName: path.basename(grant.folderPath),
+    };
+  }
+
   async copy(
     sessionId: string,
     bundleNumber: number,

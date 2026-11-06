@@ -60,6 +60,9 @@ export interface PromptExportArtifact {
   collectionId: string;
   grants: ReadonlyMap<number, PromptExportBundleGrant>;
   snapshotFingerprint: string;
+  collectionName: string;
+  setName: string;
+  handoffItems: ReadonlyMap<number, { pictureNumbers: readonly number[]; textCount: number }>;
 }
 
 export interface ActiveRun {

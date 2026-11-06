@@ -39,6 +39,7 @@ const bridge: ImnotaBridge = {
   finishPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:finish', input),
   cancelPromptExport: (input) => ipcRenderer.invoke('workflow:prompt-export:cancel', input),
   readPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:read', input),
+  getPromptExportAgentHandoff: (input) => ipcRenderer.invoke('workflow:prompt-export:agent-handoff', input),
   copyPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:copy', input),
   copyPromptExportMarkdown: (text) => ipcRenderer.invoke('workflow:prompt-export:copy-markdown', text),
   openPromptExportBundle: (input) => ipcRenderer.invoke('workflow:prompt-export:open', input),

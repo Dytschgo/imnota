@@ -80,6 +80,7 @@ export interface PromptBundleCardProps {
   onOpenFiles?(request: PromptBundleActionRequest): void | Promise<void>;
   onCopyPaths?(request: PromptBundleActionRequest): void | Promise<void>;
   onLoadPreview?(request: PromptBundleActionRequest): void | Promise<void>;
+  onAgentHandoff?(request: PromptBundleActionRequest): void | Promise<void>;
 }
 
 const busyStates: readonly PromptBundleCardState[] = ['preparing', 'writing', 'copying'];
@@ -153,6 +154,7 @@ export function PromptBundleCard({
   onOpenFiles,
   onCopyPaths,
   onLoadPreview,
+  onAgentHandoff,
 }: PromptBundleCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number }>();
@@ -392,6 +394,16 @@ export function PromptBundleCard({
           <p className="prompt-bundle-error" role="alert">
             {bundle.error}
           </p>
+        )}
+        {savedLocally && onAgentHandoff && (
+          <Button
+            variant="ghost"
+            data-testid={`agent-handoff-${bundle.bundleNumber}`}
+            disabled={busy || disabled || !bundle.artifactSessionId}
+            onClick={() => void onAgentHandoff(request)}
+          >
+            Send saved bundle to agent
+          </Button>
         )}
         {showFallbacks && (
           <div

@@ -100,6 +100,15 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
   imageDataUrl?: string;
 }
 
+export interface PromptExportAgentHandoff {
+  bundleId: string;
+  setName: string;
+  collectionName: string;
+  bundleNumber: number;
+  instruction: string;
+  agentAccessEnabled: boolean;
+}
+
 /** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
 export interface HostedSharePlan {
   planId: string;
@@ -270,6 +279,10 @@ export interface WorkflowBridge {
     sessionId: string;
     bundleNumber: number;
   }): Promise<WorkflowResult<PromptExportBundleContent>>;
+  getPromptExportAgentHandoff(input: {
+    sessionId: string;
+    bundleNumber: number;
+  }): Promise<WorkflowResult<PromptExportAgentHandoff>>;
   copyPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;
