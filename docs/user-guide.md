@@ -119,7 +119,7 @@ The application selects semantic annotation colors for the active theme; a compa
 
 ### Compare two screenshots
 
-Choose **Compare** in the screenshot toolbar to pair two screenshots in the active collection. Use **Current / Expected** to explain an intended result, or **Before / After** to review a change. Each collection can keep one optional pair. **Save comparison** saves the relationship; **Done** closes the preview. Screenshots keep their existing order, descriptions and independent annotations.
+Choose **Compare screenshots** beside the Collection heading to pair two screenshots in the active collection. Use **Current / Expected** to explain an intended result, or **Before / After** to review a change. Each collection can keep one optional pair. **Save comparison** saves the relationship; **Done** closes the preview. Screenshots keep their existing order, descriptions and independent annotations.
 
 The viewer uses the same annotated, cropped and redacted rendering as prompt export. Equal rendered dimensions allow linked zoom and scrolling. Different dimensions are shown explicitly and use independent views; Imnota does not stretch or automatically align them. Zoom sliders and focused image regions support keyboard operation. Narrow windows stack the views.
 

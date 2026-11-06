@@ -21,16 +21,31 @@ export async function exerciseScreenshotComparison(
   if (await driver.exists({ selector: '.settings-view' }))
     await driver.click({ selector: '[aria-label="Back to workspace"]' });
   await driver.waitFor({ selector: '.workspace' });
+  const chooseOption = async (label: string, index: number) => {
+    if (process.platform === 'darwin') {
+      // macOS owns select popups outside webContents. As in the channel walkthrough,
+      // establish the option through the real React change handler; subsequent Save,
+      // reopen, range keys and scrolling remain native observations.
+      await driver.evaluate(`(()=>{
+        const select=document.querySelector('select[aria-label="${label}"]');
+        select.focus(); select.value=select.options[${index}].value;
+        select.dispatchEvent(new Event('input',{bubbles:true}));
+        select.dispatchEvent(new Event('change',{bubbles:true}));
+      })()`);
+    } else {
+      await driver.evaluate(`document.querySelector('select[aria-label="${label}"]').focus()`);
+      await driver.press('Home');
+      for (let step = 0; step < index; step++) await driver.press('Down');
+    }
+  };
   await driver.click({ selector: '[data-testid="compare-screenshots"]' });
   await driver.waitFor({ selector: '[role="dialog"]', text: 'Compare screenshots' });
-  // Trusted native key events select the first and second existing screenshots.
-  for (const [label, down] of [
-    ['Current screenshot', false],
-    ['Expected screenshot', true],
+  // Select existing screenshots; macOS uses the documented popup setup above.
+  for (const [label, index] of [
+    ['Current screenshot', 0],
+    ['Expected screenshot', 1],
   ] as const) {
-    await driver.evaluate(`document.querySelector('select[aria-label="${label}"]').focus()`);
-    await driver.press('Home');
-    if (down) await driver.press('Down');
+    await chooseOption(label, index);
   }
   await driver.waitFor({ selector: 'img[alt="Expected annotated screenshot"]' });
   await driver.evaluate(
@@ -96,8 +111,7 @@ export async function exerciseScreenshotComparison(
   );
   if (JSON.stringify(reopened) !== JSON.stringify(['current-expected', shots[0].id, shots[1].id]))
     throw new Error('Comparison roles changed after reopening the native window.');
-  await driver.evaluate(`document.querySelector('select[aria-label="Comparison"]').focus()`);
-  await driver.press('End');
+  await chooseOption('Comparison', 1);
   await driver.waitFor({ selector: 'img[alt="After annotated screenshot"]' });
   await driver.click({ selector: 'button', text: 'Save comparison', exact: true });
   await driver.waitFor({ selector: '[role="status"]', text: 'Comparison saved.', exact: false });
@@ -124,20 +138,21 @@ export async function exerciseScreenshotComparison(
     ['Before screenshot', 1],
     ['After screenshot', 4],
   ] as const) {
-    await driver.evaluate(`document.querySelector('select[aria-label="${label}"]').focus()`);
-    await driver.press('Home');
-    for (let step = 0; step < steps; step++) await driver.press('Down');
+    await chooseOption(label, steps);
   }
   await driver.waitFor({ selector: '.comparison-link input' }, { enabled: true });
   await driver.evaluate(`document.querySelector('input[aria-label="Before zoom"]').focus()`);
-  await driver.press('End');
+  await driver.press('Right');
+  await driver.press('Right');
+  await driver.press('Right');
   const zooms = await driver.evaluate<string[]>(
     `Array.from(document.querySelectorAll('.comparison-image input[type="range"]')).map((field)=>field.value)`,
   );
-  if (JSON.stringify(zooms) !== JSON.stringify(['400', '400']))
+  if (JSON.stringify(zooms) !== JSON.stringify(['175', '175']))
     throw new Error('Native keyboard zoom did not link the two comparison views.');
   await driver.evaluate(`document.querySelector('.comparison-viewport').focus()`);
-  await driver.press('PageDown');
+  await driver.press('Down');
+  await driver.press('Down');
   await driver.evaluate(`new Promise((resolve,reject)=>{
     const deadline=Date.now()+5000;
     const check=()=>{

@@ -3,7 +3,7 @@ import { Columns2 } from 'lucide-react';
 import type { ProjectData, ScreenshotComparison as Pair } from '../../shared/types';
 import { comparisonLabels } from '../../shared/screenshot-comparison';
 import { nowIso } from '../../shared/utils';
-import { Button, Modal } from '../components/ui';
+import { Button, IconButton, Modal } from '../components/ui';
 import { useAppStore } from '../store';
 import { renderAnnotatedImageWithDimensions, type AnnotatedImageRender } from '../export-image';
 import './screenshot-comparison.css';
@@ -27,9 +27,10 @@ export function ScreenshotComparison(props: Props) {
   if (!collection || !store.snapshot) return null;
   return (
     <>
-      <Button
+      <IconButton
         data-testid="compare-screenshots"
-        variant="ghost"
+        className="comparison-trigger"
+        label="Compare screenshots"
         disabled={busy || (!collection.comparison && screenshots.length < 2)}
         onClick={async () => {
           if (pending.current) return;
@@ -48,9 +49,8 @@ export function ScreenshotComparison(props: Props) {
           }
         }}
       >
-        <Columns2 size={16} aria-hidden="true" />
-        Compare
-      </Button>
+        <Columns2 size={14} aria-hidden="true" />
+      </IconButton>
       {error && <span role="alert">{error}</span>}
       {open && <ComparisonDialog {...props} onClose={() => setOpen(false)} />}
     </>

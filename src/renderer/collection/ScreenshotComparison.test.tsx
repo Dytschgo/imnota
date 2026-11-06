@@ -80,7 +80,7 @@ async function open(
       <ScreenshotComparison onFlush={onFlush} onSaveProject={onSaveProject} />
     </StrictMode>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Compare screenshots' }));
   await screen.findByRole('dialog', { name: 'Compare screenshots' });
   return { onSaveProject, onFlush };
 }
@@ -99,7 +99,7 @@ it('saves both modes without changing images, descriptions or order, then reopen
   fireEvent.click(screen.getByRole('button', { name: 'Save comparison' }));
   await waitFor(() => expect(onSaveProject).toHaveBeenCalledTimes(2));
   fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Compare screenshots' }));
   expect(await screen.findByLabelText('Comparison')).toHaveValue('before-after');
   expect(screen.getByLabelText('After screenshot')).toHaveValue('two');
 });
@@ -197,7 +197,7 @@ it('shows excluded-image and read-failure states and allows a bounded explicit r
 
 it('does not open comparison after a failed flush', async () => {
   render(<ScreenshotComparison onFlush={async () => false} onSaveProject={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Compare screenshots' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Save the current edits');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
