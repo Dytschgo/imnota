@@ -161,6 +161,7 @@ function CaptureCard({
     <section
       className="quick-capture-card"
       data-testid={`quick-capture-${card.id}`}
+      data-capture-revision={card.revision}
       tabIndex={0}
       aria-label={`Capture ${card.width} by ${card.height}`}
       aria-keyshortcuts="Enter E Escape"

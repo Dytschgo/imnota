@@ -4,7 +4,12 @@ import { exerciseQuickCaptureNativeDrag } from './quick-capture-drag-smoke.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nativeClipboard } from './native-clipboard.js';
-import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
+import {
+  NativeUiDriver,
+  SMOKE_RENDERER_DIAGNOSTIC,
+  withSmokeDeadline,
+  type SmokeCapture,
+} from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
 import { smokeStringLiteral } from './smoke-string-literal.js';
 
@@ -155,6 +160,11 @@ export async function exerciseQuickCaptures(
     const edited = manager.store.item(second.id, 2);
     if (!edited.annotations.some((item) => item.kind === 'blur'))
       throw new Error('Quick capture did not preserve editable redaction annotations.');
+    // Native Apply can finish before its changed event refreshes the card props.
+    // Observe the revision that the Copy handler will actually submit.
+    await driver.waitFor({
+      selector: `[data-testid="quick-capture-${second.id}"][data-capture-revision="2"]`,
+    });
     await driver.click({
       selector: `[data-testid="quick-capture-${second.id}"] button`,
       text: 'Copy image',
@@ -284,6 +294,38 @@ export async function exerciseQuickCaptures(
     if ((await host.readProject(projectPath)).screenshots.length !== before.screenshots.length + 1)
       throw new Error('Copy or Discard created extra project items.');
     if (dragFailure) throw new Error('macOS native PNG drag remains unverified: ' + dragFailure.message);
+  } catch (reason) {
+    const failedWindow = manager.browserWindow;
+    if (artifactDirectory && failedWindow && !failedWindow.isDestroyed()) {
+      try {
+        const renderer = await new NativeUiDriver(failedWindow).evaluate(SMOKE_RENDERER_DIAGNOSTIC);
+        await fs.writeFile(
+          path.join(artifactDirectory, 'quick-capture-failure.json'),
+          JSON.stringify(
+            {
+              error: reason instanceof Error ? reason.message : String(reason),
+              bounds: failedWindow.getBounds(),
+              focused: failedWindow.isFocused(),
+              visible: failedWindow.isVisible(),
+              cards: manager.store.cards().map(({ id, revision, busy }) => ({ id, revision, busy })),
+              renderer,
+            },
+            null,
+            2,
+          ),
+        );
+        const frame = await withSmokeDeadline(
+          () => failedWindow.webContents.capturePage(),
+          15000,
+          'Quick capture failure frame',
+        );
+        if (!frame.isEmpty())
+          await fs.writeFile(path.join(artifactDirectory, 'quick-capture-failure.png'), frame.toPNG());
+      } catch (diagnosticError) {
+        console.error('Quick capture failure evidence could not be collected:', diagnosticError);
+      }
+    }
+    throw reason;
   } finally {
     await main.evaluate(
       `(async()=>{const result=await window.imnota.setPreferenceSettings({capture:{quickAccessCorner:'off'}});if(!result.ok)throw new Error(result.error.message);})()`,

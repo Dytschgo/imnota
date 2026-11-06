@@ -126,12 +126,55 @@ it('opens and applies annotation to the intended capture without consuming the o
     annotations: [],
     pngDataUrl: 'data:image/png;base64,edited',
   });
+  await waitFor(() =>
+    expect(screen.getByTestId('quick-capture-second')).toHaveAttribute('data-capture-revision', '2'),
+  );
   fireEvent.click(
     within(screen.getByTestId('quick-capture-second')).getByRole('button', { name: 'Copy image' }),
   );
   await waitFor(() =>
     expect(window.imnotaQuickCapture.copy).toHaveBeenCalledWith({ id: 'second', revision: 2 }),
   );
+  expect(screen.getByTestId('quick-capture-first')).toBeVisible();
+});
+
+it('reports the Copy handler revision while an applied-state refresh is delayed, then copies the refreshed revision', async () => {
+  await show();
+  fireEvent.click(
+    within(screen.getByTestId('quick-capture-second')).getByRole('button', { name: 'Annotate' }),
+  );
+  await screen.findByTestId('compact-canvas');
+  const refreshes: Array<(result: Awaited<ReturnType<typeof window.imnotaQuickCapture.state>>) => void> = [];
+  vi.mocked(window.imnotaQuickCapture.state).mockImplementation(
+    () => new Promise((resolve) => refreshes.push(resolve)),
+  );
+  vi.mocked(window.imnotaQuickCapture.copy).mockImplementation(async (input) =>
+    input.revision === state.cards.find((card) => card.id === input.id)!.revision
+      ? { ok: true, value: undefined }
+      : {
+          ok: false,
+          error: {
+            code: 'capture-failed',
+            message: 'Capture changed. Retry after refresh.',
+            retryable: true,
+          },
+        },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Apply edits' }));
+  const card = await screen.findByTestId('quick-capture-second');
+  expect(state.cards.find((item) => item.id === 'second')!.revision).toBe(2);
+  expect(card).toHaveAttribute('data-capture-revision', '1');
+  fireEvent.click(within(card).getByRole('button', { name: 'Copy image' }));
+  expect(await within(card).findByRole('alert')).toHaveTextContent('Capture changed');
+  expect(window.imnotaQuickCapture.copy).toHaveBeenLastCalledWith({ id: 'second', revision: 1 });
+  expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+  await act(async () => {
+    for (const complete of refreshes) complete({ ok: true, value: structuredClone(state) });
+  });
+  expect(card).toHaveAttribute('data-capture-revision', '2');
+  fireEvent.click(within(card).getByRole('button', { name: 'Copy image' }));
+  expect(await within(card).findByRole('status')).toHaveTextContent('Image copied.');
+  expect(window.imnotaQuickCapture.copy).toHaveBeenLastCalledWith({ id: 'second', revision: 2 });
   expect(screen.getByTestId('quick-capture-first')).toBeVisible();
 });
 
