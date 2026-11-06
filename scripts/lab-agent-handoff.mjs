@@ -89,8 +89,7 @@ try {
     bootstrap,
     `const {app}=require('electron');
 for(const name of ['appData','userData','sessionData','logs','crashDumps'])app.setPath(name,${JSON.stringify(profile)});
-app.setAppPath(${JSON.stringify(root)});
-import(${JSON.stringify(pathToFileURL(path.join(root, 'dist-electron/electron/main.js')).href)}).catch(error=>{console.error(error);app.exit(1)});`,
+`,
   );
   const source = path.join(fixture, 'synthetic.png');
   const image = new PNG({ width: 720, height: 480 });
@@ -107,14 +106,19 @@ import(${JSON.stringify(pathToFileURL(path.join(root, 'dist-electron/electron/ma
     delete environment[name];
   application = await _electron.launch({
     executablePath: require('electron'),
-    args: [bootstrap],
+    args: ['--require', bootstrap, root],
     cwd: root,
     env: environment,
     timeout: 30000,
   });
   assert.equal(await application.evaluate(({ app }) => app.getPath('userData')), profile);
+  assert.equal(await application.evaluate(({ app }) => app.getVersion()), packageVersion);
   page = await application.firstWindow();
   page.setDefaultTimeout(15000);
+  await page.getByTestId('new-project-button').waitFor();
+  const loadedPreferences = await page.evaluate(() => globalThis.window.imnota.getPreferenceSettings());
+  assert.equal(loadedPreferences.ok, true);
+  assert.equal(loadedPreferences.value.settings.updates.whatsNewAcknowledgedVersion, packageVersion);
   await application.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
   await page.getByTestId('new-project-button').click();
