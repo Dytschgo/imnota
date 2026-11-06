@@ -3,6 +3,8 @@ import { pictureSourceSizeLine } from './markdown';
 import { textAnnotationReferences } from './annotation-order';
 import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr';
 import type { Annotation } from './types';
+import type { ScreenshotComparison } from './types';
+import { comparisonRole, comparisonSummary } from './screenshot-comparison';
 
 export type PromptPriority = 'low' | 'medium' | 'high';
 export type PromptVisualKind = 'screenshot' | 'drawing';
@@ -48,6 +50,7 @@ export interface PromptCollectionInput {
   collectionId: string;
   collectionName: string;
   overallContext: string;
+  comparison?: ScreenshotComparison;
   /** Kept for existing callers; mixed callers must provide items. */
   screenshots: readonly PromptScreenshotInput[];
   items?: readonly PromptCollectionItemInput[];
@@ -68,6 +71,7 @@ export interface PromptBundlePicture {
   pictureNumber: number;
   kind: PromptVisualKind;
   title: string;
+  comparisonRole?: string;
   originalFilename: string;
   description: string;
   priority: PromptPriority;
@@ -130,6 +134,8 @@ export interface PromptBundle {
   excludedVisuals: Array<{ number: number; kind: PromptVisualKind }>;
   excludedTextCount: number;
   markdown: string;
+  /** Precomputed from the full collection, retained when export identity is stamped. */
+  comparisonSummary?: string;
   layout: PromptBundleLayout;
   estimatedPngCharacters: number;
   delivery: PromptBundleDelivery;
@@ -263,7 +269,13 @@ function markdownForBundle(
   collection: PromptCollectionInput,
   bundle: Pick<
     PromptBundle,
-    'pictures' | 'entries' | 'excludedVisuals' | 'excludedTextCount' | 'number' | 'total'
+    | 'pictures'
+    | 'entries'
+    | 'excludedVisuals'
+    | 'excludedTextCount'
+    | 'number'
+    | 'total'
+    | 'comparisonSummary'
   >,
   identity?: PromptBundleMarkdownIdentity,
 ): string {
@@ -282,6 +294,7 @@ function markdownForBundle(
   const context = normalized(collection.overallContext);
   if (context.trim() && bundle.number === 1) lines.push('## Overall context', '', context, '');
   else if (context.trim()) lines.push('Shared collection context is included in Bundle 1.', '');
+  if (bundle.comparisonSummary) lines.push(bundle.comparisonSummary, '');
   const visualById = new Map(bundle.pictures.map((picture) => [picture.screenshotId, picture]));
   for (const entry of bundle.entries) {
     if (entry.kind === 'text') {
@@ -292,6 +305,7 @@ function markdownForBundle(
     if (!picture) continue;
     lines.push(`## ${visualLabel(picture)} — ${cleanHeading(picture.title, picture.originalFilename)}`, '');
     if (picture.kind === 'screenshot') {
+      if (picture.comparisonRole) lines.push(`Comparison role: ${picture.comparisonRole}`, '');
       lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
       lines.push(pictureSourceSizeLine(picture.nativeWidth, picture.nativeHeight), '');
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
@@ -435,6 +449,7 @@ export function planPromptBundles(
     }
     if (current.pictures.length && options.breakBeforeScreenshotIds?.has(item.id)) finalize();
     const picture = resolveRendered(item, visualNumbers.get(item.id)!, measured);
+    picture.comparisonRole = comparisonRole(collection.comparison, item.id);
     const candidate = [...current.pictures, picture];
     const layout = calculatePromptBundleLayout(candidate, options.layout);
     const estimate = estimatePngCharacters(candidate, limits.encodedSizeHeadroom);
@@ -467,6 +482,14 @@ export function planPromptBundles(
       excludedVisuals,
       excludedTextCount,
       markdown: '',
+      ...(collection.comparison
+        ? {
+            comparisonSummary: comparisonSummary(
+              collection.comparison,
+              ordered.filter((item) => item.kind !== 'text'),
+            ),
+          }
+        : {}),
       layout,
       estimatedPngCharacters,
       delivery: clipboardSafe ? 'clipboard' : 'file-only',

@@ -308,6 +308,7 @@ describe('screenshot trash and Undo transactions', () => {
       descriptionFile: `collections/${screenshot.collectionId}/descriptions/002-second.png.md`,
     };
     project.screenshots.push(second);
+    project.collections[0].comparison = { kind: 'before-after', leftId: screenshot.id, rightId: second.id };
     await atomicWrite(targets.metadata, JSON.stringify(project));
     await atomicWrite(screenshotPath(dir, second), Buffer.from([4, 5, 6]));
     await atomicWrite(path.join(dir, second.annotationFile), '[{"id":"second"}]');
@@ -317,6 +318,7 @@ describe('screenshot trash and Undo transactions', () => {
     deletedA.project.name = 'Renamed between deletes';
     await atomicWrite(targets.metadata, JSON.stringify(deletedA.project));
     const deletedB = await deleteScreenshotToTrash(dir, deletedA.project, second.id, trashItem);
+    expect(deletedB.project.collections[0].comparison).toEqual(project.collections[0].comparison);
     deletedB.project.description = 'Edited after both deletes';
     await atomicWrite(targets.metadata, JSON.stringify(deletedB.project));
 
@@ -334,6 +336,7 @@ describe('screenshot trash and Undo transactions', () => {
     restoredA.project.favourite = true;
     await atomicWrite(targets.metadata, JSON.stringify(restoredA.project));
     const restoredB = await undoScreenshotDelete(dir, restoredA.project, deletedB.undoToken);
+    expect(restoredB.project.collections[0].comparison).toEqual(project.collections[0].comparison);
     expect(restoredB.project.favourite).toBe(true);
     expect(restoredB.project.screenshots.map((item) => item.id).sort()).toEqual([screenshot.id, second.id]);
     expect(await listScreenshotTrashTransactions(dir)).toEqual([]);

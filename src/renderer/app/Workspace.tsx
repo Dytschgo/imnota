@@ -21,6 +21,7 @@ import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
 import { useAppStore } from '../store';
 import { TextBlockEditor } from '../content/TextBlockEditor';
+import { ScreenshotComparison } from '../collection/ScreenshotComparison';
 
 const DrawingEditor = lazy(() =>
   import('../content/DrawingEditor').then((module) => ({ default: module.DrawingEditor })),
@@ -236,6 +237,11 @@ export function Workspace(props: WorkspaceProps) {
       <div className="canvas-column">
         {(!item || item.kind === 'text') && (
           <div className="workspace-toolbar">
+            <ScreenshotComparison
+              key={`${store.snapshot?.projectPath}:${store.activeCollectionId}`}
+              onFlush={props.onFlush}
+              onSaveProject={props.onSaveProject}
+            />
             {item ? (
               <strong className="content-editor-heading">Text block</strong>
             ) : (

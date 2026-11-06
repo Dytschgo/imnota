@@ -104,6 +104,13 @@ const fixtureFunctions = program.getSourceFile(fixturesPath)!.statements.filter(
 // generic parameter name (for example, `filename`).
 const canvasFreeByModule = new Map<string, Set<string>>([
   [
+    'screenshot-comparison-smoke.ts',
+    new Set([
+      'comparison-current-expected.png', // Modal displays decoded export-rendered images, not an annotation canvas.
+      'comparison-before-after-narrow.png', // Same image viewer after native role selection and resize.
+    ]),
+  ],
+  [
     'smoke-workflow.ts',
     new Set([
       // Settings replace the canvas; intro/copy/What's new never display one.

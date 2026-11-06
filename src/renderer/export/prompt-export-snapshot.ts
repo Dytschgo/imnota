@@ -245,6 +245,7 @@ export async function capturePromptExportSnapshot(
     collectionId: collection.id,
     collectionName: collection.name,
     overallContext: collection.overallContext,
+    ...(collection.comparison ? { comparison: collection.comparison } : {}),
     screenshots: hasMixedContentItems ? [] : (promptItems as PromptScreenshotInput[]),
     items: hasMixedContentItems ? promptItems : undefined,
   }) as Readonly<PromptCollectionInput>;
