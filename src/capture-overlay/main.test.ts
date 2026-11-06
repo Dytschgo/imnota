@@ -43,7 +43,7 @@ const STILL = 'data:image/png;base64,cG5n';
 async function setup(
   displayId = 2,
   displayBounds = { x: 0, y: 0, width: 800, height: 600 },
-  extra: { lastRegion?: CaptureRectangle | null; lastRegionAvailable?: boolean } = {},
+  extra: { lastRegion?: CaptureRectangle | null; lastRegionAvailable?: boolean; quickAccess?: boolean } = {},
 ) {
   let payloadHandler:
     | ((payload: {
@@ -52,6 +52,7 @@ async function setup(
         imageDataUrl: string;
         lastRegion: CaptureRectangle | null;
         lastRegionAvailable: boolean;
+        quickAccess?: boolean;
       }) => void)
     | undefined;
   let selectionHandler: ((state: ReturnType<typeof selectionState>) => void) | undefined;
@@ -75,6 +76,7 @@ async function setup(
     imageDataUrl: STILL,
     lastRegion: extra.lastRegion ?? null,
     lastRegionAvailable: extra.lastRegionAvailable ?? extra.lastRegion != null,
+    quickAccess: extra.quickAccess,
   });
   return { surface, selectionHandler: selectionHandler! };
 }
@@ -97,6 +99,21 @@ beforeEach(() => {
     onPayload: vi.fn(() => () => {}),
     onSelection: vi.fn(() => () => {}),
   };
+});
+
+it.each([false, true])('labels capture completion honestly when quick access is %s', async (quickAccess) => {
+  const { selectionHandler } = await setup(2, { x: 0, y: 0, width: 800, height: 600 }, { quickAccess });
+  selectionHandler(
+    selectionState({
+      selection: { x: 10, y: 10, width: 200, height: 100 },
+      complete: true,
+      actionsDisplayId: 2,
+    }),
+  );
+  const save = document.querySelector<HTMLButtonElement>('[data-action="save"]')!;
+  expect(save).toHaveTextContent(quickAccess ? 'Keep capture' : 'Save to collection');
+  save.click();
+  await vi.waitFor(() => expect(window.imnotaCapture.save).toHaveBeenCalledOnce());
 });
 
 it('paints the captured still and only then marks the overlay ready', async () => {

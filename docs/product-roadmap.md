@@ -156,7 +156,9 @@ Do not claim full compatibility until import -> edit -> export round trips prese
 
 ## Proposed: next capture and hand-off features
 
-The [next features plan](next-features-plan.md) sequences a quick-access overlay, on-device OCR on macOS and Linux, redaction suggestions, agent hand-off through MCP and a CLI, scrolling capture, short clips reduced to key frames, a browser-context extension and issue creation. The browser extension and issue creation add new surfaces and need a product decision recorded here before implementation.
+The approved first quick-access slice is implemented on its feature branch and remains unreleased: an optional left/right window retains session captures for explicit Copy, Annotate, native Drag PNG, Add to a chosen collection, or Discard. Existing preferences default to Off. It adds no account, upload, telemetry or hosted AI call. Session limits, quit confirmation and failure/retry behavior are documented in the [user guide](user-guide.md#optional-pending-captures-unreleased); final platform acceptance remains open in the [implementation status](implementation-plan.md#unreleased-persistent-quick-capture-access). Automatic expiry and copy-with-context are outside this approved slice.
+
+The remaining [next features plan](next-features-plan.md) proposals include on-device OCR on macOS and Linux, redaction suggestions, further agent hand-off through MCP and a CLI, scrolling capture, short clips reduced to key frames, a browser-context extension and issue creation. The browser extension and issue creation add new surfaces and need a product decision recorded here before implementation.
 
 ## Explicitly not planned in this roadmap
 
