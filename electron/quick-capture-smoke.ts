@@ -6,6 +6,7 @@ import path from 'node:path';
 import { nativeClipboard } from './native-clipboard.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import type { SmokeWorkflowHost } from './smoke-workflow.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
 
 async function until(check: () => boolean, message: string): Promise<void> {
   const deadline = Date.now() + 15000;
@@ -170,14 +171,14 @@ export async function exerciseQuickCaptures(
     const destinationSelector = `[data-testid="quick-capture-${second.id}"] select`;
     const destinationValue = JSON.stringify([destination.projectPath, destination.collectionId]);
     const destinationIndex = await driver.evaluate<number>(
-      `(()=>{const select=document.querySelector(${JSON.stringify(destinationSelector)});select.focus();return [...select.options].findIndex(option=>option.value===${JSON.stringify(destinationValue)});})()`,
+      `(()=>{const select=document.querySelector(${smokeStringLiteral(destinationSelector)});select.focus();return [...select.options].findIndex(option=>option.value===${smokeStringLiteral(destinationValue)});})()`,
     );
     if (destinationIndex < 1) throw new Error('Quick Add did not offer the active fixture collection.');
     if (process.platform === 'darwin') {
       // macOS owns select popups outside webContents. Establish this setup through
       // the real React change handler; Add itself remains a trusted native click.
       await driver.evaluate(
-        `(()=>{const select=document.querySelector(${JSON.stringify(destinationSelector)});select.value=${JSON.stringify(destinationValue)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`,
+        `(()=>{const select=document.querySelector(${smokeStringLiteral(destinationSelector)});select.value=${smokeStringLiteral(destinationValue)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`,
       );
     } else {
       await driver.press('Home');

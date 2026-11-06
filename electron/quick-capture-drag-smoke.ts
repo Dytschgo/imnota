@@ -8,6 +8,7 @@ import type { QuickCaptureCard } from '../src/shared/quick-capture.js';
 import type { QuickCaptureWindow } from './quick-capture-window.js';
 import { NativeUiDriver } from './smoke-native-driver.js';
 import { createWindowsSmokePointer } from './windows-smoke-input.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
 
 const execute = promisify(execFile);
 let macInputHelper: Promise<string> | undefined;
@@ -72,7 +73,7 @@ export async function exerciseQuickCaptureNativeDrag(
   const driver = new NativeUiDriver(source);
   const selector = `[data-testid="quick-capture-${card.id}"] button`;
   await driver.evaluate(
-    `(()=>{const button=[...document.querySelectorAll(${JSON.stringify(selector)})].find(button=>button.textContent==='Drag PNG');if(!button)throw new Error('Drag control missing');button.focus();})()`,
+    `(()=>{const button=[...document.querySelectorAll(${smokeStringLiteral(selector)})].find(button=>button.textContent==='Drag PNG');if(!button)throw new Error('Drag control missing');button.focus();})()`,
   );
   await driver.waitFor({ selector: '[role="status"]', text: 'PNG ready to drag.', exact: true });
   if (!manager.store.item(card.id, card.revision).dragPath)
@@ -114,7 +115,7 @@ export async function exerciseQuickCaptureNativeDrag(
     source.show();
     source.focus();
     const rect = await driver.evaluate<{ x: number; y: number }>(
-      `(()=>{const button=[...document.querySelectorAll(${JSON.stringify(selector)})].find(button=>button.textContent==='Drag PNG');const bounds=button.getBoundingClientRect();return {x:Math.round(bounds.x+bounds.width/2),y:Math.round(bounds.y+bounds.height/2)};})()`,
+      `(()=>{const button=[...document.querySelectorAll(${smokeStringLiteral(selector)})].find(button=>button.textContent==='Drag PNG');const bounds=button.getBoundingClientRect();return {x:Math.round(bounds.x+bounds.width/2),y:Math.round(bounds.y+bounds.height/2)};})()`,
     );
     const origin = source.getContentBounds(),
       target = receiver.getContentBounds();

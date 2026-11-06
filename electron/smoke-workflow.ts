@@ -22,6 +22,7 @@ import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
 import { exerciseQuickCaptures } from './quick-capture-smoke.js';
+import { smokeStringLiteral } from './smoke-string-literal.js';
 import type { QuickCaptureWindow } from './quick-capture-window.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
@@ -2928,7 +2929,7 @@ export async function runSmokeWorkflow(
     await driver.evaluate(`(async () => {
       const result = await window.imnota.setPreferenceSettings({
         onboarding: { completed: true },
-        updates: { whatsNewAcknowledgedVersion: ${JSON.stringify(options.version)} },
+        updates: { whatsNewAcknowledgedVersion: ${smokeStringLiteral(options.version)} },
       });
       if (!result.ok) throw new Error(result.error.message);
     })()`);
