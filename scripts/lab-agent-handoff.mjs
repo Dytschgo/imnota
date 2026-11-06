@@ -151,13 +151,14 @@ for(const name of ['appData','userData','sessionData','logs','crashDumps'])app.s
   await page.getByTestId('copy-bundle-1').click();
   await page.getByTestId('last-saved-handoff').waitFor();
   await page.getByTestId('last-saved-handoff').click();
-  const instructionBox = page.getByLabel('Agent instruction', { exact: true });
+  const handoffDialog = page.getByRole('dialog', { name: 'Send saved bundle to agent', exact: true });
+  const instructionBox = handoffDialog.locator('textarea[readonly]');
   await instructionBox.waitFor();
   assert.equal(
     await page.getByRole('button', { name: 'Copy agent instruction', exact: true }).isDisabled(),
     true,
   );
-  assert.match(await page.getByRole('dialog').innerText(), /Local agent access is off/);
+  assert.match(await handoffDialog.innerText(), /Local agent access is off/);
   const settings = JSON.parse(await fs.readFile(path.join(profile, 'settings.json'), 'utf8'));
   assert.equal(settings.preferences.agentAccess.enabled, false);
   passed('Access-off guidance leaves access disabled');
@@ -248,8 +249,11 @@ for(const name of ['appData','userData','sessionData','logs','crashDumps'])app.s
   try {
     await fs.unlink(pngPath);
     await page.getByRole('button', { name: 'Open saved files', exact: true }).click();
-    await page.getByRole('alert').waitFor();
-    assert.match(await page.getByRole('alert').innerText(), /no longer available|not found|unavailable/i);
+    await handoffDialog.getByRole('alert').waitFor();
+    assert.match(
+      await handoffDialog.getByRole('alert').innerText(),
+      /no longer available|not found|unavailable/i,
+    );
     assert.equal(await instructionBox.inputValue(), instruction);
     assert.equal((await application.evaluate(() => globalThis.__imnotaPlaywrightOpened)).length, 2);
     passed('Missing saved files produce an explicit error without opening a substitute');
