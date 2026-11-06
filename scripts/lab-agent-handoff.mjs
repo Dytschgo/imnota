@@ -130,13 +130,20 @@ for(const name of ['appData','userData','sessionData','logs','crashDumps'])app.s
       (item) => item.name === 'Playwright saved handoff',
     );
     const snapshot = await globalThis.window.imnota.loadProject(project.projectPath);
-    await globalThis.window.imnota.importImageFiles({
+    const imported = await globalThis.window.imnota.importImageFiles({
       projectPath: project.projectPath,
       paths: [source],
       collectionId: snapshot.project.collections[0].id,
     });
+    if (imported.project.screenshots.length !== 1)
+      throw new Error('Synthetic import did not persist one screenshot.');
     return project.projectPath;
   }, source);
+  // Fixture import uses the native bridge; reopen through the normal UI to load
+  // that saved snapshot into the workbench before exercising the handoff flow.
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await page.locator('.project-row-main').filter({ hasText: 'Playwright saved handoff' }).click();
+  await page.locator('.workspace').waitFor();
   await page.locator('[data-testid^="screenshot-"]').first().click();
   await page.getByLabel('Description', { exact: true }).fill('SAVED_PLAYWRIGHT_EVIDENCE');
   await page.getByTestId('share-prompt-bundles').click();
