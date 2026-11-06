@@ -16,6 +16,7 @@ interface CaptureOverlayPayload {
   imageDataUrl: string;
   lastRegion: CaptureRectangle | null;
   lastRegionAvailable: boolean;
+  quickAccess?: boolean;
 }
 
 contextBridge.exposeInMainWorld('imnotaCapture', {

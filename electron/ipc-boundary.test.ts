@@ -398,7 +398,14 @@ describe('renderer bridge, contracts and handlers stay consistent', () => {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
       sent.push(...literals(await readSource(file), /webContents\.send\(\s*'([^']+)'/g));
     }
-    expect(sorted(sent.filter((channel) => !channel.startsWith('capture-overlay:')))).toEqual(listened);
+    // Separate capture renderers have dedicated preload/handler contract tests.
+    expect(
+      sorted(
+        sent.filter(
+          (channel) => !channel.startsWith('capture-overlay:') && !channel.startsWith('quick-capture:'),
+        ),
+      ),
+    ).toEqual(listened);
   });
 
   it('keeps the capture overlay preload and its main-process listeners in step', async () => {

@@ -24,6 +24,10 @@ import {
 import { PersistenceDiagnostics, tracesPersistenceChannel } from './persistence-diagnostics.js';
 import { inspectProjectFiles } from './project-integrity.js';
 import { captureTrayTemplate } from './app-tray.js';
+import { QuickCaptureWindow } from './quick-capture-window.js';
+import { guardPendingCaptureQuit } from './quick-capture-quit.js';
+import { commitQuickCapture } from './quick-capture-commit.js';
+import { listWorkspaceProjects } from './project-list.js';
 import {
   onboardingHandoffRoot,
   OnboardingHandoffWorkflow,
@@ -41,6 +45,7 @@ const { autoUpdater } = updater;
 import type {
   ImagePayload,
   ProjectData,
+  Annotation,
   ProjectSnapshot,
   ScreenshotRecord,
   WorkspaceSettings,
@@ -206,6 +211,7 @@ if (!primaryInstance) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let quickCaptureAccess: QuickCaptureWindow | undefined;
 let startupWindowCreated = false;
 // Main-process-only, one-use approval for the disposable native smoke fixture.
 let smokeBackupRestorePath: string | null = null;
@@ -318,6 +324,9 @@ function createAppTray(): void {
           else raiseMainWindow();
         },
         onQuit: () => app.quit(),
+        onPendingCaptures: () => {
+          void quickCaptureAccess?.show(true).catch(console.error);
+        },
       }),
     ),
   );
@@ -1288,6 +1297,7 @@ async function chooseCaptureRegion(
           imageDataUrl: `data:image/png;base64,${capture.png.toString('base64')}`,
           lastRegion: lastCaptureRegionForDisplay(remembered, capture.display),
           lastRegionAvailable: remembered !== null,
+          quickAccess: quickCaptureAccess?.enabled ?? false,
         });
       });
       overlays.push({ window, capture, ready: false });
@@ -1345,6 +1355,7 @@ async function insertCapturedPng(
   collectionId: string,
   png: Buffer,
   assertAdmission: () => void,
+  quickCapture?: { id: string; annotations: Annotation[] },
 ): Promise<{
   snapshot: ProjectSnapshot;
   screenshotId: string;
@@ -1398,7 +1409,7 @@ async function insertCapturedPng(
   const timestamp = nextProjectMutationTimestamp(project.updatedAt);
   const screenshot: ScreenshotRecord = {
     collectionId: collection.id,
-    id: `shot_${crypto.randomUUID()}`,
+    id: quickCapture?.id ?? `shot_${crypto.randomUUID()}`,
     originalFilename: 'Screen capture.png',
     storedFilename,
     title: 'Screen capture',
@@ -1433,7 +1444,7 @@ async function insertCapturedPng(
       },
       {
         relativePath: screenshot.annotationFile,
-        after: Buffer.from('[]'),
+        after: Buffer.from(JSON.stringify(quickCapture?.annotations ?? [])),
         expectedBefore: screenshotTransactionBaseline(null),
       },
       {
@@ -1604,6 +1615,9 @@ function createIpcHost() {
     },
     get pendingCapturePng() {
       return pendingCapturePng;
+    },
+    get quickCaptureAccess() {
+      return quickCaptureAccess;
     },
     set pendingCapturePng(value: typeof pendingCapturePng) {
       pendingCapturePng = value;
@@ -1869,6 +1883,50 @@ function registerIpc(): void {
     trace: (channel, run) => diagnostics.run(channel, run),
   });
   const host = createIpcHost();
+  quickCaptureAccess = new QuickCaptureWindow({
+    preload: path.join(__dirname, 'quick-capture-preload.cjs'),
+    html: path.join(__dirname, '../../dist/quick-capture.html'),
+    temporaryDirectory: process.env.IMNOTA_SMOKE === '1' ? app.getPath('userData') : app.getPath('temp'),
+    devUrl: process.env.VITE_DEV_SERVER_URL,
+    corner: () => preferenceSettingsResult.settings.capture.quickAccessCorner ?? 'off',
+    updatePending: () => updateInstallPending,
+    authorize: assertProjectPath,
+    destinations: async () => {
+      const workspace = settings.workspacePath;
+      if (!workspace) return [];
+      const projects = await listWorkspaceProjects(workspace);
+      if (settings.workspacePath !== workspace)
+        throw new Error('Workspace changed. Reopen Pending captures and choose a destination again.');
+      return projects
+        .filter((project) => project.status === 'active')
+        .flatMap((project) =>
+          project.collections
+            .filter((collection) => !collection.archived)
+            .map((collection) => ({
+              projectPath: project.projectPath,
+              collectionId: collection.id,
+              label: `${project.name} / ${collection.name || 'Untitled collection'}`,
+            })),
+        );
+    },
+    insert: (item, destination) =>
+      router.enqueue(async () => {
+        await commitQuickCapture(item, destination, {
+          authorize: assertProjectPath,
+          read: readProjectMetadata,
+          snapshot: makeSnapshot,
+          insert: insertCapturedPng,
+          assertAdmission: () => {
+            if (updateInstallPending) throw new Error('Imnota is preparing an update. Your capture is kept.');
+          },
+        });
+        await projectWatchManager?.notifyProjectChanged(
+          await assertProjectPath(destination.projectPath),
+          'A pending capture was added to this project.',
+        );
+      }),
+  });
+  quickCaptureAccess.registerIpc();
   const handleCaptureWorkflow = captureWorkflowRegistrar(router);
   registerCaptureIpc(router, handleCaptureWorkflow, host);
 
@@ -2208,6 +2266,7 @@ app.whenReady().then(async () => {
     const exitCode = await runSmokeSession({
       mainWindow: () => mainWindow,
       captureCapability: smokeDesktopCaptureCapability,
+      quickCaptures: () => quickCaptureAccess!,
       diagnosticsHealth: () => diagnostics.health(),
       setWorkspace(workspacePath) {
         settings = { ...settings, workspacePath };
@@ -2259,6 +2318,27 @@ app.on('window-all-closed', () => {
   if (appTray) return;
   captureGlobalShortcut.clear();
   if (process.platform !== 'darwin') app.quit();
+});
+guardPendingCaptureQuit({
+  onBeforeQuit: (listener) => {
+    app.on('before-quit', listener);
+  },
+  access: () => quickCaptureAccess,
+  ask: async (count) =>
+    (
+      await dialog.showMessageBox({
+        type: 'question',
+        title: 'Pending captures',
+        message: `${count} pending capture(s) have not been added.`,
+        detail:
+          'Keep working to copy or add them. Discard and quit removes only these pending captures from memory.',
+        buttons: ['Keep working', 'Discard pending captures and quit'],
+        defaultId: 0,
+        cancelId: 0,
+      })
+    ).response === 1,
+  report: (message) => dialog.showErrorBox('Pending captures are kept', message),
+  quit: () => app.quit(),
 });
 onSuccessfulQuit(app, () => {
   appTray = teardownTrayAfterSuccessfulQuit({

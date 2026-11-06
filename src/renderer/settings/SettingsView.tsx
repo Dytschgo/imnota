@@ -60,6 +60,7 @@ export interface SettingsViewProps {
   onShortcutChange?(value: PreferenceSettings['shortcuts']): void | Promise<void>;
   globalCaptureShortcutRegistered?: boolean;
   onPromptExportChange?(value: PreferenceSettings['promptExport']): void | Promise<void>;
+  onCaptureChange?(value: PreferenceSettings['capture']): void | Promise<void>;
   projects?: ProjectListItem[];
   onBackupChange?(value: BackupPreferences): void | Promise<void>;
   onBeforeBackupAction?(): boolean | Promise<boolean>;
@@ -93,6 +94,7 @@ export function SettingsView({
   onShortcutChange = async () => undefined,
   globalCaptureShortcutRegistered = false,
   onPromptExportChange,
+  onCaptureChange,
   projects = [],
   onBackupChange = async () => undefined,
   onBeforeBackupAction = () => true,
@@ -359,6 +361,29 @@ export function SettingsView({
         <div hidden={group !== 'Features'}>
           <section className="settings-section" aria-labelledby="capture-title">
             <h2 id="capture-title">Screen capture</h2>
+            <label className="settings-field">
+              <span>Quick capture cards</span>
+              <select
+                aria-label="Quick capture cards"
+                value={preferences.capture.quickAccessCorner ?? 'off'}
+                disabled={savingPreferences || !onCaptureChange || shortcutPlatform === 'linux'}
+                onChange={(event) =>
+                  void onCaptureChange?.({
+                    ...preferences.capture,
+                    quickAccessCorner: event.target.value as 'off' | 'left' | 'right',
+                  })
+                }
+              >
+                <option value="off">Off — add captures immediately</option>
+                <option value="left">Bottom left</option>
+                <option value="right">Bottom right</option>
+              </select>
+            </label>
+            <p>
+              Keep up to three captures for copying, annotation or adding later. Hiding the cards keeps them
+              in memory until you Add, Discard or quit.
+            </p>
+            <Button onClick={() => void window.imnota.showQuickCaptures()}>Show pending captures</Button>
             <p>
               Captures stay on this device. Area selection spans all connected displays on Windows and macOS;
               on Linux, use Import or Paste.

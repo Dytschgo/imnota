@@ -31,6 +31,7 @@ declare global {
           imageDataUrl: string;
           lastRegion: CaptureRectangle | null;
           lastRegionAvailable: boolean;
+          quickAccess?: boolean;
         }) => void,
       ): () => void;
       onSelection(handler: (state: CaptureSelectionState) => void): () => void;
@@ -265,6 +266,8 @@ function setupRegionSelection() {
   }
 
   window.imnotaCapture.onPayload((payload) => {
+    const save = root.querySelector<HTMLButtonElement>('[data-action="save"]')!;
+    save.textContent = payload.quickAccess ? 'Keep capture' : 'Save to collection';
     displayId = payload.displayId;
     displayBounds = payload.displayBounds;
     setLastRegionAvailability(payload.lastRegion, payload.lastRegionAvailable);

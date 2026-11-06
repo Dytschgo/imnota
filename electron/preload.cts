@@ -105,6 +105,7 @@ const bridge: ImnotaBridge = {
   copyText: (text) => ipcRenderer.invoke('system:copy-text', text),
   copyContext: (input) => ipcRenderer.invoke('system:copy-context', input),
   copyImage: (dataUrl) => ipcRenderer.invoke('system:copy-image', dataUrl),
+  showQuickCaptures: () => ipcRenderer.invoke('workflow:capture:show-quick-access'),
   prepareOnboardingHandoff: (input) => ipcRenderer.invoke('onboarding:prepare-handoff', input),
   copyOnboardingHandoff: (input) => ipcRenderer.invoke('onboarding:copy-handoff', input),
   openOnboardingHandoff: (input) => ipcRenderer.invoke('onboarding:open-handoff', input),

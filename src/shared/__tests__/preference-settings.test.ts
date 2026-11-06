@@ -15,6 +15,20 @@ import {
 } from '../preferences';
 
 describe('profile-aware preference settings', () => {
+  it('keeps quick access off for older profiles and preserves chosen corners across unrelated changes and restart', () => {
+    const original = resolvePreferenceSettings(undefined, false).settings;
+    expect(original.capture.quickAccessCorner ?? 'off').toBe('off');
+    const enabled = mergePreferenceSettings(original, { capture: { quickAccessCorner: 'left' } });
+    expect(enabled.capture.experimentalRegionCapture).toBe(original.capture.experimentalRegionCapture);
+    const unrelated = mergePreferenceSettings(enabled, { nativeCopy: { defaultFunction: 'rich' } });
+    const restarted = resolvePreferenceSettings(preferenceSettingsEnvelope({}, unrelated), true).settings;
+    expect(restarted.capture.quickAccessCorner).toBe('left');
+    const disabled = mergePreferenceSettings(restarted, {
+      capture: { quickAccessCorner: 'off', experimentalRegionCapture: false },
+    });
+    expect(disabled.capture).toMatchObject({ quickAccessCorner: 'off', experimentalRegionCapture: false });
+    expect(() => preferenceSettingsUpdateSchema.parse({ capture: { quickAccessCorner: 'cloud' } })).toThrow();
+  });
   it('migrates profiles without presets and preserves presets across unrelated updates and restarts', () => {
     const initial = resolvePreferenceSettings(undefined, false);
     const legacy = { ...initial.settings };

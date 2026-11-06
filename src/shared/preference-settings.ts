@@ -12,7 +12,12 @@ import { SHORTCUT_ACTIONS } from './shortcuts.js';
 import { backupPreferencesSchema } from './backups.js';
 
 const shortcutValueSchema = z.string().max(100).nullable();
-const capturePreferencesSchema = z.object({ experimentalRegionCapture: z.boolean() }).strict();
+const capturePreferencesSchema = z
+  .object({
+    experimentalRegionCapture: z.boolean(),
+    quickAccessCorner: z.enum(['off', 'left', 'right']).optional(),
+  })
+  .strict();
 const workbenchPreferencesSchema = z.object({ screenshotFirstAdd: z.boolean() }).strict();
 const nativeCopyPreferencesSchema = z
   .object({ defaultFunction: z.enum(['files', 'files-rich', 'rich']) })
