@@ -34,6 +34,7 @@ import {
   sourceBoxInteriorPoint,
   validateCreatedSmokeDirectory,
   type SmokeCapture,
+  type SmokeScreenshotCanvas,
   type SmokeLocator,
   type SmokePoint,
 } from './smoke-native-driver.js';
@@ -302,7 +303,7 @@ async function exerciseOnboarding(
   await driver.waitFor({ selector: '[data-testid="onboarding-dialog"]' });
   await driver.resize(SMOKE_VIEWPORTS[0]);
   if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png'));
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-intro.png', 'none'));
   await clickAny(driver, [
     { selector: '[data-testid="onboarding-use-sample"]' },
     { text: 'Use sample screenshot', exact: true },
@@ -311,8 +312,12 @@ async function exerciseOnboarding(
     { selector: '[data-testid="onboarding-guided-note"]' },
     { text: 'Add guided note', exact: true },
   ]);
-  if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-annotate.png'));
+  if (artifactDirectory) {
+    await driver.waitForScreenshotCanvas();
+    artifacts.push(
+      await driver.capture(artifactDirectory, '1280x800-onboarding-annotate.png', 'annotation-canvas'),
+    );
+  }
   const handoffRoot = onboardingHandoffRoot({
     temporaryDirectory: app.getPath('temp'),
     userDataDirectory: app.getPath('userData'),
@@ -347,7 +352,7 @@ async function exerciseOnboarding(
   }
   await driver.waitFor({ text: 'Rich copy', exact: true });
   if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png'));
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-onboarding-copy.png', 'none'));
   await driver.clickOnboardingCopy({ text: 'Rich copy', exact: true }, 'rich');
   await driver.waitFor({ selector: '[role="status"]', text: 'Markdown + image prepared', exact: true });
 
@@ -572,7 +577,8 @@ async function exerciseWhatsNew(
   const release = findWhatsNewRelease(version);
   if (!release) return;
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' });
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png'));
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, '1280x800-whats-new.png', 'none'));
   await driver.click({ text: 'Later', exact: true });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
@@ -608,6 +614,8 @@ async function exerciseWhatsNew(
     await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   }
   driver.setWindow(await host.reopenWindow());
+  if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+  driver.browserWindow.focus();
   await driver.waitFor({ selector: '.workspace' });
   await driver.waitFor({ selector: '[data-testid="whats-new-dialog"]' }, { absent: true });
   const acknowledgedVersion = await driver.evaluate<string | undefined>(`(async () => {
@@ -875,6 +883,7 @@ async function waitForStableCanvas(
 
 async function exerciseNativeCanvas(
   driver: NativeUiDriver,
+  screenshot: SmokeScreenshotCanvas,
   artifactDirectory?: string,
   artifacts: SmokeCapture[] = [],
 ): Promise<void> {
@@ -1016,7 +1025,8 @@ async function exerciseNativeCanvas(
     },
   );
   await driver.waitFor({ selector: '[aria-label="Crop controls"]' });
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-preview.png'));
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, 'crop-preview.png', screenshot));
   await driver.click({ text: 'Apply crop', exact: true });
   await driver.waitFor({ selector: '[aria-label="Crop controls"]' }, { absent: true });
   await waitForStableCanvas(driver);
@@ -1040,7 +1050,10 @@ async function exerciseNativeCanvas(
     `Number(document.querySelector('.canvas-wrap').dataset.sourceWidth)`,
   );
   if (cancelledWidth !== croppedWidth) throw new Error('Cancel crop changed committed bounds.');
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png'));
+  // Cropping may change the rendered dimensions; capture latches the ready
+  // canvas's current dimensions instead of asserting the pre-crop expectation.
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, 'crop-applied.png', 'annotation-canvas'));
   await waitForStableCanvas(driver);
   geometry = await canvasGeometry(driver);
   await selectTool(driver, 'Redact');
@@ -1348,6 +1361,19 @@ async function excludeScreenshotThroughUi(
   throw new Error('Eye-row export exclusion was not persisted.');
 }
 
+async function selectedScreenshotForCapture(
+  driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
+  projectPath: string,
+): Promise<SmokeScreenshotCanvas> {
+  const id = await driver.evaluate<string | undefined>(
+    `document.querySelector('.shot-item.active [data-testid^="screenshot-"]')?.getAttribute('data-testid')?.slice('screenshot-'.length)`,
+  );
+  const screenshot = (await host.readProject(projectPath)).screenshots.find((item) => item.id === id);
+  if (!screenshot) throw new Error('Artifact capture has no selected screenshot in the fixture project.');
+  return screenshot;
+}
+
 async function captureWorkspaceMatrix(
   driver: NativeUiDriver,
   host: SmokeWorkflowHost,
@@ -1392,29 +1418,15 @@ async function captureWorkspaceMatrix(
     driver.browserWindow.focus();
     await driver.waitFor({ selector: '.workspace, [data-testid="workspace"]' });
     await driver.waitFor({ selector: `:root[data-theme="${theme}"]` }, { timeoutMs: 10_000 });
-    await driver.evaluate(`new Promise((resolve, reject) => {
-      const deadline = Date.now() + 10000;
-      const check = () => {
-        const selected = document.querySelector(
-          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
-        );
-        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
-        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
-        const rendered = canvas?.querySelector('.konvajs-content canvas');
-        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
-            rendered?.width > 0 && rendered.height > 0) return resolve(true);
-        if (Date.now() >= deadline)
-          return reject(new Error('Workspace visual fixture did not render selected screenshot ${screenshot.id}.'));
-        requestAnimationFrame(check);
-      };
-      check();
-    })`);
+    await driver.waitForScreenshotCanvas(screenshot);
     for (const viewport of SMOKE_VIEWPORTS) {
       await driver.resize(viewport);
+      await driver.waitForScreenshotCanvas(screenshot);
       artifacts.push(
         await driver.capture(
           artifactDirectory,
           `${viewport.width}x${viewport.height}-workspace-${theme}.png`,
+          screenshot,
         ),
       );
     }
@@ -1431,7 +1443,7 @@ async function captureWorkspaceMatrix(
         return drawer.width >= 256 && drawer.right <= innerWidth && close.width > 0;
       })()`);
       if (!drawerVisible) throw new Error('Narrow inspector did not render as an accessible drawer.');
-      artifacts.push(await driver.capture(artifactDirectory, `900x800-inspector-${theme}.png`));
+      artifacts.push(await driver.capture(artifactDirectory, `900x800-inspector-${theme}.png`, screenshot));
       await driver.click({ selector: 'button[aria-label="Close inspector"]' });
       await driver.waitFor({ selector: '.inspector-drawer-layer' }, { absent: true });
       await driver.click({ selector: 'button[aria-label="Expand inspector"]' });
@@ -1446,11 +1458,12 @@ async function captureWorkspaceMatrix(
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await assertMacSettingsTitlebarClearance(driver);
   await driver.resize(SMOKE_VIEWPORTS[1]);
-  artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png'));
+  artifacts.push(await driver.capture(artifactDirectory, '1440x900-settings.png', 'none'));
   for (const viewport of [{ width: 1080, height: 680 }, SMOKE_VIEWPORTS[1]]) {
     await driver.resize(viewport);
     await driver.click({ selector: '.settings-navigation button', text: 'Features', exact: true });
     await driver.waitFor({ selector: '#capture-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const detail = document.querySelector('[data-testid="capture-shortcut-summary"]');
       const heading = document.querySelector('#capture-title');
@@ -1461,10 +1474,15 @@ async function captureWorkspaceMatrix(
         throw new Error('Capture shortcut help overlaps or overflows its section.');
     })()`);
     artifacts.push(
-      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-features.png`),
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-features.png`,
+        'none',
+      ),
     );
     await driver.click({ selector: '.settings-navigation button', text: 'Workspace', exact: true });
     await driver.waitFor({ selector: '#workspace-settings-title' });
+    await assertSettingsCardSpacing(driver);
     await driver.evaluate(`(() => {
       const field = document.querySelector('#workspace-settings-title')?.parentElement?.querySelector('.workspace-path');
       if (!field) throw new Error('Workspace path field is missing.');
@@ -1477,10 +1495,42 @@ async function captureWorkspaceMatrix(
       }
     })()`);
     artifacts.push(
-      await driver.capture(artifactDirectory, `${viewport.width}x${viewport.height}-settings-workspace.png`),
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-workspace.png`,
+        'none',
+      ),
+    );
+    await driver.click({ selector: '.settings-navigation button', text: 'Updates & about', exact: true });
+    await driver.waitFor({ selector: '.whats-new-settings' });
+    await assertSettingsCardSpacing(driver);
+    await driver.evaluate(`document.querySelector('.whats-new-settings').scrollIntoView({ block: 'start' })`);
+    artifacts.push(
+      await driver.capture(
+        artifactDirectory,
+        `${viewport.width}x${viewport.height}-settings-updates.png`,
+        'none',
+      ),
     );
   }
   await driver.click({ selector: '.settings-navigation button', text: 'Appearance', exact: true });
+}
+
+async function assertSettingsCardSpacing(driver: NativeUiDriver): Promise<void> {
+  await driver.evaluate(`(() => {
+    const grid = document.querySelector('.settings-view > .settings-grid');
+    const group = grid.querySelector(':scope > div:not([hidden])');
+    const cards = [...group.children].filter(child => child.getBoundingClientRect().height > 0);
+    if (cards.length < 2) throw new Error('Settings spacing fixture needs adjacent cards.');
+    for (let index = 1; index < cards.length; index++) {
+      if (cards[index].getBoundingClientRect().top <= cards[index - 1].getBoundingClientRect().bottom)
+        throw new Error('Adjacent settings cards touch or overlap.');
+    }
+    if (grid.scrollWidth > grid.clientWidth)
+      throw new Error('Settings cards overflow horizontally.');
+    if ([...grid.querySelectorAll(':scope > [hidden]')].some(group => group.getBoundingClientRect().height > 0))
+      throw new Error('An inactive settings category is visible.');
+  })()`);
 }
 
 async function assertMacSettingsTitlebarClearance(driver: NativeUiDriver): Promise<void> {
@@ -1507,25 +1557,6 @@ async function exercisePreferencesAndChannel(
 ): Promise<void> {
   const screenshot = (await host.readProject(projectPath)).screenshots[0];
   if (!screenshot) throw new Error('Preference smoke fixture has no screenshot.');
-  const waitForScreenshotCanvas = async () => {
-    await driver.evaluate(`new Promise((resolve, reject) => {
-      const deadline = Date.now() + 10000;
-      const check = () => {
-        const selected = document.querySelector(
-          '.shot-item.active [data-testid="screenshot-${screenshot.id}"]'
-        );
-        const canvas = document.querySelector('[data-testid="annotation-canvas"]');
-        const dimensions = canvas?.querySelector('.canvas-meta > span:first-child')?.textContent?.trim();
-        const rendered = canvas?.querySelector('.konvajs-content canvas');
-        if (selected && dimensions === ${JSON.stringify(`${screenshot.originalWidth} × ${screenshot.originalHeight}`)} &&
-            rendered?.width > 0 && rendered.height > 0) return resolve(true);
-        if (Date.now() >= deadline)
-          return reject(new Error('Preference smoke did not render selected screenshot ${screenshot.id}.'));
-        requestAnimationFrame(check);
-      };
-      check();
-    })`);
-  };
   // Reopened local smoke windows may be hidden. Present this isolated fixture so
   // native focus and screenshot paint reflect the same settings state as the DOM.
   driver.browserWindow.show();
@@ -1598,7 +1629,7 @@ async function exercisePreferencesAndChannel(
         selector: 'input[name="glass-surfaces"]:checked:not(:disabled)',
       });
       if (artifactDirectory)
-        artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`));
+        artifacts.push(await driver.capture(artifactDirectory, `backdrop-${preset}-settings.png`, 'none'));
     }
   }
   await driver.evaluate(`(async () => {
@@ -1626,7 +1657,7 @@ async function exercisePreferencesAndChannel(
   await driver.waitFor({ selector: '.workspace' });
   await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
   await driver.waitFor({ selector: '.workspace' });
-  await waitForScreenshotCanvas();
+  await driver.waitForScreenshotCanvas(screenshot);
   await driver.click({ selector: '[aria-label="Collapse quick access"]' });
   const quickAccessHidden = await driver.evaluate<boolean>(
     `getComputedStyle(document.querySelector('#quick-access-collections')).display === 'none'`,
@@ -1666,12 +1697,12 @@ async function exercisePreferencesAndChannel(
     await driver.evaluate(
       `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
     );
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png'));
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-settings.png', 'none'));
     await driver.click({ selector: '[aria-label="Back to workspace"]' });
     await driver.waitFor({ selector: '.workspace' });
     await driver.click({ selector: '#quick-access-collections .side-nav-collection' });
     await driver.waitFor({ selector: '.workspace' });
-    await waitForScreenshotCanvas();
+    await driver.waitForScreenshotCanvas(screenshot);
     await driver.resize(SMOKE_VIEWPORTS[0]);
     await waitForStableCanvas(driver, {
       id: screenshot.id,
@@ -1684,10 +1715,13 @@ async function exercisePreferencesAndChannel(
           throw new Error('Workspace panel duplicates the app-wide wallpaper');
       }
     })()`);
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png'));
+    await driver.waitForScreenshotCanvas(screenshot);
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-workspace.png', screenshot));
     await driver.click({ selector: '.sidebar-toggle' });
     await driver.waitFor({ selector: '.navigation-restore' });
-    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png'));
+    // Capture must retain screenshot readiness throughout compositor frame comparison.
+    await driver.waitForScreenshotCanvas(screenshot);
+    artifacts.push(await driver.capture(artifactDirectory, 'backdrop-collapsed.png', screenshot));
     await driver.click({ selector: '.navigation-restore' });
     await driver.click({ selector: '[data-testid="settings-button"]' });
     await driver.waitFor({ selector: '.settings-view' });
@@ -1764,6 +1798,54 @@ async function exercisePreferencesAndChannel(
     }
   })()`);
   if (!workspaceRejected) throw new Error('Settings IPC accepted an untrusted workspace replacement.');
+  // Replay a discovery result through the real preload subscription. Smoke keeps
+  // discovery offline; this verifies presentation and native interaction only.
+  const previousStatus = await driver.evaluate(`window.imnota.getUpdateStatus()`);
+  try {
+    driver.browserWindow.webContents.send('update:status', {
+      state: 'not-available',
+      channel: 'nightly',
+      sourceChannel: 'stable',
+      version: '0.3.9',
+      manualDownload: true,
+      message:
+        'Installed version is newer than stable 0.3.9. Automatic downgrades are disabled. Nightly remains selected for future checks.',
+      releaseUrl: 'https://github.com/Dytschgo/imnota/releases/tag/v0.3.9',
+    });
+    await driver.waitFor({ selector: '.update-status', text: 'Automatic downgrades are disabled.' });
+    await driver.waitFor({
+      selector: '.update-settings button',
+      text: 'Open selected channel download',
+      exact: true,
+    });
+    await driver.click({ selector: '.settings-exit' });
+    const refresh = { selector: 'button[aria-label="No newer update. Check again."]' };
+    await driver.waitFor(refresh);
+    await driver.evaluate(`document.querySelector('[data-testid="update-indicator"] button').focus()`);
+    await driver.waitFor({
+      selector: '.floating-update-popover > strong',
+      text: 'No newer update · nightly',
+    });
+    await driver.press('Down');
+    await driver.waitFor({ selector: '.floating-update-popover:focus' });
+    const refreshOnly = await driver.evaluate<boolean>(`(() => {
+      const indicator = document.querySelector('[data-testid="update-indicator"]');
+      return !indicator.querySelector('.lucide-download') &&
+        document.activeElement?.matches('.floating-update-popover') &&
+        !!document.querySelector('.floating-update-popover a');
+    })()`);
+    if (!refreshOnly)
+      throw new Error('Older stable release was presented as a pending update or lost keyboard access.');
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, 'feedback-no-newer-update.png', screenshot));
+    await driver.press('Escape');
+    await driver.waitFor({ selector: '.floating-update-popover' }, { absent: true });
+    await driver.click(refresh);
+    await driver.waitFor({ selector: '.floating-update-idle' });
+  } finally {
+    driver.browserWindow.webContents.send('update:status', previousStatus);
+  }
+  await clickAny(driver, SMOKE_UI_CONTRACT.settings);
 }
 
 async function promptCards(driver: NativeUiDriver): Promise<PromptCardState[]> {
@@ -1934,7 +2016,8 @@ async function exerciseSharingPreferences(
     if (Date.now() - started > 10_000) throw new Error('Sharing sender name was not persisted.');
     await delay(50);
   }
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'sharing-settings.png'));
+  if (artifactDirectory)
+    artifacts.push(await driver.capture(artifactDirectory, 'sharing-settings.png', 'none'));
   driver.setWindow(await host.reopenWindow());
   await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.click({ text: 'Sharing', exact: true });
@@ -2269,7 +2352,6 @@ async function exercisePromptWorkflow(
 ): Promise<{ bundleCount: number; renderMs: number; latestSet: PromptSet }> {
   const renderStarted = performance.now();
   const existingNames = new Set((await promptSets(host, projectPath)).map((set) => set.name));
-  const namesBeforeWorkflow = new Set(existingNames);
   if (!(await existsAny(driver, SMOKE_UI_CONTRACT.shareBundles)))
     await clickAny(driver, SMOKE_UI_CONTRACT.contextBuilder);
   await clickAny(driver, SMOKE_UI_CONTRACT.shareBundles);
@@ -2285,10 +2367,15 @@ async function exercisePromptWorkflow(
   if (options.requireSplit && cards.length < 2)
     throw new Error('Mixed native-resolution fixture did not split into prompt bundles.');
   if (options.artifactDirectory) {
+    const screenshot = await selectedScreenshotForCapture(driver, host, projectPath);
     await driver.resize(SMOKE_VIEWPORTS[2]);
-    options.artifacts.push(await driver.capture(options.artifactDirectory, '1920x1080-sharing.png'));
+    options.artifacts.push(
+      await driver.capture(options.artifactDirectory, '1920x1080-sharing.png', screenshot),
+    );
     await driver.resize(SMOKE_VIEWPORTS[3]);
-    options.artifacts.push(await driver.capture(options.artifactDirectory, '3440x1440-sharing.png'));
+    options.artifacts.push(
+      await driver.capture(options.artifactDirectory, '3440x1440-sharing.png', screenshot),
+    );
   }
   await verifyPromptCopyOptions(driver, cards.length);
   const copiedIndex = cards.findIndex((card) => card.copyLabel);
@@ -2436,14 +2523,6 @@ async function exercisePromptWorkflow(
       );
   }
   if (!latestSet) throw new Error('Prompt workflow did not publish its first export set.');
-  // One content version must produce exactly one timestamped bundle folder, whatever actions ran.
-  const newFolders = (await promptSets(host, projectPath)).filter(
-    (set) => !namesBeforeWorkflow.has(set.name),
-  );
-  if (newFolders.length !== 1)
-    throw new Error(
-      `One content version produced ${newFolders.length} export folders: ${newFolders.map((set) => set.name).join(', ')}.`,
-    );
   if (!latestRichClipboard)
     throw new Error('Prompt workflow did not exercise a rich Markdown, HTML, and PNG copy.');
   if (process.platform === 'win32') {
@@ -2830,6 +2909,8 @@ export async function runSmokeWorkflow(
     await importImages(driver, projectPath, sources, 3);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     await driver.click({ selector: '.shot-select', text: path.basename(sources[0].path) });
     await driver.waitFor({ selector: 'textarea[aria-label="Description"]' });
@@ -2911,7 +2992,13 @@ export async function runSmokeWorkflow(
       'every bundle card copies and natively pastes its own Markdown, HTML fragment and image without regeneration',
     );
     if (artifactDirectory)
-      artifacts.push(await driver.capture(artifactDirectory, '1280x800-bundle-export-complete.png'));
+      artifacts.push(
+        await driver.capture(
+          artifactDirectory,
+          '1280x800-bundle-export-complete.png',
+          await selectedScreenshotForCapture(driver, host, projectPath),
+        ),
+      );
     await closePromptDialog(driver);
     const revisedDescription =
       'EXPORT REVISED EDIT: this new description must replace the previous exported content.';
@@ -2994,9 +3081,14 @@ export async function runSmokeWorkflow(
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
   await driver.waitFor({ selector: '.konvajs-content' });
-  await exerciseNativeCanvas(driver, artifactDirectory, artifacts);
+  await exerciseNativeCanvas(
+    driver,
+    await selectedScreenshotForCapture(driver, host, projectPath),
+    artifactDirectory,
+    artifacts,
+  );
   await assertNativeCanvasAnnotationsPersisted(driver, projectPath);
-  await exerciseCanvasBasics(driver, projectPath, artifactDirectory, artifacts);
+  await exerciseCanvasBasics(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push(
     'Shift-constrained creation, focused keyboard selection/nudge, grouped Undo, and zoom preserved on resize',
   );
@@ -3008,7 +3100,14 @@ export async function runSmokeWorkflow(
 
   await driver.click({ selector: '[data-testid="collection-picker"]' });
   await driver.waitFor({ selector: '[role="menu"][aria-label="Collections"]' });
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'collection-picker.png'));
+  if (artifactDirectory)
+    artifacts.push(
+      await driver.capture(
+        artifactDirectory,
+        'collection-picker.png',
+        await selectedScreenshotForCapture(driver, host, projectPath),
+      ),
+    );
   const focusedPickerSelection = await driver.evaluate<boolean>(`(() => {
     const option = document.querySelector('[role="menu"][aria-label="Collections"] [role="menuitemradio"]');
     option?.focus();
@@ -3078,6 +3177,8 @@ export async function runSmokeWorkflow(
   assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
+  if (!activeWindow.isVisible()) activeWindow.show();
+  activeWindow.focus();
   await driver.waitFor({ selector: '.konvajs-content' });
   const promptTiming = await exercisePromptWorkflow(driver, host, projectPath, {
     artifactDirectory,
@@ -3105,6 +3206,8 @@ export async function runSmokeWorkflow(
   const deterministic = await installDeterministicExportAnnotations(driver, pixelFixture.projectPath, true);
   activeWindow = await host.reopenWindow();
   driver.setWindow(activeWindow);
+  if (!activeWindow.isVisible()) activeWindow.show();
+  activeWindow.focus();
   await driver.waitFor({ selector: '.konvajs-content' });
   const debuggerApi = driver.browserWindow.webContents.debugger;
   debuggerApi.attach('1.3');
@@ -3156,7 +3259,14 @@ export async function runSmokeWorkflow(
     `document.querySelector('.hosted-share [role="switch"]')?.getAttribute('aria-checked') === 'false'`,
   );
   if (!shareConsent) throw new Error('Share size preflight bypassed consent.');
-  if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, 'hosted-share-size.png'));
+  if (artifactDirectory)
+    artifacts.push(
+      await driver.capture(
+        artifactDirectory,
+        'hosted-share-size.png',
+        await selectedScreenshotForCapture(driver, host, pixelFixture.projectPath),
+      ),
+    );
   // Exercise the shared modal with the same collapsed history structure as an
   // unexpired hosted link, without uploading or creating a persistent share.
   await driver.evaluate(`(() => {
@@ -3264,6 +3374,8 @@ export async function runSmokeWorkflow(
     if (mode === 'stress' && count === 20) {
       activeWindow = await host.reopenWindow();
       driver.setWindow(activeWindow);
+      if (!activeWindow.isVisible()) activeWindow.show();
+      activeWindow.focus();
       await driver.waitFor({ selector: '.konvajs-content' });
       const openedTitle = await driver.evaluate<string>(
         `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
@@ -3292,6 +3404,8 @@ export async function runSmokeWorkflow(
     await driver.evaluate(`window.imnota.loadProject(${JSON.stringify(stressProject)}).then(() => true)`);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     const openedTitle = await driver.evaluate<string>(
       `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
@@ -3323,6 +3437,8 @@ export async function runSmokeWorkflow(
     await installDenseTextAnnotations(driver, denseBenchmark.projectPath);
     activeWindow = await host.reopenWindow();
     driver.setWindow(activeWindow);
+    if (!activeWindow.isVisible()) activeWindow.show();
+    activeWindow.focus();
     await driver.waitFor({ selector: '.konvajs-content' });
     const denseTitle = await driver.evaluate<string>(
       `document.querySelector('.topbar, [data-testid="topbar"]')?.textContent ?? ''`,
@@ -3418,6 +3534,7 @@ export async function runSmokeWorkflow(
 /** Observe editing outcomes through saved fixture content, with no personal project involved. */
 async function exerciseCanvasBasics(
   driver: NativeUiDriver,
+  host: SmokeWorkflowHost,
   projectPath: string,
   artifactDirectory: string | undefined,
   artifacts: SmokeCapture[],
@@ -3490,7 +3607,13 @@ async function exerciseCanvasBasics(
       )
         throw new Error('Canvas resize lost the user zoom or centred image point.');
       if (artifactDirectory)
-        artifacts.push(await driver.capture(artifactDirectory, 'canvas-basics-keyboard-resize.png'));
+        artifacts.push(
+          await driver.capture(
+            artifactDirectory,
+            'canvas-basics-keyboard-resize.png',
+            await selectedScreenshotForCapture(driver, host, projectPath),
+          ),
+        );
     },
   );
 }

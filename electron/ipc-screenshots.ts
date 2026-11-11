@@ -1,3 +1,4 @@
+import { withCreatedFileCleanup } from './created-file-cleanup.js';
 import { restoreConfirmation } from './restore-confirmation.js';
 import { annotationSchema, validateProject } from '../src/shared/schema.js';
 import type { ScreenshotRecord } from '../src/shared/types.js';
@@ -27,7 +28,6 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
     atomicWrite,
     commitFileTransaction,
     contentRevision,
-    copyFile,
     diagnostics,
     importOne,
     loadImage,
@@ -216,39 +216,41 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
     const ext = path.extname(source.storedFilename);
     const name = await uniqueStoredName(safePath, `${path.basename(source.storedFilename, ext)}-copy${ext}`);
     await assertNoLinks(screenshotPath(safePath, source));
-    for (const [original, destination, fallback] of [
-      [source.annotationFile, `collections/${source.collectionId}/annotations/${name}.json`, '[]'],
-      [source.descriptionFile, `collections/${source.collectionId}/descriptions/${name}.md`, ''],
-    ]) {
-      await assertNoLinks(path.join(safePath, original));
-      const contents = await fs
-        .readFile(path.join(safePath, original), 'utf8')
-        .catch((error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') return fallback;
-          throw error;
-        });
-      await atomicWrite(path.join(safePath, destination), contents);
-    }
-    await copyFile(
-      screenshotPath(safePath, source),
-      path.join(safePath, 'collections', source.collectionId, 'screenshots', name),
-    );
-    const timestamp = nowIso();
-    project.screenshots.push({
-      ...source,
-      id: `shot_${crypto.randomUUID()}`,
-      originalFilename: `${source.originalFilename} copy`,
-      storedFilename: name,
-      title: `${source.title} copy`,
-      position: nextScreenshotPosition(project, source.collectionId),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      annotationFile: `collections/${source.collectionId}/annotations/${name}.json`,
-      descriptionFile: `collections/${source.collectionId}/descriptions/${name}.md`,
+    await withCreatedFileCleanup(path.join(safePath, 'project.json'), async (create) => {
+      for (const [original, destination, fallback] of [
+        [source.annotationFile, `collections/${source.collectionId}/annotations/${name}.json`, '[]'],
+        [source.descriptionFile, `collections/${source.collectionId}/descriptions/${name}.md`, ''],
+      ]) {
+        await assertNoLinks(path.join(safePath, original));
+        const contents = await fs
+          .readFile(path.join(safePath, original), 'utf8')
+          .catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return fallback;
+            throw error;
+          });
+        const target = path.join(safePath, destination);
+        await create(target, (capture) => atomicWrite(target, contents, capture));
+      }
+      const imagePath = path.join(safePath, 'collections', source.collectionId, 'screenshots', name);
+      const imageSource = await fs.readFile(screenshotPath(safePath, source));
+      await create(imagePath, (capture) => atomicWrite(imagePath, imageSource, capture));
+      const timestamp = nowIso();
+      project.screenshots.push({
+        ...source,
+        id: `shot_${crypto.randomUUID()}`,
+        originalFilename: `${source.originalFilename} copy`,
+        storedFilename: name,
+        title: `${source.title} copy`,
+        position: nextScreenshotPosition(project, source.collectionId),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        annotationFile: `collections/${source.collectionId}/annotations/${name}.json`,
+        descriptionFile: `collections/${source.collectionId}/descriptions/${name}.md`,
+      });
+      project.updatedAt = timestamp;
+      collection.archived = false;
+      await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     });
-    project.updatedAt = timestamp;
-    collection.archived = false;
-    await atomicWrite(path.join(safePath, 'project.json'), JSON.stringify(project, null, 2));
     return makeSnapshot(safePath);
   });
   handle('screenshots:delete', async (_event, input) => {

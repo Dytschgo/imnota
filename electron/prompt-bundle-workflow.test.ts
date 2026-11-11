@@ -8,7 +8,8 @@ import {
   MAX_PROMPT_BUNDLE_PNG_BYTES,
   PromptBundleStore,
 } from './prompt-bundle-store.js';
-import { PromptBundleWorkflow } from './prompt-bundle-workflow.js';
+import { workflowOutcome } from './workflow-errors.js';
+import { promptCollectionGrant, PromptBundleWorkflow } from './prompt-bundle-workflow.js';
 import { TemporaryFileHandoffStore } from './onboarding-handoff.js';
 
 const temporary: string[] = [];
@@ -59,7 +60,7 @@ async function fixture() {
     {
       authorize: async (candidate, candidateCollection) => {
         if (candidate !== projectPath || candidateCollection !== collectionId)
-          throw new Error('Collection does not belong to the project.');
+          return promptCollectionGrant(candidate, candidateCollection, []);
         return { projectPath, collectionId, collectionName: 'Collection' };
       },
       copyContext,
@@ -280,4 +281,42 @@ describe('main-owned prompt bundle grants', () => {
     await expect(workflow.cancel(held.sessionId)).resolves.toEqual(heldResult);
     // This exercises 129 real filesystem sessions, including Windows file operations.
   }, 30_000);
+});
+
+it('reports exact grant errors and directs text-only image/file copies to Copy Markdown only', async () => {
+  const { workflow, projectPath, collectionId } = await fixture();
+  await expect(
+    workflowOutcome(() => workflow.start(projectPath, 'missing', manifest)),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'collection-not-found', retryable: false },
+  });
+  await expect(
+    workflowOutcome(() => workflow.write('unknown', 1, pngDataUrl(), '# Context')),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'session-not-found', retryable: false },
+  });
+  const session = await workflow.start(projectPath, collectionId, [
+    { bundleNumber: 1, hasImage: false, width: 0, height: 0 },
+  ]);
+  await workflow.write(session.sessionId, 1, undefined, '# Text');
+  await workflow.finish(session.sessionId);
+  for (const target of ['image', 'files', 'files-rich'] as const) {
+    await expect(workflowOutcome(() => workflow.copy(session.sessionId, 1, target))).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        retryable: false,
+        details: { reason: 'rejected' },
+        message: 'This prompt has no image to copy. Use Copy Markdown only.',
+      },
+    });
+  }
+  await expect(
+    workflowOutcome(() => workflow.write(session.sessionId, 1, undefined, '# Late')),
+  ).resolves.toMatchObject({
+    ok: false,
+    error: { code: 'session-not-found', retryable: false },
+  });
 });

@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer, request } from 'node:http';
 import { once } from 'node:events';
@@ -18,8 +18,8 @@ it('retains the failed 5000ms timeout but settles the real upload before fixture
   }
 }, 35_000);
 
-async function resource() {
-  const fixture = new ShareFixture();
+async function resource(clock) {
+  const fixture = new ShareFixture(clock);
   const directory = await fixture.directory('imnota-share-lifetime-resource-');
   const db = new DatabaseSync(path.join(directory, 'shares.sqlite'));
   db.exec("CREATE TABLE evidence (value TEXT); INSERT INTO evidence VALUES ('preserved')");
@@ -55,18 +55,17 @@ it('retains files and a live database on a bounded unsettled-body failure', asyn
 });
 
 it('waits for an async handler after its HTTP socket closes and retains it at the bound', async () => {
-  const { fixture, directory, db } = await resource();
+  const { fixture, directory, db } = await resource({
+    now: () => globalThis.performance.now(),
+    setTimeout: (...args) => globalThis.setTimeout(...args),
+    clearTimeout: (timer) => globalThis.clearTimeout(timer),
+  });
   let release;
-  let entered;
   const barrier = new Promise((resolve) => {
     release = resolve;
   });
-  const ready = new Promise((resolve) => {
-    entered = resolve;
-  });
   const layer = {
     handle: async (_request, response) => {
-      entered();
       response.destroy();
       await barrier;
       db.prepare('INSERT INTO evidence VALUES (?)').run('late handler settled');
@@ -74,23 +73,53 @@ it('waits for an async handler after its HTTP socket closes and retains it at th
   };
   fixture.observeHandlers([layer]);
   fixture.server = createServer((req, res) => layer.handle(req, res));
+  const listening = once(fixture.server, 'listening');
   fixture.server.listen(0, '127.0.0.1');
-  await once(fixture.server, 'listening');
-  const body = fixture.run(async () => {
-    const outgoing = request(`http://127.0.0.1:${fixture.server.address().port}`);
-    const closed = once(outgoing, 'error');
-    outgoing.end();
-    await closed;
-  });
-  await ready;
-  await body;
+  await listening;
   try {
-    await expect(fixture.teardown(40)).rejects.toMatchObject({
+    // A request error alone does not establish that either socket has closed.
+    const serverClosed = new Promise((resolve) => {
+      fixture.server.once('connection', (socket) => socket.once('close', resolve));
+    });
+    await fixture.run(async () => {
+      const outgoing = request(`http://127.0.0.1:${fixture.server.address().port}`);
+      const failed = once(outgoing, 'error');
+      const clientClosed = new Promise((resolve) => outgoing.once('close', resolve));
+      outgoing.end();
+      const [[error]] = await Promise.all([failed, clientClosed, serverClosed]);
+      expect(error.code).toBe('ECONNRESET');
+      expect(outgoing.destroyed).toBe(true);
+    });
+    expect(fixture.state()).toMatchObject({ bodySettled: true, requests: 0 });
+    expect(fixture.operations.size).toBeGreaterThan(0);
+
+    // Keep HTTP/SQLite real. Control only the fixture's unchanged 40ms bound.
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    let settled = false;
+    const teardown = fixture.teardown(40).finally(() => {
+      settled = true;
+    });
+    const retained = expect(teardown).rejects.toMatchObject({
       cause: { message: 'Share fixture teardown deadline: service operations' },
     });
+    try {
+      await vi.advanceTimersByTimeAsync(39);
+      expect(settled).toBe(false);
+      expect(fixture.retained).toBe(false);
+      expect(db.isOpen).toBe(true);
+      expect(db.prepare('SELECT value FROM evidence').all()).toEqual([{ value: 'preserved' }]);
+    } finally {
+      // Even a failed pre-bound assertion must expire teardown before releasing
+      // the handler, so an abandoned cleanup cannot race the evidence checks.
+      await vi.advanceTimersByTimeAsync(1);
+      await retained;
+    }
+    expect(fixture.retained).toBe(true);
+    expect(fixture.operations.size).toBeGreaterThan(0);
     expect(db.isOpen).toBe(true);
     expect(await fs.stat(path.join(directory, 'shares.sqlite'))).toBeDefined();
   } finally {
+    vi.useRealTimers();
     release();
     await Promise.all([...fixture.operations]);
     await new Promise((resolve, reject) =>

@@ -23,13 +23,17 @@ multiplies bounded case counts (integer 1–100); filesystem properties intentio
 use fewer cases. Seeds must fit a signed 32-bit integer. Invalid settings fail
 rather than silently changing the requested run. Clear overrides after use.
 
-Four ordinary tests record known product bugs with explicit current-behavior
-expectations: the filename schema accepts `NUL`, `CON.txt` and `COM1`; a seeded
-device-name property confirms acceptance across generated casing and extension
-variants; `a\u007fb`, `a\u0085b` and names containing `< > " | ? *` are accepted;
-schema 3 IDs `a` and `a\u0000` compare equal under collation and retain opposite
-orders when their storage arrays are reversed. These passing observations do not
-establish portable filename validation or storage-independent tie ordering.
+Filename tests preserve read tolerance for existing stored names such as `NUL`,
+`CON.txt`, `COM1`, `a\u007fb`, `a\u0085b` and names containing `< > " | ? *`.
+The shared `portableFilename` helper replaces forbidden characters, strips C0,
+DEL and C1 controls, removes trailing dots/spaces and prefixes reserved device
+names when generating new disk names. One seeded property checks its output
+across arbitrary text, device-name casing/extensions and forbidden characters;
+a disk-reopen test confirms an existing schema 3 project referencing `CON.png`
+still loads unchanged. No read/load schema was tightened or stored file renamed.
+The schema 3 ordering observation remains a known bug: IDs `a` and `a\u0000`
+compare equal under collation and retain opposite orders when their storage
+arrays are reversed.
 
 The tests use no expected-failure wrappers or exception-catching oracle. A setup
 error, invalid fast-check replay path or unexpected product throw fails the test.
@@ -38,22 +42,25 @@ execution does not advance another's generator. The shared helper validates seed
 and run-factor bounds; fast-check validates replay paths when the selected
 property runs. Replay only generated properties, using the selected test's path.
 
-These bugs require separately scoped production fixes. When a fix lands, its
-current-behavior test must fail until the acceptance expectation is inverted or
-the ordering expectation requires the same deterministic result in both storage
-orders. The property PR changes no production validation or ordering.
+The ordering bug requires a separately scoped production fix. When it lands,
+the ordering expectation must require the same deterministic result in both
+storage orders. Filename read tolerance remains intentional for compatibility;
+portable generation does not migrate existing names or repair legacy files that
+the host filesystem cannot open.
 
 Run `corepack pnpm test:coverage` for text, HTML and JSON summary reports in ignored
 `coverage/`. It uses the ordinary Vitest discovery and includes untested application
 sources, excluding test fixtures and declarations. Script tests and the separate
 sharing service are outside this application coverage report. Test failures still
 fail the local command; there are no coverage percentage thresholds or baseline
-updates. The existing CI test step remains required. A separate diagnostic step
-retains the report as `application-coverage` for 14 days and cannot change the
-required tests' result. Counts and percentages describe instrumented execution,
+updates. Validate runs this command as its required application test execution,
+then runs `pnpm test:scripts` separately; it no longer runs Vitest twice. Coverage
+generation or test failures fail quality checks. A diagnostic upload retains the
+report as `application-coverage` for 14 days, including reports from failed tests.
+Counts and percentages describe instrumented execution,
 not native receiver acceptance or release readiness.
 
-The CI coverage addition is integrated alongside PR #193's workflow pins and
-timeout/secret-scan changes. The ordinary `pnpm test` step remains fail-closed;
-only coverage reporting and retention are diagnostic. Validate the combined
-workflow after any further integration.
+Nightly and stable retain their ordinary fail-closed `pnpm test` execution and
+separate diagnostic coverage run. Coverage percentages and report retention are
+diagnostic in all workflows. Validate the combined workflow after any further
+integration.

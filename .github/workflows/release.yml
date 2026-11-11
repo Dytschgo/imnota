@@ -127,6 +127,13 @@ jobs:
         run: |
           node --test scripts/update-macos.test.mjs
           bash scripts/verify-mac.sh
+      - name: Verify native Mac installer transactions
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          export IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-${IMNOTA_EXPECT_VERSION}-universal-mac.zip"
+          test -f "$IMNOTA_NATIVE_MAC_ARCHIVE"
+          node --test scripts/install.native-mac.test.mjs
       - name: Retain Mac walkthrough evidence
         if: always() && matrix.platform == 'macos'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -155,6 +162,8 @@ jobs:
       - name: Smoke packaged Linux application
         if: matrix.platform == 'linux'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-release-linux
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.platform }}
@@ -166,6 +175,15 @@ jobs:
             release/*.deb
             release/*.blockmap
             release/latest*.yml
+      # Diagnostic artifacts must never match the publication asset pattern.
+      - name: Retain packaged smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-failure-evidence-release-${{ matrix.platform }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-*/
+          if-no-files-found: ignore
+          retention-days: 7
       # Evidence must remain outside the publish job's release-* artifact pattern.
       - name: Retain packaged MCP evidence
         if: always()
@@ -233,6 +251,16 @@ jobs:
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'IMNOTA_EXPECT_VERSION=' + process.env.GITHUB_REF_NAME.slice(1) + String.fromCharCode(10))"
       - name: Test the installed public download
         run: node scripts/smoke.mjs "$HOME/Applications/Imnota.app/Contents/MacOS/Imnota"
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-public-mac-release
+      - name: Retain public Mac smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-failure-evidence-public-mac-release
+          path: ${{ runner.temp }}/imnota-verification-artifacts-public-mac-release/
+          if-no-files-found: ignore
+          retention-days: 7
 
   promote-latest:
     needs: verify-public-mac-install

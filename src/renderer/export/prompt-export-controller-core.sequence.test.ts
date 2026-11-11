@@ -107,7 +107,7 @@ function harness() {
       warnings: [],
     });
   const bridge: PromptBundleControllerBridge = {
-    copyText: vi.fn(async () => undefined),
+    copyPromptExportMarkdown: vi.fn(async () => ok(undefined)),
     async loadScreenshotContent({ screenshot: item }) {
       return {
         image: { filename: item.originalFilename, dataUrl: pixels, width: 100, height: 80 },
@@ -263,6 +263,17 @@ const SEEDS = Array.from({ length: 40 }, (_, index) => 0x5eed + index);
 const CONTENT_VERSIONS = 3;
 
 describe('prompt export controller work invariants', () => {
+  test('Markdown-first copies text without rendering or exporting files', async () => {
+    const h = harness();
+    await h.controller.open();
+    expect(await ACTIONS.copyMarkdown(h, true)).toMatchObject({ ok: true });
+    expect(h.bridge.copyPromptExportMarkdown).toHaveBeenCalledWith(expect.stringContaining('Description 1'));
+    expect(h.renders).toBe(0);
+    expect(h.bridge.startPromptExport).not.toHaveBeenCalled();
+    expect(h.bridge.writePromptExportBundle).not.toHaveBeenCalled();
+    expect(h.folders).toEqual([]);
+  });
+
   test.each(SEEDS)('seed %i: each content version renders and exports at most once', async (seed) => {
     const random = seededRandom(seed);
     const h = harness();
@@ -282,12 +293,16 @@ describe('prompt export controller work invariants', () => {
       ];
       for (const name of order) {
         const strip = random() < 0.5;
+        const staleFiles = version > 0 && h.folders.length === before.starts;
         const result = await ACTIONS[name](h, strip);
         trace.push(
           `v${version}:${name}${strip ? '(no session)' : ''}=${result.ok ? 'ok' : result.error?.code}`,
         );
         // Stale files may be refused for edited content, but nothing else may fail.
-        if (!result.ok) expect(result.error?.code, trace.join(' ')).toBe('content-changed');
+        if (!result.ok) {
+          expect(staleFiles, trace.join(' ')).toBe(true);
+          expect(result.error?.code, trace.join(' ')).toBe('content-changed');
+        }
       }
       // Whatever happened above, the user can still get this version's files.
       const files = await ACTIONS.copyFiles(h, false);

@@ -10,6 +10,7 @@ When the user refers to “the screenshot”, “the bundle”, “the prompt”
 - `list_projects` / `list_collections` to locate the collection and discover prepared bundle ids
 - `list_collection_items` to inspect its ordered items
 - `get_bundle` with a discovered id to read a particular saved export
+- `inspect_bundle` with a discovered id to check file sizes and read limits before fetching content; inspection does not verify content or freshness
 - `search_saved_text` for saved text only (not pixels)
 
 If the tool returns `bundle not prepared`, ask the user to run **Copy Bundle** in Imnota. Do not generate or invent an export. Do not read recovery journals, backups, or hosted-share secrets.
