@@ -877,6 +877,13 @@ async function uiCase(
     await driver.waitFor({ selector: '.konvajs-content' });
   } else {
     const original = await fs.readFile(path.join(snapshot.projectPath, shot.descriptionFile));
+    await driver.evaluate(`(() => {
+      window.__imnotaDebug214Toast = [];
+      for (const type of ['mouseover','mouseout','focusin','focusout']) document.body.addEventListener(type,event => {
+        if (!event.target?.closest?.('.toast') && !event.relatedTarget?.closest?.('.toast')) return;
+        window.__imnotaDebug214Toast.push({event:'[DEBUG-214-toast] '+type, at:performance.now(),trusted:event.isTrusted,target:event.target?.className, related:event.relatedTarget?.className});
+      },true);
+    })()`);
     await driver.click({ selector: `[data-testid="item-delete-${shot.id}"]` });
     await driver.waitFor({ selector: '.toast-action', text: 'Undo', exact: true });
     const bounds = await driver.waitFor({ selector: '.toast-action', text: 'Undo', exact: true });
@@ -910,7 +917,7 @@ async function uiCase(
     await driver.evaluate(`new Promise((resolve,reject) => {
       const deadline=performance.now()+15000;
       const check=()=>{ const observed=window.__imnotaFaultToast;
-        if (document.querySelector('.toast-action')!==observed.element) return reject(new Error('Undo generation changed or expired'));
+        if (document.querySelector('.toast-action')!==observed.element) return reject(new Error('Undo generation changed or expired [DEBUG-214-toast] '+JSON.stringify(window.__imnotaDebug214Toast)));
         if(observed.duration!==4000 || document.querySelector('.toast')?.dataset.faultGeneration!==observed.generation) return reject(new Error('Unexpected Undo lifetime or generation'));
         if(performance.now()>=observed.start+observed.duration) return resolve(true);
         if(performance.now()>deadline) return reject(new Error('Undo timer observation exceeded deadline'));
