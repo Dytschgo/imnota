@@ -1,4 +1,5 @@
 import type { Event } from 'electron';
+import { fileURLToPath } from 'node:url';
 
 /** Only main's configured app document may reload, regardless of renderer history changes. */
 export function preventForeignNavigation(
@@ -11,7 +12,17 @@ export function preventForeignNavigation(
     // A fragment identifies a location inside the same document, not another file or origin.
     target.hash = '';
     trusted.hash = '';
-    if (target.href === trusted.href) return;
+    if (target.protocol === 'file:' && trusted.protocol === 'file:') {
+      // loadFile and pathToFileURL can escape the same path differently (notably
+      // ~ in Windows portable extraction paths). Compare decoded file operands,
+      // while retaining the configured host and query and rejecting bad escapes.
+      if (
+        target.host === trusted.host &&
+        target.search === trusted.search &&
+        fileURLToPath(target) === fileURLToPath(trusted)
+      )
+        return;
+    } else if (target.href === trusted.href) return;
   } catch {
     // Missing or malformed startup/target URLs cannot grant navigation.
   }

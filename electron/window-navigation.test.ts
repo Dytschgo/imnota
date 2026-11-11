@@ -45,4 +45,28 @@ describe('main app navigation', () => {
     preventForeignNavigation(event, 'file:///C:/app/index.html');
     expect(event.preventDefault).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['file:///C:/Users/DYLANF~1/app/index.html', 'file:///C:/Users/DYLANF%7E1/app/index.html'],
+    ['file:///C:/Users/DYLANF%7E1/app/index.html', 'file:///C:/Users/DYLANF~1/app/index.html'],
+    ['file:///C:/app/caf%c3%a9/index.html', 'file:///C:/app/caf%C3%A9/index.html'],
+  ])('allows the configured file with equivalent URL escaping: %s', (url, trusted) => {
+    const event = { url, preventDefault: vi.fn() };
+    preventForeignNavigation(event, trusted);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'file:///C:/Users/DYLANF~1/app/private.html',
+    'file:///C:/Users/DYLANF~1/app/index.html?reload=true',
+    'file://foreign/C:/Users/DYLANF~1/app/index.html',
+    'file:///C:/Users/DYLANF%257E1/app/index.html',
+    'file:///C:/Users/DYLANF~1/app%2Findex.html',
+    'file:///C:/Users/DYLANF~1/app%5Cindex.html',
+    'file:///C:/Users/DYLANF~1/app/%FFindex.html',
+  ])('keeps foreign or ambiguous file targets blocked: %s', (url) => {
+    const event = { url, preventDefault: vi.fn() };
+    preventForeignNavigation(event, 'file:///C:/Users/DYLANF%7E1/app/index.html');
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+  });
 });
