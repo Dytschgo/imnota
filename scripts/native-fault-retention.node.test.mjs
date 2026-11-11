@@ -13,6 +13,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { runWalkthroughChild } from './walkthrough-child.mjs';
+import { logFaultLifecycle } from './native-fault-lifecycle.mjs';
 import {
   retainFaultOperands,
   writeFaultEvidenceManifest,
@@ -88,6 +90,29 @@ it('does not capture or clean a run whose child exit has not been observed', () 
   assert.equal(existsSync(join(proof.artifactRoot, 'retained-run')), false);
 });
 
+it('retains the early receipt and pending profile after a timed-out child actually exits', async () => {
+  const { proof } = fixture();
+  await assert.rejects(
+    runWalkthroughChild(process.execPath, ['--eval', 'setInterval(() => {}, 60000)'], {
+      timeoutMs: 100,
+      windowsHide: true,
+    }),
+    (error) => {
+      assert.match(error.message, /exceeded/);
+      assert.ok(error.nativeChildOutcome?.pid > 0, 'observed exit must carry child identity');
+      assert.equal(error.nativeChildOutcome.timedOut, true);
+      assert.throws(() => process.kill(error.nativeChildOutcome.pid, 0), { code: 'ESRCH' });
+      retainFaultOperands(proof, error.nativeChildOutcome);
+      assert.equal(
+        readFileSync(join(proof.artifactRoot, 'retained-run', 'profile', 'synthetic-pending.json'), 'utf8'),
+        '{"draft":"retain"}',
+      );
+      assert.ok(existsSync(join(proof.artifactRoot, 'retained-run', 'fault-session.json')));
+      return true;
+    },
+  );
+});
+
 it('detects hidden journal loss, byte changes and extra files after evidence transport', () => {
   const { proof } = fixture();
   const journal = join(proof.artifactRoot, '.imnota-undo');
@@ -105,4 +130,42 @@ it('detects hidden journal loss, byte changes and extra files after evidence tra
   rmSync(join(proof.artifactRoot, 'extra'));
   rmSync(member);
   assert.throws(() => verifyFaultEvidenceManifest(proof.artifactRoot), /manifest/);
+});
+
+it('surfaces candidate-bound case starts on failure and rejects forged or incomplete success logs', () => {
+  const { proof } = fixture();
+  Object.assign(proof, { caseSet: 'restore-eio', sourceSha: 'a'.repeat(40) });
+  const filename = join(proof.artifactRoot, 'case-lifecycle.jsonl');
+  const receipts = ['screenshot', 'drawing', 'text'].flatMap((caseId) =>
+    ['starting', 'passed'].map((phase) => ({
+      nonce: proof.nonce,
+      sourceSha: proof.sourceSha,
+      caseSet: proof.caseSet,
+      caseId,
+      phase,
+    })),
+  );
+  const write = (values) =>
+    writeFileSync(filename, values.map((value) => JSON.stringify(value) + '\n').join(''));
+  write(receipts.slice(0, 1));
+  const failedLines = [];
+  logFaultLifecycle(proof, false, (line) => failedLines.push(line));
+  assert.deepEqual(failedLines, ['Native fault case starting: restore-eio/screenshot']);
+  assert.throws(() => logFaultLifecycle(proof, true), /Missing/);
+  write(receipts);
+  const lines = [];
+  logFaultLifecycle(proof, true, (line) => lines.push(line));
+  assert.equal(lines.length, 6);
+  assert.equal(lines.at(-1), 'Native fault case passed: restore-eio/text');
+  for (const invalid of [
+    receipts.map((entry) => ({ ...entry, nonce: 'foreign' })),
+    receipts.map((entry) => ({ ...entry, sourceSha: 'b'.repeat(40) })),
+    [receipts[1], receipts[0], ...receipts.slice(2)],
+    [...receipts, receipts[0]],
+  ]) {
+    write(invalid);
+    const rejectedLines = [];
+    assert.throws(() => logFaultLifecycle(proof, true, (line) => rejectedLines.push(line)));
+    assert.deepEqual(rejectedLines, []);
+  }
 });

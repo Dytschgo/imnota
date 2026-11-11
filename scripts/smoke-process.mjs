@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { faultCases, assertFaultReport } from './native-fault-catalog.mjs';
 import { retainFaultOperands } from './native-fault-retention.mjs';
+import { logFaultLifecycle } from './native-fault-lifecycle.mjs';
 import { runWalkthroughChild } from './walkthrough-child.mjs';
 import process from 'node:process';
 import {
@@ -206,6 +207,15 @@ export async function runNativeVerification({
     originalFailure = error;
     outcome ??= error.nativeChildOutcome;
   } finally {
+    if (faultProof && outcome) {
+      try {
+        logFaultLifecycle(faultProof, !originalFailure && report?.passed === true);
+      } catch (error) {
+        originalFailure = originalFailure
+          ? new AggregateError([originalFailure, error], 'Native verification and lifecycle evidence failed.')
+          : error;
+      }
+    }
     try {
       if (mode !== 'faults') removeRunDirectory(runDirectory);
       else {

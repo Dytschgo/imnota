@@ -380,13 +380,17 @@ async function restoreCase(
         renderer.acceptedRevision === faultDigest(disk),
       'Queued metadata was not saved and adopted.',
     );
+    const adoption = events.findIndex(
+      (event) =>
+        event.event === 'renderer' &&
+        (event.value as { acceptedRevision?: string }).acceptedRevision === faultDigest(restored),
+    );
+    const firstCas = events.findIndex(
+      (event) => event.event === 'ipc-invocation' && event.channel === 'workflow:project-watch:cas',
+    );
     requireThat(
-      events.some(
-        (event) =>
-          event.event === 'renderer' &&
-          (event.value as { acceptedRevision?: string }).acceptedRevision === faultDigest(restored),
-      ),
-      'No real renderer observation of Restore adoption before CAS.',
+      adoption >= 0 && firstCas > adoption,
+      'Restore revision adoption was not observed before the first metadata CAS invocation.',
     );
   } else {
     requireThat(cas.length === 0, 'Unconfirmed Restore permitted a metadata CAS.');
@@ -891,11 +895,24 @@ export async function exerciseNativeFaultCases(
 ) {
   const cases = [];
   const artifacts: SmokeCapture[] = [];
+  const lifecycle = path.join(controller.proof.artifactRoot, 'case-lifecycle.jsonl');
+  await fs.writeFile(lifecycle, '', { flag: 'wx' });
+  const receipt = (caseId: string, phase: 'starting' | 'passed') =>
+    fs.appendFile(
+      lifecycle,
+      json({
+        nonce: controller.proof.nonce,
+        sourceSha: controller.proof.sourceSha,
+        caseSet: controller.proof.caseSet,
+        caseId,
+        phase,
+      }) + '\n',
+    );
   for (const caseId of nativeFaultCases(controller.proof.caseSet)) {
     const directory = path.join(controller.proof.artifactRoot, caseId);
     await fs.mkdir(directory);
     const start = controller.events.length;
-    console.log(`Native fault case starting: ${controller.proof.caseSet}/${caseId}`);
+    await receipt(caseId, 'starting');
     try {
       const evidence = controller.proof.caseSet.startsWith('restore-')
         ? await restoreCase(driver, host, controller, caseId, directory)
@@ -922,7 +939,7 @@ export async function exerciseNativeFaultCases(
       await fs.writeFile(path.join(directory, 'case.json'), json(result, null, 2), { flag: 'wx' });
       cases.push({ caseId, passed: true, disarmed: true, sha256: faultDigest(json(result, null, 2)) });
       artifacts.push(...evidence.captures);
-      console.log(`Native fault case passed: ${controller.proof.caseSet}/${caseId}`);
+      await receipt(caseId, 'passed');
     } catch (error) {
       controller.cancel();
       try {

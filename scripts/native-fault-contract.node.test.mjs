@@ -2,6 +2,7 @@ import { URL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { load } from 'js-yaml';
 import {
   faultCaseSets,
   faultCases,
@@ -84,7 +85,12 @@ describe('closed packaged native fault gate', () => {
         assert.match(source, /pattern: nightly-\*/);
         assert.match(source, /draft: true/);
         assert.match(source, /make_latest: false/);
-        assert.equal(source.split('IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}').length - 1, 6);
+        const workflow = load(source);
+        const steps = workflow.jobs.package.steps;
+        for (const platform of ['macos', 'windows', 'linux']) {
+          const step = steps.find((value) => value.name === `Verify packaged native faults on ${platform}`);
+          assert.equal(step.env.IMNOTA_EXPECT_VERSION, '${{ needs.guard.outputs.version }}');
+        }
       }
     }
   });

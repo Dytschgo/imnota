@@ -42,6 +42,7 @@ describe('native smoke process safety', () => {
         await runWalkthroughChild(process.execPath, ['--eval', ${JSON.stringify(childCode)}]);
       } catch (error) {
         console.error(error.message);
+        console.error('TERMINATED:' + JSON.stringify(error.nativeChildOutcome));
         process.exitCode = 1;
       } finally {
         process.disconnect();
@@ -75,6 +76,9 @@ describe('native smoke process safety', () => {
     const [code] = await exit;
     assert.equal(code, 1, stderr);
     assert.match(stderr, /cancelled by SIGTERM/);
+    const outcome = JSON.parse(stderr.match(/TERMINATED:(.*)/)[1]);
+    assert.equal(outcome.pid, childPid);
+    assert.equal(outcome.cancelled, 'SIGTERM');
     assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' });
   });
   it('selects the focused clipboard workflow explicitly', () => {
