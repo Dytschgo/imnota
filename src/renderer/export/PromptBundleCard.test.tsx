@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
-import { PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COPY_CELEBRATION_MS, PromptBundleCard, type PromptBundleCardModel } from './PromptBundleCard';
 
 const initialShowPopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'showPopover');
 const initialHidePopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hidePopover');
@@ -277,6 +277,16 @@ it('keeps focus inside the dialog when an option makes its trigger busy', () => 
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dialog fallback' }));
 });
 
+it('closes a replaced plan menu and restores focus to its current trigger', () => {
+  const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn(), onCopyMarkdown: vi.fn() };
+  const { rerender } = render(<PromptBundleCard bundle={model()} {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy options' }));
+  screen.getByRole('menuitem', { name: 'Copy Markdown' }).focus();
+  rerender(<PromptBundleCard bundle={model({ planId: 'replacement-plan' })} {...props} />);
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy options' })).toHaveFocus();
+});
+
 it('shows a gray copied state while leaving Copy Bundle available again', () => {
   const onCopyFresh = vi.fn();
   render(
@@ -493,4 +503,110 @@ it('leaves an error to the dialog when the dialog already reports it', () => {
     />,
   );
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+describe('row highlight states', () => {
+  const card = () => screen.getByTestId('prompt-bundle-card');
+  const renderCard = (bundle: PromptBundleCardModel) =>
+    render(<PromptBundleCard bundle={bundle} onCopyFresh={vi.fn()} onPrepareFreshFiles={vi.fn()} />);
+
+  it.each([
+    [
+      'an error',
+      model({ state: 'error', error: 'No requested format was confirmed on the clipboard.' }),
+      'error',
+    ],
+    ['a warning', model({ warning: 'A text block was intentionally excluded from this export.' }), 'warning'],
+    ['file-only delivery', model({ delivery: 'file-only' }), 'warning'],
+  ] as const)('marks %s with a steady tone', (_label, bundle, tone) => {
+    renderCard(bundle);
+    expect(card()).toHaveAttribute('data-tone', tone);
+  });
+
+  it('keeps a healthy bundle untoned and marks work in progress as busy', () => {
+    const { rerender } = renderCard(model());
+    expect(card()).not.toHaveAttribute('data-tone');
+    expect(card()).toHaveAttribute('aria-busy', 'false');
+    rerender(
+      <PromptBundleCard
+        bundle={model({ state: 'copying' })}
+        onCopyFresh={vi.fn()}
+        onPrepareFreshFiles={vi.fn()}
+      />,
+    );
+    expect(card()).toHaveAttribute('aria-busy', 'true');
+    expect(card()).toHaveAttribute('data-state', 'copying');
+  });
+
+  it.each(['copied', 'idle'] as const)(
+    'acknowledges a copy that finishes as %s once, then settles',
+    (state) => {
+      vi.useFakeTimers();
+      try {
+        const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+        const { rerender } = render(<PromptBundleCard bundle={model({ state: 'copying' })} {...props} />);
+        expect(card()).not.toHaveAttribute('data-celebrate');
+        rerender(<PromptBundleCard bundle={model({ state, outcome: 'combined' })} {...props} />);
+        expect(card()).toHaveAttribute('data-celebrate');
+        act(() => vi.advanceTimersByTime(COPY_CELEBRATION_MS));
+        expect(card()).not.toHaveAttribute('data-celebrate');
+        expect(card()).toHaveAttribute('data-state', state);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('does not celebrate an already copied bundle or a copy that failed', () => {
+    const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+    const reopened = render(
+      <PromptBundleCard bundle={model({ state: 'copied', outcome: 'combined' })} {...props} />,
+    );
+    expect(card()).not.toHaveAttribute('data-celebrate');
+    reopened.unmount();
+    const failed = render(<PromptBundleCard bundle={model({ state: 'copying' })} {...props} />);
+    failed.rerender(
+      <PromptBundleCard bundle={model({ state: 'copied', error: 'Copy failed' })} {...props} />,
+    );
+    expect(card()).not.toHaveAttribute('data-celebrate');
+  });
+
+  it('does not replay a copy celebration after Open files, but celebrates a new copy of the same format', () => {
+    const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+    const copied = model({ state: 'copied', outcome: 'combined' });
+    const { rerender } = render(<PromptBundleCard bundle={copied} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying' }} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, opened: 'files' }} {...props} />);
+    expect(card()).not.toHaveAttribute('data-celebrate');
+    expect(screen.getByText('Files opened')).toBeInTheDocument();
+    expect(screen.getByText('Last copied: Text + image')).toBeInTheDocument();
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying', opened: 'files' }} {...props} />);
+    rerender(<PromptBundleCard bundle={copied} {...props} />);
+    expect(card()).toHaveAttribute('data-celebrate');
+    // Interrupting the lap with another Open must not revive its old timer/state.
+    rerender(<PromptBundleCard bundle={{ ...copied, state: 'copying' }} {...props} />);
+    rerender(<PromptBundleCard bundle={{ ...copied, opened: 'files' }} {...props} />);
+    expect(card()).not.toHaveAttribute('data-celebrate');
+  });
+
+  it.each([
+    ['file-only', model({ delivery: 'file-only' })],
+    ['warned', model({ warning: 'Use saved files.' })],
+  ] as const)('preserves the %s tone during and after a fallback copy celebration', (_label, bundle) => {
+    vi.useFakeTimers();
+    try {
+      const props = { onCopyFresh: vi.fn(), onPrepareFreshFiles: vi.fn() };
+      const { rerender } = render(<PromptBundleCard bundle={{ ...bundle, state: 'copying' }} {...props} />);
+      rerender(<PromptBundleCard bundle={{ ...bundle, state: 'copied', outcome: 'markdown' }} {...props} />);
+      expect(card()).toHaveAttribute('data-celebrate');
+      expect(card()).toHaveAttribute('data-tone', 'warning');
+      expect(card()).toHaveClass('prompt-bundle-card');
+      act(() => vi.advanceTimersByTime(COPY_CELEBRATION_MS));
+      expect(card()).not.toHaveAttribute('data-celebrate');
+      expect(card()).toHaveAttribute('data-tone', 'warning');
+      // jsdom verifies the state hooks, not the animated CSS ring; inspect it in a browser.
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

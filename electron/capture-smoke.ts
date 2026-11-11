@@ -600,7 +600,9 @@ export async function exerciseRegionCapture(
         selector: `[data-testid="add-item-capture-delay-${seconds}"][aria-checked="true"]`,
       });
       if (artifactDirectory && seconds === 3 && cancel)
-        artifacts.push(await driver.capture(artifactDirectory, 'capture-add-menu.png'));
+        artifacts.push(
+          await driver.capture(artifactDirectory, 'capture-add-menu.png', baseline.screenshots[0]!),
+        );
       const started = Date.now();
       await driver.click({ selector: '[data-testid="add-item-capture"]' });
       let hud: BrowserWindow | undefined;
@@ -630,7 +632,7 @@ export async function exerciseRegionCapture(
         }
       })()`);
       if (artifactDirectory && seconds === 5 && cancel)
-        artifacts.push(await hudDriver.capture(artifactDirectory, 'capture-countdown.png'));
+        artifacts.push(await hudDriver.capture(artifactDirectory, 'capture-countdown.png', 'none'));
       if (captureOverlayWindows(driver.browserWindow).length)
         throw new Error('Selection opened before the countdown elapsed.');
       if (cancel) {
@@ -730,7 +732,7 @@ export async function exerciseRegionCapture(
   overlay = await startCapture(driver);
   await selectRegion(overlay);
   if (artifactDirectory)
-    artifacts.push(await overlay.capture(artifactDirectory, 'capture-overlay-synthetic.png'));
+    artifacts.push(await overlay.capture(artifactDirectory, 'capture-overlay-synthetic.png', 'none'));
   const savedOverlay = overlay.browserWindow;
   await overlay.click({ selector: '[data-action="save"]' });
   await waitForClosed(savedOverlay, 'Saved capture overlay');
@@ -761,7 +763,7 @@ export async function exerciseRegionCapture(
   await driver.waitFor({ selector: '[data-testid="save-state"]', text: 'Saved', exact: true });
   await waitForPaint(driver);
   if (artifactDirectory)
-    artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png'));
+    artifacts.push(await driver.capture(artifactDirectory, 'capture-annotation-synthetic.png', captured));
 
   const exportPath = await driver.evaluate<string>(`(async () => {
     const canvas = document.querySelector('.konvajs-content canvas');
@@ -865,7 +867,9 @@ export async function exerciseRegionCapture(
         ? await selectCrossDisplayRegionWithNativePointer(overlayDrivers, crossDisplayPlan)
         : await selectCrossDisplayRegion(overlayDrivers, displays, crossDisplayPlan);
     if (artifactDirectory)
-      artifacts.push(await crossOverlay.capture(artifactDirectory, 'capture-cross-display-synthetic.png'));
+      artifacts.push(
+        await crossOverlay.capture(artifactDirectory, 'capture-cross-display-synthetic.png', 'none'),
+      );
     await crossOverlay.click({ selector: '[data-action="save"]' });
     await waitForAllCaptureOverlaysClosed(driver.browserWindow, 'Cross-display capture');
     const afterCross = await waitForScreenshotCount(host, projectPath, beforeCross.screenshots.length + 1);
