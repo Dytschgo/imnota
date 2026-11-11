@@ -69,7 +69,9 @@ Each screenshot has:
 
 Drag screenshot rows to change their order. Internal IDs remain stable; `Picture 1`, `Picture 2` and so on are assigned from the current order only when exporting.
 
-Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+Deleting a screenshot moves its source image, annotations and description to the operating-system trash. If system trash rejects the operation, Imnota can finish the deletion using its existing local recovery copies and shows a notice directing you to **Recently deleted**. This fallback also applies to drawings and text blocks. Undo and the same 30-day restore window remain available; the original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+
+The fallback verifies the recovery copy and unchanged source before removing the source. Missing or damaged backups, changed or linked files, and a failed local removal stop deletion. Imnota restores the baseline where safe, or keeps the journal and reports incomplete recovery without overwriting an external edit. These checks do not lock out another application writing the workspace: a path can still change after the final check. Whole-project deletion still requires system trash and does not use this fallback.
 
 ## Restore a deleted item
 

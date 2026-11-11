@@ -59,6 +59,8 @@ The [product roadmap](product-roadmap.md) consolidates still-relevant proposals:
 
 ## Maintenance and review
 
+The #228 item-deletion follow-up uses existing screenshot/content recovery journals when system trash rejects an operation. It revalidates recovery bytes and source identity before local removal, reports the local recovery destination, and preserves the existing Undo, rollback and 30-day Recently deleted retention. No journal format or project-deletion behavior changes. Verification and release of this follow-up must name its reviewed revision; this entry alone does not claim it is in a published build.
+
 Atomic replacement now distinguishes a failure before replacement from a committed file whose directory durability could not be confirmed. Settings and project watch publication follow committed bytes; transaction commit points remain separate from intermediate file writes. Platform-specific fault injection and review evidence are required before release.
 
 The implementation includes save-before-close protection after failed updates and guards against duplicate collection actions during pending saves. The repository review records their regression coverage and any subsequent fixes.
