@@ -1,5 +1,6 @@
 import { RestoreConfirmationError } from './restore-confirmation.js';
 import { retireDeleteJournal } from './delete-retention.js';
+import { LOCAL_TRASH_WARNING, trashWithLocalRecovery } from './trash-fallback.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -744,6 +745,7 @@ export async function deleteScreenshotToTrash(
   let { manifest } = staged;
   const { directory, deletedProject } = staged;
   const metadataPath = path.join(root, 'project.json');
+  let localRecovery = false;
   try {
     manifest = await setPhase(directory, manifest, 'trashing', operations);
     for (const item of manifest.content) {
@@ -758,7 +760,14 @@ export async function deleteScreenshotToTrash(
           manifest.token,
         );
       await assertNoLinks(target);
-      await trashItem(target);
+      localRecovery =
+        (await trashWithLocalRecovery(
+          target,
+          path.join(directory, item.bytes.blob!),
+          item.bytes,
+          trashItem,
+          operations.unlink,
+        )) || localRecovery;
       if ((await readOptional(target)) !== null)
         throw new Error(`${item.relativePath} remained after the trash operation.`);
     }
@@ -773,12 +782,21 @@ export async function deleteScreenshotToTrash(
       throw new Error('project.json did not reach its deleted state.');
     try {
       manifest = await setPhase(directory, manifest, 'deleted', operations);
-      return { project: deletedProject, undoToken: manifest.token };
+      return {
+        project: deletedProject,
+        undoToken: manifest.token,
+        ...(localRecovery ? { warning: LOCAL_TRASH_WARNING } : {}),
+      };
     } catch (error) {
       return {
         project: deletedProject,
         undoToken: manifest.token,
-        warning: `Deletion committed, but the Undo journal needs recovery: ${error instanceof Error ? error.message : String(error)}`,
+        warning: [
+          localRecovery ? LOCAL_TRASH_WARNING : '',
+          `Deletion committed, but the Undo journal needs recovery: ${error instanceof Error ? error.message : String(error)}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     }
   } catch (error) {
@@ -791,7 +809,12 @@ export async function deleteScreenshotToTrash(
       return {
         project: deletedProject,
         undoToken: manifest.token,
-        warning: `Deletion committed after a recoverable journal error: ${error instanceof Error ? error.message : String(error)}`,
+        warning: [
+          localRecovery ? LOCAL_TRASH_WARNING : '',
+          `Deletion committed after a recoverable journal error: ${error instanceof Error ? error.message : String(error)}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     }
     try {
