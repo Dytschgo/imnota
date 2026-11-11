@@ -15,7 +15,7 @@ import { exerciseMixedContent } from './mixed-content-smoke.js';
 import { exerciseUiFeedback } from './ui-feedback-smoke.js';
 import { readMacClipboardFiles, readMacClipboardObservation } from './mac-clipboard.js';
 import { onboardingCopyEvidence } from './smoke-onboarding-copy.js';
-import { setGlassSurfaces } from './smoke-appearance.js';
+import { assertLightTextContrast, setGlassSurfaces } from './smoke-appearance.js';
 import { shouldShowOnboarding, type PreferenceSettingsResult } from '../src/shared/preferences.js';
 import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
@@ -1588,6 +1588,10 @@ async function exercisePreferencesAndChannel(
     await clickAny(driver, SMOKE_UI_CONTRACT.settings);
   await driver.waitFor({ selector: '.settings-view, [data-testid="settings-view"]' });
   await assertMacSettingsTitlebarClearance(driver);
+  await driver.click({ selector: 'label:has(input[name="appearance-mode"][value="light"])' });
+  await driver.waitFor({ selector: ':root[data-theme="light"]' });
+  await driver.waitFor({ selector: 'input[name="appearance-mode"][value="light"]:checked:not(:disabled)' });
+  await assertLightTextContrast(driver, artifactDirectory);
   for (const preset of BACKDROP_PRESETS) {
     await driver.click({ selector: `[data-testid="backdrop-preset-${preset}"]` });
     await driver.evaluate(`new Promise((resolve, reject) => {
@@ -3178,7 +3182,9 @@ export async function runSmokeWorkflow(
   }
   await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
-  assertions.push('preferences, performance profile, update channel confirmation and persistence');
+  assertions.push(
+    'preferences, performance profile, update channel confirmation and persistence; native solid light text contrast',
+  );
   await exerciseSharingPreferences(driver, host, artifactDirectory, artifacts);
   assertions.push('Sharing sender name persists across reopen and the owner-link control remains available');
   activeWindow = await host.reopenWindow();
