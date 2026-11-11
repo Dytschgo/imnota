@@ -167,6 +167,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '1080x800-feedback-paste-error.png', // Clipboard error over a Markdown template.
       'feedback-search.png', // Search dialog over a Markdown template.
       'feedback-projects.png', // Project library.
+      'feedback-archived-collections.png', // Archived collection rows in the project library.
       'feedback-project-delete-confirm.png', // Confirmation dialog over the library.
       'workspace-local-diagnostics.png', // Workspace settings.
       'agent-access-setup-prompt.png', // Features settings.
