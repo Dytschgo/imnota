@@ -2147,7 +2147,20 @@ async function createWindow(): Promise<BrowserWindow> {
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   const appEntry = path.join(__dirname, '../../dist/index.html');
   const trustedAppUrl = devUrl ? new URL(devUrl).href : pathToFileURL(appEntry).href;
-  createdWindow.webContents.on('will-navigate', (event) => preventForeignNavigation(event, trustedAppUrl));
+  createdWindow.webContents.on('will-navigate', (event) => {
+    preventForeignNavigation(event, trustedAppUrl);
+    if (smokeFaultController)
+      smokeFaultController.events.push({
+        event: '[DEBUG-214-portable-nav]',
+        url: event.url,
+        trustedAppUrl,
+        currentUrl: createdWindow.webContents.getURL(),
+        defaultPrevented: event.defaultPrevented,
+      });
+  });
+  createdWindow.webContents.on('will-prevent-unload', () => {
+    if (smokeFaultController) smokeFaultController.events.push({ event: '[DEBUG-214-portable-unload]' });
+  });
   try {
     if (devUrl) await createdWindow.loadURL(devUrl);
     else await createdWindow.loadFile(appEntry);
