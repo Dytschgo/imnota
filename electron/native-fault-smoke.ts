@@ -97,8 +97,10 @@ async function fixture(
   })()`);
   const metadataPath = path.join(snapshot.projectPath, 'project.json');
   const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-  metadata.contentItems.find((item: { kind: string }) => item.kind === 'drawing').description =
-    'fixture-own-draw';
+  const drawing = metadata.contentItems.find((item: { kind: string }) => item.kind === 'drawing');
+  // Both search services index a drawing's title; description is not a search field.
+  drawing.title = 'fixture-own-draw';
+  drawing.description = 'Fixture drawing description';
   await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
   driver.setWindow(await host.reopenWindow());
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
