@@ -103,6 +103,8 @@ async function fixture(
   drawing.description = 'Fixture drawing description';
   await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
   driver.setWindow(await host.reopenWindow());
+  if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
+  driver.browserWindow.focus();
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.library' });
   await driver.click({ selector: '.project-row-main', text: name, exact: false });
