@@ -631,8 +631,16 @@ async function recoveryCase(
   const first = await controller.command('observe');
   const firstFiles = await preserve(snapshot.projectPath, path.join(directory, 'first-save'));
   const firstCapture = await capture(driver, directory, 'recovery-refused-1280x800.png');
-  requireThat(first.pendingMetadata, 'Failed recovery discarded queued metadata.');
   const lineage = controller.proof.caseSet.startsWith('recovery-lineage-');
+  const firstMetadata = firstFiles.find((file) => file.relative === 'project.json');
+  const firstProject = JSON.parse(await fs.readFile(path.join(snapshot.projectPath, 'project.json'), 'utf8'));
+  requireThat(
+    first.pendingMetadata ||
+      (!lineage &&
+        firstMetadata?.sha256 === first.acceptedRevision &&
+        firstProject.name === FAULT_QUEUED_NAME),
+    'Failed recovery neither retained queued metadata nor confirmed its exact saved revision and name.',
+  );
   if (lineage) {
     requireThat(
       (await fs.readFile(path.join(snapshot.projectPath, textFile), 'utf8')) === FAULT_MARKDOWN,
@@ -810,7 +818,17 @@ async function recoveryCase(
     }
   }
   await controller.disarm(consumed);
-  return { beforeFiles, firstFiles, afterFiles, before, staged, first, captures: [firstCapture], consumed };
+  return {
+    beforeFiles,
+    firstFiles,
+    afterFiles,
+    before,
+    staged,
+    first,
+    firstMetadataDisposition: first.pendingMetadata ? 'pending' : 'saved-and-adopted',
+    captures: [firstCapture],
+    consumed,
+  };
 }
 
 async function uiCase(
