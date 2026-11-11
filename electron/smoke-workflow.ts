@@ -1272,6 +1272,12 @@ async function verifyOneImagePromptBundle(
     );
   if (path.basename(pngFiles[0], '.png') !== path.basename(bundleMarkdownFiles[0], '.md'))
     throw new Error('One-image prompt PNG and Markdown filenames do not match.');
+  const markdown = await fs.readFile(path.join(setDirectory, bundleMarkdownFiles[0]), 'utf8');
+  if (
+    !markdown.split(/\r?\n/).includes('- 2 redacted regions') ||
+    /\b(?:blur|pixelate)\b|`(?:redaction|pixels)`/.test(markdown)
+  )
+    throw new Error('Redacted bundle must report only the mask count, without mask kinds or ids.');
   const exportedPath = path.join(setDirectory, pngFiles[0]);
   if (!pathIsWithin(projectPath, exportedPath)) throw new Error('PNG export escaped its fixture project.');
   const exported = nativeImage.createFromPath(exportedPath);
@@ -3251,7 +3257,7 @@ export async function runSmokeWorkflow(
     }
   }
   assertions.push(
-    'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, and one PNG/Markdown pair',
+    'DPR 2 one-image prompt dimensions, crop privacy, opaque redaction, translucent fill/stroke and pixelation pixels, one PNG/Markdown pair, and count-only redaction Markdown',
   );
   await driver.click({ text: 'Share online', exact: true });
   await driver.waitFor({ text: 'KiB / 1,024 KiB text allowance' });
