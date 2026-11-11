@@ -707,37 +707,6 @@ async function recoveryCase(
     requireThat(first.pendingContent, 'Precommit failure discarded the real content draft.');
   }
   const foreign = lineage && caseId === 'foreign';
-  // Temporary owned-fixture probes; remove after the reload failure is diagnosed.
-  driver.browserWindow.webContents.once('will-navigate', (event) => {
-    void fs
-      .writeFile(
-        path.join(directory, 'navigation-probe.json'),
-        json(
-          {
-            url: event.url,
-            currentUrl: driver.browserWindow.webContents.getURL(),
-            defaultPrevented: event.defaultPrevented,
-          },
-          null,
-          2,
-        ),
-      )
-      .catch((error) => console.error('[DEBUG-214-nav]', error));
-  });
-  driver.browserWindow.webContents.once('did-finish-load', () => {
-    void fs
-      .writeFile(
-        path.join(directory, 'navigation-finished.json'),
-        json(
-          {
-            url: driver.browserWindow.webContents.getURL(),
-          },
-          null,
-          2,
-        ),
-      )
-      .catch((error) => console.error('[DEBUG-214-nav]', error));
-  });
   // One deliberate user retry, never an automatic test rerun.
   await observedSave(controller, !foreign, () =>
     driver.click({
