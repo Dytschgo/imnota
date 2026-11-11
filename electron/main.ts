@@ -34,7 +34,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import updater from 'electron-updater';
 const { autoUpdater } = updater;
@@ -63,6 +63,7 @@ import {
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
 import { assertNoLinks, CommittedWriteError, isWithin, type CaptureWrittenFileIdentity } from './files.js';
 import { persistSettings, writeApplicationFile } from './application-persistence.js';
+import { preventForeignNavigation } from './window-navigation.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
 import { recoverScreenshotTrashTransactions, type ScreenshotTrashOperations } from './screenshot-trash.js';
@@ -2143,11 +2144,13 @@ async function createWindow(): Promise<BrowserWindow> {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
-  createdWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   const devUrl = process.env.VITE_DEV_SERVER_URL;
+  const appEntry = path.join(__dirname, '../../dist/index.html');
+  const trustedAppUrl = devUrl ? new URL(devUrl).href : pathToFileURL(appEntry).href;
+  createdWindow.webContents.on('will-navigate', (event) => preventForeignNavigation(event, trustedAppUrl));
   try {
     if (devUrl) await createdWindow.loadURL(devUrl);
-    else await createdWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+    else await createdWindow.loadFile(appEntry);
   } catch (error) {
     if (!createdWindow.isDestroyed()) throw error;
   }

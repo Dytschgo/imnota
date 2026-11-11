@@ -65,6 +65,8 @@ Atomic replacement now distinguishes a failure before replacement from a committ
 
 External member-file edits raise the renderer's external-change warning even when `project.json` retains its accepted revision. Only a metadata-only event at that exact revision is suppressed as already confirmed. Unknown or mixed changed paths require review before saving queued metadata; the metadata hash cannot confirm description, drawing or Markdown bytes.
 
+The recovery screen's protected Reload may navigate to main's configured app document after saving pending work. Other paths, queries and origins remain blocked; renderer history changes cannot authorize a different document. Fragment-only locations within the configured document remain valid. Native recovery acceptance must observe the new renderer and saved bytes, not only a completed save callback.
+
 The implementation includes save-before-close protection after failed updates and guards against duplicate collection actions during pending saves. The repository review records their regression coverage and any subsequent fixes.
 
 Use [the September 8 repository review](history/repository-review-2026-09-08.md) for the historical disposition of older plans and dependency work. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.
