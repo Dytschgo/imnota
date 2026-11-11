@@ -161,8 +161,8 @@ async function warningLayouts(driver: NativeUiDriver, directory: string) {
   const captures = [await capture(driver, directory, 'restore-warning-1280x800.png')];
   const geometries = [];
   for (const requested of [
-    { width: 1064, height: 655 },
-    { width: 1440, height: 920 },
+    { width: 1064, height: 655, filename: 'restore-warning-requested-1064x655.png' },
+    { width: 1440, height: 920, filename: 'restore-warning-requested-1440x920.png' },
   ] as const) {
     let limitation: string | undefined;
     try {
@@ -173,11 +173,7 @@ async function warningLayouts(driver: NativeUiDriver, directory: string) {
       if (!(error instanceof Error) || !error.message.startsWith('OS clamped the requested ')) throw error;
       limitation = error.message;
     }
-    const actual = await capture(
-      driver,
-      directory,
-      `restore-warning-requested-${requested.width}x${requested.height}.png`,
-    );
+    const actual = await capture(driver, directory, requested.filename);
     captures.push(actual);
     geometries.push({ requested, actual: actual.cssViewport, verified: !limitation, limitation });
   }
