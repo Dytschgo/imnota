@@ -1,11 +1,9 @@
 // @vitest-environment node
 import type { IpcMainInvokeEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { z } from 'zod';
 import { IpcRouter, type IpcRouterOptions } from './ipc-router.js';
-
-// Lets every pending promise continuation run (one macrotask turn) without a timed wait.
-const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const trusted = { trusted: true } as unknown as IpcMainInvokeEvent;
 const untrusted = { trusted: false } as unknown as IpcMainInvokeEvent;
@@ -121,7 +119,7 @@ describe('IpcRouter', () => {
     });
     let drained = false;
     const drain = router.drain().then(() => (drained = true));
-    await settle();
+    await nextTurn();
     expect(drained).toBe(false);
     release();
     await drain;
@@ -144,7 +142,7 @@ describe('IpcRouter', () => {
     expect(order).toEqual(['request started', 'save']);
     let drained = false;
     const drain = router.drain().then(() => (drained = true));
-    await settle();
+    await nextTurn();
     expect(drained).toBe(false);
     releaseRequest();
     await drain;
@@ -174,7 +172,7 @@ describe('IpcRouter', () => {
       queuedSettled = true;
       return result;
     });
-    await settle();
+    await nextTurn();
     expect(queuedSettled).toBe(false);
     releaseSlow();
     await slow;

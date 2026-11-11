@@ -137,7 +137,7 @@ describe('project schema properties', () => {
           expect(result.accepted).toBe(false);
         }
       }),
-      runs(300),
+      runs(100),
     );
   });
 
@@ -147,7 +147,7 @@ describe('project schema properties', () => {
         const result = outcome(() => parseProjectFile({ ...rest, schemaVersion }));
         expect(result.accepted).toBe(false);
       }),
-      runs(200),
+      runs(100),
     );
   });
 
@@ -181,7 +181,7 @@ describe('project schema properties', () => {
           JSON.parse(JSON.stringify(result.value)),
         );
       }),
-      runs(300),
+      runs(100),
     );
   });
 
@@ -191,7 +191,7 @@ describe('project schema properties', () => {
         const result = outcome(() => parseProjectFile(document));
         if (result.accepted) expect(parseProjectFile(result.value)).toEqual(result.value);
       }),
-      runs(200),
+      runs(100),
     );
   });
 

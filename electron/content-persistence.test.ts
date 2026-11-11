@@ -583,7 +583,7 @@ describe('native mixed content persistence', () => {
     expect((await service.load({ projectPath, itemId: duplicate.id })).markdown).toBe('Durable body');
   });
 
-  it('restores both drawing files and metadata when system trash fails partway', async () => {
+  it('keeps a drawing restorable locally when system trash fails partway', async () => {
     const { projectPath, service, snapshot } = await fixture();
     const created = await service.create({
       projectPath,
@@ -603,9 +603,12 @@ describe('native mixed content persistence', () => {
         await fs.unlink(target);
       },
     });
-    await expect(failing.delete({ projectPath, itemId: item.id })).rejects.toThrow(
-      /baseline files were restored/,
-    );
+    const deleted = await failing.delete({ projectPath, itemId: item.id });
+    expect(deleted.snapshot.warnings?.join(' ')).toContain('Recently deleted');
+    expect(deleted.snapshot.project.contentItems).toHaveLength(0);
+    await expect(fs.stat(path.join(projectPath, paths.source!))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(path.join(projectPath, paths.image!))).rejects.toMatchObject({ code: 'ENOENT' });
+    await failing.undoDelete({ projectPath, undoToken: deleted.undoToken });
     expect(await fs.readFile(path.join(projectPath, paths.source!))).toEqual(beforeSource);
     expect(await fs.readFile(path.join(projectPath, paths.image!))).toEqual(beforeImage);
     expect((await snapshot(projectPath)).project.contentItems).toHaveLength(1);

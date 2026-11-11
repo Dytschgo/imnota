@@ -3,6 +3,7 @@ import Konva from 'konva';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Annotation } from '../../shared/types';
+import { zoomAt } from '../viewport';
 import { AnnotationCanvas } from './AnnotationCanvas';
 import type { ToolChoice } from './Toolbar';
 
@@ -40,7 +41,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: Annotation[] = []) {
+function mountCanvas(
+  initialTool: ToolChoice = 'rectangle',
+  initialAnnotations: Annotation[] = [],
+  revealAnnotationId?: string,
+) {
   const image = document.createElement('img');
   vi.spyOn(window, 'Image').mockImplementation(function () {
     return image;
@@ -68,6 +73,7 @@ function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: 
         }}
         onTool={setTool}
         stageRef={stageRef}
+        revealAnnotationId={revealAnnotationId}
         theme="dark"
       />
     );
@@ -107,6 +113,75 @@ function mountCanvas(initialTool: ToolChoice = 'rectangle', initialAnnotations: 
   }
   return { stage, canvas, pointer, touch, captured, saved: () => saved, selected: () => selection };
 }
+
+test('a search target that appears on a later frame is revealed in the viewport', () => {
+  let frame: FrameRequestCallback | undefined;
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frame = callback;
+    return 42;
+  });
+  const { stage } = mountCanvas('select', [{ ...existingRectangle, x: 1800 }], existingRectangle.id);
+  const node = stage.findOne(`#${existingRectangle.id}`) as Konva.Shape;
+  const parent = node.getParent()!;
+  expect(node.getClientRect().x).toBeGreaterThan(stage.width());
+  node.remove();
+  const firstFrame = frame!;
+  frame = undefined;
+  act(() => firstFrame(0));
+  expect(frame).toBeDefined();
+  parent.add(node);
+  act(() => frame!(16));
+  const rect = node.getClientRect();
+  expect(rect.x).toBeGreaterThanOrEqual(0);
+  expect(rect.y).toBeGreaterThanOrEqual(0);
+  expect(rect.x + rect.width).toBeLessThanOrEqual(stage.width());
+  expect(rect.y + rect.height).toBeLessThanOrEqual(stage.height());
+});
+
+test('wheel input waits for one frame and replays pan and zoom in order with per-event clamps', () => {
+  const { stage, canvas } = mountCanvas();
+  let frame: FrameRequestCallback | undefined;
+  const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frame = callback;
+    return 42;
+  });
+  const initial = {
+    x: Number(canvas.dataset.imageX),
+    y: Number(canvas.dataset.imageY),
+    scale: Number(canvas.dataset.imageScale),
+  };
+  let expected = initial;
+  const wheel = (options: WheelEventInit) => {
+    expected =
+      options.ctrlKey || options.metaKey
+        ? zoomAt(
+            expected,
+            { x: options.clientX ?? 0, y: options.clientY ?? 0 },
+            Math.exp(-(options.deltaY ?? 0) * 0.01),
+          )
+        : { ...expected, x: expected.x - (options.deltaX ?? 0), y: expected.y - (options.deltaY ?? 0) };
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...options });
+    act(() => stage.content.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+  };
+  wheel({ deltaX: 5, deltaY: 10 });
+  wheel({ ctrlKey: true, deltaY: -10, clientX: 100, clientY: 150 });
+  wheel({ deltaX: 7, deltaY: 20 });
+  wheel({ metaKey: true, deltaY: -20, clientX: 300, clientY: 250 });
+  wheel({ ctrlKey: true, deltaY: -1000, clientX: 200, clientY: 100 });
+  expect(expected.scale).toBe(8);
+  wheel({ ctrlKey: true, deltaY: -Math.log(2) * 100, clientX: 250, clientY: 150 });
+  wheel({ ctrlKey: true, deltaY: Math.log(2) * 100, clientX: 350, clientY: 200 });
+  expect(expected.scale).toBe(4);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(Number(canvas.dataset.imageX)).toBe(initial.x);
+  expect(Number(canvas.dataset.imageY)).toBe(initial.y);
+  expect(Number(canvas.dataset.imageScale)).toBe(initial.scale);
+  act(() => frame!(0));
+  expect(Number(canvas.dataset.imageScale)).toBeCloseTo(expected.scale);
+  expect(Number(canvas.dataset.imageX)).toBeCloseTo(expected.x);
+  expect(Number(canvas.dataset.imageY)).toBeCloseTo(expected.y);
+});
 
 test('a real Konva stage click following React pointerup keeps the new square selected for immediate nudges', () => {
   const { stage, canvas, pointer, saved } = mountCanvas();

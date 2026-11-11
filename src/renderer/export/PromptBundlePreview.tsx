@@ -11,7 +11,7 @@ export function PromptBundlePreview({
   preview: { bundleNumber: number; dataUrl: string; width: number; height: number };
   onClose(): void;
 }) {
-  const [mode, setMode] = useState<PreviewMode>('fit');
+  const [mode, setMode] = useState<PreviewMode>('width');
   return (
     <Modal
       title={`Bundle ${preview.bundleNumber} preview`}
@@ -38,6 +38,8 @@ export function PromptBundlePreview({
           key={mode}
           className={`prompt-large-preview prompt-preview-${mode}`}
           data-testid="prompt-large-preview"
+          // Start on the image so arrow keys scroll it and Close is not pre-focused.
+          data-autofocus
           tabIndex={0}
           role="region"
           aria-label="Bundle image, scroll to inspect"

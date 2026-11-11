@@ -11,10 +11,17 @@ destination="$(mktemp -d)"
 ditto -x -k "$archive" "$destination"
 codesign --verify --deep --strict "$destination/Imnota.app"
 test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$destination/Imnota.app/Contents/Info.plist")" = "13.0.0"
-lipo "$destination/Imnota.app/Contents/MacOS/Imnota" -verify_arch arm64 x86_64
+# Current lipo consumes one arch after -verify_arch; check one per call.
+verify_universal() {
+  local arch
+  for arch in arm64 x86_64; do
+    lipo "$1" -verify_arch "$arch"
+  done
+}
+verify_universal "$destination/Imnota.app/Contents/MacOS/Imnota"
 capture_helper="$destination/Imnota.app/Contents/Resources/imnota-capture-helper"
 test -x "$capture_helper"
-lipo "$capture_helper" -verify_arch arm64 x86_64
+verify_universal "$capture_helper"
 "$capture_helper" windows 0 | node -e 'let text = ""; process.stdin.on("data", chunk => text += chunk); process.stdin.on("end", () => { if (!Array.isArray(JSON.parse(text))) process.exit(1); });'
 if [[ "${IMNOTA_SMOKE_MODE:-smoke}" != "clipboard" ]]; then
   node scripts/verify-mcp.mjs "$destination/Imnota.app/Contents/MacOS/Imnota" "$archive"

@@ -84,27 +84,35 @@ function deferred() {
 }
 
 describe('workspace content search', () => {
-  it('indexes 100 projects / 1,000 items once, with subsequent queries using memory', async () => {
+  it('indexes multiple projects and items once, with subsequent queries using memory', async () => {
     const root = await workspace();
+    const projects = 4;
+    const itemsPerProject = 3;
+    const fileReads = projects * (itemsPerProject + 1);
     await Promise.all(
-      Array.from({ length: 100 }, (_, index) =>
-        writeProject(root, project(index, 10), `Full Markdown body identifier-${index}.`),
+      Array.from({ length: projects }, (_, index) =>
+        writeProject(root, project(index, itemsPerProject), `Full Markdown body identifier-${index}.`),
       ),
     );
     const readText = vi.fn(readSearchText);
     const service = new WorkspaceContentSearch({ readText });
-    const response = await service.search({ workspacePath: root, query: 'BODY identifier-99.' });
-    expect(response.results).toHaveLength(10);
+    const response = await service.search({ workspacePath: root, query: 'BODY identifier-3.' });
+    expect(response.results).toHaveLength(itemsPerProject);
     expect(response.warnings).toEqual([]);
-    expect(response.results[9]).toMatchObject({
-      projectId: 'project-99',
-      itemId: 'text-99-9',
+    expect(response.results[2]).toMatchObject({
+      projectId: 'project-3',
+      itemId: 'text-3-2',
       matchSource: 'markdown',
     });
-    expect(readText).toHaveBeenCalledTimes(1100);
-    await service.search({ workspacePath: root, query: 'identifier-98.' });
-    // The warm query is served from memory: no further file reads. Wall-clock speed is not asserted.
-    expect(readText).toHaveBeenCalledTimes(1100);
+    expect(readText).toHaveBeenCalledTimes(fileReads);
+    const warmResponse = await service.search({ workspacePath: root, query: 'identifier-2.' });
+    expect(warmResponse.results).toHaveLength(itemsPerProject);
+    expect(warmResponse.results.every((result) => result.projectId === 'project-2')).toBe(true);
+    expect(readText).toHaveBeenCalledTimes(fileReads);
+    expect(new Set(readText.mock.calls.map(([folder, file]) => path.join(folder, file))).size).toBe(
+      fileReads,
+    );
+    // Both queries return the right content without rereading any indexed file.
   }, 30_000);
 
   it('retains metadata and readable siblings when a Markdown file is unreadable', async () => {

@@ -28,6 +28,11 @@ export class ShareFixture {
   body;
   notify = () => {};
 
+  // Only lifecycle controls inject a clock; ordinary contracts retain real deadlines.
+  constructor(clock = { now: () => performance.now(), setTimeout, clearTimeout }) {
+    this.clock = clock;
+  }
+
   run(body) {
     const result = Promise.resolve().then(body);
     // Keep the actual body, independently of Vitest's timeout wrapper. Its original
@@ -139,21 +144,21 @@ export class ShareFixture {
   async teardown(budgetMs = 8_000) {
     // One deadline for the WHOLE teardown, below the existing 10s Vitest hook
     // bound. On nonsettlement the continuation never advances to rm.
-    const deadline = performance.now() + budgetMs;
+    const deadline = this.clock.now() + budgetMs;
     const bounded = async (work, phase) => {
       let timer;
       try {
         return await Promise.race([
           work,
           new Promise((_, reject) => {
-            timer = setTimeout(
+            timer = this.clock.setTimeout(
               () => reject(new Error(`Share fixture teardown deadline: ${phase}`)),
-              Math.max(0, deadline - performance.now()),
+              Math.max(0, deadline - this.clock.now()),
             );
           }),
         ]);
       } finally {
-        clearTimeout(timer);
+        this.clock.clearTimeout(timer);
       }
     };
     const errors = [];

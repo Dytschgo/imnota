@@ -16,6 +16,8 @@ Call the Imnota MCP tools instead of guessing from chat images or asking the use
 
 If `get_latest_bundle` returns `bundle not prepared`, tell the user to use **Copy Bundle** in Imnota first. Do not invent export contents.
 
+When choosing among discovered exports or checking payload size, call `inspect_bundle` with its id first. Use `get_bundle` when the contents are needed; inspection reports sizes, not verified content or freshness.
+
 Bundles are saved snapshots. Check omission notes before claiming to have read every image or prompt; oversized content is represented by its saved path, and PNGs are returned as MCP image blocks.
 
 Stay inside the selected workspace. Do not ask for hosted-share tokens, pairing codes, recovery journals, or backup archives.
