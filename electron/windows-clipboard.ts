@@ -126,6 +126,9 @@ export class WindowsClipboardOpenError extends Error {
   }
 }
 
+/** The prior clipboard could not be captured safely; the write has not started. */
+export class WindowsClipboardPriorContentError extends Error {}
+
 export interface WindowsClipboardLockOptions {
   timeoutMs?: number;
   requireStableSequence?: boolean;
@@ -419,7 +422,7 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
     return snapshot;
   } catch (error) {
     for (const memory of snapshot) freeMemory(api, memory);
-    throw error;
+    throw new WindowsClipboardPriorContentError(error instanceof Error ? error.message : String(error));
   }
 }
 

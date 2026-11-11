@@ -202,6 +202,22 @@ async function sha256(file) {
   return hash.digest('hex');
 }
 
+export function inspectMcpClientNode(configured = process.env.IMNOTA_MCP_CLIENT_NODE, probe = spawnSync) {
+  const executable = configured ?? process.execPath;
+  const result = probe(executable, ['--version'], { encoding: 'utf8', windowsHide: true });
+  if (result.error || result.status !== 0)
+    throw new Error(
+      `MCP client Node binary is unavailable: ${executable}${result.error ? ` (${result.error.message})` : ''}`,
+    );
+  const version = result.stdout.trim();
+  const major = /^v(\d+)\.\d+\.\d+$/.exec(version)?.[1];
+  if (!major)
+    throw new Error(`MCP client Node binary returned an invalid version: ${executable} (${version})`);
+  if (configured !== undefined && Number(major) < 24)
+    throw new Error(`MCP client Node must be version 24 or later: ${executable} is ${version}`);
+  return { executable, version };
+}
+
 export async function verifyPackagedMcp(executable, packagedArtifact = executable) {
   assert.ok(executable, 'An actual packaged executable is required.');
   executable = await realpath(resolve(executable));
@@ -234,6 +250,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
     report.asarSha256 = await sha256(asar);
     let launch;
     if (process.platform === 'win32') {
+      report.clientNode = inspectMcpClientNode();
       const relay = resolve(executable, '..', 'resources', 'imnota-mcp.mjs');
       report.relay = relay;
       report.relaySha256 = await sha256(relay);
@@ -283,7 +300,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
         delete env.ELECTRON_ENABLE_LOGGING;
         delete env.NODE_OPTIONS;
         const result = await runMcpProcess(
-          outer ? process.execPath : executable,
+          outer ? report.clientNode.executable : executable,
           outer ? [report.relay] : ['--mcp'],
           env,
           async (request) => {
@@ -296,7 +313,13 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(init.result.serverInfo.version, version);
             assert.equal(init.result.serverInfo.name, 'imnota');
             const tools = await request('tools/list', {});
-            for (const name of ['list_projects', 'list_collections', 'get_bundle', 'get_latest_bundle'])
+            for (const name of [
+              'list_projects',
+              'list_collections',
+              'get_bundle',
+              'get_latest_bundle',
+              'inspect_bundle',
+            ])
               assert.ok(
                 tools.result.tools.some((tool) => tool.name === name),
                 `Missing ${name}`,
@@ -312,6 +335,16 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(collections.length, 2);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
+            const inspected = await call('inspect_bundle', { id });
+            assert.equal(inspected.isError, false);
+            assert.equal(inspected.content.length, 1);
+            const inspection = JSON.parse(inspected.content[0].text);
+            assert.equal(inspection.sourceKind, 'saved-export');
+            assert.equal(inspection.freshness, 'unknown');
+            assert.equal(inspection.contentVerified, false);
+            assert.equal(inspection.bundles[0].markdown.bytes, Buffer.byteLength(markdown));
+            assert.equal(inspection.bundles[0].image.bytes, png.length);
+            assert.deepEqual(inspection.next, { tool: 'get_bundle', arguments: { id } });
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
@@ -327,6 +360,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             }
             for (const [name, args, error] of [
               ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
+              ['inspect_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
               ['get_latest_bundle', { projectPath, collectionId: '002-empty' }, 'bundle not prepared'],
             ]) {
               const result = await call(name, args);
@@ -342,7 +376,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
           transport: outer ? 'installed-node-command' : report.transport,
           root: runRoot,
           workspaceHashes: before,
-          command: outer ? [process.execPath, report.relay] : [executable, '--mcp'],
+          command: outer ? [report.clientNode.executable, report.relay] : [executable, '--mcp'],
           ...result,
         });
         assert.equal(result.rawStdoutBytes, result.stdoutBytes + (launch && !outer ? 2 : 0));
@@ -356,7 +390,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
         assert.equal(result.code, enabled ? 0 : 1);
         if (!enabled) {
           assert.equal(result.stdoutBytes, 0);
-          assert.match(result.stderr, /Local agent access is off/);
+          assert.match(result.stderr, /Local agent access is off\. Enable it in Settings → Features\./);
         }
         assert.doesNotMatch(result.stderr, /UnhandledPromiseRejection|Uncaught Exception|JavaScript error/i);
         const lifecycle = JSON.parse(await readFile(join(profile, 'mcp-lifecycle.json'), 'utf8'));

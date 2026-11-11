@@ -1,11 +1,18 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { runWalkthroughChild } from './walkthrough-child.mjs';
 import { access, lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: 'inherit', ...options });
-  if (result.status !== 0) throw new Error(`${command} failed with exit code ${result.status ?? 'unknown'}.`);
+async function run(command, args, options = {}) {
+  const result = await runWalkthroughChild(command, args, {
+    cancellationGraceMs: 5_000,
+    forwardToGroup: false,
+    ...options,
+  });
+  if (result.code !== 0) throw new Error(`${command} failed with exit code ${result.code ?? 'unknown'}.`);
 }
 
 function contained(root, candidate) {
@@ -48,17 +55,17 @@ async function smokeLinuxAppImage(target, faults) {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'imnota-appimage-'));
   const root = ownedTemporaryDirectory(temporaryDirectory);
   try {
-    run(target, ['--appimage-extract'], { cwd: root });
+    await run(target, ['--appimage-extract'], { cwd: root });
     const extractedRoot = contained(root, join(root, 'squashfs-root'));
     const sandboxHelper = await regularFileWithin(extractedRoot, join(extractedRoot, 'chrome-sandbox'));
     const executable = await regularFileWithin(extractedRoot, join(extractedRoot, 'imnota'));
     if (!(await lstat(extractedRoot)).isDirectory())
       throw new Error('AppImage extraction did not create squashfs-root.');
     // Match the existing CI Electron helper policy without disabling the sandbox or changing host AppArmor.
-    run('sudo', ['chown', 'root:root', sandboxHelper]);
-    run('sudo', ['chmod', '4755', sandboxHelper]);
+    await run('sudo', ['chown', 'root:root', sandboxHelper]);
+    await run('sudo', ['chmod', '4755', sandboxHelper]);
     if (faults)
-      run(
+      await run(
         process.execPath,
         ['scripts/smoke.mjs', executable, target, executable, join(extractedRoot, 'resources', 'app.asar')],
         {
@@ -67,13 +74,67 @@ async function smokeLinuxAppImage(target, faults) {
       );
     else {
       if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
-        run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
-      run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
+        await run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
+      await run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
     }
   } finally {
     if (!faults) await rm(root, { recursive: true, force: true });
     else console.error('Retained owned fault extraction:', root);
   }
+}
+
+function onPath(command) {
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  return spawnSync(lookup, [command], { stdio: 'ignore' }).status === 0;
+}
+
+/**
+ * Problems that make the packaged smoke impossible before it starts (for example on a fresh
+ * clone), each with the command that fixes it. An empty list means the smoke can run.
+ */
+export function packagedSmokePreflight({
+  platform,
+  version,
+  releaseDirectory = 'release',
+  smokeMode = process.env.IMNOTA_SMOKE_MODE,
+  has = existsSync,
+  command = onPath,
+}) {
+  const executable =
+    platform === 'windows'
+      ? `Imnota ${version}.exe`
+      : platform === 'linux'
+        ? `Imnota-${version}.AppImage`
+        : undefined;
+  if (!executable)
+    return { problems: [`Unsupported packaged smoke platform ${platform}. Use linux or windows.`] };
+  const target = resolve(releaseDirectory, executable);
+  const problems = [];
+  if (!has(target))
+    problems.push(
+      `Run "pnpm package:${platform === 'windows' ? 'win' : 'linux'}" first (expected ${target}).`,
+    );
+  if (
+    smokeMode !== 'clipboard' &&
+    platform === 'windows' &&
+    !has(resolve(releaseDirectory, 'win-unpacked/Imnota.exe'))
+  )
+    problems.push(
+      `Run "pnpm package:win" first (expected ${resolve(releaseDirectory, 'win-unpacked/Imnota.exe')}).`,
+    );
+  const mcpFixtures = ['utils.js', 'preferences.js'].map((name) => resolve('dist-electron/src/shared', name));
+  if (smokeMode !== 'clipboard' && mcpFixtures.some((file) => !has(file)))
+    problems.push(
+      'Run "pnpm build" first (expected dist-electron/src/shared/utils.js and preferences.js for MCP fixtures).',
+    );
+  if (platform === 'linux') {
+    if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY)
+      problems.push(
+        'No display. Run it under xvfb: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux.',
+      );
+    if (!command('sudo')) problems.push('sudo is required to set up the AppImage chrome-sandbox helper.');
+  }
+  return { target, problems };
 }
 
 async function main() {
@@ -92,14 +153,18 @@ async function main() {
   if (!faults) delete process.env.IMNOTA_FAULT_CASE_SET;
   const version =
     process.env.IMNOTA_EXPECT_VERSION ?? JSON.parse(await readFile('package.json', 'utf8')).version;
-  const executable =
-    platform === 'windows'
-      ? `Imnota ${version}.exe`
-      : platform === 'linux'
-        ? `Imnota-${version}.AppImage`
-        : undefined;
-  if (!executable) throw new Error(`Unsupported packaged smoke platform ${platform}.`);
-  const target = resolve(positional[1] ?? 'release', executable);
+  const { target, problems } = packagedSmokePreflight({
+    platform,
+    version,
+    releaseDirectory: positional[1],
+  });
+  if (problems.length) {
+    process.stderr.write(
+      `Packaged smoke cannot start: build first.\n${problems.map((item) => `- ${item}`).join('\n')}\n`,
+    );
+    process.exitCode = 2;
+    return;
+  }
   await access(target);
   if (!(await lstat(target)).isFile()) throw new Error(`Expected a regular packaged file: ${target}`);
   if (platform === 'linux') return smokeLinuxAppImage(target, faults);
@@ -118,7 +183,7 @@ async function main() {
   if (platform === 'windows') {
     // Preserve main's owned MCP stdio check and portable UI walkthrough.
     if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
-      run(
+      await run(
         process.execPath,
         ['scripts/verify-mcp.mjs', resolve(positional[1] ?? 'release', 'win-unpacked/Imnota.exe'), target],
         { env: process.env },
@@ -127,4 +192,4 @@ async function main() {
   }
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

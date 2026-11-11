@@ -135,8 +135,19 @@ function assertSearch(
   );
 }
 
-async function capture(driver: NativeUiDriver, directory: string, name: string) {
-  const value = await driver.capture(directory, name);
+type FaultCaptureName =
+  | 'restore-warning-1280x800.png'
+  | 'restore-warning-requested-1064x655.png'
+  | 'restore-warning-requested-1440x920.png'
+  | 'recovery-refused-1280x800.png'
+  | 'panel-fallback.png'
+  | 'undo-hover-past-original-deadline.png'
+  | 'undo-focus-past-original-deadline.png';
+
+async function capture(driver: NativeUiDriver, directory: string, name: FaultCaptureName) {
+  // These warnings/fallbacks also cover Markdown, drawing and empty editors.
+  // The driver still enforces annotation-canvas readiness when one is present.
+  const value = await driver.capture(directory, name, 'none');
   return {
     ...value,
     sha256: faultDigest(await fs.readFile(path.join(directory, name))),
@@ -152,7 +163,7 @@ async function warningLayouts(driver: NativeUiDriver, directory: string) {
   for (const requested of [
     { width: 1064, height: 655 },
     { width: 1440, height: 920 },
-  ]) {
+  ] as const) {
     let limitation: string | undefined;
     try {
       await driver.resize(requested);
@@ -842,7 +853,15 @@ async function uiCase(
         requestAnimationFrame(check); }; check(); })`);
     controller.releaseUiBarrier();
     await waitObservation(controller, (state) => !state.pendingMetadata);
-    captures.push(await capture(driver, directory, `${caseId}-past-original-deadline.png`));
+    captures.push(
+      await capture(
+        driver,
+        directory,
+        caseId === 'undo-hover'
+          ? 'undo-hover-past-original-deadline.png'
+          : 'undo-focus-past-original-deadline.png',
+      ),
+    );
     await driver.click({ selector: '.toast-action', text: 'Undo', exact: true });
     await driver.waitFor({ selector: `[data-testid="screenshot-${shot.id}"]` });
     requireThat(

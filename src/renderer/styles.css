@@ -79,7 +79,7 @@
   --ink-3: #545b6a;
   --ink-4: #5c6472;
   --text-cyan: #0369a1;
-  --text-success: #15803d;
+  --text-success: oklch(0.46 0.11 150);
   --line: rgba(18, 20, 26, 0.15);
   --line-strong: rgba(18, 20, 26, 0.24);
   --indigo-light: #4e3ee6;

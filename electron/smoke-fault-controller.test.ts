@@ -55,7 +55,7 @@ describe('owned real-filesystem fault boundary', () => {
     await controller.arm({ caseId: 'baseline-repair', projectPath: value.project, projectId: value.id });
     const other = path.join(value.project, 'other.json');
     expect(controller.atomicVerification(other)).toBeUndefined();
-    await atomicWrite(other, 'B exact', controller.atomicVerification(other));
+    await atomicWrite(other, 'B exact', undefined, controller.atomicVerification(other));
     expect(await fs.readFile(other, 'utf8')).toBe('B exact');
     expect(controller.events.filter((event) => event.event === 'consumed')).toHaveLength(0);
     const next = JSON.stringify({ id: value.id, name: 'after' });
@@ -75,7 +75,7 @@ describe('owned real-filesystem fault boundary', () => {
         ],
       }),
     );
-    const write = () => atomicWrite(target, next, controller.atomicVerification(target));
+    const write = () => atomicWrite(target, next, undefined, controller.atomicVerification(target));
     await expect(
       controller.invoke('content:save', [{ projectPath: value.project }], write),
     ).rejects.toMatchObject({ code: 'EIO' });
@@ -139,7 +139,7 @@ describe('owned real-filesystem fault boundary', () => {
   it('labels the actual platform boundary and preserves typed postrename commit semantics', async () => {
     const value = await fixture();
     const seen: string[] = [];
-    const operation = atomicWrite(value.target, 'committed bytes', {
+    const operation = atomicWrite(value.target, 'committed bytes', undefined, {
       beforeParentSync: async (_target, _directory, boundary) => {
         seen.push(boundary);
         expect(await fs.readFile(value.target, 'utf8')).toBe('committed bytes');
@@ -205,7 +205,13 @@ describe('owned real-filesystem fault boundary', () => {
               undoToken: reason === 'wrong-token' ? `delete-${randomUUID()}` : token,
             },
           ],
-          () => atomicWrite(value.target, 'must not write', controller.atomicVerification(value.target)),
+          () =>
+            atomicWrite(
+              value.target,
+              'must not write',
+              undefined,
+              controller.atomicVerification(value.target),
+            ),
         ),
       ).rejects.toThrow();
       expect(await fs.readFile(value.target)).toEqual(preserved);
@@ -246,12 +252,13 @@ describe('owned real-filesystem fault boundary', () => {
       [{ projectPath: value.project, undoToken: token }],
       async () => {
         await expect(
-          atomicWrite(value.target, after, controller.atomicVerification(value.target)),
+          atomicWrite(value.target, after, undefined, controller.atomicVerification(value.target)),
         ).rejects.toBeInstanceOf(CommittedWriteError);
         await expect(
           atomicWrite(
             marker,
             JSON.stringify({ ...manifest, phase: 'restored', undoAfter: { sha256: faultDigest(after) } }),
+            undefined,
             controller.atomicVerification(marker),
           ),
         ).rejects.toMatchObject({ code: 'EACCES' });
