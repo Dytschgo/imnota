@@ -378,6 +378,27 @@ describe('prompt bundle planning', () => {
       expect(redacted.bundles[0].markdown).not.toContain(leaked);
   });
 
+  it.each(['blur', 'pixelate'] as const)(
+    'lists a %s-only screenshot with a count-only Marks section',
+    (kind) => {
+      const result = planPromptBundles(
+        collection([
+          screenshot('secret', 0, {
+            annotations: [annotation('private-mask', kind, { x: 33, y: 44, width: 55, height: 16 })],
+          }),
+        ]),
+        [rendered('secret')],
+      );
+      expect(result.kind).toBe('ready');
+      if (result.kind !== 'ready') return;
+      const markdown = result.bundles[0].markdown;
+      expect(markdown.split('### Picture 1 / Marks\n\n')[1]?.split('\n\n')[0].trimEnd()).toBe(
+        '- 1 redacted region',
+      );
+      expect(markdown).not.toMatch(/private-mask|\b(?:blur|pixelate)\b|33\.0%|44\.0%|55\.0%|16\.0%/);
+    },
+  );
+
   it('appends Visible text from injected OCR and omits it for redacted screenshots', () => {
     const result = planPromptBundles(collection([screenshot('first', 0, { visibleText: 'Submit order' })]), [
       rendered('first'),
