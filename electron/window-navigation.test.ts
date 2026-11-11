@@ -59,6 +59,8 @@ describe('main app navigation', () => {
   it.each([
     'file:///C:/Users/DYLANF~1/app/private.html',
     'file:///C:/Users/DYLANF~1/app/index.html?reload=true',
+    'file:///C:/Users/DYLANF~1/app/index.html?',
+    'file:///C:/Users/DYLANF~1/app/index.html?#fragment',
     'file://foreign/C:/Users/DYLANF~1/app/index.html',
     'file:///C:/Users/DYLANF%257E1/app/index.html',
     'file:///C:/Users/DYLANF~1/app%2Findex.html',

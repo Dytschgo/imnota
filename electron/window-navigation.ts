@@ -19,6 +19,8 @@ export function preventForeignNavigation(
       if (
         target.host === trusted.host &&
         target.search === trusted.search &&
+        // URL.search omits an empty query marker; it must not broaden this grant.
+        target.href.includes('?') === trusted.href.includes('?') &&
         fileURLToPath(target) === fileURLToPath(trusted)
       )
         return;
