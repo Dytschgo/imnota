@@ -901,6 +901,51 @@ describe('feedback controls', () => {
     }));
   });
 
+  it.each([false, true])(
+    'holds Undo after an unpaired native mouseover, with keyboard focus %s',
+    async (focused) => {
+      useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: false } }));
+      const undoDeleteScreenshot = vi.fn<ImnotaBridge['undoDeleteScreenshot']>(async () => snapshot);
+      await renderEditingProject({
+        deleteScreenshot: vi.fn(async () => ({ snapshot, undoToken: 'undo' })),
+        undoDeleteScreenshot,
+      });
+      vi.useFakeTimers();
+      try {
+        fireEvent.click(screen.getByRole('button', { name: /^Delete screenshot:/ }));
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        const undo = screen.getByRole('button', { name: 'Undo' });
+        const rail = screen.getByLabelText('Content sequence');
+        const text = document.querySelector('.toast > span')!;
+        // Replays the native trace: managed relatedTarget, with no preceding mouseout.
+        fireEvent.mouseOver(undo, { relatedTarget: rail });
+        if (focused) fireEvent.focus(undo);
+        // Moving between descendants must neither release nor duplicate a hover hold.
+        fireEvent.mouseOut(undo, { relatedTarget: text });
+        fireEvent.mouseOver(text, { relatedTarget: undo });
+        act(() => vi.advanceTimersByTime(TOAST_ACTION_MS + 1));
+        expect(undo).toBeInTheDocument();
+        fireEvent.mouseOut(text, { relatedTarget: rail });
+        if (focused) {
+          act(() => vi.advanceTimersByTime(TOAST_ACTION_MS + 1));
+          expect(undo).toBeInTheDocument();
+          fireEvent.blur(undo, { relatedTarget: rail });
+        }
+        act(() => vi.advanceTimersByTime(TOAST_ACTION_MS - 1));
+        expect(undo).toBeInTheDocument();
+        act(() => vi.advanceTimersByTime(2));
+        expect(undo).not.toBeInTheDocument();
+        expect(undoDeleteScreenshot).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        useAppStore.setState((state) => ({ settings: { ...state.settings, confirmBeforeDeletion: true } }));
+      }
+    },
+  );
+
   it('does not adopt a Recently deleted restore after a different project opens', async () => {
     const deleted = {
       kind: 'screenshot' as const,

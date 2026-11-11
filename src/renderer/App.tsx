@@ -113,14 +113,6 @@ export function userFacingErrorMessage(message: string): string {
   return withoutIpcWrapper.replace(/^(?:Error(?:[.:]\s*|\s+))+/i, '') || 'Something went wrong. Try again.';
 }
 
-function debug214Toast(event: string, detail: Record<string, unknown>) {
-  if (!nativeFaultReceiverPresent) return;
-  const target = window as Window & { __imnotaDebug214Toast?: unknown[] };
-  const entries = (target.__imnotaDebug214Toast ??= []);
-  if (entries.length < 100)
-    entries.push({ event: '[DEBUG-214-toast] ' + event, at: performance.now(), ...detail });
-}
-
 export default function App() {
   const store = useAppStore(
     useShallow((state) => ({
@@ -305,7 +297,6 @@ export default function App() {
   );
 
   const clearToastTimer = useCallback(() => {
-    debug214Toast('clear', { timer: toastTimer.current, hold: toastHold.current });
     if (toastTimer.current !== null) {
       window.clearTimeout(toastTimer.current);
       toastTimer.current = null;
@@ -313,10 +304,8 @@ export default function App() {
   }, []);
   const armToastTimer = useCallback(
     (generation: number, durationMs: number) => {
-      debug214Toast('arm', { generation, durationMs, hold: toastHold.current });
       clearToastTimer();
       toastTimer.current = window.setTimeout(() => {
-        debug214Toast('fire', { generation, current: toastGeneration.current, hold: toastHold.current });
         if (toastGeneration.current !== generation) return;
         toastTimer.current = null;
         toastLifetime.current = null;
@@ -330,7 +319,6 @@ export default function App() {
   const showToast = useCallback(
     (message: string, action?: ToastNotification['action']) => {
       const generation = ++toastGeneration.current;
-      debug214Toast('show', { generation, message });
       const durationMs = action ? TOAST_ACTION_MS : TOAST_STATUS_MS;
       toastHold.current = 0;
       toastLifetime.current = { generation, durationMs };
@@ -346,12 +334,10 @@ export default function App() {
     [armToastTimer],
   );
   const holdToast = useCallback(() => {
-    debug214Toast('hold', { hold: toastHold.current });
     toastHold.current += 1;
     clearToastTimer();
   }, [clearToastTimer]);
   const releaseToast = useCallback(() => {
-    debug214Toast('release', { hold: toastHold.current });
     toastHold.current = Math.max(0, toastHold.current - 1);
     const lifetime = toastLifetime.current;
     if (toastHold.current > 0 || toastErrorPaused.current || !lifetime) return;
@@ -359,7 +345,6 @@ export default function App() {
   }, [armToastTimer]);
   const dismissToast = useCallback(
     (generation?: number) => {
-      debug214Toast('dismiss', { generation, current: toastGeneration.current });
       if (generation !== undefined && toastGeneration.current !== generation) return;
       toastHold.current = 0;
       toastLifetime.current = null;
@@ -372,7 +357,6 @@ export default function App() {
   const errorVisible = Boolean(error || contentPersistence.error || persistence.error || preferences.error);
   const hiddenActionToast = errorVisible && toast?.action ? toast.generation : null;
   useEffect(() => {
-    debug214Toast('error-effect', { hiddenActionToast, hold: toastHold.current });
     toastErrorPaused.current = hiddenActionToast !== null;
     // Removing the toast does not emit mouseleave. Discard holds from its old DOM node.
     toastHold.current = 0;
@@ -2582,8 +2566,16 @@ export default function App() {
               }
             : {})}
           role="status"
-          onMouseEnter={holdToast}
-          onMouseLeave={releaseToast}
+          onMouseOver={(event) => {
+            // A native mouseover can arrive without the paired mouseout that
+            // React's synthesized enter expects. Ignore moves within the toast.
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              holdToast();
+          }}
+          onMouseOut={(event) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              releaseToast();
+          }}
           onFocus={holdToast}
           onBlur={releaseToast}
         >
