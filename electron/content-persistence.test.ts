@@ -426,7 +426,7 @@ describe('native mixed content persistence', () => {
     async (rollbackFailure) => {
       const f = await failedSaveFixture(rollbackFailure);
       const saved = await f.retrying.save(f.request);
-      expect(saved.conflictCreated).toBe(rollbackFailure);
+      expect(saved.conflictCreated).toBe(false);
       expect(await fs.readFile(f.textFile, 'utf8')).toBe(f.request.markdown);
       const beforeOpen = await Promise.all([fs.readFile(f.metadata), fs.readFile(f.textFile)]);
       await expect(recoverScreenshotTransactions(f.projectPath)).resolves.toBeDefined();
@@ -455,12 +455,12 @@ describe('native mixed content persistence', () => {
   });
 
   it('fails closed after restart without the original failed-operation witness', async () => {
-    const f = await failedSaveFixture();
+    const f = await failedSaveFixture(true);
     const restarted = new ContentPersistenceService({
       snapshot: f.snapshot,
       trashItem: (target) => fs.unlink(target),
     });
-    await restarted.save(f.request);
+    expect((await restarted.save(f.request)).conflictCreated).toBe(true);
     expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
     await expect(recoverScreenshotTransactions(f.projectPath)).rejects.toMatchObject({
       code: 'baseline-changed',
@@ -468,16 +468,38 @@ describe('native mixed content persistence', () => {
   });
 
   it('does not infer the same operation after a logical project replacement at the same path', async () => {
-    const f = await failedSaveFixture();
+    const f = await failedSaveFixture(true);
     const replaced = JSON.parse(await fs.readFile(f.metadata, 'utf8'));
     replaced.id = 'project_replaced';
     await atomicWrite(f.metadata, JSON.stringify(replaced, null, 2));
-    await f.retrying.save(f.request);
+    expect((await f.retrying.save(f.request)).conflictCreated).toBe(true);
     expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
     await expect(recoverScreenshotTransactions(f.projectPath)).rejects.toMatchObject({
       code: 'baseline-changed',
     });
   });
+
+  it.each(['changed draft', 'foreign bytes'] as const)(
+    'keeps conflict-copy protection for an owned retry with %s',
+    async (change) => {
+      const f = await failedSaveFixture(true);
+      const request =
+        change === 'changed draft' ? { ...f.request, markdown: 'Newer retry draft' } : f.request;
+      if (change === 'foreign bytes') await fs.writeFile(f.textFile, 'Foreign newer content');
+      const original = await fs.readFile(f.textFile);
+      const saved = await f.retrying.save(request);
+      expect(saved.conflictCreated).toBe(true);
+      expect(saved.itemId).not.toBe(f.item.id);
+      expect(await fs.readFile(f.textFile)).toEqual(original);
+      const copy = saved.snapshot.project.contentItems!.find((entry) => entry.id === saved.itemId)!;
+      expect(
+        await fs.readFile(path.join(f.projectPath, contentItemRelativePaths(copy).markdown!), 'utf8'),
+      ).toBe(request.markdown);
+      await expect(recoverScreenshotTransactions(f.projectPath)).resolves.toBeDefined();
+      const [preserved] = (await fs.readdir(f.journalRoot)).filter((name) => name.startsWith('superseded-'));
+      expect(await journalFiles(path.join(f.journalRoot, preserved))).toEqual(f.failedFiles);
+    },
+  );
 
   it('does not touch live files when transferring the prior journal is refused', async () => {
     const f = await failedSaveFixture();

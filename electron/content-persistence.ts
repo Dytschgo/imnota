@@ -658,7 +658,20 @@ export class ContentPersistenceService {
         height: prepared.height!,
       });
     const current = await this.readItemFiles(input.projectPath, trusted);
-    const conflict = current.revision !== input.contentRevision;
+    const failedKey = JSON.stringify([
+      await fs.realpath(input.projectPath),
+      baseline.project.id,
+      trusted.kind,
+      input.itemId,
+    ]);
+    const desiredRevision =
+      trusted.kind === 'drawing'
+        ? sha256('drawing', prepared.source!, prepared.image!)
+        : sha256('text', prepared.markdown!);
+    // An incompletely repaired own save may already contain the exact intended
+    // member bytes. Its validated replacement need not manufacture a conflict copy.
+    const matchesOwnedRetry = this.failedSaves.has(failedKey) && current.revision === desiredRevision;
+    const conflict = current.revision !== input.contentRevision && !matchesOwnedRetry;
     const timestamp = nextTimestamp(baseline.project, this.now());
     let savedItem: ContentItem;
     let next: ProjectData;
@@ -759,12 +772,6 @@ export class ContentPersistenceService {
       after: projectAfter,
       expectedBefore: screenshotTransactionBaseline(baseline.source),
     });
-    const failedKey = JSON.stringify([
-      await fs.realpath(input.projectPath),
-      baseline.project.id,
-      trusted.kind,
-      input.itemId,
-    ]);
     const kind = conflict ? 'content-conflict' : 'content-save';
     const preserved: string[] = [];
     let warning: string | undefined;
@@ -823,14 +830,10 @@ export class ContentPersistenceService {
       [warning, ...preserved.map((location) => `Previous save recovery files were preserved at ${location}.`)]
         .filter(Boolean)
         .join(' ') || undefined;
-    const revision =
-      savedItem.kind === 'drawing'
-        ? sha256('drawing', prepared.source!, prepared.image!)
-        : sha256('text', prepared.markdown!);
     return {
       snapshot: withWarning(await this.dependencies.snapshot(input.projectPath), warning),
       itemId: savedItem.id,
-      contentRevision: revision,
+      contentRevision: desiredRevision,
       projectRevisionTransition: { before: baseline.revision, after: projectRevision(projectAfter) },
       conflictCreated: conflict,
     };
