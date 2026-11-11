@@ -8,6 +8,29 @@ import { packagedSmokePreflight } from './verify-packaged.mjs';
 
 const everything = () => true;
 
+test('clipboard verification needs only the portable artifact, not unused MCP fixtures', () => {
+  const target = resolve('release', 'Imnota 1.2.3.exe');
+  const { problems } = packagedSmokePreflight({
+    platform: 'windows',
+    version: '1.2.3',
+    smokeMode: 'clipboard',
+    has: (file) => file === target,
+  });
+  assert.deepEqual(problems, []);
+  for (const fixture of ['utils.js', 'preferences.js']) {
+    const missing = resolve('dist-electron/src/shared', fixture);
+    assert.match(
+      packagedSmokePreflight({
+        platform: 'windows',
+        version: '1.2.3',
+        smokeMode: 'standard',
+        has: (file) => file !== missing,
+      }).problems.join('\n'),
+      /Run "pnpm build" first/,
+    );
+  }
+});
+
 test('preflight passes when the packaged build, display and sudo are present', () => {
   const previous = process.env.DISPLAY;
   process.env.DISPLAY = ':99';

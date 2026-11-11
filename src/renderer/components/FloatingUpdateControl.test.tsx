@@ -36,6 +36,68 @@ it('treats an up-to-date result as a refresh, not a download', () => {
   expect(onDownload).not.toHaveBeenCalled();
 });
 
+it.each(['nightly', 'stable'] as const)(
+  'checks again instead of advertising an older stable release on %s',
+  (channel) => {
+    const onCheck = vi.fn();
+    const onDownload = vi.fn();
+    render(
+      <FloatingUpdateControl
+        status={{
+          state: 'not-available',
+          currentVersion: '0.4.1-nightly.20261021.39643958284',
+          version: '0.4.0',
+          channel,
+          sourceChannel: 'stable',
+          manualDownload: true,
+          message: 'Installed version is newer than stable 0.4.0. Automatic downgrades are disabled.',
+          releaseUrl: 'https://example.com/stable',
+        }}
+        onCheck={onCheck}
+        onDownload={onDownload}
+        onInstall={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    const indicator = screen.getByTestId('update-indicator');
+    expect(indicator.querySelector('.lucide-download')).toBeNull();
+    fireEvent.pointerEnter(indicator);
+    expect(screen.getByRole('dialog')).toHaveTextContent(`No newer update · ${channel}`);
+    expect(screen.getByRole('dialog')).toHaveTextContent('Automatic downgrades are disabled.');
+    expect(screen.getByRole('link', { name: /View release details/ })).toHaveAttribute(
+      'href',
+      'https://example.com/stable',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'No newer update. Check again.' }));
+    expect(onCheck).toHaveBeenCalledOnce();
+    expect(onDownload).not.toHaveBeenCalled();
+  },
+);
+
+it('still offers a genuinely newer stable fallback while Nightly stays selected', () => {
+  const onDownload = vi.fn();
+  render(
+    <FloatingUpdateControl
+      status={{
+        state: 'available',
+        channel: 'nightly',
+        sourceChannel: 'stable',
+        version: '0.5.0',
+        manualDownload: true,
+        terminalCommand: 'update-command',
+      }}
+      onCheck={vi.fn()}
+      onDownload={onDownload}
+      onInstall={vi.fn()}
+      onRetry={vi.fn()}
+    />,
+  );
+  fireEvent.pointerEnter(screen.getByTestId('update-indicator'));
+  expect(screen.getByRole('dialog')).toHaveTextContent('Update 0.5.0 · stable');
+  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  expect(onDownload).toHaveBeenCalledOnce();
+});
+
 it('shows disabled download progress while an update is fetching', () => {
   render(
     <FloatingUpdateControl

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { runWalkthroughChild } from './walkthrough-child.mjs';
 import process from 'node:process';
 import electron from 'electron';
 import {
@@ -95,31 +95,6 @@ export function removeRunDirectory(runDirectory) {
   rmSync(resolved, { recursive: true, force: true });
 }
 
-function runChild(executable, args, env, timeoutMs) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, args, { env, stdio: 'inherit' });
-    let timedOut = false;
-    let forceKill;
-    const timeout = globalThis.setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      forceKill = globalThis.setTimeout(() => child.kill('SIGKILL'), 5_000);
-    }, timeoutMs);
-    child.once('error', (error) => {
-      globalThis.clearTimeout(timeout);
-      globalThis.clearTimeout(forceKill);
-      reject(error);
-    });
-    child.once('exit', (code, signal) => {
-      globalThis.clearTimeout(timeout);
-      globalThis.clearTimeout(forceKill);
-      if (timedOut)
-        reject(new Error(`Native verification exceeded its ${Math.round(timeoutMs / 1000)} second limit.`));
-      else resolvePromise({ code, signal });
-    });
-  });
-}
-
 export async function runNativeVerification({ packagedExecutable, mode = 'smoke' } = {}) {
   mode = normalizeNativeVerificationMode(mode);
   const runDirectory = createRunDirectory();
@@ -142,7 +117,7 @@ export async function runNativeVerification({ packagedExecutable, mode = 'smoke'
     // 36265303628; portable extraction/startup and shutdown also share this budget.
     // Per-operation deadlines remain unchanged, and a timed-out run still fails.
     const timeoutMs = mode === 'stress' ? 15 * 60_000 : mode === 'clipboard' ? 4 * 60_000 : 6 * 60_000;
-    const result = await runChild(executable, args, env, timeoutMs);
+    const result = await runWalkthroughChild(executable, args, { env, timeoutMs });
     let report;
     try {
       report = JSON.parse(readFileSync(reportPath, 'utf8'));

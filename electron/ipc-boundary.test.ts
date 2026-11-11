@@ -249,6 +249,42 @@ async function registerHandlerModules(
 }
 
 const failure = (result: unknown) => result as Extract<WorkflowResult<unknown>, { ok: false }>;
+
+describe('direct prompt Markdown clipboard workflow', () => {
+  it('returns a structured too-large failure without reaching the clipboard writer', async () => {
+    const outcome = await entry('workflow:prompt-export:copy-markdown').invoke(
+      trusted,
+      'x'.repeat(2_000_001),
+    );
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        details: { reason: 'too-large' },
+      },
+    });
+    expect(reached).toEqual([]);
+  });
+
+  it('preserves a rejected clipboard failure in the workflow outcome', async () => {
+    const copyTextToClipboard = vi.fn(async () => {
+      throw new NativeWorkflowError('clipboard-limit', 'Private Markdown must not be displayed', false, {
+        reason: 'rejected',
+      });
+    });
+    const local = tripwireHost({ copyTextToClipboard });
+    const { registry: handlers } = await registerHandlerModules(local.host);
+    const outcome = await handlers.get('workflow:prompt-export:copy-markdown')!.invoke(trusted, 'Markdown');
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: 'clipboard-limit',
+        details: { reason: 'rejected' },
+      },
+    });
+    expect(copyTextToClipboard).toHaveBeenCalledWith('Markdown');
+  });
+});
 const isResultKind = (kind: Kind) => kind === 'workflow' || kind === 'capture';
 
 let root: string;
@@ -742,6 +778,11 @@ const invalidCases: Record<string, InvalidCase[]> = {
       [{ projectPath: anyPath, expectedRevision: revision, patch: { id: 'project_other' } }],
     ],
     [
+      'projects:update-metadata',
+      'a non-boolean favourite',
+      [{ projectPath: anyPath, expectedRevision: revision, patch: { favourite: 'yes' } }],
+    ],
+    [
       'projects:set-archived',
       'a non-boolean flag',
       [{ projectPath: anyPath, expectedRevision: revision, archived: 'yes' }],
@@ -954,6 +995,8 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['workflow:prompt-export:cancel', 'a session id with separators', [{ sessionId: 'a/b' }]],
     ['workflow:prompt-export:read', 'a fractional bundle number', [{ sessionId, bundleNumber: 1.5 }]],
     ['workflow:prompt-export:copy', 'an unknown target', [{ sessionId, bundleNumber: 1, target: 'shell' }]],
+    ['workflow:prompt-export:copy-markdown', 'non-text Markdown', [{ markdown: 'a' }]],
+    ['workflow:prompt-export:copy-markdown', 'an extra argument', ['a', 'b']],
     [
       'workflow:prompt-export:open',
       'an unknown target',
