@@ -67,6 +67,8 @@ External member-file edits raise the renderer's external-change warning even whe
 
 The recovery screen's protected Reload may navigate to main's configured app document after saving pending work. Other paths, queries and origins remain blocked; renderer history changes cannot authorize a different document. Fragment-only locations within the configured document remain valid. Native recovery acceptance must observe the new renderer and saved bytes, not only a completed save callback.
 
+Retrying a failed Markdown or drawing save can preserve the witnessed prior transaction intact after staging its replacement. This prevents the old candidate from blocking a confirmed retry's next open after independent metadata changes. The earlier material stays in a `superseded-*` manual-recovery directory; its files are not deleted. Ownership mismatches and transfer failures stop before the new live commit. Same-process ownership, restart limits and failure behavior are documented in [the data format](data-format.md#superseded-failed-saves); packaged candidate acceptance remains pending until the native failure catalog completes.
+
 The implementation includes save-before-close protection after failed updates and guards against duplicate collection actions during pending saves. The repository review records their regression coverage and any subsequent fixes.
 
 Use [the September 8 repository review](history/repository-review-2026-09-08.md) for the historical disposition of older plans and dependency work. Version-only major dependency changes must demonstrate application startup and the affected workflows before merge; green compilation alone is insufficient.

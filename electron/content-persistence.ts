@@ -14,12 +14,21 @@ import { filenameSchema, validateProject } from '../src/shared/schema.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
 import {
   screenshotTransactionBaseline,
+  ScreenshotTransactionError,
   type ScreenshotTransactionOperations,
   type ScreenshotTransactionWrite,
 } from './screenshot-transactions.js';
 import {
+  witnessFailedSaveJournal,
+  witnessSaveStage,
+  preserveSupersededSaveJournal,
+  type FailedSaveJournalWitness,
+  type SaveStageWitness,
+} from './failed-save-journals.js';
+import {
   commitScreenshotFileTransaction,
   nextProjectMutationTimestamp,
+  type CommitScreenshotFileTransactionInput,
 } from './screenshot-transaction-adapter.js';
 import {
   deleteContentItemToTrash,
@@ -382,6 +391,7 @@ function withWarning(snapshot: ProjectSnapshot, warning?: string): ProjectSnapsh
 export class ContentPersistenceService {
   private readonly randomId: () => string;
   private readonly now: () => Date;
+  private readonly failedSaves = new Map<string, FailedSaveJournalWitness[]>();
 
   constructor(private readonly dependencies: ContentPersistenceDependencies) {
     this.randomId = dependencies.randomId ?? randomUUID;
@@ -412,10 +422,12 @@ export class ContentPersistenceService {
     baseline: ProjectBaseline,
     writes: ScreenshotTransactionWrite[],
     assertContent?: () => Promise<void>,
+    lifecycle?: Pick<CommitScreenshotFileTransactionInput, 'beforeCommit' | 'onStaged'>,
   ): Promise<string | undefined> {
     const result = await commitScreenshotFileTransaction(projectPath, {
       kind,
       writes,
+      ...lifecycle,
       assertBaseline: async () => {
         await this.assertBaseline(projectPath, baseline);
         await assertContent?.();
@@ -747,17 +759,70 @@ export class ContentPersistenceService {
       after: projectAfter,
       expectedBefore: screenshotTransactionBaseline(baseline.source),
     });
-    const warning = await this.commit(
-      input.projectPath,
-      conflict ? 'content-conflict' : 'content-save',
-      baseline,
-      writes,
-      async () => {
-        const fresh = await this.readItemFiles(input.projectPath, trusted);
-        if (fresh.revision !== current.revision)
-          throw new Error('Content changed while the save was prepared. Reload it and try again.');
-      },
-    );
+    const failedKey = JSON.stringify([
+      await fs.realpath(input.projectPath),
+      baseline.project.id,
+      trusted.kind,
+      input.itemId,
+    ]);
+    const kind = conflict ? 'content-conflict' : 'content-save';
+    const preserved: string[] = [];
+    let warning: string | undefined;
+    let stage: SaveStageWitness | undefined;
+    try {
+      warning = await this.commit(
+        input.projectPath,
+        kind,
+        baseline,
+        writes,
+        async () => {
+          const fresh = await this.readItemFiles(input.projectPath, trusted);
+          if (fresh.revision !== current.revision)
+            throw new Error('Content changed while the save was prepared. Reload it and try again.');
+        },
+        {
+          beforeCommit: async () => {
+            // The replacement candidate is durable before transferring any prior
+            // failed attempt belonging to this original item (including conflict copies).
+            const pending = this.failedSaves.get(failedKey);
+            while (pending?.length) {
+              const location = await preserveSupersededSaveJournal(input.projectPath, pending[0]);
+              if (location) preserved.push(location);
+              pending.shift();
+            }
+            this.failedSaves.delete(failedKey);
+          },
+          onStaged: async (staged) => {
+            stage = await witnessSaveStage(input.projectPath, staged.token);
+          },
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof ScreenshotTransactionError &&
+        error.token &&
+        error.candidateAvailable &&
+        stage?.token === error.token
+      ) {
+        try {
+          const pending = this.failedSaves.get(failedKey) ?? [];
+          if (pending.length >= 32 || (!this.failedSaves.has(failedKey) && this.failedSaves.size >= 128))
+            throw new Error('Failed-save ownership capacity reached; recovery files remain in place.');
+          pending.push(await witnessFailedSaveJournal(stage, kind, writes));
+          this.failedSaves.set(failedKey, pending);
+        } catch (witnessError) {
+          throw new AggregateError(
+            [error, witnessError],
+            'Save failed; recovery files were preserved but ownership could not be recorded.',
+          );
+        }
+      }
+      throw error;
+    }
+    warning =
+      [warning, ...preserved.map((location) => `Previous save recovery files were preserved at ${location}.`)]
+        .filter(Boolean)
+        .join(' ') || undefined;
     const revision =
       savedItem.kind === 'drawing'
         ? sha256('drawing', prepared.source!, prepared.image!)
