@@ -103,8 +103,15 @@ async function fixture(
   drawing.description = 'Fixture drawing description';
   await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
   driver.setWindow(await host.reopenWindow());
+  // Local smoke creates hidden replacement windows. Native hover/focus needs
+  // this actual fixture window to be presented, just as it is on CI.
   if (!driver.browserWindow.isVisible()) driver.browserWindow.show();
   driver.browserWindow.focus();
+  await driver.evaluate(`new Promise((resolve,reject) => {
+    const deadline=performance.now()+15000;
+    const check=()=>{ if(document.hasFocus()) return resolve(true);
+      if(performance.now()>deadline) return reject(new Error('Fixture window did not receive native focus'));
+      requestAnimationFrame(check); }; check(); })`);
   await driver.click({ selector: '.side-nav-primary .nav-item', text: 'Projects', exact: true });
   await driver.waitFor({ selector: '.library' });
   await driver.click({ selector: '.project-row-main', text: name, exact: false });
@@ -876,11 +883,6 @@ async function uiCase(
     await driver.evaluate(
       `window.__imnotaFaultToast = { element:document.querySelector('.toast-action'), start:performance.now(), generation:document.querySelector('.toast')?.dataset.faultGeneration, duration:Number(document.querySelector('.toast')?.dataset.faultDuration) }`,
     );
-    await driver.evaluate(`(() => {
-      const observed = window.__imnotaFaultToast;
-      observed.events = [];
-      for (const type of ['mouseover','mouseout','focusin','focusout']) document.querySelector('.toast').addEventListener(type, event => observed.events.push({type, trusted:event.isTrusted, at:performance.now()-observed.start, related:event.relatedTarget?.className}));
-    })()`);
     if (caseId === 'undo-hover')
       driver.browserWindow.webContents.sendInputEvent({
         type: 'mouseMove',
@@ -899,17 +901,16 @@ async function uiCase(
       requireThat(focused, 'Undo was not reachable through native keyboard traversal.');
       driver.browserWindow.webContents.sendInputEvent({ type: 'mouseMove', ...{ x: 10, y: 10 } });
     }
+    await driver.waitFor({
+      selector: caseId === 'undo-hover' ? '.toast-action:hover' : '.toast-action:focus',
+      text: 'Undo',
+      exact: true,
+    });
     await controller.command('queue-fixture-metadata');
-    console.log(
-      '[DEBUG-214-undo]',
-      await driver.evaluate(
-        `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve({hover:document.querySelector('.toast-action')?.matches(':hover'), toast:document.querySelector('.toast')?.outerHTML, focused:document.hasFocus(), observed:window.__imnotaFaultToast}))))`,
-      ),
-    );
     await driver.evaluate(`new Promise((resolve,reject) => {
       const deadline=performance.now()+15000;
       const check=()=>{ const observed=window.__imnotaFaultToast;
-        if (document.querySelector('.toast-action')!==observed.element) return reject(new Error('Undo generation changed or expired [DEBUG-214-undo] '+JSON.stringify(observed.events)));
+        if (document.querySelector('.toast-action')!==observed.element) return reject(new Error('Undo generation changed or expired'));
         if(observed.duration!==4000 || document.querySelector('.toast')?.dataset.faultGeneration!==observed.generation) return reject(new Error('Unexpected Undo lifetime or generation'));
         if(performance.now()>=observed.start+observed.duration) return resolve(true);
         if(performance.now()>deadline) return reject(new Error('Undo timer observation exceeded deadline'));
