@@ -826,7 +826,15 @@ export function useProjectPersistence({
         });
         return;
       }
-      if (event.projectRevision && event.projectRevision === acceptedRevision.current) return;
+      // This revision hashes project.json only. An unchanged metadata revision
+      // cannot confirm description, annotation or other member-file bytes.
+      if (
+        event.projectRevision &&
+        event.projectRevision === acceptedRevision.current &&
+        event.changedPaths.length > 0 &&
+        event.changedPaths.every((changed) => changed === 'project.json')
+      )
+        return;
       // A watch event is never an accepted CAS baseline, including during recovery.
       publishExternalChange({
         kind: 'external-change',
