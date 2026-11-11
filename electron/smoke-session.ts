@@ -4,6 +4,7 @@ import path from 'node:path';
 import { runSmokeWorkflow, type SmokeWorkflowHost } from './smoke-workflow.js';
 import {
   boundedSmokeDiagnostic,
+  SMOKE_RENDERER_DIAGNOSTIC,
   pathIsWithin,
   validateCreatedSmokeDirectory,
 } from './smoke-native-driver.js';
@@ -90,27 +91,46 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           process.env.IMNOTA_SMOKE_ARTIFACT_DIR,
           'artifact',
         );
+      } catch (artifactError) {
+        console.error('Failure report unavailable:', artifactError);
+      }
+    }
+    let rendererState: unknown;
+    let windowFocused: boolean | undefined;
+    const diagnosticStarted = Date.now();
+    const failedWindow = host.mainWindow();
+    if (failedWindow && !failedWindow.isDestroyed()) {
+      windowFocused = failedWindow.isFocused();
+      rendererState = await boundedSmokeDiagnostic(() =>
+        failedWindow.webContents.executeJavaScript(SMOKE_RENDERER_DIAGNOSTIC),
+      );
+    }
+    const rendererResponsiveness = {
+      requestedAt: new Date(diagnosticStarted).toISOString(),
+      elapsedMs: Date.now() - diagnosticStarted,
+      status: rendererState === undefined ? 'unavailable' : 'responded',
+    };
+    result = {
+      passed: false,
+      version: app.getVersion(),
+      error: failureMessage,
+      rendererResponsiveness,
+      rendererState,
+      windowFocused,
+      diagnosticsHealth,
+    };
+    if (failureArtifactDirectory) {
+      try {
         await fs.writeFile(
           path.join(failureArtifactDirectory, 'verification-failure.json'),
-          JSON.stringify(
-            { passed: false, version: app.getVersion(), error: failureMessage, diagnosticsHealth },
-            null,
-            2,
-          ),
+          JSON.stringify(result, null, 2),
           { flag: 'wx' },
         );
       } catch (artifactError) {
         console.error('Failure report unavailable:', artifactError);
       }
     }
-    let rendererState: unknown;
-    const failedWindow = host.mainWindow();
     if (failedWindow && !failedWindow.isDestroyed()) {
-      rendererState = await boundedSmokeDiagnostic(() =>
-        failedWindow.webContents.executeJavaScript(
-          `({ text: document.body.innerText.slice(-12000), active: document.activeElement?.outerHTML.slice(0, 1000), pointerTrace: window.__imnotaPointerTrace, pointerGeometry: window.__imnotaPointerGeometry })`,
-        ),
-      );
       if (failureArtifactDirectory) {
         try {
           const captured = await boundedSmokeDiagnostic(() => failedWindow.webContents.capturePage());
@@ -123,13 +143,6 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
         }
       }
     }
-    result = {
-      passed: false,
-      version: app.getVersion(),
-      error: failureMessage,
-      rendererState,
-      diagnosticsHealth,
-    };
     console.error(error);
     console.error('Renderer state:', rendererState);
   }

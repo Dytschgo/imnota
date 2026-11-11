@@ -200,6 +200,7 @@ export function Library({
           {filtered.length > 0 && (
             <div
               className="project-list"
+              role={view === 'archived' ? 'group' : undefined}
               aria-labelledby={view === 'archived' ? 'archived-projects-heading' : undefined}
             >
               {filtered.map((project) => (
@@ -261,9 +262,10 @@ export function Library({
           {archivedCollections.length > 0 && (
             <>
               <h2 id="archived-collections-heading">Archived collections</h2>
-              <div className="project-list" aria-labelledby="archived-collections-heading">
+              <div className="project-list" role="group" aria-labelledby="archived-collections-heading">
                 {archivedCollections.map(({ project, collection }) => (
                   <button
+                    type="button"
                     className="project-row"
                     key={`${project.projectPath}:${collection.id}`}
                     data-testid={`archived-collection-${project.id}-${collection.id}`}

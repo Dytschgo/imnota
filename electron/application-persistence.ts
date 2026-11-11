@@ -1,4 +1,4 @@
-import { afterFileCommit, atomicWrite } from './files.js';
+import { afterFileCommit, atomicWrite, type CaptureWrittenFileIdentity } from './files.js';
 import { preferenceSettingsEnvelope } from '../src/shared/preference-settings.js';
 import type { WorkspaceSettings } from '../src/shared/types.js';
 import type { PreferenceSettings, PreferenceSettingsResult } from '../src/shared/preferences.js';
@@ -13,10 +13,11 @@ export async function writeApplicationFile(
     recordSelfWrite(path: string, content: string | Uint8Array): void;
     invalidate(path: string): void;
   },
+  captureIdentity?: CaptureWrittenFileIdentity,
 ): Promise<void> {
   await host.diagnostics.filesystem('write', filePath, () =>
     afterFileCommit(
-      () => atomicWrite(filePath, content),
+      () => atomicWrite(filePath, content, captureIdentity),
       () => {
         host.recordSelfWrite(filePath, content);
         host.invalidate(filePath);

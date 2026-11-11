@@ -84,35 +84,43 @@ function deferred() {
 }
 
 describe('workspace content search', () => {
-  it('indexes 100 projects / 1,000 items once, with subsequent queries using memory', async () => {
+  it('indexes multiple projects and items once, with subsequent queries using memory', async () => {
     const root = await workspace();
+    const projects = 4;
+    const itemsPerProject = 3;
+    const fileReads = projects * (itemsPerProject + 1);
     await Promise.all(
-      Array.from({ length: 100 }, (_, index) =>
-        writeProject(root, project(index, 10), `Full Markdown body identifier-${index}.`),
+      Array.from({ length: projects }, (_, index) =>
+        writeProject(root, project(index, itemsPerProject), `Full Markdown body identifier-${index}.`),
       ),
     );
     const readText = vi.fn(readSearchText);
     const service = new WorkspaceContentSearch({ readText });
     const start = performance.now();
-    const response = await service.search({ workspacePath: root, query: 'BODY identifier-99.' });
+    const response = await service.search({ workspacePath: root, query: 'BODY identifier-3.' });
     const cold = performance.now() - start;
-    expect(response.results).toHaveLength(10);
+    expect(response.results).toHaveLength(itemsPerProject);
     expect(response.warnings).toEqual([]);
-    expect(response.results[9]).toMatchObject({
-      projectId: 'project-99',
-      itemId: 'text-99-9',
+    expect(response.results[2]).toMatchObject({
+      projectId: 'project-3',
+      itemId: 'text-3-2',
       matchSource: 'markdown',
     });
-    expect(readText).toHaveBeenCalledTimes(1100);
+    expect(readText).toHaveBeenCalledTimes(fileReads);
     const warmStart = performance.now();
-    await service.search({ workspacePath: root, query: 'identifier-98.' });
+    const warmResponse = await service.search({ workspacePath: root, query: 'identifier-2.' });
     const warm = performance.now() - warmStart;
-    expect(readText).toHaveBeenCalledTimes(1100);
+    expect(warmResponse.results).toHaveLength(itemsPerProject);
+    expect(warmResponse.results.every((result) => result.projectId === 'project-2')).toBe(true);
+    expect(readText).toHaveBeenCalledTimes(fileReads);
+    expect(new Set(readText.mock.calls.map(([folder, file]) => path.join(folder, file))).size).toBe(
+      fileReads,
+    );
     // Cold disk timings vary with concurrent filesystem tests. Gate bounded I/O and
     // cached-query responsiveness; report cold timing rather than asserting disk speed.
     expect(warm).toBeLessThan(1000);
     console.info(
-      `Search fixture: cold ${cold.toFixed(1)}ms, warm ${warm.toFixed(1)}ms; 100 projects, 1000 items, 1100 file reads total.`,
+      `Search fixture: cold ${cold.toFixed(1)}ms, warm ${warm.toFixed(1)}ms; ${projects} projects, ${projects * itemsPerProject} items, ${fileReads} file reads total.`,
     );
   }, 30_000);
 

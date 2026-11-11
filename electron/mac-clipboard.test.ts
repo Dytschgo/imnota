@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { workflowOutcome } from './workflow-errors.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   macFilePair,
@@ -76,3 +77,17 @@ it('allowlists and bounds native type names before any diagnostic can retain the
   });
   expect(JSON.stringify(result)).not.toContain('secret');
 });
+
+it.each(['failure', 'timeout', 'malformed JSON', 'unexpected read-back'])(
+  'reports macOS %s as a rejected clipboard write',
+  async (failure) => {
+    const run: RunOsascript = async () => {
+      if (failure === 'failure' || failure === 'timeout') throw new Error(failure);
+      return failure === 'malformed JSON' ? 'not JSON' : '{"not":"a list"}';
+    };
+    await expect(workflowOutcome(() => writeMacClipboardFiles(pair, {}, run))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'clipboard-limit', retryable: false, details: { reason: 'rejected' } },
+    });
+  },
+);

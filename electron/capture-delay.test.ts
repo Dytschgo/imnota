@@ -43,28 +43,23 @@ describe('capture delay', () => {
     expect(clock.pending).toBe(0);
   });
 
-  it('ticks a 3s countdown then elapses', async () => {
+  it.each([3, 5])('ticks a %ss countdown then elapses', async (seconds) => {
     const clock = manualTimer();
     const ticks: number[] = [];
-    const session = new CaptureDelaySession(3, clock.timer, (remaining) => ticks.push(remaining));
-    expect(ticks).toEqual([3]);
-    clock.advance(1000);
-    expect(ticks).toEqual([3, 2]);
-    clock.advance(1000);
-    expect(ticks).toEqual([3, 2, 1]);
+    const session = new CaptureDelaySession(seconds, clock.timer, (remaining) => ticks.push(remaining));
+    expect(ticks).toEqual([seconds]);
+    if (seconds === 3) {
+      for (let elapsed = 1; elapsed < seconds; elapsed += 1) {
+        clock.advance(1000);
+        expect(ticks).toEqual(Array.from({ length: elapsed + 1 }, (_, index) => seconds - index));
+      }
+    } else {
+      clock.advance((seconds - 1) * 1000);
+      expect(ticks).toEqual(Array.from({ length: seconds }, (_, index) => seconds - index));
+    }
     clock.advance(1000);
     await expect(session.result).resolves.toBe('elapsed');
     expect(clock.pending).toBe(0);
-  });
-
-  it('ticks a 5s countdown then elapses', async () => {
-    const clock = manualTimer();
-    const ticks: number[] = [];
-    const session = new CaptureDelaySession(5, clock.timer, (remaining) => ticks.push(remaining));
-    clock.advance(4000);
-    expect(ticks).toEqual([5, 4, 3, 2, 1]);
-    clock.advance(1000);
-    await expect(session.result).resolves.toBe('elapsed');
   });
 
   it('keeps cancellation from becoming a late elapsed overlay start', async () => {
