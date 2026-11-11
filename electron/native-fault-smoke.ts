@@ -304,7 +304,12 @@ async function restoreCase(
       : state.pendingMetadata && !state.acceptedRevision,
   );
   const text = await driver.evaluate<string>(`document.querySelector(${json(selector)}).innerText`);
-  requireThat(text.includes(COMMITTED_WRITE_WARNING), 'Restore omitted the complete durability warning.');
+  const adoptionRefusal = ['restore-later-change', 'restore-renderer-readback'].includes(
+    controller.proof.caseSet,
+  );
+  let warningText = text;
+  if (!adoptionRefusal)
+    requireThat(text.includes(COMMITTED_WRITE_WARNING), 'Restore omitted the complete durability warning.');
   if (success) {
     requireThat(
       text.includes(`Restored “${record.title}”.`),
@@ -322,6 +327,27 @@ async function restoreCase(
       !(await driver.exists({ selector: `${selector} [role="status"]`, text: 'Restored' })),
       'Unconfirmed Restore announced completion.',
     );
+  if (adoptionRefusal) {
+    requireThat(
+      text.includes('Restore could not be completed'),
+      'Adoption refusal omitted its dialog error.',
+    );
+    // Adoption failures retain the complete warning in the workspace conflict
+    // banner. Close the refusal dialog to inspect that visible, actionable state.
+    await driver.press('Escape');
+    await driver.waitFor({ selector }, { absent: true });
+    await driver.waitFor({
+      selector: '[data-testid="external-change-banner"]',
+      text: COMMITTED_WRITE_WARNING,
+    });
+    warningText = await driver.evaluate<string>(
+      `document.querySelector('[data-testid="external-change-banner"]').innerText`,
+    );
+    requireThat(
+      warningText.includes(COMMITTED_WRITE_WARNING),
+      'Adoption refusal lost its durability warning.',
+    );
+  }
   const journalRoot = path.join(
     snapshot.projectPath,
     kind === 'screenshot' ? '.imnota-undo' : '.imnota-content-undo',
@@ -414,7 +440,7 @@ async function restoreCase(
   ];
   if (!success) {
     // Exercise the actual save shortcut against the refusal, never a synthetic flush result.
-    await driver.press('Escape');
+    if (!adoptionRefusal) await driver.press('Escape');
     await observedSave(controller, false, () =>
       driver.press('S', [process.platform === 'darwin' ? 'meta' : 'control']),
     );
@@ -535,6 +561,10 @@ async function restoreCase(
     beforeFiles,
     afterFiles,
     externalEvidence,
+    warning: {
+      location: adoptionRefusal ? 'workspace-external-change-banner' : 'recently-deleted-dialog',
+      text: warningText,
+    },
     revisions: {
       deleted: faultDigest(undoBefore),
       restored: faultDigest(restored),
