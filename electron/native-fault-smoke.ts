@@ -193,7 +193,7 @@ async function warningLayouts(driver: NativeUiDriver, directory: string) {
 }
 
 async function waitObservation(
-  controller: OwnedSmokeFaultController,
+  controller: Pick<OwnedSmokeFaultController, 'command'>,
   predicate: (value: Awaited<ReturnType<typeof controller.command>>) => boolean,
 ) {
   const deadline = Date.now() + 15000;
@@ -203,6 +203,31 @@ async function waitObservation(
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   throw new Error('The real renderer did not reach the required fault postcondition in 15 seconds.');
+}
+
+export async function editExternalFaultMember(
+  controller: Pick<OwnedSmokeFaultController, 'command' | 'caseEvents'>,
+  externalPath: string,
+  expectedRevision: string,
+) {
+  const prior = await fs.readFile(externalPath);
+  const priorStat = await fs.stat(externalPath);
+  const next = Buffer.from(prior.toString().replace('fixture-own-', 'fixture-ext-'));
+  requireThat(
+    next.length === prior.length && !next.equals(prior),
+    'External fixture edit must be distinct and same-size.',
+  );
+  // Rendering an item after reopening does not establish that its new watch
+  // has started. Edit only after that renderer accepts the committed baseline.
+  await waitObservation(
+    controller,
+    (value) =>
+      value.acceptedRevision === expectedRevision && !value.pendingMetadata && value.nativeMutations === 0,
+  );
+  const start = controller.caseEvents.length;
+  await fs.writeFile(externalPath, next);
+  await fs.utimes(externalPath, priorStat.atime, priorStat.mtime);
+  return { prior, priorStat, next, start };
 }
 
 async function observedSave(
@@ -513,16 +538,11 @@ async function restoreCase(
         : contentItemRelativePaths(snapshot.project.contentItems!.find((value) => value.kind === 'text')!)
             .markdown!;
     const externalPath = path.join(snapshot.projectPath, relative);
-    const prior = await fs.readFile(externalPath);
-    const priorStat = await fs.stat(externalPath);
-    const next = Buffer.from(prior.toString().replace('fixture-own-', 'fixture-ext-'));
-    requireThat(
-      next.length === prior.length && !next.equals(prior),
-      'External fixture edit must be distinct and same-size.',
+    const { prior, priorStat, next, start } = await editExternalFaultMember(
+      controller,
+      externalPath,
+      faultDigest(disk),
     );
-    const start = controller.caseEvents.length;
-    await fs.writeFile(externalPath, next);
-    await fs.utimes(externalPath, priorStat.atime, priorStat.mtime);
     const barrier = await waitObservation(controller, (value) => Boolean(value.externalChange));
     requireThat(
       controller.caseEvents
