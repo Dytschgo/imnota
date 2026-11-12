@@ -324,6 +324,10 @@ async function restoreCase(
     (value) => Boolean(value.acceptedRevision) && !value.pendingMetadata && value.nativeMutations === 0,
   );
   requireThat(initial.acceptedRevision && !initial.pendingMetadata, 'Restore fixture watch is not ready.');
+  requireThat(
+    !initial.externalChange,
+    'Own fixture deletion raised an external-change barrier before Restore.',
+  );
   await driver.click({ selector: '[data-testid="recently-deleted-open"]' });
   await driver.click({ selector: `[data-testid="recently-deleted-${item.id}"] button` });
   const success = ['restore-eio', 'restore-eacces', 'restore-eperm'].includes(controller.proof.caseSet);

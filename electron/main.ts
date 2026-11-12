@@ -62,7 +62,7 @@ import {
 } from '../src/shared/utils.js';
 import { validateProject, parseProjectFile, annotationSchema, notesSchema } from '../src/shared/schema.js';
 import { assertNoLinks, CommittedWriteError, isWithin, type CaptureWrittenFileIdentity } from './files.js';
-import { persistSettings, writeApplicationFile } from './application-persistence.js';
+import { persistSettings, trashApplicationFile, writeApplicationFile } from './application-persistence.js';
 import { preventForeignNavigation } from './window-navigation.js';
 import { ThumbnailCache, thumbnailSize } from './thumbnail-cache.js';
 import { ensureCollection, migrateProjectWithBackup, screenshotPath } from './collections.js';
@@ -1979,10 +1979,12 @@ function registerIpc(): void {
     restoreVerificationReadHooks: (projectPath) => smokeFaultController?.confirmationReadHooks(projectPath),
     ownsRestoreRevision: (projectPath, revision) =>
       projectWatchManager?.hasSelfProjectRevision(projectPath, revision) ?? false,
-    trashItem: async (target) => {
-      await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
-      projectWatchManager?.recordSelfDelete(target);
-    },
+    trashItem: (target) =>
+      trashApplicationFile(target, {
+        diagnostics,
+        trash: (file) => shell.trashItem(file),
+        recordSelfDelete: (file) => projectWatchManager?.recordSelfDelete(file),
+      }),
     validatePng: (png, expected) => {
       const image = nativeImage.createFromBuffer(Buffer.from(png));
       const actual = image.getSize();

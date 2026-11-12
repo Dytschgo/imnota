@@ -9,6 +9,22 @@ import type { WorkspaceSettings } from '../src/shared/types.js';
 import type { PreferenceSettings, PreferenceSettingsResult } from '../src/shared/preferences.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 
+export async function trashApplicationFile(
+  filePath: string,
+  host: {
+    diagnostics: PersistenceDiagnostics;
+    trash(path: string): Promise<void>;
+    recordSelfDelete(path: string): void;
+  },
+): Promise<void> {
+  await host.diagnostics.filesystem('trash', filePath, async () => {
+    await host.trash(filePath);
+    // The watch can flush while the diagnostic completion record is syncing.
+    // Publish only a completed trash, before diagnostics can delay its marker.
+    host.recordSelfDelete(filePath);
+  });
+}
+
 /** Shared by main and integration tests: publication precedes diagnostic completion or rejection. */
 export async function writeApplicationFile(
   filePath: string,
