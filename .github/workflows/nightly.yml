@@ -99,6 +99,9 @@ jobs:
       - run: bash -n scripts/install.sh
 
   package:
+    permissions:
+      contents: read
+      actions: read
     # Build alongside quality; publish still requires both to pass.
     needs: guard
     if: needs.guard.outputs.skip != 'true'
@@ -234,13 +237,16 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
       - name: Download native fault evidence for manifest verification
+        id: native_fault_download
         if: always() && steps.native_fault_upload.outcome == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: native-fault-evidence-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.native_fault_upload.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
           path: ${{ runner.temp }}/imnota-verification-artifacts-native-faults-downloaded/
       - name: Verify downloaded native fault evidence manifest
-        if: always() && steps.native_fault_upload.outcome == 'success'
+        if: always() && steps.native_fault_download.outcome == 'success'
         run: node scripts/smoke.mjs --verify-fault-evidence "${{ runner.temp }}/imnota-verification-artifacts-native-faults-downloaded"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

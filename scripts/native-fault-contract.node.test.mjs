@@ -80,6 +80,23 @@ describe('closed packaged native fault gate', () => {
       assert.match(source, /node scripts\/smoke\.mjs --verify-fault-evidence/);
       assert.match(source, /name: Download native fault evidence for manifest verification/);
       assert.doesNotMatch(upload, /continue-on-error/);
+      const packageJob = load(source).jobs.package;
+      const download = packageJob.steps.find(
+        (step) => step.name === 'Download native fault evidence for manifest verification',
+      );
+      const verify = packageJob.steps.find(
+        (step) => step.name === 'Verify downloaded native fault evidence manifest',
+      );
+      assert.equal(packageJob.permissions.actions, 'read');
+      assert.equal(packageJob.permissions.contents, 'read');
+      assert.equal(download.with['artifact-ids'], '${{ steps.native_fault_upload.outputs.artifact-id }}');
+      assert.equal(download.with['github-token'], '${{ github.token }}');
+      assert.equal(download.with['run-id'], '${{ github.run_id }}');
+      assert.equal(download.with.name, undefined);
+      assert.equal(download.id, 'native_fault_download');
+      assert.equal(verify.if, "always() && steps.native_fault_download.outcome == 'success'");
+      assert.notEqual(download['continue-on-error'], true);
+      assert.notEqual(verify['continue-on-error'], true);
       if (name === 'nightly') {
         assert.match(source, /needs: \[guard, quality, package\]/);
         assert.match(source, /pattern: nightly-\*/);
