@@ -107,11 +107,15 @@ if (receiver) {
       requestId: command.requestId,
       event: command.action,
     });
-    if (command.action === 'disarm') adapter = undefined;
+    if (command.action === 'disarm') {
+      adapter = undefined;
+      lastCommand = undefined;
+    }
     notify();
   });
   window.addEventListener('pagehide', () => {
     adapter = undefined;
+    lastCommand = undefined;
     armedSave = undefined;
     failure = undefined;
     listeners.clear();

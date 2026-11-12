@@ -19,7 +19,12 @@ const receiver = vi.hoisted(() => {
   Object.assign(window, { imnotaNativeFault: value });
   return value;
 });
-import { NativeFaultProbe, registerNativeFaultAdapter, observeNativeFaultSave } from './native-fault-probe';
+import {
+  NativeFaultProbe,
+  registerNativeFaultAdapter,
+  observeNativeFaultSave,
+  reportNativeFaultTransition,
+} from './native-fault-probe';
 
 const projectId = 'project_22222222-2222-4222-8222-222222222222';
 function command(action: FaultCommand['action'], extra: Partial<FaultCommand> = {}) {
@@ -161,3 +166,29 @@ it.each([true, false])('observes a newly armed save through delayed completion (
   await observeNativeFaultSave(async () => true);
   expect(receiver.report).not.toHaveBeenCalled();
 });
+
+it.each(['disarm', 'pagehide'] as const)(
+  'does not send stale revision receipts after %s when a new fixture adapter registers',
+  (lifecycle) => {
+    adapter();
+    command('observe');
+    reportNativeFaultTransition();
+    expect(receiver.report).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'state:revision' }));
+    if (lifecycle === 'disarm') command('disarm');
+    else window.dispatchEvent(new Event('pagehide'));
+    receiver.report.mockClear();
+    const next = adapter();
+    next.state.projectPath = '/synthetic-next';
+    reportNativeFaultTransition();
+    expect(receiver.report).not.toHaveBeenCalled();
+    command('observe', { projectPath: '/synthetic-next', requestId: '44444444-4444-4444-8444-444444444444' });
+    reportNativeFaultTransition();
+    expect(receiver.report).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        projectPath: '/synthetic-next',
+        requestId: '44444444-4444-4444-8444-444444444444',
+        event: 'state:revision',
+      }),
+    );
+  },
+);
