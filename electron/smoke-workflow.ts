@@ -1817,7 +1817,11 @@ async function exercisePreferencesAndChannel(
     if (process.platform === 'darwin') {
       // Presentation evidence only: native helper signaling and archive transactions
       // have separate controls. Never install an update into this smoke session.
-      for (const state of ['available', 'downloading', 'downloaded'] as const) {
+      for (const { state, filename } of [
+        { state: 'available', filename: 'feedback-macos-update-available.png' },
+        { state: 'downloading', filename: 'feedback-macos-update-downloading.png' },
+        { state: 'downloaded', filename: 'feedback-macos-update-downloaded.png' },
+      ] as const) {
         driver.browserWindow.webContents.send('update:status', {
           state,
           channel: 'nightly',
@@ -1833,10 +1837,7 @@ async function exercisePreferencesAndChannel(
             text: state === 'available' ? 'Download update' : 'Restart to install',
             exact: true,
           });
-        if (artifactDirectory)
-          artifacts.push(
-            await driver.capture(artifactDirectory, `feedback-macos-update-${state}.png`, screenshot),
-          );
+        if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, filename, 'none'));
       }
     }
     driver.browserWindow.webContents.send('update:status', {
