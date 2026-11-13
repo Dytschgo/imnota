@@ -729,6 +729,10 @@ export async function exerciseRegionCapture(
   )
     throw new Error('Cancelled capture changed the project screenshot records.');
 
+  await driver.evaluate(`(async () => {
+    const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:true}});
+    if(!result.ok) throw new Error(result.error.message);
+  })()`);
   overlay = await startCapture(driver);
   await selectRegion(overlay);
   if (artifactDirectory)
@@ -744,6 +748,13 @@ export async function exerciseRegionCapture(
     (screenshot) => !baseline.screenshots.some((previous) => previous.id === screenshot.id),
   );
   if (!captured) throw new Error('Saved capture did not create a screenshot record.');
+  if (
+    captured.source?.via !== 'capture' ||
+    Number.isNaN(Date.parse(captured.source.capturedAt)) ||
+    captured.source.windowTitle ||
+    captured.source.url
+  )
+    throw new Error('Region capture source metadata is missing or invents a window/URL.');
   await driver.waitFor({ selector: `[data-testid="screenshot-${captured.id}"]` });
   const selected = await driver.evaluate<boolean>(
     `document.querySelector(${JSON.stringify(`[data-testid="screenshot-${captured.id}"]`)})?.closest('.shot-item')?.classList.contains('active') === true`,
@@ -915,5 +926,9 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
+  await driver.evaluate(`(async () => {
+    const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:false}});
+    if(!result.ok) throw new Error(result.error.message);
+  })()`);
   return { artifacts, skipped: false, displays, crossDisplay };
 }

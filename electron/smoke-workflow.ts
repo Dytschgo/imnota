@@ -21,6 +21,7 @@ import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
+import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
@@ -3583,6 +3584,8 @@ export async function runSmokeWorkflow(
   await checkpoint('local history restore and reopen complete; capturing light feature views');
   artifacts.push(...(await captureNextFeatureLightViews(driver, artifactDirectory)));
 
+  artifacts.push(...(await exerciseSourceContext(driver, host, fixtureRoot, artifactDirectory)));
+  assertions.push('source opt-in import, inspector edit/reopen/remove and export suppression while off');
   const captureSmoke = await exerciseRegionCapture(driver, host, artifactDirectory);
   if (!captureSmoke.skipped) {
     artifacts.push(...captureSmoke.artifacts);

@@ -31,7 +31,7 @@ export function SourceInfoSection({ source, enabled, onUpdateShot }: SourceInfoS
         <p className="section-intro">
           {enabled
             ? 'No source info was recorded for this screenshot.'
-            : 'Source info is off. Turn it on in Settings → Features to record it for new screenshots.'}
+            : 'Source info is off. To record it for new screenshots, turn it on in Settings → Features.'}
         </p>
       ) : (
         <>
@@ -43,18 +43,21 @@ export function SourceInfoSection({ source, enabled, onUpdateShot }: SourceInfoS
           </p>
           <TextInput
             label="App"
+            data-testid="source-app"
             value={source.app ?? ''}
             maxLength={300}
             onChange={(event) => update('app', event.target.value)}
           />
           <TextInput
             label="Window title"
+            data-testid="source-window-title"
             value={source.windowTitle ?? ''}
             maxLength={300}
             onChange={(event) => update('windowTitle', event.target.value)}
           />
           <TextInput
             label="URL"
+            data-testid="source-url"
             type="url"
             placeholder="https://"
             value={source.url ?? ''}

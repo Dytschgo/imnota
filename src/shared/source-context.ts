@@ -44,7 +44,9 @@ export function cleanSourceUrl(value: string | null | undefined): string | undef
   if (!text) return undefined;
   try {
     const url = new URL(text);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.href.length <= SOURCE_URL_LIMIT
+      ? url.href
+      : undefined;
   } catch {
     return undefined;
   }
@@ -61,7 +63,7 @@ const optionalText = z
 export const screenshotSourceSchema = z
   .object({
     via: z.enum(['capture', 'import']),
-    capturedAt: z.string().min(1).max(40),
+    capturedAt: z.iso.datetime({ offset: true }).max(40),
     app: optionalText,
     windowTitle: optionalText,
     url: z
@@ -124,8 +126,9 @@ export function createScreenshotSource(input: {
   url?: string | null;
   display?: string | null;
 }): ScreenshotSource {
-  const windowTitle = cleanSourceText(input.windowTitle);
-  const app = cleanSourceText(input.app) ?? (windowTitle ? appFromWindowTitle(windowTitle) : undefined);
+  const completeTitle = cleanSourceText(input.windowTitle, Number.MAX_SAFE_INTEGER);
+  const windowTitle = completeTitle?.slice(0, SOURCE_TEXT_LIMIT);
+  const app = cleanSourceText(input.app) ?? (completeTitle ? appFromWindowTitle(completeTitle) : undefined);
   const source: ScreenshotSource = { via: input.via, capturedAt: input.now.toISOString() };
   if (app) source.app = app;
   if (windowTitle) source.windowTitle = windowTitle;

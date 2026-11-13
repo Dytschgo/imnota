@@ -51,6 +51,31 @@ describe('screenshot source info', () => {
     expect(cleanSourceUrl('not a url')).toBeUndefined();
   });
 
+  it('keeps normalized URLs within the persisted limit across reopening', () => {
+    const input = `https://example.com/${'ü'.repeat(400)}`;
+    expect(cleanSourceUrl(input)).toBeUndefined();
+    const source = screenshotSourceSchema.parse({ via: 'import', capturedAt: now.toISOString(), url: input });
+    expect(source.url).toBeUndefined();
+    expect(screenshotSourceSchema.parse(JSON.parse(JSON.stringify(source)))).toEqual(source);
+  });
+
+  it.each(['not-a-date', 'bad\u202e\nvalue', '2026-02-30T12:00:00Z'])(
+    'rejects damaged capture time %j',
+    (capturedAt) => {
+      expect(screenshotSourceSchema.safeParse({ via: 'capture', capturedAt }).success).toBe(false);
+    },
+  );
+
+  it('infers an app before truncating a long window title', () => {
+    const source = createScreenshotSource({
+      via: 'capture',
+      now,
+      windowTitle: `${'x'.repeat(350)} - Google Chrome`,
+    });
+    expect(source.app).toBe('Google Chrome');
+    expect(source.windowTitle).toHaveLength(300);
+  });
+
   it('writes escaped Markdown lines and nothing for a missing source', () => {
     expect(sourceMarkdownLines(undefined)).toEqual([]);
     const lines = sourceMarkdownLines({
