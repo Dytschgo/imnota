@@ -24,6 +24,20 @@ function native(
 }
 
 describe('identifiable capture windows', () => {
+  it('preserves the inferred app before shortening a native title for the overlay', () => {
+    const [window] = identifiableCaptureWindows(
+      [
+        native({
+          id: 'long',
+          title: `${'x'.repeat(350)} - Google Chrome`,
+          bounds: { x: 10, y: 10, width: 200, height: 120 },
+        }),
+      ],
+      [display],
+    );
+    expect(window?.title).toHaveLength(120);
+    expect(window?.app).toBe('Google Chrome');
+  });
   it('keeps z-order, drops shell chrome, and clips to the captured display', () => {
     const windows = identifiableCaptureWindows(
       [

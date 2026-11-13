@@ -285,6 +285,7 @@ export default function App() {
   const promptBundles = usePromptBundleController({
     getSavedContext: getSavedPromptContext,
     getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+    getIncludeSourceContext: () => preferences.settings.promptExport.includeSourceContext,
   });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
@@ -2410,6 +2411,7 @@ export default function App() {
           />
         ) : (
           <Workspace
+            sourceContextEnabled={preferences.settings.promptExport.includeSourceContext}
             content={contentPersistence.content}
             contentLoading={contentPersistence.loading}
             contentSaveState={contentPersistence.saveState}

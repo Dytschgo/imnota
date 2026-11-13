@@ -141,6 +141,9 @@ import type {
 import { CAPTURE_OVERLAY_MODES, MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS } from '../src/shared/capture.js';
 import { LastCaptureRegionMemory, lastCaptureRegionForDisplay } from './last-capture-region.js';
 import { identifiableCaptureWindows, type CaptureWindowCandidate } from './capture-windows.js';
+import type { CaptureSourceDetails } from './capture-source.js';
+import { sourceWindowFixtureTitle } from './source-window-fixture.js';
+import { createScreenshotSource, type ScreenshotSource } from '../src/shared/source-context.js';
 import { tryListWindowsCaptureWindows } from './windows-capture-windows.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 import {
@@ -960,6 +963,13 @@ async function readScreenshotFiles(projectPath: string, screenshot: ScreenshotRe
   };
 }
 
+/** Source info is recorded only while the user's setting is on; nothing leaves the device. */
+function recordedSource(source: () => ScreenshotSource): ScreenshotSource | undefined {
+  return preferenceSettingsResult.settings.promptExport.includeSourceContext ? source() : undefined;
+}
+
+const withSource = (source: ScreenshotSource | undefined) => (source ? { source } : {});
+
 async function importOne(
   projectPath: string,
   sourcePath: string,
@@ -972,6 +982,7 @@ async function importOne(
     sourcePath,
     originalFilename,
     collectionId,
+    recordedSource(() => createScreenshotSource({ via: 'import', now: new Date() })),
   );
 }
 
@@ -1248,15 +1259,25 @@ function macCaptureHelperLocation(): MacCaptureHelperLocation {
 async function listIdentifiableCaptureWindows(
   displays: readonly CaptureDisplay[],
 ): Promise<CaptureWindowCandidate[]> {
-  if (process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic') return [];
+  const synthetic = process.env.IMNOTA_SMOKE_CAPTURE_SOURCE === 'synthetic';
+  const fixtureTitle = sourceWindowFixtureTitle();
+  if (synthetic && !fixtureTitle) return [];
   // macOS lists windows through a bundled read-only WindowServer helper; a failure
   // leaves Area and Display available and Window mode explains it cannot identify windows.
-  if (process.platform === 'darwin')
-    return listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => []);
-  return identifiableCaptureWindows(
-    tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
-    displays,
-  );
+  const windows =
+    process.platform === 'darwin'
+      ? await listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(
+          (error: unknown) => {
+            // A synthetic fixture must expose provider failures instead of looking like an absent window.
+            if (fixtureTitle) throw error;
+            return [];
+          },
+        )
+      : identifiableCaptureWindows(
+          tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
+          displays,
+        );
+  return synthetic ? windows.filter((window) => window.title === fixtureTitle) : windows;
 }
 
 async function chooseCaptureRegion(
@@ -1378,6 +1399,8 @@ async function insertCapturedPng(
   collectionId: string,
   png: Buffer,
   assertAdmission: () => void,
+  sourceDetails: CaptureSourceDetails = {},
+  capturedAt = new Date(),
 ): Promise<{
   snapshot: ProjectSnapshot;
   screenshotId: string;
@@ -1445,6 +1468,9 @@ async function insertCapturedPng(
     originalWidth: dimensions.width,
     originalHeight: dimensions.height,
     includeInExport: true,
+    ...withSource(
+      recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...sourceDetails })),
+    ),
   };
   project.screenshots.push(screenshot);
   collection.archived = false;
@@ -2360,6 +2386,7 @@ app.whenReady().then(async () => {
         return captureGlobalShortcut.registeredAccelerator !== null;
       },
       readProject,
+      listCaptureWindows: listIdentifiableCaptureWindows,
       async restoreRecovery(projectPath) {
         return openWithRecovery(projectPath, 'restore');
       },

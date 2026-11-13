@@ -31,6 +31,7 @@ Each screenshot record contains:
 - `includeInExport` and a manually sortable `position`.
 - Creation/update timestamps, stored filename, dimensions and relative annotation/description paths.
 - An optional conflict marker for externally conflicting copies.
+- An optional `source` object recorded at capture or import while **Record source info** is on: `via` (`capture` or `import`), `capturedAt` (ISO 8601), and optional `app`, `windowTitle`, `url` (http or https only) and `display` (for example `Display 2 of 3`). Text fields are at most 300 characters and the URL at most 2,000. A damaged `source` is dropped when the project is read instead of making the project unreadable. Older Imnota versions ignore the field and drop it if they save that project.
 
 The record's `position` orders screenshots within its collection. Picture numbers are not stored identities: export derives them from the current order. Excluding or reordering a screenshot therefore never changes internal IDs.
 

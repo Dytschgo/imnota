@@ -72,6 +72,7 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
           trayAvailable: host.trayAvailable,
           globalCaptureShortcutRegistered: host.globalCaptureShortcutRegistered,
           readProject: host.readProject,
+          listCaptureWindows: host.listCaptureWindows,
           restoreRecovery: host.restoreRecovery,
           readSettings: host.readSettings,
           async approveNextBackupRestore(projectPath) {

@@ -231,6 +231,8 @@ export interface PromptBundleControllerEngineOptions {
   rendering?: Partial<PromptBundleControllerRendering>;
   includeMasterOverview?: boolean;
   getIncludeRecognisedText?(): boolean;
+  /** Write each screenshot's recorded source info into the Markdown. Defaults to off. */
+  getIncludeSourceContext?(): boolean;
 }
 
 export class PromptBundleControllerEngine {
@@ -242,6 +244,7 @@ export class PromptBundleControllerEngine {
   private readonly getSavedContext: () => Promise<SavedPromptExportContext>;
   private readonly includeMasterOverview: boolean;
   private readonly getIncludeRecognisedText: () => boolean;
+  private readonly getIncludeSourceContext: () => boolean;
   private activeRun?: ActiveRun;
   private latestPlan?: PreparedPromptPlan;
   private latestArtifact?: PromptExportArtifact;
@@ -258,6 +261,7 @@ export class PromptBundleControllerEngine {
     this.rendering = { ...defaultRendering(), ...options.rendering };
     this.includeMasterOverview = options.includeMasterOverview ?? true;
     this.getIncludeRecognisedText = options.getIncludeRecognisedText ?? (() => true);
+    this.getIncludeSourceContext = options.getIncludeSourceContext ?? (() => false);
     this.pipeline = new PromptExportPipeline({
       bridge: this.bridge,
       rendering: this.rendering,
@@ -479,6 +483,7 @@ export class PromptBundleControllerEngine {
       signal: run.controller.signal,
       reuseCheck,
       includeRecognisedText: this.getIncludeRecognisedText(),
+      includeSourceContext: this.getIncludeSourceContext(),
       assertActive: () => this.assertActive(run),
       loadContentItem: (input) => this.loadContentItem(input),
       loadScreenshotContent: (input) => this.bridge.loadScreenshotContent(input),

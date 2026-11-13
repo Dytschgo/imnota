@@ -28,6 +28,8 @@ const DrawingEditor = lazy(() =>
 );
 
 export interface WorkspaceProps {
+  /** Source info switch in Settings → Features; the inspector explains its effect. */
+  sourceContextEnabled?: boolean;
   content?: ContentItemContent | null;
   contentLoading?: boolean;
   contentSaveState?: 'saved' | 'saving' | 'error';
@@ -488,6 +490,7 @@ export function Workspace(props: WorkspaceProps) {
                 }}
                 onDuplicate={props.onDuplicate}
                 duplicateShortcut={props.shortcutLabels.duplicate}
+                sourceContextEnabled={props.sourceContextEnabled}
               />
             )}
           </div>
