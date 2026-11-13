@@ -27,8 +27,12 @@ in_app=0
 app_pid=""
 install_requested=0
 app_quit_observed=0
+replacement_shutdown_confirmed=1
+original_app_restored=0
+failure_reason=""
 
 die() {
+  failure_reason="$*"
   printf 'Update failed: %s\n' "$*" >&2
   exit 1
 }
@@ -63,6 +67,7 @@ restore_previous_version() {
   fi
 
   if ! quiesce_replacement "$app_path"; then
+    replacement_shutdown_confirmed=0
     keep_staging=1
     warn "Failed replacement preserved at: $stage_dir/failed-${APP_NAME}.app (or $app_path if moving it fails). Quit that process before reopening the restored app."
   fi
@@ -89,15 +94,57 @@ restore_previous_version() {
 
   backup_path=""
   rollback_owned=0
+  original_app_restored=1
   return 0
 }
 
+show_update_failure() {
+  # Fixed AppleScript; paths and failure text are data, never script source.
+  /usr/bin/osascript - "$1" <<'APPLESCRIPT'
+on run argv
+  display alert "Imnota update failed" message (item 1 of argv) as critical buttons {"OK"} default button "OK"
+end run
+APPLESCRIPT
+}
+
+report_update_failure() {
+  local reopened=$1 message report_path=""
+  printf -v message 'Imnota update failed.\n%s\n\n' "${failure_reason:-The update stopped before installation completed.}"
+  if (( rollback_failed != 0 )); then
+    message+="Automatic restoration did not complete. Preserve the previous app at: $backup_path"
+  elif (( replacement_shutdown_confirmed == 0 )); then
+    message+="The previous app was restored, but the failed replacement may still be running. Quit that process before reopening the restored app."
+  elif (( reopened != 0 )); then
+    message+="Your previous app was reopened."
+  else
+    message+="Imnota could not be reopened automatically. The installation path is: $app_path"
+  fi
+  if [[ -n "$stage_dir" ]]; then
+    message+=$'\n\nRecovery files: '"$stage_dir"
+    if safe_physical_directory "$stage_dir"; then
+      report_path="$stage_dir/update-result.txt"
+      # Never overwrite a pre-existing file, including a symlink, even inside owned staging.
+      if (umask 077; set -C; printf '%s\nRecovery report: %s\n' "$message" "$report_path" > "$report_path"); then
+        message+=$'\nRecovery report: '"$report_path"
+      else
+        warn "The recovery report could not be written; preserved files: $stage_dir"
+      fi
+    fi
+  fi
+  printf '%s\n' "$message" >&2
+  show_update_failure "$message" || warn "The native update failure dialog could not be shown."
+}
+
 cleanup() {
-  local status=$?
+  local status=$? reopened=0
   trap - EXIT
 
   if (( status != 0 && transaction_committed == 0 )); then
     restore_previous_version || true
+  fi
+  # The observing app is gone; retain a discoverable report beside the recovery files.
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 )); then
+    keep_staging=1
   fi
 
   if [[ -n "$stage_dir" && "$keep_staging" -eq 0 ]] && safe_physical_directory "$stage_dir"; then
@@ -109,9 +156,17 @@ cleanup() {
   release_lock
 
   # Nobody watches a background update: reopen the restored app it closed.
-  if (( status != 0 && in_app != 0 && app_quit_observed != 0 && rollback_failed == 0 )) &&
-    [[ -n "$app_path" && -d "$app_path" ]] && ! is_app_running; then
-    launch_app "$app_path" || warn "The previous Imnota version could not be reopened."
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 && rollback_failed == 0 && replacement_shutdown_confirmed != 0 )) &&
+    [[ -n "$app_path" && -d "$app_path" && ! -L "$app_path" ]] && ! is_app_running &&
+    { (( original_app_restored != 0 )) || (assert_original_app_unchanged) >/dev/null 2>&1; }; then
+    if launch_app "$app_path" && wait_for_replacement "$app_path"; then
+      reopened=1
+    else
+      warn "The previous Imnota version could not be reopened."
+    fi
+  fi
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 )); then
+    report_update_failure "$reopened"
   fi
 
   if (( status != 0 )); then

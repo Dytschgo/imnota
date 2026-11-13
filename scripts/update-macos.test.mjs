@@ -826,11 +826,12 @@ printf 'should-not-install'
   },
 );
 
-test(
-  'in-app mode reopens the restored app when the replacement fails after Imnota quit',
-  { skip: !bash },
-  () => {
-    const result = runBash(`
+for (const shutdownConfirmed of [true, false]) {
+  test(
+    `in-app failed replacement reopens only after confirmed shutdown (${shutdownConfirmed})`,
+    { skip: !bash },
+    () => {
+      const result = runBash(`
 root=$(mktemp -d)
 root="$(cd "$root" && pwd -P)"
 app_path="$root/Imnota.app"
@@ -842,8 +843,10 @@ in_app=1
 app_quit_observed=1
 verify_signature() { return 0; }
 is_app_running() { return 1; }
-# The launch stub below creates no replacement process to quiesce.
-find_replacement_pids() { replacement_pids=""; }
+# The launch stub creates no real replacement; control its shutdown outcome explicitly.
+quiesce_replacement() { return ${shutdownConfirmed ? 0 : 1}; }
+wait_for_replacement() { return 0; }
+show_update_failure() { printf '%s' "$1" > "$root/notice"; }
 launch_app() { cat "$1/version" >> "$root/launches"; printf ' ' >> "$root/launches"; [[ "$(cat "$1/version")" == old ]]; }
 set +e
 ( trap cleanup EXIT; swap_and_launch "$stage_dir/new/Imnota.app" ) > "$root/update.log" 2>&1
@@ -852,10 +855,79 @@ cat "$root/update.log"
 set -e
 [[ "$status" -ne 0 ]]
 [[ "$(cat "$app_path/version")" == old ]]
-[[ "$(cat "$root/launches")" == "new old " ]]
+[[ "$(cat "$root/launches")" == "${shutdownConfirmed ? 'new old ' : 'new '}" ]]
+[[ -f "$stage_dir/update-result.txt" && -f "$root/notice" ]]
+grep -q 'Imnota update failed' "$stage_dir/update-result.txt"
+grep -Fq "$stage_dir/update-result.txt" "$root/notice"
+${shutdownConfirmed ? '' : 'grep -q "Quit that process before reopening" "$root/notice"'}
+rm -rf "$root"
+`);
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    },
+  );
+}
+
+test('an in-app failure never reopens an independently replaced bundle', { skip: !bash }, () => {
+  const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+app_path="$root/Imnota.app"
+stage_dir="$root/stage"
+mkdir "$app_path" "$stage_dir"
+ORIGINAL_APP_IDENTITY="$(stat_identity "$app_path")"
+mv "$app_path" "$root/previous.app"
+mkdir "$app_path"
+in_app=1
+app_quit_observed=1
+is_app_running() { return 1; }
+launch_app() { printf unsafe > "$root/launched"; }
+wait_for_replacement() { return 0; }
+show_update_failure() { printf '%s' "$1" > "$root/notice"; }
+set +e
+( trap cleanup EXIT; exit 1 ) >/dev/null 2>&1
+status=$?
+set -e
+[[ "$status" -ne 0 && ! -e "$root/launched" ]]
+[[ -f "$root/notice" && -f "$stage_dir/update-result.txt" ]]
+rm -rf "$root"
+`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test(
+  'a recovery report collision preserves the existing file and still shows recovery instructions',
+  { skip: !bash },
+  () => {
+    const result = runBash(`
+root=$(mktemp -d)
+root="$(cd "$root" && pwd -P)"
+stage_dir="$root/stage"
+mkdir "$stage_dir"
+printf personal > "$stage_dir/update-result.txt"
+show_update_failure() { printf '%s' "$1" > "$root/notice"; }
+report_update_failure 0
+[[ "$(cat "$stage_dir/update-result.txt")" == personal ]]
+grep -Fq "Recovery files: $stage_dir" "$root/notice"
+! grep -q 'Recovery report:' "$root/notice"
 rm -rf "$root"
 `);
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  },
+);
+
+test(
+  'the native recovery dialog script compiles with failure text supplied as data',
+  { skip: process.platform !== 'darwin' },
+  (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'imnota-update-alert-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const source = fs.readFileSync(scriptPath, 'utf8').match(/<<'APPLESCRIPT'\n([\s\S]*?)\nAPPLESCRIPT/);
+    assert.ok(source, 'The fixed native alert source must be present');
+    const compiled = spawnSync('/usr/bin/osacompile', ['-o', path.join(root, 'alert.scpt'), '-'], {
+      input: source[1],
+      encoding: 'utf8',
+    });
+    assert.equal(compiled.status, 0, `${compiled.stdout}\n${compiled.stderr}`);
   },
 );
 
@@ -1295,11 +1367,9 @@ swap_and_launch "$stage_dir/new.app"
   );
 }
 
-for (const boundary of ['move-aside', 'restore']) {
-  test(
-    `updater failed ${boundary} preserves the old app and reports its actual rollback path`,
-    { skip: !bash },
-    () => {
+for (const mode of ['terminal', 'in-app']) {
+  for (const boundary of ['move-aside', 'restore']) {
+    test(`updater failed ${boundary} preserves and reports its rollback (${mode})`, { skip: !bash }, () => {
       const result = runBash(
         `
 root=$(mktemp -d)
@@ -1316,6 +1386,9 @@ verify_signature() { return 1; }
   if [[ "$2" == */.rollback-*.app && "$FAIL_BOUNDARY" == restore ]]; then return 1; fi
   command /bin/mv "$@"
 }
+in_app=${mode === 'in-app' ? 1 : 0}
+app_quit_observed=$in_app
+show_update_failure() { printf '%s' "$1" > "$root/notice"; }
 FAIL_BOUNDARY=$2
 set +e
 output=$( ( trap cleanup EXIT; swap_and_launch "$stage_dir/new.app" ) 2>&1 )
@@ -1326,12 +1399,19 @@ set -e
 [[ "$output" == *"previous app is preserved at: $root/.imnota-backups.noindex/.rollback-$$.app"* ]]
 [[ "$output" != *"installation was left in place"* ]]
 [[ -d "$stage_dir" ]]
+${
+  mode === 'in-app'
+    ? `[[ -f "$stage_dir/update-result.txt" && -f "$root/notice" ]]
+grep -Fq "$root/.imnota-backups.noindex/.rollback-$$.app" "$root/notice"
+grep -q 'Automatic restoration did not complete' "$root/notice"`
+    : ''
+}
 `,
         [boundary],
       );
       assert.equal(result.status, 0, result.stderr);
-    },
-  );
+    });
+  }
 }
 
 test(
