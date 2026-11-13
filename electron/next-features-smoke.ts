@@ -123,7 +123,8 @@ export async function exerciseNextFeatures(
       exact: true,
     });
     await driver.waitFor({
-      selector: '.prompt-bundle-state-success',
+      // The previous outcome remains visible while a second Terminal/WSL action is copying.
+      selector: '[data-testid="prompt-sharing-dialog"][aria-busy="false"] .prompt-bundle-state-success',
       text: 'Last copied: Terminal hand-off',
       exact: true,
     });
