@@ -10,7 +10,7 @@ import zlib from 'node:zlib';
 import request from 'supertest';
 import { fromBuffer } from 'yauzl';
 import { ZipArchive } from 'archiver';
-import { createService } from '../src/app.js';
+import { createService, writeArchive } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
 import { randomToken, tokenHash } from '../src/security.js';
@@ -288,6 +288,36 @@ test('creates, renders and downloads only controlled finalized artifacts', async
   assert.deepEqual([...entries.keys()].sort(), ['prompt-001.png', 'prompt.md']);
   assert.equal(entries.get('prompt.md').toString('utf8'), markdown.text);
   assert.deepEqual(entries.get('prompt-001.png'), image.body);
+});
+
+test('archive source warning removes the partial ZIP before returning an error', async (t) => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'imnota-archive-test-'));
+  t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(directory, 'prompt.md'), '# Prompt');
+  await assert.rejects(writeArchive(directory, [{ filename: 'missing.png' }]), /missing\.png|ENOENT/u);
+  assert.deepEqual(await fsp.readdir(directory), ['prompt.md']);
+});
+
+test('archive write failure returns an error without a share or staged files', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const originalCreateWriteStream = fs.createWriteStream;
+  fs.createWriteStream = (file, options) => {
+    const output = originalCreateWriteStream(file, options);
+    if (file.endsWith('archive.zip'))
+      output.once('open', () => output.destroy(new Error('simulated archive write failure')));
+    return output;
+  };
+  try {
+    const response = await share(instance);
+    assert.equal(response.status, 500);
+    assert.equal(response.body.error.code, 'internal_error');
+    assert.deepEqual(await fsp.readdir(instance.config.uploadsDir), []);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM shares').get().count, 0);
+    assert.equal(instance.db.prepare('SELECT COUNT(*) AS count FROM staging_uploads').get().count, 0);
+  } finally {
+    fs.createWriteStream = originalCreateWriteStream;
+  }
 });
 
 test('keeps archive directory traversal compatible with the patched matcher dependency', async (t) => {
