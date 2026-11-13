@@ -25,6 +25,7 @@ import type { CaptureDisplay } from '../src/shared/capture.js';
 import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
+import { exerciseScreenshotComparison } from './screenshot-comparison-smoke.js';
 import type { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import type { WindowsCopyVariantId } from '../src/shared/workflow-bridge.js';
 import {
@@ -3246,6 +3247,10 @@ export async function runSmokeWorkflow(
     assertions.push('deterministic workspace annotations after native pointer checks');
   }
   await captureWorkspaceMatrix(driver, host, projectPath, artifactDirectory, artifacts);
+  artifacts.push(...(await exerciseScreenshotComparison(driver, host, projectPath, artifactDirectory)));
+  assertions.push(
+    'native screenshot comparison selection, both role modes, saved reopen, narrow layout and relationship-only removal',
+  );
   await exercisePreferencesAndChannel(driver, host, projectPath, artifactDirectory, artifacts);
   assertions.push(
     'preferences, performance profile, update channel confirmation and persistence; native solid light text contrast',

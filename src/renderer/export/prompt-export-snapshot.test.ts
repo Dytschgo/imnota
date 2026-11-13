@@ -20,6 +20,20 @@ const snapshot: PromptCollectionInput = {
 };
 
 describe('prompt export snapshot identity', () => {
+  it('invalidates a saved plan when comparison membership or roles change', async () => {
+    const comparison = { kind: 'current-expected' as const, leftId: 'one', rightId: 'two' };
+    const plain = await fingerprintPromptExportSnapshot(snapshot);
+    const paired = await fingerprintPromptExportSnapshot({ ...snapshot, comparison });
+    const reversed = await fingerprintPromptExportSnapshot({
+      ...snapshot,
+      comparison: { ...comparison, leftId: 'two', rightId: 'one' },
+    });
+    const reviewed = await fingerprintPromptExportSnapshot({
+      ...snapshot,
+      comparison: { ...comparison, kind: 'before-after' },
+    });
+    expect(new Set([plain, paired, reversed, reviewed]).size).toBe(4);
+  });
   it('uses a versioned stable fingerprint for the same saved input', async () => {
     expect(PROMPT_EXPORT_SNAPSHOT_VERSION).toBe(3);
     await expect(fingerprintPromptExportSnapshot(snapshot)).resolves.toBe(

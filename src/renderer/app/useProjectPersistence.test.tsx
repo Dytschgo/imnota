@@ -1623,4 +1623,63 @@ describe('useProjectPersistence', () => {
     expect(result.current.imageLoadFailed).toBe(false);
     expect(result.current.loadedScreenshotId).toBe('two');
   });
+  it.each([false, true])(
+    'preserves comparison edits across native metadata and blocks divergent external pairs (conflict=%s)',
+    async (conflict) => {
+      const source = snapshot([shot('one'), shot('two')]);
+      const local = structuredClone(source.project);
+      local.collections[0].comparison = { kind: 'current-expected', leftId: 'one', rightId: 'two' };
+      const external = structuredClone(source.project);
+      if (conflict)
+        external.collections[0].comparison = { kind: 'before-after', leftId: 'one', rightId: 'two' };
+      const mock = bridge({
+        saveScreenshotContent: vi.fn(async ({ screenshot: saved }: { screenshot: ScreenshotRecord }) => ({
+          project: { ...external, screenshots: [saved, shot('two')] },
+          savedScreenshotId: saved.id,
+          conflictCreated: false,
+          contentRevision: 'external-content',
+          projectRevision: 'external-revision',
+        })),
+      });
+      window.imnota = mock.value as never;
+      const onProject = vi.fn();
+      const { result } = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: source.project.screenshots[0],
+          onProject,
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      );
+      await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+      act(() => {
+        result.current.queueProjectMetadata(local);
+        result.current.markScreenshotDirty(shot('one', 'Edited'));
+      });
+      await act(async () => {
+        await result.current.flush();
+      });
+      expect(onProject.mock.calls.at(-1)?.[0].collections[0].comparison).toEqual(
+        local.collections[0].comparison,
+      );
+      if (conflict) {
+        expect(result.current.externalChange?.kind).toBe('metadata-conflict');
+        expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+      } else {
+        await act(async () => {
+          await result.current.flushProjectMetadata();
+        });
+        expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
+          expect.objectContaining({
+            project: expect.objectContaining({
+              collections: expect.arrayContaining([
+                expect.objectContaining({ comparison: local.collections[0].comparison }),
+              ]),
+            }),
+          }),
+        );
+      }
+    },
+  );
 });

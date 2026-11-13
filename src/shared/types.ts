@@ -117,6 +117,14 @@ export interface Collection {
   createdAt: string;
   updatedAt: string;
   overallContext: string;
+  /** Missing comparison members remain recoverable through Undo. */
+  comparison?: ScreenshotComparison;
+}
+
+export interface ScreenshotComparison {
+  kind: 'current-expected' | 'before-after';
+  leftId: string;
+  rightId: string;
 }
 
 export interface ProjectSnapshot {

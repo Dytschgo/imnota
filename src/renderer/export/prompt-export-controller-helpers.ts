@@ -1,4 +1,5 @@
 import type { TextWidthMeasurer } from '../../shared/annotation-geometry';
+import { comparisonRole, comparisonSummary } from '../../shared/screenshot-comparison';
 import { EXPORT_SAFETY_MARGIN, expandedExportBounds } from '../../shared/crop';
 import {
   type MeasuredPromptScreenshot,
@@ -248,6 +249,13 @@ export function masterMarkdown(
   ];
   const context = normalizedMarkdown(plan.overallContext);
   if (context.trim()) lines.push('## Overall context', '', context, '');
+  if (input.comparison) {
+    const visuals = (input.items ?? input.screenshots)
+      .filter((item) => item.kind !== 'text')
+      .slice()
+      .sort((a, b) => a.position - b.position);
+    lines.push(comparisonSummary(input.comparison, visuals), '');
+  }
   lines.push('## Prompt bundles', '');
   for (const bundle of plan.bundles)
     lines.push(
@@ -279,6 +287,8 @@ export function masterMarkdown(
       '',
     );
     if (item.kind === 'screenshot') {
+      const role = comparisonRole(input.comparison, item.id);
+      if (role) lines.push(`Comparison role: ${role}`, '');
       const screenshotItem = item as PromptScreenshotInput;
       lines.push(
         `Priority for agent: ${screenshotItem.priority[0].toUpperCase()}${screenshotItem.priority.slice(1)}`,

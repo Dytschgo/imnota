@@ -22,6 +22,7 @@ import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../sh
 import { collectionDisplayName } from './collection-display-name';
 import { RecentlyDeleted } from './RecentlyDeleted';
 import { orderedCollectionItems, type OrderedCollectionItem } from '../../shared/content-items';
+import { ScreenshotComparison } from './ScreenshotComparison';
 import { detectShortcutPlatform, formatShortcut, shortcutMatchesEvent } from '../../shared/shortcuts';
 import { nowIso } from '../../shared/utils';
 import { Button, IconButton, Modal, TextArea, TextInput } from '../components/ui';
@@ -237,15 +238,24 @@ export function CollectionControls({
     <div className="round-controls">
       <div className="collection-control-heading">
         <span className="field-label">Collection</span>
-        <IconButton
-          data-testid="new-collection"
-          className="new-collection-button"
-          label="New collection"
-          disabled={busy}
-          onClick={() => void apply('create')}
-        >
-          <Plus size={14} aria-hidden="true" />
-        </IconButton>
+        <div className="collection-heading-actions">
+          {onSaveProject && (
+            <ScreenshotComparison
+              key={`${store.snapshot?.projectPath}:${store.activeCollectionId}`}
+              onFlush={async () => (await onFlush()) !== false}
+              onSaveProject={onSaveProject}
+            />
+          )}
+          <IconButton
+            data-testid="new-collection"
+            className="new-collection-button"
+            label="New collection"
+            disabled={busy}
+            onClick={() => void apply('create')}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </IconButton>
+        </div>
       </div>
       <div className="collection-picker" ref={pickerRef}>
         <button

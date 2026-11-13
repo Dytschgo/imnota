@@ -281,21 +281,31 @@ button:disabled {
   min-height: 20px;
   margin-bottom: 6px;
 }
-button.icon-button.new-collection-button {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
+.collection-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+button.icon-button:is(.new-collection-button, .comparison-trigger) {
+  inline-size: 24px;
+  block-size: 24px;
+  min-block-size: 24px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
   color: var(--ink-2);
 }
-.new-collection-button:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  background: var(--surface-2);
-  color: var(--ink);
+@media (hover: hover) and (pointer: fine) {
+  :is(.new-collection-button, .comparison-trigger):hover:not(:disabled) {
+    border-color: var(--line-strong);
+    background: var(--surface-2);
+    color: var(--ink);
+  }
 }
-button.icon-button.new-collection-button svg {
+button.icon-button:is(.new-collection-button, .comparison-trigger):active:not(:disabled) {
+  background: var(--surface-2);
+}
+button.icon-button:is(.new-collection-button, .comparison-trigger) svg {
   color: inherit;
 }
 .collection-picker {

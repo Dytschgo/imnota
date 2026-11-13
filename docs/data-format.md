@@ -22,7 +22,13 @@ collections/001-collection/exports/Collection 01 - 260907-184205/
 
 Project names and descriptions can be edited without changing the project ID or folder. The optional `icon` field stores a predefined icon key, with the default project icon used for older files. Archiving changes the project's status rather than moving or deleting its content. Metadata edits and archive/restore operations check the expected project revision before committing, so a stale window cannot silently overwrite newer metadata.
 
-Each screenshot record contains:
+## Screenshot comparisons
+
+Collections can optionally store `comparison: { kind, leftId, rightId }`, where `kind` is `current-expected` or `before-after` and the IDs identify distinct screenshots in that collection. Missing members remain referenced so deletion Undo can restore the relationship; views and exports report their absence instead of reading deleted pixels. Existing drawing/text or other-collection IDs are rejected as comparison members. Exclusion preserves the relationship without including excluded pixels. Comparison metadata uses the existing revision-checked project save and external-change conflict handling. No new sidecar or source-image write is involved.
+
+Comparison is optional in schema 3 and 4. Existing projects require no migration. Older builds can discard this unfamiliar field when saving; use a project copy or snapshot when moving between builds. Original image and annotation content remains independent of the pair.
+
+## Screenshot fields
 
 - Immutable ID and collection ID.
 - Editable title and immutable original filename.

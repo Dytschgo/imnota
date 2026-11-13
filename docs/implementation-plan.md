@@ -61,6 +61,8 @@ These are open verification or operating tasks, not claims that the implementati
 
 ## Future product proposals
 
+Unreleased screenshot-comparison work pairs two existing screenshots per collection as Current / Expected or Before / After, with annotated previews and comparison roles in Markdown and PNG exports. The [hillclimb scorecard](hillclimb-scorecard.md) tracks acceptance and platform evidence separately from implementation. See the [user guide](user-guide.md#compare-two-screenshots) and [data format](data-format.md#screenshot-comparisons). This is not a claim that the released baseline above contains the feature.
+
 The [product roadmap](product-roadmap.md) consolidates still-relevant proposals: measured scale improvements, clipboard compatibility, export presets, PDF export, richer Markdown controls and full Excalidraw interchange. Screen capture, workflow templates, and export-scoped local OCR are implemented; their remaining evidence and follow-up work stay explicit. These proposals still require separate scope and acceptance decisions.
 
 ## Maintenance and review

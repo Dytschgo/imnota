@@ -222,6 +222,13 @@ function mergeTrackedProjectMetadata(
           externalCollection.overallContext,
           conflicts,
         ),
+        comparison: mergeField(
+          `collection ${externalCollection.id} comparison`,
+          baseCollection.comparison,
+          localCollection.comparison,
+          externalCollection.comparison,
+          conflicts,
+        ),
         updatedAt:
           localCollection.updatedAt !== baseCollection.updatedAt
             ? localCollection.updatedAt
