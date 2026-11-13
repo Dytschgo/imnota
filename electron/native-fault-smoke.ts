@@ -3,6 +3,7 @@ import path from 'node:path';
 import { nativeImage } from 'electron';
 import type { ProjectSearchResponse } from '../src/shared/project-search.js';
 import type { ContentSearchResponse } from '../src/shared/content-search.js';
+import type { ContentItemContent } from '../src/shared/content-items.js';
 import type { ProjectSnapshot } from '../src/shared/types.js';
 import type { RecentlyDeletedItem } from '../src/shared/recently-deleted.js';
 import {
@@ -76,17 +77,7 @@ async function fixture(
   await fs.writeFile(png, nativeImage.createFromBitmap(pixels, { width: 48, height: 32 }).toPNG(), {
     flag: 'wx',
   });
-  const snapshot = await driver.evaluate<ProjectSnapshot>(`(async () => {
-    const created = await window.imnota.createProject({name:${json(name)},description:'fixture-own-project'});
-    const projectPath = created.projectPath, collectionId = created.project.collections[0].id;
-    await window.imnota.importImageFiles({projectPath,collectionId,paths:[${json(png)}]});
-    await window.imnota.createContentItem({projectPath,collectionId,kind:'drawing'});
-    const mixed = await window.imnota.createContentItem({projectPath,collectionId,kind:'text'});
-    const item = mixed.project.contentItems.find(item=>item.kind==='text');
-    const content = await window.imnota.loadContentItem({projectPath,itemId:item.id});
-    await window.imnota.saveContentItem({projectPath,itemId:item.id,contentRevision:content.contentRevision,markdown:${json('# Fixture owned\n\nfixture-own-text\n')}});
-    return window.imnota.loadProject(projectPath);
-  })()`);
+  const snapshot = await createNativeFaultProject(driver, name, png);
   const shot = snapshot.project.screenshots[0];
   requireThat(shot, 'Fixture screenshot missing.');
   // Setup uses the actual production screenshot save before arming any fault.
@@ -118,6 +109,37 @@ async function fixture(
   await driver.waitFor({ selector: `[data-testid="screenshot-${shot.id}"]` });
   await driver.resize({ width: 1280, height: 800 });
   return snapshot;
+}
+
+export async function createNativeFaultProject(
+  driver: Pick<NativeUiDriver, 'evaluate'>,
+  name: string,
+  png: string,
+) {
+  // Each production operation keeps the driver's deadline; a batch must not spend it cumulatively.
+  const created = await driver.evaluate<ProjectSnapshot>(
+    `window.imnota.createProject(${json({ name, description: 'fixture-own-project' })})`,
+  );
+  const projectPath = created.projectPath,
+    collectionId = created.project.collections[0].id;
+  await driver.evaluate(
+    `window.imnota.importImageFiles(${json({ projectPath, collectionId, paths: [png] })})`,
+  );
+  await driver.evaluate(
+    `window.imnota.createContentItem(${json({ projectPath, collectionId, kind: 'drawing' })})`,
+  );
+  const mixed = await driver.evaluate<ProjectSnapshot>(
+    `window.imnota.createContentItem(${json({ projectPath, collectionId, kind: 'text' })})`,
+  );
+  const item = mixed.project.contentItems?.find((value) => value.kind === 'text');
+  requireThat(item, 'Fixture text missing.');
+  const content = await driver.evaluate<ContentItemContent>(
+    `window.imnota.loadContentItem(${json({ projectPath, itemId: item.id })})`,
+  );
+  await driver.evaluate(
+    `window.imnota.saveContentItem(${json({ projectPath, itemId: item.id, contentRevision: content.contentRevision, markdown: '# Fixture owned\n\nfixture-own-text\n' })})`,
+  );
+  return driver.evaluate<ProjectSnapshot>(`window.imnota.loadProject(${json(projectPath)})`);
 }
 
 async function search(driver: NativeUiDriver, controller: OwnedSmokeFaultController, query: string) {

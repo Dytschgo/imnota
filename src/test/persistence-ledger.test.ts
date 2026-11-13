@@ -249,30 +249,47 @@ it('isolates a timed-out lifetime from the next session after every await', asyn
   }
 });
 
-it.each(['finite', 'deadline'] as const)(
-  'safely cleans a real held native watch read at teardown (%s)',
-  async (mode) => {
+it.each(
+  (['finite', 'deadline'] as const).flatMap((mode) =>
+    (['self-marker', 'unmarked'] as const).map((readPath) => ({ mode, readPath })),
+  ),
+)(
+  'safely cleans a real held native watch read at teardown ($mode, $readPath)',
+  async ({ mode, readPath }) => {
     const ledger = persistenceLedger();
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-ledger-')));
     ledger.own(root, 'imnota-ledger-');
-    const file = path.join(root, 'project.json');
+    const projectRoot = path.join(root, 'project');
+    await fs.mkdir(projectRoot);
+    const file = path.join(projectRoot, 'project.json');
     const project = emptyProject('Ledger control', '');
     const barrier = deferred();
+    const nextSource = JSON.stringify({ ...project, name: 'Changed' });
     let reading = false;
+    let actualReadPath: 'self-marker' | 'unmarked' | undefined;
+    let holdReads = false;
+    let write: Promise<void> | undefined;
     const diagnostics = new PersistenceDiagnostics(() => path.join(root, 'diagnostics'), {
       version: 'test',
       platform: process.platform,
     });
     ledger.diagnostics(diagnostics);
-    const manager = new ProjectWatchManager({
-      readWatchedFile: (target) =>
-        ledger.span('watch read', async () => {
-          const bytes = await fs.readFile(target);
+    const read = (target: string, source: 'self-marker' | 'unmarked') =>
+      ledger.span('watch read', async () => {
+        const bytes = await fs.readFile(target);
+        if (holdReads) {
+          expect(bytes.toString('utf8')).toBe(nextSource);
+          actualReadPath ??= source;
           reading = true;
           await barrier.promise;
-          return bytes;
-        }),
-      loadSnapshot: async () => ({ projectPath: root, project, thumbnails: {}, recoveryFound: false }),
+        }
+        return bytes;
+      });
+    const manager = new ProjectWatchManager({
+      readWatchedFile: (target) => read(target, 'self-marker'),
+      readProjectSource: async (directory) =>
+        (await read(path.join(directory, 'project.json'), 'unmarked')).toString('utf8'),
+      loadSnapshot: async () => ({ projectPath: projectRoot, project, thumbnails: {}, recoveryFound: false }),
       saveProject: async () => {
         throw new Error('unused');
       },
@@ -282,16 +299,29 @@ it.each(['finite', 'deadline'] as const)(
     ledger.stop(() => manager.stopAll());
     try {
       await fs.writeFile(file, JSON.stringify(project));
-      await manager.start(root);
-      await ledger.span('write', () =>
-        writeApplicationFile(file, JSON.stringify({ ...project, name: 'Changed' }), {
+      await manager.start(projectRoot);
+      holdReads = true;
+      // Explicit fixture precondition; cleanup must cover either real flush read path.
+      if (readPath === 'self-marker') manager.recordSelfWrite(file, nextSource);
+      write = ledger.span('write', () =>
+        writeApplicationFile(file, nextSource, {
           diagnostics,
           recordSelfWrite: (target, bytes) => manager.recordSelfWrite(target, bytes),
           invalidate: () => {},
+          // Hold post-rename publication until the native unmarked read has started.
+          ...(readPath === 'unmarked'
+            ? { verification: { beforeParentSync: () => vi.waitFor(() => expect(reading).toBe(true)) } }
+            : {}),
         }),
       );
+      void write.catch(() => undefined);
+      await write;
       await vi.waitFor(() => expect(reading).toBe(true));
-      expect(ledger.snapshot().outstanding.map(([, label]) => label)).toEqual(['watch flush', 'watch read']);
+      expect(actualReadPath).toBe(readPath);
+      // Native hosts may coalesce events differently; every held operation must remain tracked.
+      expect(new Set(ledger.snapshot().outstanding.map(([, label]) => label))).toEqual(
+        new Set(['watch flush', 'watch read']),
+      );
       // Fake only the cleanup clock, after the real native watcher and filesystem read started.
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       let finished = false;
@@ -325,6 +355,7 @@ it.each(['finite', 'deadline'] as const)(
     } finally {
       barrier.resolve();
       vi.useRealTimers();
+      await write?.catch(() => undefined);
       await ledger.cleanup(1000);
     }
   },

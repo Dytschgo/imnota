@@ -1814,6 +1814,32 @@ async function exercisePreferencesAndChannel(
   // discovery offline; this verifies presentation and native interaction only.
   const previousStatus = await driver.evaluate(`window.imnota.getUpdateStatus()`);
   try {
+    if (process.platform === 'darwin') {
+      // Presentation evidence only: native helper signaling and archive transactions
+      // have separate controls. Never install an update into this smoke session.
+      for (const { state, filename } of [
+        { state: 'available', filename: 'feedback-macos-update-available.png' },
+        { state: 'downloading', filename: 'feedback-macos-update-downloading.png' },
+        { state: 'downloaded', filename: 'feedback-macos-update-downloaded.png' },
+      ] as const) {
+        driver.browserWindow.webContents.send('update:status', {
+          state,
+          channel: 'nightly',
+          sourceChannel: 'nightly',
+          version: '0.4.1-nightly.20261002.37064937780',
+          percent: 42,
+        });
+        if (state === 'downloading')
+          await driver.waitFor({ selector: '[role="progressbar"][aria-valuenow="42"]' });
+        else
+          await driver.waitFor({
+            selector: '.update-settings button',
+            text: state === 'available' ? 'Download update' : 'Restart to install',
+            exact: true,
+          });
+        if (artifactDirectory) artifacts.push(await driver.capture(artifactDirectory, filename, 'none'));
+      }
+    }
     driver.browserWindow.webContents.send('update:status', {
       state: 'not-available',
       channel: 'nightly',

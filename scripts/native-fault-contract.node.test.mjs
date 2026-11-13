@@ -90,8 +90,10 @@ describe('closed packaged native fault gate', () => {
       assert.equal(packageJob.permissions.actions, 'read');
       assert.equal(packageJob.permissions.contents, 'read');
       assert.equal(download.with['artifact-ids'], '${{ steps.native_fault_upload.outputs.artifact-id }}');
-      assert.equal(download.with['github-token'], '${{ github.token }}');
-      assert.equal(download.with['run-id'], '${{ github.run_id }}');
+      // Same-job evidence must use the current-run artifact service, not REST publication lookup.
+      assert.equal(download.with['github-token'], undefined);
+      assert.equal(download.with['run-id'], undefined);
+      assert.equal(download.with.repository, undefined);
       assert.equal(download.with.name, undefined);
       assert.equal(download.id, 'native_fault_download');
       assert.equal(verify.if, "always() && steps.native_fault_download.outcome == 'success'");

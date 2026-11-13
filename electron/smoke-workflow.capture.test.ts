@@ -131,6 +131,9 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '`backdrop-${preset}-settings.png`',
       'backdrop-settings.png',
       'sharing-settings.png',
+      'feedback-macos-update-available.png',
+      'feedback-macos-update-downloading.png',
+      'feedback-macos-update-downloaded.png',
     ]),
   ],
   [
