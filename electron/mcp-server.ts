@@ -8,7 +8,7 @@ import {
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
-import readline from 'node:readline';
+import { decodeMcpUtf8, readMcpFrames, writeMcpResponse } from './mcp-framing.js';
 import { z } from 'zod';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import type { ContentSearchRequest, ContentSearchResponse } from '../src/shared/content-search.js';
@@ -110,19 +110,55 @@ interface McpTool {
 const projectPathSchema = z.string().min(1).max(2000);
 const collectionIdSchema = filenameSchema;
 const itemIdSchema = z.string().min(1).max(200);
-const searchQuerySchema = z.string().min(1).max(500);
+const searchQuerySchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine((query) => query.trim().length > 0, 'Enter a search term.');
 
-const listProjectsInput = z.object({}).strict();
+const listProjectsInput = z.object({ scope: z.enum(['active', 'archived', 'all']).optional() }).strict();
 const listCollectionItemsInput = z
   .object({ projectPath: projectPathSchema, collectionId: collectionIdSchema })
   .strict();
 const listCollectionsInput = z.object({ projectPath: projectPathSchema }).strict();
+const bundleReadOptions = {
+  includeImages: z.boolean().optional(),
+  bundleNumbers: z
+    .array(z.number().int().min(1).max(999))
+    .min(1)
+    .max(100)
+    .refine((numbers) => new Set(numbers).size === numbers.length, 'Bundle numbers must be unique.')
+    .optional(),
+};
+interface BundleReadOptions {
+  includeImages?: boolean;
+  bundleNumbers?: number[];
+}
+const bundleReadProperties = {
+  includeImages: {
+    type: 'boolean',
+    description: 'Default true. Set false to read Markdown without opening PNG payloads.',
+  },
+  bundleNumbers: {
+    type: 'array',
+    minItems: 1,
+    maxItems: 100,
+    uniqueItems: true,
+    items: { type: 'integer', minimum: 1, maximum: 999 },
+    description: 'Read only these numbered parts, in saved numeric order. Missing parts are an error.',
+  },
+};
 const getLatestBundleInput = z
-  .object({ projectPath: projectPathSchema.optional(), collectionId: collectionIdSchema.optional() })
+  .object({
+    projectPath: projectPathSchema.optional(),
+    collectionId: collectionIdSchema.optional(),
+    ...bundleReadOptions,
+  })
   .strict();
 /** Opaque identifier: a fixed-shape digest that cannot carry separators, dots or drive letters. */
 const bundleIdSchema = z.string().regex(BUNDLE_ID);
-const getBundleInput = z.object({ id: bundleIdSchema }).strict();
+const bundleLookupInput = z.object({ id: bundleIdSchema }).strict();
+const getBundleInput = z.object({ id: bundleIdSchema, ...bundleReadOptions }).strict();
 const getItemInput = z.object({ projectPath: projectPathSchema, itemId: itemIdSchema }).strict();
 const searchSavedTextInput = z
   .object({
@@ -334,12 +370,16 @@ async function preparedSets(
   return sets;
 }
 
-/** Bounded read of a regular, unlinked file. Returns null when it is larger than the allowance. */
-async function readBoundedImage(target: string, maximumBytes: number): Promise<Buffer | null> {
+type BundleImageRead =
+  { status: 'available'; bytes: Buffer } | { status: 'too-large' } | { status: 'unavailable' };
+
+/** Bounded read of a regular, unlinked file, distinguishing absence from a byte cap. */
+async function readBoundedImage(target: string, maximumBytes: number): Promise<BundleImageRead> {
   try {
-    return await readStableRegularFileBytes(target, maximumBytes);
+    const bytes = await readStableRegularFileBytes(target, maximumBytes);
+    return bytes === null ? { status: 'unavailable' } : { status: 'available', bytes };
   } catch (error) {
-    if (error instanceof FileReadLimitError) return null;
+    if (error instanceof FileReadLimitError) return { status: 'too-large' };
     throw error;
   }
 }
@@ -355,7 +395,9 @@ function isValidPng(png: Buffer): boolean {
   }
 }
 
-type BundleImageStatus = 'included' | 'omitted-too-large' | 'invalid' | 'none';
+type BundleImageStatus =
+  'included' | 'omitted-too-large' | 'invalid' | 'none' | 'not-requested' | 'unavailable';
+class BundleSelectionError extends Error {}
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -363,7 +405,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * Read one published export folder. Only regular files named exactly `<set> - NN.md|png` directly
  * inside the folder are considered; nothing in the folder can redirect a read elsewhere.
  */
-async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+async function preparedBundleFiles(set: PreparedSet) {
   await assertContainedFile(set.projectPath, set.folder);
   const prefix = `${set.setName} - `;
   const markdownFiles = new Map<number, string>();
@@ -383,6 +425,88 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
     (match[2] === 'md' ? markdownFiles : pngFiles).set(bundleNumber, entry.name);
   }
   if (!markdownFiles.size) return null;
+  return { markdownFiles, pngFiles };
+}
+
+/** File sizes describe an observation, not verified content or an immutable snapshot. */
+async function inspectPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
+  const files = await preparedBundleFiles(set);
+  if (!files) return null;
+  const metadata = async (name: string) => {
+    try {
+      const target = await assertContainedFile(set.folder, path.join(set.folder, name));
+      const stat = await fs.lstat(target);
+      if (!stat.isFile() || stat.isSymbolicLink() || !Number.isSafeInteger(stat.size) || stat.size < 0)
+        throw new Error('Unavailable file metadata.');
+      await assertNoLinks(target);
+      return { status: 'not-read' as const, bytes: stat.size };
+    } catch {
+      return { status: 'unavailable' as const, bytes: null };
+    }
+  };
+  const bundles = [];
+  for (const [bundleNumber, name] of [...files.markdownFiles].sort(([left], [right]) => left - right)) {
+    const png = files.pngFiles.get(bundleNumber);
+    bundles.push({
+      bundleNumber,
+      markdown: await metadata(name),
+      image: png ? await metadata(png) : null,
+      next: {
+        tool: 'get_bundle',
+        arguments: { id: set.id, bundleNumbers: [bundleNumber], includeImages: false },
+      },
+    });
+  }
+  const totalBytes = (entries: Array<{ bytes: number | null }>) => {
+    let total = 0;
+    for (const entry of entries) {
+      if (entry.bytes === null || !Number.isSafeInteger(total + entry.bytes)) return null;
+      total += entry.bytes;
+    }
+    return total;
+  };
+  const images = bundles.flatMap((bundle) => (bundle.image ? [bundle.image] : []));
+  const totalMarkdownBytes = totalBytes(bundles.map((bundle) => bundle.markdown));
+  const totalImageBytes = totalBytes(images);
+  return {
+    id: set.id,
+    setName: set.setName,
+    collectionId: set.collectionId,
+    sourceKind: 'saved-export',
+    preparedAt: set.preparedAt,
+    preparedAtBasis: 'filename-local-time',
+    freshness: 'unknown',
+    contentVerified: false,
+    summary: {
+      bundleCount: bundles.length,
+      imageCount: images.length,
+      markdownBytes: totalMarkdownBytes,
+      imageBytes: totalImageBytes,
+      sizeMetadataComplete: totalMarkdownBytes !== null && totalImageBytes !== null,
+    },
+    bundles,
+    readLimits: { ...limits, maxTextResponseBytes: MAX_MCP_TEXT_RESPONSE_BYTES },
+    next: { tool: 'get_bundle', arguments: { id: set.id } },
+    notes: [
+      'Metadata only: no Markdown or PNG content was read. Sizes may change before retrieval.',
+      'The export filename is not publication provenance. Current edits, content integrity and redaction were not checked.',
+    ],
+  };
+}
+
+async function readPreparedBundle(
+  set: PreparedSet,
+  limits: McpBundleLimits,
+  options: BundleReadOptions = {},
+) {
+  const files = await preparedBundleFiles(set);
+  if (options.bundleNumbers?.some((number) => !files?.markdownFiles.has(number)))
+    throw new BundleSelectionError(
+      'One or more requested bundle numbers are not present in this saved export. Inspect the bundle before selecting parts.',
+    );
+  if (!files) return null;
+  const { markdownFiles, pngFiles } = files;
+  const selected = options.bundleNumbers ? new Set(options.bundleNumbers) : null;
 
   const images: McpImageContent[] = [];
   const bundles = [];
@@ -390,8 +514,10 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
   let imageBytes = 0;
   let imagesOmitted = 0;
   let imagesInvalid = 0;
+  let imagesUnavailable = 0;
   let markdownOmitted = 0;
   for (const bundleNumber of [...markdownFiles.keys()].sort((left, right) => left - right)) {
+    if (selected && !selected.has(bundleNumber)) continue;
     const markdownName = markdownFiles.get(bundleNumber);
     if (!markdownName) continue;
     // The markdown read below re-checks links, so the path is validated before either read.
@@ -412,20 +538,31 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
     const pngName = pngFiles.get(bundleNumber);
     let pngPath: string | undefined;
     let image: BundleImageStatus = 'none';
-    if (pngName) {
+    let imageContentIndex: number | undefined;
+    let imageOmissionReason: 'count-limit' | 'byte-limit' | undefined;
+    if (pngName && options.includeImages === false) image = 'not-requested';
+    else if (pngName) {
       pngPath = await assertContainedFile(set.folder, path.join(set.folder, pngName));
       const allowance = Math.min(limits.maxImageBytes, limits.maxTotalImageBytes - imageBytes);
-      const png = images.length < limits.maxImages ? await readBoundedImage(pngPath, allowance) : null;
-      if (!png) {
+      const png: BundleImageRead =
+        images.length < limits.maxImages
+          ? await readBoundedImage(pngPath, allowance)
+          : { status: 'too-large' };
+      if (png.status === 'unavailable') {
+        image = 'unavailable';
+        imagesUnavailable += 1;
+      } else if (png.status === 'too-large') {
         image = 'omitted-too-large';
+        imageOmissionReason = images.length >= limits.maxImages ? 'count-limit' : 'byte-limit';
         imagesOmitted += 1;
-      } else if (!isValidPng(png)) {
+      } else if (!isValidPng(png.bytes)) {
         image = 'invalid';
         imagesInvalid += 1;
       } else {
         image = 'included';
-        imageBytes += png.length;
-        images.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+        imageBytes += png.bytes.length;
+        images.push({ type: 'image', data: png.bytes.toString('base64'), mimeType: 'image/png' });
+        imageContentIndex = images.length;
       }
     }
     bundles.push({
@@ -433,16 +570,29 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
       markdownPath,
       ...(pngPath ? { pngPath } : {}),
       markdown: markdown ?? '',
+      markdownBytes: markdown === null ? 0 : Buffer.byteLength(markdown, 'utf8'),
       ...(markdown === null ? { markdownOmitted: true } : {}),
+      ...(markdown === null
+        ? {
+            next: {
+              tool: 'get_bundle',
+              arguments: { id: set.id, bundleNumbers: [bundleNumber], includeImages: false },
+            },
+          }
+        : {}),
       image,
+      ...(imageContentIndex !== undefined ? { imageContentIndex } : {}),
+      ...(imageOmissionReason ? { imageOmissionReason } : {}),
     });
   }
   const notes: string[] = [];
   if (imagesOmitted)
     notes.push(
-      `too large — ${plural(imagesOmitted, 'image', 'images')} omitted (limits per call: ${limits.maxImages} images, ${limits.maxImageBytes} bytes each, ${limits.maxTotalImageBytes} bytes in total). Their pngPath values are listed.`,
+      `Read limits — ${plural(imagesOmitted, 'image', 'images')} omitted (limits per call: ${limits.maxImages} images, ${limits.maxImageBytes} bytes each, ${limits.maxTotalImageBytes} bytes in total). Their pngPath values are listed.`,
     );
   if (imagesInvalid) notes.push(`${plural(imagesInvalid, 'image', 'images')} not returned: not a valid PNG.`);
+  if (imagesUnavailable)
+    notes.push(`${plural(imagesUnavailable, 'image', 'images')} not returned: no longer available.`);
   if (markdownOmitted)
     notes.push(
       `too large — Markdown of ${plural(markdownOmitted, 'prompt', 'prompts')} omitted (limit per call: ${limits.maxMarkdownBytes} bytes). Their markdownPath values are listed.`,
@@ -453,11 +603,15 @@ async function readPreparedBundle(set: PreparedSet, limits: McpBundleLimits) {
     projectPath: set.projectPath,
     collectionId: set.collectionId,
     preparedAt: set.preparedAt,
+    sourceKind: 'saved-export',
+    preparedAtBasis: 'filename-local-time',
+    freshness: 'unknown',
     folderPath: set.folder,
     bundles,
     imagesIncluded: images.length,
     imagesOmitted,
     imagesInvalid,
+    imagesUnavailable,
     markdownOmitted,
     notes,
   };
@@ -532,13 +686,14 @@ export function createMcpTools(
     }
     return sets;
   };
-  const firstReadable = async (sets: PreparedSet[]) => {
+  const firstReadable = async (sets: PreparedSet[], options: BundleReadOptions = {}) => {
     for (const set of sets.sort(compareLatest)) {
       try {
-        const bundle = await readPreparedBundle(set, limits);
+        const bundle = await readPreparedBundle(set, limits, options);
         if (bundle) return bundle;
-      } catch {
-        // A removed, linked or unreadable set must not hide a valid saved sibling.
+      } catch (error) {
+        if (options.bundleNumbers || error instanceof BundleSelectionError) throw error;
+        // Only ordinary unselected reads may fall back to a readable saved sibling.
       }
     }
     return null;
@@ -547,10 +702,15 @@ export function createMcpTools(
   return [
     {
       name: 'list_projects',
-      description: 'List active Imnota projects in the selected workspace.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description:
+        'List Imnota projects in the selected workspace. Defaults to active; scope archived or all discovers saved projects without guessing search terms.',
+      inputSchema: {
+        type: 'object',
+        properties: { scope: { type: 'string', enum: ['active', 'archived', 'all'] } },
+        additionalProperties: false,
+      },
       async handle(args) {
-        listProjectsInput.parse(args);
+        const input = listProjectsInput.parse(args);
         const workspace = workspaceOrThrow();
         await assertNoLinks(workspace);
         const projects = await listWorkspaceProjects(workspace, undefined, {
@@ -559,7 +719,7 @@ export function createMcpTools(
         });
         return {
           projects: projects
-            .filter((project) => project.status === 'active')
+            .filter((project) => input.scope === 'all' || project.status === (input.scope ?? 'active'))
             .map((project) => ({
               path: project.projectPath,
               name: project.name,
@@ -584,18 +744,29 @@ export function createMcpTools(
         const projectPath = await authorize(input.projectPath);
         const project = await readProjectDocument(projectPath);
         const collections = [];
+        // Resolve the authorized project identity once, rather than twice per collection.
+        const key = await projectKey(projectPath);
         for (const collection of project.collections) {
-          const sets = await projectSets(projectPath, project, (candidate) => candidate === collection);
+          const sets = await preparedSets(projectPath, key, collection.id, latestAllowed());
           collections.push({
             id: collection.id,
             name: collection.name,
             archived: collection.archived,
             updatedAt: collection.updatedAt,
             itemCount: orderedCollectionItems(project, collection.id).length,
+            preparedBundlesTotal: sets.length,
+            preparedBundlesTruncated: sets.length > MAX_LISTED_BUNDLES_PER_COLLECTION,
             preparedBundles: sets
               .sort(compareLatest)
               .slice(0, MAX_LISTED_BUNDLES_PER_COLLECTION)
-              .map((set) => ({ id: set.id, setName: set.setName, preparedAt: set.preparedAt })),
+              .map((set) => ({
+                id: set.id,
+                setName: set.setName,
+                preparedAt: set.preparedAt,
+                sourceKind: 'saved-export',
+                preparedAtBasis: 'filename-local-time',
+                freshness: 'unknown',
+              })),
           });
         }
         return { projectPath, projectName: project.name, collections };
@@ -627,6 +798,7 @@ export function createMcpTools(
             kind: item.kind,
             title: item.kind === 'text' ? item.preview || 'Text block' : item.title,
             includeInExport: item.includeInExport,
+            next: { tool: 'get_item', arguments: { projectPath, itemId: item.id } },
             ...(item.kind === 'screenshot' ? { priority: item.priority } : {}),
           })),
         };
@@ -635,12 +807,13 @@ export function createMcpTools(
     {
       name: 'get_latest_bundle',
       description:
-        'Read the most recently prepared Markdown+PNG prompt bundle: for one collection, for a project (projectPath only), or for the whole workspace (no arguments). Returns Markdown as text and PNGs as images. Does not generate an export.',
+        'Read the most recently prepared Markdown+PNG prompt bundle for a collection, project or workspace. Optional includeImages:false reads text only; bundleNumbers selects saved parts. Missing parts are an error, not permission to select an older export. Does not generate an export.',
       inputSchema: {
         type: 'object',
         properties: {
           projectPath: { type: 'string', minLength: 1, maxLength: 2000 },
           collectionId: { type: 'string', minLength: 1, maxLength: 255 },
+          ...bundleReadProperties,
         },
         additionalProperties: false,
       },
@@ -659,7 +832,7 @@ export function createMcpTools(
             collectionId ? collection.id === collectionId : !collection.archived,
           );
         } else sets = await workspaceSets(true);
-        const bundle = await firstReadable(sets);
+        const bundle = await firstReadable(sets, input);
         if (!bundle) throw new Error(BUNDLE_NOT_PREPARED);
         return bundle;
       },
@@ -667,10 +840,10 @@ export function createMcpTools(
     {
       name: 'get_bundle',
       description:
-        'Read one already-prepared prompt bundle by the id returned from list_collections or get_latest_bundle. Returns Markdown as text and PNGs as images. Does not generate an export.',
+        'Read a saved export by its discovered id. Optional includeImages:false reads Markdown without PNG payloads; bundleNumbers selects numbered parts. Defaults to the full export. Does not generate an export.',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string', pattern: '^b_[0-9a-f]{32}$' } },
+        properties: { id: { type: 'string', pattern: '^b_[0-9a-f]{32}$' }, ...bundleReadProperties },
         required: ['id'],
         additionalProperties: false,
       },
@@ -678,9 +851,33 @@ export function createMcpTools(
         const input = getBundleInput.parse(args);
         // The id is only ever compared with ids derived from validated folders; it is never a path.
         const matches = (await workspaceSets(false)).filter((set) => set.id === input.id);
-        const bundle = await firstReadable(matches);
+        const bundle = await firstReadable(matches, input);
         if (!bundle) throw new Error(BUNDLE_NOT_FOUND);
         return bundle;
+      },
+    },
+    {
+      name: 'inspect_bundle',
+      description:
+        'Inspect a saved export by its discovered bundle id before reading it. Returns ordered Markdown/image file sizes, read limits and unknown freshness; no text bodies or images. File content, redaction and integrity are not verified. Use get_bundle to read the export.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', pattern: '^b_[0-9a-f]{32}$' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      async handle(args) {
+        const input = bundleLookupInput.parse(args);
+        const matches = (await workspaceSets(false)).filter((set) => set.id === input.id);
+        for (const set of matches.sort(compareLatest)) {
+          try {
+            const inspected = await inspectPreparedBundle(set, limits);
+            if (inspected) return inspected;
+          } catch {
+            // Removed or linked export folders cannot authorize another location.
+          }
+        }
+        throw new Error(BUNDLE_NOT_FOUND);
       },
     },
     {
@@ -820,6 +1017,12 @@ export function handleMcpJsonRpc(
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+          },
         })),
       });
     case 'tools/call':
@@ -834,7 +1037,7 @@ export function handleMcpJsonRpc(
 }
 
 function idOf(value: unknown): JsonRpcId {
-  return typeof value === 'string' || typeof value === 'number' ? value : null;
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)) ? value : null;
 }
 
 async function callTool(id: JsonRpcId, params: unknown, tools: readonly McpTool[]) {
@@ -842,6 +1045,7 @@ async function callTool(id: JsonRpcId, params: unknown, tools: readonly McpTool[
     .object({
       name: z.string().min(1).max(100),
       arguments: z.record(z.string(), z.unknown()).optional(),
+      _meta: z.record(z.string(), z.unknown()).optional(),
     })
     .strict()
     .safeParse(params);
@@ -859,13 +1063,13 @@ async function callTool(id: JsonRpcId, params: unknown, tools: readonly McpTool[
 async function readHttpBody(request: http.IncomingMessage, maximum: number): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of request) {
+  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > maximum) throw new Error('JSON-RPC request exceeds the read limit.');
+    if (size > maximum) throw new FileReadLimitError('JSON-RPC request exceeds the read limit.');
     chunks.push(buffer);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return decodeMcpUtf8(Buffer.concat(chunks));
 }
 
 export class LocalMcpServer {
@@ -958,21 +1162,25 @@ export class LocalMcpServer {
         }
       : this.context;
     const tools = this.stdioSettingsFile ? createMcpTools(context) : this.tools;
-    const lines = readline.createInterface({ input, crlfDelay: Infinity });
-    for await (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (Buffer.byteLength(line, 'utf8') > MAX_JSON_RPC_BYTES) {
-        output.write(
-          `${JSON.stringify(jsonRpcError(null, -32600, 'JSON-RPC request exceeds the read limit.'))}\n`,
+    for await (const frame of readMcpFrames(input, MAX_JSON_RPC_BYTES)) {
+      if (frame.error) {
+        await writeMcpResponse(
+          output,
+          jsonRpcError(
+            null,
+            frame.error === 'too-large' ? -32600 : -32700,
+            frame.error === 'too-large' ? 'JSON-RPC request exceeds the read limit.' : 'Invalid UTF-8.',
+          ),
         );
         continue;
       }
+      const trimmed = frame.text.trim();
+      if (!trimmed) continue;
       let message: JsonRpcRequest;
       try {
         message = JSON.parse(trimmed) as JsonRpcRequest;
       } catch {
-        output.write(`${JSON.stringify(jsonRpcError(null, -32700, 'Parse error'))}\n`);
+        await writeMcpResponse(output, jsonRpcError(null, -32700, 'Parse error'));
         continue;
       }
       if (this.stdioSettingsFile && message?.method === 'tools/call') {
@@ -990,13 +1198,11 @@ export class LocalMcpServer {
         }
       }
       if (!(this.stdioSettingsFile && message?.method !== 'tools/call') && !context.enabled()) {
-        output.write(
-          `${JSON.stringify(jsonRpcError(idOf(message?.id), -32000, 'Local agent access is off.'))}\n`,
-        );
+        await writeMcpResponse(output, jsonRpcError(idOf(message?.id), -32000, 'Local agent access is off.'));
         continue;
       }
       const response = await handleMcpJsonRpc(message, tools, this.context.appVersion());
-      if (response) output.write(`${JSON.stringify(response)}\n`);
+      if (response) await writeMcpResponse(output, response);
     }
     return true;
   }
@@ -1014,7 +1220,11 @@ export class LocalMcpServer {
     const address = this.listening();
     const port = address?.port ?? LOCAL_AGENT_ACCESS_PORT;
     const fail = (status: number, message: string) => {
-      response.writeHead(status, { 'Content-Type': 'application/json', Connection: 'close' });
+      response.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        Connection: 'close',
+      });
       response.end(JSON.stringify({ error: message }));
     };
     if (!this.context.enabled()) return fail(403, 'Local agent access is off.');
@@ -1022,17 +1232,38 @@ export class LocalMcpServer {
     if (!isLoopbackHostHeader(request.headers.host, port)) return fail(403, 'Loopback Host required.');
     // Browsers send Origin; native MCP clients do not. Reject rather than CORS-allow loopback pages.
     if (request.headers.origin !== undefined) return fail(403, 'Browser Origin is not accepted.');
-    const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
+    response.setHeader('Cache-Control', 'no-store');
+    let url: URL;
+    try {
+      url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
+    } catch {
+      return fail(400, 'Invalid request URL.');
+    }
     if (url.pathname !== LOCAL_MCP_PATH) return fail(404, 'Not found.');
-    if (request.method !== 'POST') return fail(405, 'POST JSON-RPC to /mcp.');
+    if (request.method !== 'POST') {
+      response.setHeader('Allow', 'POST');
+      return fail(405, 'POST JSON-RPC to /mcp.');
+    }
+    const length = request.headers['content-length'];
+    if (length && Number(length) > MAX_JSON_RPC_BYTES)
+      return fail(413, 'JSON-RPC request exceeds the read limit.');
     try {
       const body = await readHttpBody(request, MAX_JSON_RPC_BYTES);
       const message = JSON.parse(body) as JsonRpcRequest;
       const payload = await handleMcpJsonRpc(message, this.tools, this.context.appVersion());
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(payload ? JSON.stringify(payload) : '');
+      if (!payload) {
+        response.writeHead(202);
+        response.end();
+      } else {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(payload));
+      }
     } catch (error) {
-      fail(400, error instanceof SyntaxError ? 'Invalid JSON-RPC JSON.' : agentErrorMessage(error));
+      if (error instanceof FileReadLimitError) return fail(413, 'JSON-RPC request exceeds the read limit.');
+      if (error instanceof SyntaxError) {
+        response.writeHead(400, { 'Content-Type': 'application/json', Connection: 'close' });
+        response.end(JSON.stringify(jsonRpcError(null, -32700, 'Invalid JSON-RPC JSON or UTF-8.')));
+      } else fail(400, agentErrorMessage(error));
     }
   }
 }

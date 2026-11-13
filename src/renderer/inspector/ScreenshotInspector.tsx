@@ -287,9 +287,10 @@ export function ScreenshotInspector({
             </Button>
           </section>
         )}
-        <section className="inspector-section export-section" aria-labelledby="export-heading">
-          <span className="section-label" id="export-heading">
-            Export
+        {/* Duplicate acts on the screenshot in this project; it does not export anything. */}
+        <section className="inspector-section export-section" aria-labelledby="screenshot-actions-heading">
+          <span className="section-label" id="screenshot-actions-heading">
+            Actions
           </span>
           <Button
             variant="ghost"

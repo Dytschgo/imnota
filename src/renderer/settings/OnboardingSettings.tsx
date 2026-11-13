@@ -1,4 +1,4 @@
-import { CheckCircle2, Play } from 'lucide-react';
+import { CheckCircle2, Circle, Play } from 'lucide-react';
 import type { OnboardingPreferences } from './preferences';
 import './settings.css';
 
@@ -21,8 +21,13 @@ export function OnboardingSettings({ value, onReplay, disabled = false }: Onboar
           Replay guide
         </button>
       </header>
-      <div className="imnota-completion-state">
-        <CheckCircle2 size={16} aria-hidden="true" />
+      {/* A check is shown only for a completed guide; an open circle marks one not yet taken. */}
+      <div className="imnota-completion-state" data-completed={value.completed || undefined}>
+        {value.completed ? (
+          <CheckCircle2 size={16} aria-hidden="true" />
+        ) : (
+          <Circle size={16} aria-hidden="true" />
+        )}
         <span>
           {value.completed
             ? `Completed with guide version ${value.completedVersion}`

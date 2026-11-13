@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { clipboardFailure } from './workflow-errors.js';
 
 /**
  * JavaScript for Automation run by /usr/bin/osascript. Electron can place only one
@@ -50,9 +51,12 @@ export function macFilePair(filePaths: readonly string[]): readonly [string, str
     path.extname(filePaths[1]).toLowerCase() !== '.png' ||
     !filePaths.every((file) => path.isAbsolute(file))
   )
-    throw new Error('macOS file copy requires one absolute Markdown file and one PNG file.');
+    throw clipboardFailure(
+      'rejected',
+      'macOS file copy requires one absolute Markdown file and one PNG file.',
+    );
   if (path.dirname(filePaths[0]) !== path.dirname(filePaths[1]))
-    throw new Error('macOS file copy requires the generated pair to share one folder.');
+    throw clipboardFailure('rejected', 'macOS file copy requires the generated pair to share one folder.');
   return [filePaths[0], filePaths[1]];
 }
 
@@ -66,17 +70,25 @@ export async function writeMacClipboardFiles(
   run: RunOsascript = nativeOsascript,
 ): Promise<string[]> {
   const pair = macFilePair(filePaths);
-  const output = await run([
-    '-l',
-    'JavaScript',
-    '-e',
-    WRITE_FILES_SCRIPT,
-    options.withText ? 'text' : 'files',
-    ...pair,
-  ]);
-  const kept: unknown = JSON.parse(output.trim() || '[]');
+  let kept: unknown;
+  try {
+    const output = await run([
+      '-l',
+      'JavaScript',
+      '-e',
+      WRITE_FILES_SCRIPT,
+      options.withText ? 'text' : 'files',
+      ...pair,
+    ]);
+    kept = JSON.parse(output.trim() || '[]');
+  } catch {
+    throw clipboardFailure(
+      'rejected',
+      'macOS could not copy the files to the clipboard. Try attaching the exported files instead.',
+    );
+  }
   if (!Array.isArray(kept) || !kept.every((entry) => typeof entry === 'string'))
-    throw new Error('The macOS clipboard returned an unexpected file list.');
+    throw clipboardFailure('rejected', 'The macOS clipboard returned an unexpected file list.');
   return kept;
 }
 

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import type { ImnotaBridge, ProjectData, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type { ProjectWatchEvent, WorkflowBridge } from '../../shared/workflow-bridge';
@@ -22,6 +22,12 @@ import { atomicWrite } from '../../../electron/files';
 import { writeApplicationFile } from '../../../electron/application-persistence';
 import { PersistenceDiagnostics } from '../../../electron/persistence-diagnostics';
 import { COMMITTED_WRITE_WARNING } from '../../shared/write-outcome';
+import {
+  persistenceSession,
+  trackWatch,
+  persistenceFault,
+  type PersistenceLedger,
+} from '../../test/persistence-ledger';
 import { workflowOutcome } from '../../../electron/workflow-errors';
 
 // No Electron process, clipboard, native image decoding or desktop access in this filesystem test.
@@ -29,30 +35,30 @@ vi.mock('electron', () => ({ app: {}, shell: {} }));
 vi.mock('../../../electron/native-clipboard', () => ({ nativeClipboard: {} }));
 
 const platform = process.platform;
-const realOpen = fs.open.bind(fs);
-const realRename = fs.rename.bind(fs);
-const temporary: string[] = [];
-const stopWatches: Array<() => void> = [];
-afterEach(async () => {
-  vi.restoreAllMocks();
-  Object.defineProperty(process, 'platform', { value: platform });
-  setReloadProtection(null);
-  for (const stop of stopWatches.splice(0)) stop();
-  for (const directory of temporary.splice(0)) {
-    if (
-      path.dirname(directory) !== (await fs.realpath(os.tmpdir())) ||
-      !path.basename(directory).startsWith('imnota-reload-')
-    )
-      throw new Error('Unexpected fixture cleanup path');
-    await fs.rm(directory, { recursive: true, force: true });
+const session = persistenceSession();
+const { ledger, it } = session;
+beforeEach(session.start);
+afterEach(async (context) => {
+  try {
+    await session.cleanup(context);
+  } finally {
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', { value: platform });
+    setReloadProtection(null);
   }
 });
 
-async function fixture(
-  options: { nativeWatch?: boolean; cleanupWarning?: boolean; keepMounted?: boolean } = {},
+function fixture(options: { nativeWatch?: boolean; cleanupWarning?: boolean; keepMounted?: boolean } = {}) {
+  const owner = ledger();
+  return owner.span('fixture construction', () => buildFixture(owner, options));
+}
+
+async function buildFixture(
+  ledger: PersistenceLedger,
+  options: { nativeWatch?: boolean; cleanupWarning?: boolean; keepMounted?: boolean },
 ) {
   const projectPath = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-reload-')));
-  temporary.push(projectPath);
+  ledger.own(projectPath, 'imnota-reload-');
   const projectFile = path.join(projectPath, 'project.json');
   const initial = emptyProject('Recovery', '');
   const shot: ScreenshotRecord = {
@@ -73,14 +79,16 @@ async function fixture(
     includeInExport: true,
   };
   initial.screenshots = [shot];
-  await fs.writeFile(projectFile, JSON.stringify(initial, null, 2));
-  for (const [relative, value] of [
-    [shot.annotationFile, '[]'],
-    [shot.descriptionFile, shot.description],
-  ]) {
-    await fs.mkdir(path.dirname(path.join(projectPath, relative)), { recursive: true });
-    await fs.writeFile(path.join(projectPath, relative), value);
-  }
+  await ledger.span('initial files creation', async () => {
+    await fs.writeFile(projectFile, JSON.stringify(initial, null, 2));
+    for (const [relative, value] of [
+      [shot.annotationFile, '[]'],
+      [shot.descriptionFile, shot.description],
+    ]) {
+      await fs.mkdir(path.dirname(path.join(projectPath, relative)), { recursive: true });
+      await fs.writeFile(path.join(projectPath, relative), value);
+    }
+  });
   const readProject = async (): Promise<ProjectData> => JSON.parse(await fs.readFile(projectFile, 'utf8'));
   const snapshot = vi.fn(async (): Promise<ProjectSnapshot> => ({
     projectPath,
@@ -95,12 +103,15 @@ async function fixture(
     version: 'test',
     platform,
   });
+  ledger.diagnostics(diagnostics);
   const write = (file: string, source: string | Uint8Array) =>
-    writeApplicationFile(file, source, {
-      diagnostics,
-      recordSelfWrite: (target, bytes) => manager?.recordSelfWrite(target, bytes),
-      invalidate: () => undefined,
-    });
+    ledger.span('write', () =>
+      writeApplicationFile(file, source, {
+        diagnostics,
+        recordSelfWrite: (target, bytes) => manager?.recordSelfWrite(target, bytes),
+        invalidate: () => undefined,
+      }),
+    );
   const transactionOperations = {
     write,
     unlink: async (file: string) => {
@@ -120,7 +131,9 @@ async function fixture(
     trashItem: async () => undefined,
     transactionOperations,
   });
-  await contentService.create({ projectPath, collectionId: initial.collections[0].id, kind: 'text' });
+  await ledger.span('initial content creation', () =>
+    contentService.create({ projectPath, collectionId: initial.collections[0].id, kind: 'text' }),
+  );
   injectCleanupWarning = options.cleanupWarning === true;
   const source = await snapshot();
   const text = source.project.contentItems![0];
@@ -183,6 +196,7 @@ async function fixture(
   const deliveredEvents: ProjectWatchEvent[] = [];
   manager = new ProjectWatchManager({
     loadSnapshot: snapshot,
+    readWatchedFile: (file) => ledger.span('watch read', () => fs.readFile(file).catch(() => null)),
     saveProject: async (_target, project) => {
       await write(projectFile, JSON.stringify(project, null, 2));
       return snapshot();
@@ -196,11 +210,12 @@ async function fixture(
     },
   });
   const watchManager = manager;
-  stopWatches.push(() => watchManager.stopAll());
+  trackWatch(ledger, watchManager);
+  ledger.stop(() => watchManager.stopAll());
   const startRevision = projectRevisionForSource(await fs.readFile(projectFile));
   const bridge = {
     startProjectWatch: vi.fn<WorkflowBridge['startProjectWatch']>(async () =>
-      workflowOutcome(() => watchManager.start(projectPath)),
+      ledger.span('watch start', () => workflowOutcome(() => watchManager.start(projectPath))),
     ),
     stopProjectWatch: async ({ watchId }) => workflowOutcome(() => watchManager.stop(watchId)),
     onProjectWatchEvent: (listener) => {
@@ -210,11 +225,15 @@ async function fixture(
       };
     },
     reloadWatchedProject: vi.fn<WorkflowBridge['reloadWatchedProject']>(async ({ watchId }) =>
-      workflowOutcome(() => watchManager.reload(watchId)),
+      ledger.span('watch reload', () => workflowOutcome(() => watchManager.reload(watchId))),
     ),
     saveProjectCompareAndSwap: vi.fn<WorkflowBridge['saveProjectCompareAndSwap']>(async (input) =>
-      workflowOutcome(() =>
-        watchManager.compareAndSwap(input.watchId, input.expectedRevision, input.project),
+      ledger.span('CAS', () =>
+        ledger.checkFault(projectFile, () =>
+          workflowOutcome(() =>
+            watchManager.compareAndSwap(input.watchId, input.expectedRevision, input.project),
+          ),
+        ),
       ),
     ),
     loadScreenshotContent: async () => ({
@@ -268,8 +287,12 @@ async function fixture(
     flush: () =>
       persistence.withReloadWatch(async () => {
         let saved = true;
-        for (const save of [content.flush, persistence.flushProjectDrafts, persistence.flushProjectMetadata])
-          if (!(await save())) saved = false;
+        for (const [label, save] of [
+          ['content flush', content.flush],
+          ['draft flush', persistence.flushProjectDrafts],
+          ['metadata flush', persistence.flushProjectMetadata],
+        ] as const)
+          if (!(await ledger.span(label, save))) saved = false;
         return saved;
       }),
   });
@@ -345,7 +368,7 @@ it.each(['none', 'before recovery', 'before metadata CAS', 'watch event', 'metad
       });
     }
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(change === 'none');
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(change === 'none');
     expect(reload).toHaveBeenCalledTimes(change === 'none' ? 1 : 0);
     expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
@@ -366,7 +389,7 @@ it.each(['none', 'before recovery', 'before metadata CAS', 'watch event', 'metad
     if (change === 'metadata write fails') {
       failMetadata = false;
       // The content adoption is retried, but an already accepted own write must not become a false conflict.
-      expect(await reloadWindow({}, reload)).toBe(true);
+      expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
       expect((await f.readProject()).name).toBe('Local name');
       expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
       expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
@@ -401,14 +424,14 @@ it.each(['before content result', 'between content and screenshot', 'after both 
       });
     }
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
     expect((await f.readProject()).name).toBe('Recovery');
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
     const committedRevision = await f.diskRevision();
     // The replacement watch is healthy. Do not re-save committed drafts to obtain new lineage.
     f.bridge.reloadWatchedProject.mockImplementation(realReload);
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     expect(reload).toHaveBeenCalledOnce();
     expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
@@ -428,7 +451,7 @@ async function commitWithWatchError(f: Awaited<ReturnType<typeof fixture>>, relo
     f.injectWatchError();
     return result;
   });
-  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
   expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
   return f.diskRevision();
@@ -473,7 +496,7 @@ it.each(['startup rejects', 'startup emits error', 'reconnect read fails', 'reco
         return result;
       });
     }
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(reload).not.toHaveBeenCalled();
     expect(await f.diskRevision()).toBe(committedRevision);
     expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
@@ -481,7 +504,7 @@ it.each(['startup rejects', 'startup emits error', 'reconnect read fails', 'reco
     expect(f.listeners.size).toBe(0);
     f.bridge.startProjectWatch.mockImplementation(start);
     f.bridge.reloadWatchedProject.mockImplementation(read);
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     expect(reload).toHaveBeenCalledOnce();
     expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
@@ -510,7 +533,7 @@ it.each(['before fallback', 'during outage', 'just before retry CAS'] as const)(
         return save(input); // Real native hash comparison rejects this stale revision.
       });
     }
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(reload).not.toHaveBeenCalled();
     expect(await fs.readFile(f.projectFile)).toEqual(externalBytes);
     expect((await f.readProject()).favourite).toBe(true);
@@ -549,13 +572,13 @@ it('retains a true native fs.watch external event when monitoring subsequently e
     f.injectWatchError();
     return grant;
   });
-  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
   const externalBytes = await fs.readFile(f.projectFile);
   expect((await f.readProject()).favourite).toBe(true);
   expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   // Even restoring the old exact bytes cannot erase the observed external-change decision.
   await fs.writeFile(f.projectFile, ownBytes);
-  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
   expect(await fs.readFile(f.projectFile)).toEqual(ownBytes);
   expect(externalBytes).not.toEqual(ownBytes);
   expect(reload).not.toHaveBeenCalled();
@@ -582,9 +605,9 @@ it.each(['content', 'screenshot'] as const)(
       }));
     }
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     const bytes = await fs.readFile(f.projectFile);
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(await fs.readFile(f.projectFile)).toEqual(bytes);
     expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
@@ -610,7 +633,7 @@ it('retains committed transaction warnings and exact lineage through a blocked a
     f.text.id,
   );
   expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
-  expect(await reloadWindow({}, reload)).toBe(true);
+  expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
   expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
   expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
   expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committedRevision);
@@ -625,7 +648,7 @@ it('rejects a replay with the same after revision but a different before revisio
   expect(committed.projectRevisionTransition).toBeDefined();
   committed.projectRevisionTransition.before = 'unrelated-baseline';
   const bytes = await fs.readFile(f.projectFile);
-  expect(await reloadWindow({}, reload)).toBe(false);
+  expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
   expect(await fs.readFile(f.projectFile)).toEqual(bytes);
   expect(f.bridge.saveProjectCompareAndSwap).not.toHaveBeenCalled();
   expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
@@ -637,37 +660,7 @@ it('rejects a replay with the same after revision but a different before revisio
 // Files, candidate sync and rename remain real. Windows only substitutes directory handles,
 // since Node cannot fsync directories there; POSIX uses real handles outside the injected sync.
 function failSync(target: string, stage: 'directory' | 'candidate', code: string, persistent = false) {
-  if (platform === 'win32') Object.defineProperty(process, 'platform', { value: 'linux' });
-  let renamed = false;
-  let failed = false;
-  vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
-    await realRename(...args);
-    if (String(args[1]) === target) renamed = true;
-  });
-  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
-    const name = String(args[0]);
-    const directory = args[1] === 'r' && (await fs.stat(name)).isDirectory();
-    const handle =
-      directory && platform === 'win32'
-        ? ({ sync: async () => undefined, close: async () => undefined } as Awaited<
-            ReturnType<typeof fs.open>
-          >)
-        : await realOpen(...args);
-    const sync = handle.sync.bind(handle);
-    handle.sync = async () => {
-      if (
-        (!failed || persistent) &&
-        ((stage === 'candidate' && name.startsWith(`${target}.tmp-`)) ||
-          (stage === 'directory' && renamed && name === path.dirname(target)))
-      ) {
-        failed = true;
-        throw Object.assign(new Error(code), { code });
-      }
-      await sync();
-    };
-    return handle;
-  });
-  return () => expect(failed).toBe(true);
+  return persistenceFault(ledger(), target, stage, code, { persistent });
 }
 
 it.each(['EIO', 'EACCES', 'EPERM'])(
@@ -682,7 +675,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
       return structuredClone(await save(input));
     });
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     assertFault();
     expect((await f.readProject()).name).toBe('Local name');
     expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
@@ -697,7 +690,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
         warnings: result.value.snapshot.warnings,
       }),
     );
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
     expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
@@ -716,14 +709,14 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
       return structuredClone(await save(input));
     });
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     assertFault();
     expect((await f.readProject()).name).toBe('Recovery');
     expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
     const committed = await f.diskRevision();
     vi.restoreAllMocks();
     Object.defineProperty(process, 'platform', { value: platform });
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     expect(f.bridge.saveProjectCompareAndSwap.mock.calls.at(-1)![0].expectedRevision).toBe(committed);
     expect((await f.readProject()).name).toBe('Local name');
     expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
@@ -752,7 +745,7 @@ it.each(['external bytes', 'unreadable snapshot'] as const)(
       return structuredClone(await save(input));
     });
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
     const result = await f.bridge.saveProjectCompareAndSwap.mock.results[0].value;
     expect(result.ok).toBe(false);
@@ -761,7 +754,7 @@ it.each(['external bytes', 'unreadable snapshot'] as const)(
     expect(result.error.message).toContain(
       failure === 'external bytes' ? 'changed again' : 'Readback unavailable',
     );
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     expect(await fs.readFile(f.projectFile)).toEqual(bytes);
     expect(f.bridge.saveContentItem).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();
@@ -792,7 +785,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
       return structuredClone(result);
     });
     const reload = vi.fn();
-    expect(await reloadWindow({}, reload)).toBe(false);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(false);
     const content = await f.bridge.saveContentItem.mock.results[0].value;
     const screenshot = await f.bridge.saveScreenshotContent.mock.results[0].value;
     const committed = await f.diskRevision();
@@ -814,7 +807,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
       'Text draft',
     );
     expect(f.persistence.hasPendingProjectMetadata()).toBe(true);
-    expect(await reloadWindow({}, reload)).toBe(true);
+    expect(await ledger().span('reload', () => reloadWindow({}, reload))).toBe(true);
     expect(f.bridge.saveProjectCompareAndSwap.mock.calls[0][0].expectedRevision).toBe(committed);
     expect((await f.readProject()).name).toBe('Local name');
     expect(f.persistence.hasPendingProjectMetadata()).toBe(false);
@@ -844,7 +837,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
     });
     let saved: boolean | undefined;
     await act(async () => {
-      saved = await f.persistence.flushProjectMetadata();
+      saved = await ledger().span('metadata flush', () => f.persistence.flushProjectMetadata());
     });
     assertFault();
     expect(saved).toBe(false);
@@ -863,7 +856,7 @@ it.each(['EIO', 'EACCES', 'EPERM'])(
     expect(await fs.readdir(path.join(f.projectPath, '.imnota-transactions'))).toEqual([]);
     // Another explicit save remains blocked; it cannot adopt or overwrite the later external edit.
     await act(async () => {
-      expect(await f.current().flushProjectMetadata()).toBe(false);
+      expect(await ledger().span('metadata flush', () => f.current().flushProjectMetadata())).toBe(false);
     });
     expect(f.bridge.saveProjectCompareAndSwap).toHaveBeenCalledOnce();
     expect(f.bridge.saveScreenshotContent).toHaveBeenCalledOnce();

@@ -20,6 +20,7 @@ import type {
 } from '../../shared/backups';
 import type { ProjectListItem } from '../../shared/types';
 import { Button } from '../components/ui';
+import { reasonMessage } from '../user-facing-error';
 import './settings.css';
 
 export interface BackupSettingsProps {
@@ -46,9 +47,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
-function actionMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
+const actionMessage = reasonMessage;
 
 export function BackupSettings({
   value,

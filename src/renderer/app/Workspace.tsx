@@ -1,7 +1,7 @@
 import { Camera, Copy, ImagePlus, PanelRight, Upload } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CaptureDelaySeconds } from '../../shared/capture';
-import type { ContentItemContent } from '../../shared/content-items';
+import { orderedCollectionItems, type ContentItemContent } from '../../shared/content-items';
 import type { RecentlyDeletedItem, RecentlyDeletedRestoreResult } from '../../shared/recently-deleted';
 import type Konva from 'konva';
 import type {
@@ -16,6 +16,7 @@ import { CollectionRail } from '../collection/CollectionRail';
 import { AnnotationCanvas } from '../components/AnnotationCanvas';
 import type { AnnotationChangeOptions } from '../canvas/undo-coalescing';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { NativeFaultProbe } from './native-fault-probe';
 import { Toolbar, type ToolChoice } from '../components/Toolbar';
 import { Button, EmptyState, IconButton } from '../components/ui';
 import { ScreenshotInspector } from '../inspector/ScreenshotInspector';
@@ -98,6 +99,15 @@ export function Workspace(props: WorkspaceProps) {
   const shot = store.activeScreenshot();
   const item = store.snapshot?.project.contentItems?.find((entry) => entry.id === store.activeScreenshotId);
   const drawingTitle = item?.kind === 'drawing' ? item.title || 'Untitled drawing' : 'Drawing';
+  // The rail numbers every item in sequence; the inspector names the same number.
+  const project = store.snapshot?.project;
+  const itemNumber = useMemo(() => {
+    if (!item || !project) return '';
+    const index = orderedCollectionItems(project, store.activeCollectionId).findIndex(
+      (entry) => entry.id === item.id,
+    );
+    return index < 0 ? '' : String(index + 1).padStart(2, '0');
+  }, [item, project, store.activeCollectionId]);
   const captureIsPrimary = props.capturePrimary && props.captureEnabled && Boolean(props.onCapture);
   const selectedAnnotation = props.selectedAnnotationId
     ? (props.annotations.find((item) => item.id === props.selectedAnnotationId) ?? null)
@@ -282,6 +292,7 @@ export function Workspace(props: WorkspaceProps) {
             )
           ) : item.kind === 'drawing' ? (
             <ErrorBoundary variant="panel" resetKey={item.id}>
+              <NativeFaultProbe scope="panel" />
               <Suspense fallback={drawingPlaceholder('Loading drawing tools…')}>
                 <DrawingEditor
                   key={item.id}
@@ -306,6 +317,7 @@ export function Workspace(props: WorkspaceProps) {
           )
         ) : shot ? (
           <ErrorBoundary variant="panel" resetKey={shot.id}>
+            <NativeFaultProbe scope="panel" />
             <AnnotationCanvas
               key={`${store.snapshot?.projectPath}:${shot.id}`}
               image={props.image}
@@ -379,50 +391,78 @@ export function Workspace(props: WorkspaceProps) {
             tabIndex={narrowViewport ? -1 : undefined}
           >
             {item ? (
+              // Same heading, section and action structure as the screenshot inspector.
               <aside className="inspector content-inspector" aria-label="Content details">
                 <div className="inspector-heading">
-                  <h2>{item.kind === 'drawing' ? 'Drawing context' : 'Text context'}</h2>
+                  <div>
+                    <span className="eyebrow">
+                      {item.kind === 'drawing' ? 'DRAWING' : 'TEXT'}
+                      {itemNumber ? ` ${itemNumber}` : ''}
+                    </span>
+                    <h2>{item.kind === 'drawing' ? 'Drawing context' : 'Text context'}</h2>
+                  </div>
                   {inspectorCollapse}
                 </div>
-                {item.kind === 'drawing' ? (
-                  <>
-                    <label className="field">
-                      <span className="field-label">Drawing title</span>
-                      <input
-                        className="input"
-                        aria-label="Drawing title"
-                        value={item.title}
-                        onChange={(event) => props.onDrawingTitle?.(event.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="field-label">Description</span>
-                      <textarea
-                        className="input"
-                        aria-label="Drawing description"
-                        rows={6}
-                        placeholder="Describe what the agent should understand from this drawing."
-                        value={item.description ?? ''}
-                        onChange={(event) => props.onDrawingDescription?.(event.target.value)}
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <p>Write Markdown directly. Your text appears at this position in the agent prompt.</p>
-                )}
-                <p className="content-hint">
-                  {item.kind === 'drawing'
-                    ? 'The description is copied into the prompt Markdown under this drawing.'
-                    : 'Use headings, lists, and code blocks to describe the task.'}
-                </p>
-                <Button
-                  variant="soft"
-                  title={props.shortcutLabels.duplicate && `Duplicate (${props.shortcutLabels.duplicate})`}
-                  onClick={() => void props.onDuplicateContent?.()}
-                >
-                  <Copy size={15} aria-hidden="true" />
-                  Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
-                </Button>
+                <div className="inspector-scroll">
+                  <section
+                    className="inspector-section context-section"
+                    aria-labelledby="content-context-heading"
+                  >
+                    <span className="section-label" id="content-context-heading">
+                      Context
+                    </span>
+                    {item.kind === 'drawing' ? (
+                      <>
+                        <p className="section-intro">
+                          The description is copied into the prompt Markdown under this drawing.
+                        </p>
+                        <label className="field">
+                          <span className="field-label">Drawing title</span>
+                          <input
+                            className="input"
+                            aria-label="Drawing title"
+                            value={item.title}
+                            onChange={(event) => props.onDrawingTitle?.(event.target.value)}
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">Description</span>
+                          <textarea
+                            className="input"
+                            aria-label="Drawing description"
+                            rows={6}
+                            placeholder="Describe what the agent should understand from this drawing."
+                            value={item.description ?? ''}
+                            onChange={(event) => props.onDrawingDescription?.(event.target.value)}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <p className="section-intro">
+                        Write Markdown directly. Your text appears at this position in the agent prompt. Use
+                        headings, lists, and code blocks to describe the task.
+                      </p>
+                    )}
+                  </section>
+                  <section
+                    className="inspector-section export-section"
+                    aria-labelledby="content-actions-heading"
+                  >
+                    <span className="section-label" id="content-actions-heading">
+                      Actions
+                    </span>
+                    <Button
+                      variant="ghost"
+                      title={
+                        props.shortcutLabels.duplicate && `Duplicate (${props.shortcutLabels.duplicate})`
+                      }
+                      onClick={() => void props.onDuplicateContent?.()}
+                    >
+                      <Copy size={15} aria-hidden="true" />
+                      Duplicate {item.kind === 'text' ? 'text' : 'drawing'}
+                    </Button>
+                  </section>
+                </div>
               </aside>
             ) : (
               <ScreenshotInspector

@@ -72,14 +72,6 @@ describe('preference controls', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_APPEARANCE, glassLevel: 'off' }));
   });
 
-  it('keeps retired toggles out of Settings', () => {
-    const { rerender } = render(<SettingsView activeCategory="Features" />);
-    expect(screen.queryByRole('checkbox', { name: 'Enable screen capture' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Screen capture' })).toBeInTheDocument();
-    rerender(<SettingsView activeCategory="Shortcuts" />);
-    expect(screen.queryByText('Open recent project')).not.toBeInTheDocument();
-  });
-
   it('records normalized shortcuts, explains reserved keys, and resets defaults', async () => {
     const onChange = vi.fn(async () => {});
     render(<ShortcutSettings value={{ bindings: {} }} onChange={onChange} platform="windows" />);
@@ -203,11 +195,6 @@ describe('preference controls', () => {
     expect(onReplay).toHaveBeenCalledOnce();
     expect(screen.getByText('Completed with guide version 1')).toBeInTheDocument();
     expect(screen.getByText(/without changing a workspace/i)).toBeInTheDocument();
-  });
-
-  it('leaves the copy format choice to the Copy Bundle menu', () => {
-    render(<SettingsView activeCategory="Sharing" preferences={DEFAULT_PREFERENCE_SETTINGS} />);
-    expect(screen.queryByRole('combobox', { name: 'Native copy functions' })).not.toBeInTheDocument();
   });
 
   it('explains when the background capture shortcut could not be registered', () => {

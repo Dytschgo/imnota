@@ -2,13 +2,31 @@
 
 Imnota turns screenshots, Markdown text blocks and drawings in one collection into local Markdown + PNG prompt bundles. Local copy/export works offline. Optional hosted links upload approved final artifacts; Imnota does not synchronize editable projects or call an AI provider.
 
+## Installing and updating
+
+On macOS, choose **Download update**, then **Restart to install**. The background helper waits for Imnota to quit itself after your install request; the quick installer asks it to quit. Both keep the previous app only during replacement and abort before replacement if it cannot close within 60 seconds. Older builds that still offer **Run update in Terminal** use that existing updater once to reach the in-app version. On copy, final signature check, launch or replacement-observation failure, both attempt to restore the previous app. The rollback copy is retired only after installed signature verification and observation of the same running replacement process from the installed bundle on two polls at least one second apart, within 30 seconds. An accepted open request alone does not commit the installation. Before restoring, they ask the replacement to quit, wait, then send TERM only to processes whose executable is verified inside that replacement bundle. This shutdown has a 10-second bound. If shutdown cannot be confirmed, they preserve the failed replacement at a reported recovery path and restore the old app; quit the remaining replacement process before reopening the restored app. A successful installation removes the temporary rollback copy and recognized older app backups in the same installation folder (`Imnota-backup-<timestamp>.app`, `Imnota Backup <version> <timestamp> <number>.app`, and managed Imnota bundles under `.imnota-backups.noindex`). Cleanup requires the Imnota bundle identifier; unrelated folders and project snapshots are preserved. Cleanup failures report a warning without undoing a successful installation. After an in-app failure following quit, a native dialog reports restoration status and recovery paths. A plain-text `update-result.txt` is retained beside recovery files in the reported `.imnota-update.*` staging folder. If shutdown of the failed replacement is unconfirmed, the old app is not automatically reopened. If restoration fails, preserve the reported old app before trying to reopen it. Terminal-mode updates continue to report failures in Terminal.
+
+Recovery paths are relative to the verified physical installation folder. The
+quick installer keeps the previous app at `.imnota-install.*/previous-Imnota.app`;
+the macOS updater keeps it at `.imnota-backups.noindex/.rollback-<pid>.app`,
+with separate `.imnota-update.*` staging. An unconfirmed replacement shutdown
+preserves the failed app at `.imnota-install.*/failed-Imnota.app` or
+`.imnota-update.*/failed-Imnota.app`, respectively. If moving it aside fails, it
+remains at `Imnota.app` and the previous app stays at its reported rollback path.
+Preserve these recovery files after interruption; restore the previous app before
+removing a stale `.imnota-update.lock`, after confirming no installer is running.
+
+Windows installers and Linux AppImage updates replace the app without creating a history of app backup folders. Native updates can retain download metadata and a reusable installer cache; these are separate from project backups. See the [installer audit](development.md#installer-and-updater-storage-audit) for paths and native verification limits. To return to an older release after a successful installation, download its installer and check [project migration compatibility](data-format.md).
+
 ## Start a project and collection
 
 Choose a workspace folder, then create or open a project. Collections replace the older Subfolder and feedback-round terminology.
 
 Generated names such as `Imnota / Collection 01` display as `Collection 01` when the project is directly inside the `Imnota` workspace. Breadcrumbs, Recent and the collection chooser use the same label. Stored names and the rename field remain unchanged. Custom names stay intact, and the prefix remains when shortening would duplicate another collection name, including an archived collection. A moved project with an old workspace prefix keeps that prefix until you rename the collection.
 
-The sidebar holds Projects and the Recent quick list. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+The sidebar holds Projects, your **Pinned** projects and the Recent quick list. Pin a project with the pin on any Recent row; pinned projects are the same as favourites. The Projects page filters between **All**, **Favourites** and **Archived**; the heart in the top bar marks a project as a favourite. Use **View all recent** beneath the quick list, or the keyboard shortcuts, to open the full Recent and Favourites pages. Archiving or restoring a collection updates the Recent list immediately; archived collections stay out of it until restored.
+
+If a pin change to a closed project fails, Imnota shows an error even if you opened the project or navigated elsewhere while it was saving. The error gives a suggested next step without exposing private paths or system error details. It refreshes the project list to show the saved pin state; if that refresh also fails, the error tells you.
 
 - A new project begins with an empty collection unless you choose a template.
 - A new collection starts empty and becomes the active collection.
@@ -20,7 +38,7 @@ Overall context is optional and applies to the active collection. Prompt 1 conta
 
 Use the plus button beside **Projects** to create a project from the sidebar. Choose a predefined icon in the new-project dialog. **Edit project** on a project row changes its name, description and icon without renaming its folder.
 
-Each project row ends with icon buttons for edit, archive or restore, and delete. **Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Open **Archived projects** to search archived projects or restore one to the active library. **Delete project** asks for confirmation, then moves the whole project folder to the operating-system trash.
+Each project row ends with icon buttons for edit, archive or restore, and delete. **Archive project** hides the project from the active library and ordinary search without deleting its files. Undo reverses the action. Select **Archived** to find separate groups for archived projects and archived collections inside active projects. Collection rows show their project name; open a row, then use **Restore** in the collection picker to make it active again. Collections inside an archived project remain covered by that project's row. **Delete project** asks for confirmation, then moves the whole project folder to the operating-system trash.
 
 ### Start from a template
 
@@ -30,7 +48,7 @@ The new-project dialog also has five optional templates: Bug report, UI review, 
 
 The toolbar **Back** button returns to earlier app locations. Settings has its own category rail and a back arrow beside its title; that arrow returns to the prior location, including the project, collection and item you were viewing. **Forward** becomes available after going back; navigating somewhere new clears the forward history. Navigation saves pending work before leaving it.
 
-Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope.
+Choose **Search** to find project and collection information, screenshot descriptions, annotation text, Markdown text blocks and drawing text. Results include context and open the matching item; annotation results reveal the matching mark on the canvas. Search reads local saved text, not text inside screenshot pixels. Archived projects have a separate search scope; when a search finds nothing, **Search the archive** (or **Search active projects**) repeats it in the other scope.
 
 Search reports when its limits or unavailable files prevent complete results. Content files over 2 MB are skipped; each request also limits the number of projects, file operations and total bytes read. Project files remain unchanged by searching.
 
@@ -51,13 +69,17 @@ Each screenshot has:
 
 Drag screenshot rows to change their order. Internal IDs remain stable; `Picture 1`, `Picture 2` and so on are assigned from the current order only when exporting.
 
-Deleting a screenshot moves its source image, annotations and description to the operating-system trash. Imnota retains a local recovery snapshot for Undo; it does not require the operating system to provide a restore API. The original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+Deleting a screenshot moves its source image, annotations and description to the operating-system trash. If system trash rejects the operation, Imnota can finish the deletion using its existing local recovery copies and shows a notice directing you to **Recently deleted**. This fallback also applies to drawings and text blocks. Undo and the same 30-day restore window remain available; the original trashed copy may remain in the system trash after Undo. This is different from crossing out a screenshot, which keeps it in place and records an exclusion in generated Markdown.
+
+The fallback verifies the recovery copy and unchanged source before removing the source. Missing or damaged backups, changed or linked files, and a failed local removal stop deletion. Imnota restores the baseline where safe, or keeps the journal and reports incomplete recovery without overwriting an external edit. These checks do not lock out another application writing the workspace: a path can still change after the final check. Whole-project deletion still requires system trash and does not use this fallback.
 
 ## Restore a deleted item
 
 Open **Recently deleted** below the collection rail's Add controls to see this project's deleted screenshots, drawings and text blocks from the last 30 days. Each row identifies the item, its collection and deletion time. **Restore** uses the same protected recovery as immediate Undo and puts the item back in its original collection. If a restore or list refresh fails, the dialog explains the error and lets you retry. Opening another project closes the dialog.
 
-If Restore reports that a file was replaced but durability could not be confirmed, check the restored item and warning before continuing. Imnota confirms the restored metadata and content before adopting the snapshot and keeps the Undo journal for later recovery. If the project changes again or confirmation cannot read it, Restore keeps recovery files and pending edits, blocks another Restore or metadata save, and asks you to reload and compare. A member-file warning alone does not mean the entire item was restored. These checks do not guarantee survival across power loss or lock out another application writing the same workspace.
+If Restore reports that a file was replaced but durability could not be confirmed, check the restored item and warning before continuing. Imnota confirms the restored metadata and content before adopting the snapshot and keeps the Undo journal for later recovery. If the project changes again or confirmation cannot read it, Restore keeps recovery files and pending edits and asks you to reload and compare. Unresolved workspace conflicts or monitoring failures block Restore and deletion Undo; unresolved conflicts also pause metadata saves and prompt preparation. Dismissing the notice only hides it; it does not resolve the conflict. A blocked Restore or deletion Undo shows the recovery banner again so you can reload; a later notification can also show it again.
+
+Another successful operation may safely refresh the project and resolve the conflict, but keeps the durability warning and recovery guidance visible. This retained warning is a reminder, not an unresolved workspace change: by itself it does not block Restore, deletion Undo, metadata saves or prompt preparation. While the banner is visible, **Reload project** lets you compare the saved project and clear the warning; with unsaved edits, **Discard local edits & reload** explicitly discards those edits first. A failed reload retains the warning. Dismissal hides it; a successful explicit reload, switching projects, starting a new project session or closing the app clears it. Warning retention is in memory and does not survive an app restart. A member-file warning alone does not mean the entire item was restored. These checks do not guarantee survival across power loss or lock out another application writing the same workspace.
 
 After 30 days, opening the project permanently expires eligible recovery copies. The boundary is an `expired-*` rename immediately before file removal; after that, the item is no longer offered for Undo even if disk cleanup fails. The system trash and separate backups have their own retention policies. Do not rely on Recently deleted as a backup.
 
@@ -107,13 +129,13 @@ Select / Move is the default tool. Drag empty screenshot space to pan; drag an a
 
 Hold Shift while drawing a new geometric annotation to make boxes square, ellipses circular, or arrows snap to horizontal, vertical or 45-degree directions. Crop and Freehand remain unconstrained. Tab into the annotation canvas, then use Tab or Shift+Tab to select annotations in stacking order. Moving past either end releases focus; Escape clears selection. A newly drawn mark stays selected for immediate keyboard editing, including when it is drawn over another mark. A cancelled drawing gesture saves no new mark. With the canvas focused, arrow keys move the selected annotation by one image pixel, or ten with Shift. A continuous burst of nudges forms one Undo step; another edit, selection change or a pause of more than one second starts a new step. Text fields and crop controls retain their keyboard behavior. A new text note becomes one Undo step when committed; cancelling it leaves no empty note. After panning or zooming, resizing the window or panels preserves the zoom and centred image point. Fit returns to automatic fitting on resize.
 
-Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move with the note selected. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual marks such as arrows, boxes and steps also appear under `Picture N / Marks` with kind, id and position as percentages of the source image. Crop stays an image operation, and redaction marks are omitted so Markdown does not outline secrets.
+Double-click the screenshot to create a text box and type immediately. Enter confirms, Shift+Enter inserts a line, and Escape cancels. After confirmation, Imnota returns to Select / Move with the note selected. Text notes are numbered within their screenshot, such as `Picture 2 / Note 1`. Visual marks such as arrows, boxes and steps also appear under `Picture N / Marks` with kind, id and position as percentages of the source image. Crop stays an image operation. Blur and pixelate marks are listed only as a count, such as `- 2 redacted regions`, with no ids, positions or sizes, so Markdown does not outline secrets.
 
 The application selects semantic annotation colors for the active theme; a compact palette allows overrides. This affects the live canvas. Prompt PNG rendering separately corrects contrast for a white export background without modifying the source screenshot or saved annotation intent.
 
 ## Copy prompt bundles
 
-Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem.
+Choose **Copy Bundle** in the active collection's toolbar to open the sharing dialog, then choose the bundle to copy. Each card shows a preview, a **Bundle 1**, **Bundle 2**, etc. heading, and one line with its pictures, counts, dimensions and estimated size. The card's menu holds the single-format copies; **Copy Markdown only**, **Copy image only**, **Open files** and **Copy file paths** also appear inline when a bundle is file-only or a copy reported a problem. Select a card's preview to inspect the full-resolution image; it opens at **Fit width**, and **Fit image** or **Actual size** change the scale. While bundles are prepared or copied, a light travels along the top of the dialog and around the bundle in progress; a finished copy gets a brief green ring. Problems hold still: a red outline marks a failed bundle and an amber outline a file-only or warned one. With reduced motion turned on in your system settings, the colours stay and the movement stops.
 
 Copying a prompt creates a fresh timestamped export from the latest saved state. Only the current collection is included. Each bundle contains a matching `.png` and `.md` file:
 
@@ -134,7 +156,7 @@ A screenshot needs neither a description nor an annotation. Its minimal Markdown
 
 When **Settings → Features → Include recognised text in Markdown** is enabled, Copy Bundle also runs on-device OCR and appends a `### Visible text` section when text is found. This beta feature is off by default. Recognition stays on this device; it is not written into descriptions or `project.json`. A crop is honoured so only the exported region is read. Screenshots with blur or pixelate marks omit Visible text so redacted pixels are not transcribed. OCR failure never blocks Copy Bundle. Windows uses the system OCR engine (`Windows.Media.Ocr`), downscales captures that exceed that engine’s size limit, and bounds each recognition so Copy Bundle is not blocked for long. Encoded screenshots larger than 20 MB skip Visible text. Linux and other platforms skip OCR without sending screenshot pixels.
 
-When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks are omitted:
+When a screenshot has visual annotations, Markdown lists them under `### Picture N / Marks` so arrows, boxes and steps are available as geometry, not only in the PNG. Text and callout notes remain under `### Picture N / Note N`. Crop is applied to the image rather than listed, and blur or pixelate marks appear only as a count of redacted regions:
 
 ```md
 ### Picture 2 / Marks
@@ -154,7 +176,9 @@ Off by default. The beta **Settings → Features → MCP access** toggle lets an
 
 Agents can list projects, read collection items, search saved text, and load the latest export. They cannot run Copy Bundle for you: if no export exists, the tool returns `bundle not prepared`. Recovery journals, backups, and hosted-share secrets are not exposed.
 
-Choose **Copy prompt** in Settings and paste it into your agent; the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
+The setup diagram shows saved bundles flowing to your agent; it is an explanation, not a live connection indicator. Copy actions announce success or an error; if copying fails, retry or select and copy the displayed text.
+
+Choose **Copy prompt** in Settings and paste it into your agent (if the clipboard is unavailable, the button reads **Copy failed** and you can select the prompt text instead); the prompt carries the server address, the stdio alternative, the tool list, and the instruction for the agent to write its own MCP configuration. A configuration reference with generic `mcpServers` entries sits below it. Optional skill and rule files live in the repository (`docs/claude-code-imnota-skill.md`, `docs/cursor-imnota-rule.md`); Imnota does not write agent configuration. See [Local agent access](agent-access.md).
 
 ## Share a hosted link
 

@@ -284,7 +284,7 @@ export function HostedShareDialog({
               </p>
             )}
             <fieldset className="hosted-share-expiry" disabled={busy || Boolean(request)}>
-              <legend>Expires after</legend>
+              <legend className="field-label">Expires after</legend>
               <div className="hosted-share-expiry-choices">
                 {[1, 7, 14, 30].map((days) => (
                   <label key={days}>

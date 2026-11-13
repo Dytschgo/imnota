@@ -145,6 +145,9 @@ export type ProjectListItem = Pick<
   screenshots: Array<Pick<ScreenshotRecord, 'id'>>;
 };
 
+/** Project fields that can change without loading the project into the editor. */
+export type ProjectMetadataPatch = Partial<Pick<ProjectData, 'name' | 'description' | 'icon' | 'favourite'>>;
+
 export interface WorkspaceSettings {
   workspacePath: string | null;
   interfaceScale: number;
@@ -160,7 +163,6 @@ export type UpdateChannel = 'stable' | 'nightly';
 export type UpdateState =
   'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
 export interface UpdateStatus {
-  terminalCommand?: string;
   installing?: boolean;
   channel?: UpdateChannel;
   releaseUrl?: string;
@@ -264,7 +266,7 @@ export interface ImnotaBridge extends WorkflowBridge, ContentBridge, BackupBridg
   updateProjectMetadata(input: {
     projectPath: string;
     expectedRevision: string;
-    patch: { name?: string; description?: string; icon?: ProjectIconKey };
+    patch: ProjectMetadataPatch;
   }): Promise<ProjectSnapshot>;
   setProjectArchived(input: {
     projectPath: string;

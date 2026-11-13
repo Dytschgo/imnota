@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Annotation, ScreenshotRecord } from '../../shared/types';
 import { ScreenshotInspector } from './ScreenshotInspector';
@@ -53,6 +53,16 @@ it('deletes the selected annotation with the mouse, including retired kinds', ()
   });
   fireEvent.click(screen.getByRole('button', { name: 'Delete annotation' }));
   expect(onDelete).toHaveBeenCalledOnce();
+});
+
+it('groups Duplicate under Actions rather than an Export region', () => {
+  renderInspector(null);
+  expect(
+    within(screen.getByRole('region', { name: 'Actions' })).getByRole('button', {
+      name: 'Duplicate screenshot',
+    }),
+  ).toBeVisible();
+  expect(screen.queryByRole('region', { name: 'Export' })).not.toBeInTheDocument();
 });
 
 it('offers deletion only while an annotation is selected', () => {
