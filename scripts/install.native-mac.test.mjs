@@ -28,6 +28,7 @@ const macosTools = [
   '/bin/chmod',
   '/bin/cp',
   '/bin/ln',
+  '/bin/kill',
   '/bin/ls',
   '/bin/mkdir',
   '/bin/mv',

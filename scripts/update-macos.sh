@@ -5,6 +5,8 @@ set -Eeuo pipefail
 readonly APP_ID="com.dytschgo.imnota"
 readonly APP_NAME="Imnota"
 readonly RELEASE_ROOT="https://github.com/Dytschgo/imnota/releases/download"
+SECURITY_OBSERVER_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
+readonly SECURITY_OBSERVER="$SECURITY_OBSERVER_DIRECTORY/imnota-security-observer"
 
 stage_dir=""
 lock_dir=""
@@ -21,8 +23,18 @@ keep_staging=0
 rollback_failed=0
 ORIGINAL_APP_IDENTITY=""
 EXPECTED_CURRENT_VERSION=""
+# In-app mode: Imnota runs this helper in the background, requests installation
+# with SIGUSR1 and quits itself. Output goes to a log file, never a pipe.
+in_app=0
+app_pid=""
+install_requested=0
+app_quit_observed=0
+replacement_shutdown_confirmed=1
+original_app_restored=0
+failure_reason=""
 
 die() {
+  failure_reason="$*"
   printf 'Update failed: %s\n' "$*" >&2
   exit 1
 }
@@ -57,6 +69,7 @@ restore_previous_version() {
   fi
 
   if ! quiesce_replacement "$app_path"; then
+    replacement_shutdown_confirmed=0
     keep_staging=1
     warn "Failed replacement preserved at: $stage_dir/failed-${APP_NAME}.app (or $app_path if moving it fails). Quit that process before reopening the restored app."
   fi
@@ -83,15 +96,57 @@ restore_previous_version() {
 
   backup_path=""
   rollback_owned=0
+  original_app_restored=1
   return 0
 }
 
+show_update_failure() {
+  # Fixed AppleScript; paths and failure text are data, never script source.
+  /usr/bin/osascript - "$1" <<'APPLESCRIPT'
+on run argv
+  display alert "Imnota update failed" message (item 1 of argv) as critical buttons {"OK"} default button "OK"
+end run
+APPLESCRIPT
+}
+
+report_update_failure() {
+  local reopened=$1 message report_path=""
+  printf -v message 'Imnota update failed.\n%s\n\n' "${failure_reason:-The update stopped before installation completed.}"
+  if (( rollback_failed != 0 )); then
+    message+="Automatic restoration did not complete. Preserve the previous app at: $backup_path"
+  elif (( replacement_shutdown_confirmed == 0 )); then
+    message+="The previous app was restored, but the failed replacement may still be running. Quit that process before reopening the restored app."
+  elif (( reopened != 0 )); then
+    message+="Your previous app was reopened."
+  else
+    message+="Imnota could not be reopened automatically. The installation path is: $app_path"
+  fi
+  if [[ -n "$stage_dir" ]]; then
+    message+=$'\n\nRecovery files: '"$stage_dir"
+    if safe_physical_directory "$stage_dir"; then
+      report_path="$stage_dir/update-result.txt"
+      # Never overwrite a pre-existing file, including a symlink, even inside owned staging.
+      if (umask 077; set -C; printf '%s\nRecovery report: %s\n' "$message" "$report_path" > "$report_path"); then
+        message+=$'\nRecovery report: '"$report_path"
+      else
+        warn "The recovery report could not be written; preserved files: $stage_dir"
+      fi
+    fi
+  fi
+  printf '%s\n' "$message" >&2
+  show_update_failure "$message" || warn "The native update failure dialog could not be shown."
+}
+
 cleanup() {
-  local status=$?
+  local status=$? reopened=0
   trap - EXIT
 
   if (( status != 0 && transaction_committed == 0 )); then
     restore_previous_version || true
+  fi
+  # The observing app is gone; retain a discoverable report beside the recovery files.
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 )); then
+    keep_staging=1
   fi
 
   if [[ -n "$stage_dir" && "$keep_staging" -eq 0 ]] && safe_physical_directory "$stage_dir"; then
@@ -101,6 +156,20 @@ cleanup() {
     /bin/rmdir -- "$backup_root" 2>/dev/null || true
   fi
   release_lock
+
+  # Nobody watches a background update: reopen the restored app it closed.
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 && rollback_failed == 0 && replacement_shutdown_confirmed != 0 )) &&
+    [[ -n "$app_path" && -d "$app_path" && ! -L "$app_path" ]] && ! is_app_running &&
+    { (( original_app_restored != 0 )) || (assert_original_app_unchanged) >/dev/null 2>&1; }; then
+    if launch_app "$app_path" && wait_for_replacement "$app_path"; then
+      reopened=1
+    else
+      warn "The previous Imnota version could not be reopened."
+    fi
+  fi
+  if (( status != 0 && in_app != 0 && app_quit_observed != 0 )); then
+    report_update_failure "$reopened"
+  fi
 
   if (( status != 0 )); then
     if (( rollback_failed == 0 )); then
@@ -183,14 +252,14 @@ acquire_lock() {
   lock_dir="${parent}/.imnota-update.lock"
 
   if (umask 077; /bin/mkdir -- "$lock_dir") 2>/dev/null; then
-    secure_private_directory "$lock_dir" || die "The update lock is not a private physical directory owned by you."
+    secure_private_directory "$lock_dir" || die "The update lock could not be confirmed private. Preserved at: $lock_dir"
     require_empty_created_directory "$lock_dir" "update lock"
     lock_owned=1
     printf '%s\n' "$$" > "$lock_dir/pid" || die "The update lock could not be recorded."
     return 0
   fi
 
-  die "Another update may be running or was interrupted. After confirming no Imnota update Terminal is running, use Finder's Go > Go to Folder to remove this lock folder, then try again: $lock_dir"
+  die "Another update may be running or was interrupted. After confirming no Imnota update helper is running, use Finder's Go > Go to Folder to remove this lock folder, then try again: $lock_dir"
 }
 
 download_file() {
@@ -272,11 +341,29 @@ directory_acl_entries() {
   '
 }
 
+native_acl_entries() {
+  [[ -f "$SECURITY_OBSERVER" && ! -L "$SECURITY_OBSERVER" && -O "$SECURITY_OBSERVER" && -x "$SECURITY_OBSERVER" ]] || return 1
+  local observation
+  observation="$("$SECURITY_OBSERVER" acl "$1")" || return 1
+  case "$observation" in
+    no-acl) return 0 ;;
+    acl) printf 'acl\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 secure_private_directory() {
   local acl
+  if [[ "${1%/*}" == /Applications ]]; then
+    # Inspect before stripping inheritance, while there are no private contents.
+    app_parent_status /Applications && acl="$(native_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  fi
   safe_physical_directory "$1" && /bin/chmod -N "$1" && /bin/chmod 700 "$1" &&
     safe_physical_directory "$1" && [[ "$(directory_mode "$1")" == 700 ]] &&
-    acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]]
+    acl="$(directory_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  if [[ "${1%/*}" == /Applications ]]; then
+    app_parent_status /Applications && acl="$(native_acl_entries "$1")" && [[ -z "$acl" ]] || return 1
+  fi
 }
 
 require_empty_created_directory() {
@@ -315,10 +402,10 @@ app_parent_status() {
   [[ ! -w "$parent" ]] || writable=1
   [[ ! -x "$parent" ]] || searchable=1
   if [[ "$parent" == /Applications && "$physical" == 1 && "$writable" == 1 && "$searchable" == 1 ]]; then
-    metadata="$(/usr/bin/stat -f '%u:%g:%Sg:%OLp' "$parent")" || return 2
+    metadata="$(/usr/bin/stat -f '%u:%g:%Sg:%OLp' "$parent")" || return 4
     IFS=: read -r uid gid group mode <<< "$metadata"
     gids="$(/usr/bin/id -G)" || return 2
-    acl="$(directory_acl_entries "$parent")" || return 2
+    acl="$(native_acl_entries "$parent")" || return 4
   fi
   app_parent_policy "$parent" "$physical" "$owned" "$writable" "$searchable" "$uid" "$group" "$mode" "$gid" "$gids" "$acl"
 }
@@ -330,6 +417,7 @@ validate_app_parent() {
     0) return 0 ;;
     1) die "The app folder is not writable and searchable by you. Move Imnota to a writable folder you own, such as ~/Applications, then try again." ;;
     3) die "The /Applications folder has extra access rules (an ACL). Move Imnota to ~/Applications, or install the update manually." ;;
+    4) die "Imnota could not confirm the access rules on /Applications. Move Imnota to ~/Applications, or install the update manually." ;;
     *) die "The app folder does not meet the ownership requirements: it must be owned by you or be the standard /Applications folder available to an admin user. Move Imnota to ~/Applications, or ask an administrator to restore the standard /Applications ownership and permissions, then try again." ;;
   esac
 }
@@ -455,8 +543,8 @@ request_quit() {
 
 wait_for_app_to_quit() {
   local timeout=60 deadline=$((SECONDS + 60))
-  is_app_running || return 0
-  if ! request_quit "$deadline"; then
+  is_app_running || { app_quit_observed=1; return 0; }
+  if (( in_app == 0 )) && ! request_quit "$deadline"; then
     echo "Imnota quit request failed or timed out. No installed app was changed." >&2
     exit 1
   fi
@@ -467,6 +555,7 @@ wait_for_app_to_quit() {
     fi
     /bin/sleep 1
   done
+  app_quit_observed=1
 }
 
 require_process_inspection() {
@@ -561,7 +650,12 @@ quiesce_replacement() {
 }
 
 is_app_running() {
-  /usr/bin/pgrep -x "$APP_NAME" >/dev/null 2>&1
+  # In-app mode follows the exact Imnota process that started it, not any instance.
+  if [[ -n "$app_pid" ]]; then
+    /bin/kill -0 "$app_pid" 2>/dev/null
+  else
+    /usr/bin/pgrep -x "$APP_NAME" >/dev/null 2>&1
+  fi
 }
 
 launch_app() {
@@ -740,6 +834,13 @@ assert_original_app_unchanged() {
     die "The installed Imnota version changed while the update was being prepared. Check for updates again."
 }
 
+wait_for_install_request() {
+  while (( install_requested == 0 )); do
+    is_app_running || die "Imnota closed before the update was installed. The downloaded update was discarded."
+    /bin/sleep 1
+  done
+}
+
 swap_and_launch() {
   local replacement=$1 backup_root_created=0
   validate_app_parent "${app_path%/*}"
@@ -756,7 +857,7 @@ swap_and_launch() {
     (umask 077; /bin/mkdir -- "$backup_root") || die "The managed rollback folder could not be created."
     backup_root_created=1
   fi
-  secure_private_directory "$backup_root" || die "The managed rollback folder is not a private physical directory owned by you."
+  secure_private_directory "$backup_root" || die "The managed rollback folder could not be confirmed private. Preserved at: $backup_root"
   # Earlier runs may have left legitimate backups; only a new root must be empty.
   if (( backup_root_created != 0 )); then
     require_empty_created_directory "$backup_root" "managed rollback folder"
@@ -766,15 +867,10 @@ swap_and_launch() {
   [[ ! -e "$rollback_target" && ! -L "$rollback_target" ]] || die "A backup path collision prevented the update."
 
   # Another local admin already controls /Applications and can race path operations.
-  # ACL changes require ownership/root or delegated security rights. Refuse any
-  # observed ACL row or + mode indicator on /Applications. This ls-based observation
-  # cannot distinguish a silent ACL-read failure from no ACL; native API observers exist but are not used.
-  # If that read silently fails while an inheritable ACL exists, new transaction
-  # directories briefly inherit another principal's access before ACL stripping.
-  # Emptiness checks and re-verification do not revoke retained descriptors, undo
-  # observed names or transient entries, or clear xattrs. The owner accepts this
-  # unresolved residual risk for nightly builds; a private same-volume transaction
-  # root or a verified native ACL observer is required before stable.
+  # A complete native no-ACL observation is required before creating shared-parent
+  # directories. A security-read failure is never interpreted as absence. Parent
+  # and child are observed again before storing contents. Root can still change
+  # ACLs between observations; root is outside this transaction's trust boundary.
   # Inheritance can also expose new directories under user-controlled parents.
   # Strip ACLs, recheck permissions and require new directories to be empty before
   # use; preserve unexpected contents on refusal.
@@ -824,8 +920,16 @@ swap_and_launch() {
 }
 
 main() {
+  if [[ "${1:-}" == "--in-app" ]]; then
+    in_app=1
+    # Installed before the ready marker, so a request can never terminate the helper.
+    trap 'install_requested=1' USR1
+    [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "The in-app update needs the Imnota process ID."
+    app_pid=$2
+    shift 2
+  fi
   [[ "$#" -eq 5 ]] ||
-    die "Usage: update-macos.sh <tag> <zip-url> <sha256sums-url> <current-app-path> <expected-current-version>"
+    die "Usage: update-macos.sh [--in-app <imnota-pid>] <tag> <zip-url> <sha256sums-url> <current-app-path> <expected-current-version>"
   trap cleanup EXIT
   trap 'exit 130' HUP INT TERM
 
@@ -839,8 +943,10 @@ main() {
   validate_app_parent "$app_parent"
   stage_dir="$(umask 077; /usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
     die "A same-folder update staging area could not be created."
-  secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you."
+  keep_staging=1
+  secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you. Preserved at: $stage_dir"
   require_empty_created_directory "$stage_dir" "staging area"
+  keep_staging=0
 
   local archive="$stage_dir/$ARCHIVE_NAME"
   local sums="$stage_dir/SHA256SUMS.txt"
@@ -849,6 +955,7 @@ main() {
 
   printf 'Downloading Imnota %s...\n' "$RELEASE_VERSION"
   download_file "$sums_url" "$sums" || die "SHA256SUMS.txt could not be downloaded."
+  (( in_app == 0 )) || printf 'IMNOTA_UPDATE archive\n'
   download_file "$archive_url" "$archive" || die "The Imnota update could not be downloaded."
 
   read_expected_checksum "$sums" "$ARCHIVE_NAME"
@@ -861,6 +968,10 @@ main() {
   extract_archive "$archive" "$extracted" || die "The verified update could not be extracted."
   validate_extracted_bundle "$extracted" "$RELEASE_VERSION"
 
+  if (( in_app != 0 )); then
+    printf 'IMNOTA_UPDATE ready\n'
+    wait_for_install_request
+  fi
   printf 'The update is verified. Waiting for Imnota to close safely...\n'
   wait_for_app_to_quit
   assert_original_app_unchanged

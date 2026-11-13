@@ -150,10 +150,17 @@ export function registerSystemIpc(router: IpcRouter, host: IpcHost): void {
   handle('update:status', () => host.updateController.getStatus());
   handle('update:install', async () => {
     if (host.updateInstallPending) throw new Error('An update installation is already starting.');
+    // Resolve session captures before starting an updater/helper that may outlive a cancelled quit.
+    if (host.quickCaptureAccess?.store.size) {
+      await host.quickCaptureAccess.show(true);
+      throw new Error('Add or discard pending captures before restarting to install the update.');
+    }
     host.updateInstallPending = true;
     try {
       // Close admission before draining all file work accepted before restart.
       await router.drain();
+      if (host.quickCaptureAccess?.store.size)
+        throw new Error('Add or discard pending captures before restarting to install the update.');
       await host.updateController.install();
     } catch (error) {
       host.updateInstallPending = false;
