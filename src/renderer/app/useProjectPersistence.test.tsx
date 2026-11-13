@@ -112,6 +112,49 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each([
+    ['screenshot description', ['collections/001/descriptions/one.md'], true],
+    ['drawing source', ['collections/001/drawings/one.json'], true],
+    ['Markdown source', ['collections/001/text/one.md'], true],
+    ['mixed metadata and member', ['project.json', 'collections/001/text/one.md'], true],
+    ['unknown changed paths', [], true],
+    ['confirmed metadata only', ['project.json'], false],
+  ] as const)(
+    'handles %s changes at the accepted metadata revision without losing queued work',
+    async (_label, changedPaths, external) => {
+      const source = snapshot();
+      const mock = bridge();
+      window.imnota = mock.value as never;
+      const hook = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: null,
+          onProject: vi.fn(),
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      );
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+      act(() =>
+        mock.emit({
+          watchId: 'watch',
+          projectPath: source.projectPath,
+          kind: 'external-change',
+          projectRevision: 'project-1',
+          changedPaths,
+        }),
+      );
+      expect(Boolean(hook.result.current.externalChange)).toBe(external);
+      await act(async () =>
+        expect(
+          await hook.result.current.saveProjectMetadata({ ...source.project, name: 'Pending name' }),
+        ).toBe(!external),
+      );
+      expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledTimes(external ? 0 : 1);
+      expect(hook.result.current.hasPendingProjectMetadata()).toBe(external);
+    },
+  );
+
   it.each(
     (['mutation', 'reload', 'reopen'] as const).flatMap((operation) =>
       (['project', 'session'] as const).flatMap((switchKind) =>
@@ -1580,4 +1623,63 @@ describe('useProjectPersistence', () => {
     expect(result.current.imageLoadFailed).toBe(false);
     expect(result.current.loadedScreenshotId).toBe('two');
   });
+  it.each([false, true])(
+    'preserves comparison edits across native metadata and blocks divergent external pairs (conflict=%s)',
+    async (conflict) => {
+      const source = snapshot([shot('one'), shot('two')]);
+      const local = structuredClone(source.project);
+      local.collections[0].comparison = { kind: 'current-expected', leftId: 'one', rightId: 'two' };
+      const external = structuredClone(source.project);
+      if (conflict)
+        external.collections[0].comparison = { kind: 'before-after', leftId: 'one', rightId: 'two' };
+      const mock = bridge({
+        saveScreenshotContent: vi.fn(async ({ screenshot: saved }: { screenshot: ScreenshotRecord }) => ({
+          project: { ...external, screenshots: [saved, shot('two')] },
+          savedScreenshotId: saved.id,
+          conflictCreated: false,
+          contentRevision: 'external-content',
+          projectRevision: 'external-revision',
+        })),
+      });
+      window.imnota = mock.value as never;
+      const onProject = vi.fn();
+      const { result } = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: source.project.screenshots[0],
+          onProject,
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      );
+      await waitFor(() => expect(result.current.loadedScreenshotId).toBe('one'));
+      act(() => {
+        result.current.queueProjectMetadata(local);
+        result.current.markScreenshotDirty(shot('one', 'Edited'));
+      });
+      await act(async () => {
+        await result.current.flush();
+      });
+      expect(onProject.mock.calls.at(-1)?.[0].collections[0].comparison).toEqual(
+        local.collections[0].comparison,
+      );
+      if (conflict) {
+        expect(result.current.externalChange?.kind).toBe('metadata-conflict');
+        expect(mock.value.saveProjectCompareAndSwap).not.toHaveBeenCalled();
+      } else {
+        await act(async () => {
+          await result.current.flushProjectMetadata();
+        });
+        expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledWith(
+          expect.objectContaining({
+            project: expect.objectContaining({
+              collections: expect.arrayContaining([
+                expect.objectContaining({ comparison: local.collections[0].comparison }),
+              ]),
+            }),
+          }),
+        );
+      }
+    },
+  );
 });

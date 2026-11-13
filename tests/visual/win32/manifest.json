@@ -21,131 +21,8 @@
   "sourceRevision": "8a93d1237a6b0a72464a00ca5fb346f32811e65e",
   "electron": "44.2.0",
   "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35784693729",
-  "environment": "GitHub Actions windows-latest, packaged Electron 44.2.0 at 1x scale. Per-capture entries record the reviewed source revisions and runs. The Settings and two backdrop captures now record the Settings rail and the Forward history entry created when leaving Settings. Packaged native walkthrough passed; strict comparison tolerance is unchanged.",
+  "environment": "GitHub Actions windows-latest, packaged Electron at 1x scale. Per-capture entries record reviewed revision, run, artifact and acceptance. November1 entries cover the design pass; November13 entries cover the Source-off inspector section after independent visual review. Native smoke and clipboard passed before intentional baseline mismatches. Strict comparison tolerance is unchanged.",
   "captureUpdates": {
-    "backdrop-collapsed.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "248f14d8ea0c8227a215ad54476ad9d62b89c1c74307dbeb84ad05058318e87e",
-      "bytes": 304731,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
-    },
-    "1280x800-workspace-dark": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1280x800-workspace-light": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1440x900-settings": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-dark": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1440x900-workspace-light": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1920x1080-workspace-dark": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1920x1080-workspace-light": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "3440x1440-workspace-dark": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "3440x1440-workspace-light": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "30506b351aaf10b013b6610239237b700223ff61",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35779685295",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. These changes show Recent labels, hidden collection-folder prefixes, and a neutral collection plus control. Surrounding workspace layout and screenshot content remain intact. Native verification passed; strict comparison tolerance is unchanged."
-    },
-    "backdrop-workspace": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "9b3023af043111cf7694ca1ffc10210b9e9ee8eb",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35782465670",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
-    },
-    "backdrop-collapsed": {
-      "reviewedAt": "2026-09-22",
-      "sourceRevision": "9b3023af043111cf7694ca1ffc10210b9e9ee8eb",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/35782465670",
-      "review": "Packaged Windows capture and highlighted difference individually reviewed. Removing the separate Drawing toolbar row and the View caption reclaims the requested canvas space. Drawing tools remain reachable in one row in the expanded and collapsed layouts; screenshot content and inspector remain visible. Packaged native verification passed; strict comparison tolerance is unchanged."
-    },
-    "1280x800-onboarding-annotate.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "0766660254d184521b8d6e1aaa87488eee95b307dbda83a60cdd32aa241122bc",
-      "bytes": 116891,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 80, 352)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
-    },
     "1280x800-onboarding-copy.png": {
       "reviewedAt": "2026-10-14",
       "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
@@ -170,122 +47,149 @@
       "bytes": 95667,
       "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (22, 161, 80, 352)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
     },
-    "1280x800-workspace-dark.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+    "1440x900-settings.png": {
+      "reviewedAt": "2026-11-01",
+      "sourceRevision": "7e52708dbe9ed276dbc58b49835cfd41993bf7df",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "3067640c966fc1c8bca0d2ea11b979a3a629460d78f8a673cd9e3a99a396eb8b",
-      "bytes": 87212,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/41272824094",
+      "sourceArtifactId": 13070890418,
+      "sha256": "6bc83fe60998dbfc32555bd68154fa2b86991911c90d1057a7ac2bb56f849be4",
+      "bytes": 406969,
+      "review": "Individually inspected capture and highlighted difference: redundant first divider removed; Accent legend sits below its divider. The resulting vertical shift preserves controls, card spacing, artwork and scrolling. Root rendered review and prior Opus review accept the intended changes. Windows packaged smoke passed 35 assertion groups and clipboard passed 5 in run 41272824094; the job failed only at the unchanged strict visual tolerance before this acceptance."
+    },
+    "1280x800-onboarding-annotate.png": {
+      "reviewedAt": "2026-11-01",
+      "sourceRevision": "7e52708dbe9ed276dbc58b49835cfd41993bf7df",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/41272824094",
+      "sourceArtifactId": 13070890418,
+      "sha256": "4253fc54feb996dc24d279285040975c35c683edb2d97edbc0d616ed58ab65d0",
+      "bytes": 116574,
+      "review": "Individually inspected capture and highlighted difference: full-width one-line canvas hint and updated workspace-search button behind the scrim. Guide actions, sample annotations and dialog layout remain intact. Root rendered review and prior Opus review accept the intended changes. Windows packaged smoke passed 35 assertion groups and clipboard passed 5 in run 41272824094; the job failed only at the unchanged strict visual tolerance before this acceptance."
     },
     "1280x800-workspace-light.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "5348667cdd1b3e6ef300bbba5b346522faf9122f388e781249b7557507d1122b",
-      "bytes": 88445,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "d878babc9cb397f5ba993e36331f731ffac7261ca4fb86a2d551e67a97c6d64e",
+      "bytes": 93294,
+      "review": "Individually inspected old/new 1280x800-workspace-light.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
-    "1440x900-settings.png": {
-      "reviewedAt": "2026-09-28",
-      "sourceRevision": "77d83530f1793883eaab3e85531812c11f74fba0",
+    "1280x800-workspace-dark.png": {
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/36413152769",
-      "review": "Inspected the hosted packaged Windows capture from integration PR 162. Only the Backdrop description changed (glass off now keeps solid surfaces in every theme, PR 157). All 13 other approved captures matched. Packaged smoke passed all 27 groups. Strict tolerance unchanged."
-    },
-    "1440x900-workspace-dark.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
-      "electron": "44.2.0",
-      "platform": "win32",
-      "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "03e5f074dd0d8b696497c5722312c1aa05c383967bb6405a435ebf6d1cae1510",
-      "bytes": 95896,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "a6a23e1a7ac30f2b3eadf2332aecedbe6871b6b776e536c278a0d5f5dfd13985",
+      "bytes": 92246,
+      "review": "Individually inspected old/new 1280x800-workspace-dark.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
     "1440x900-workspace-light.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "bb6e38b92ac7c1686f6ee0d2023e5d43edabb0910116f00389beb8bf769aa3cd",
-      "bytes": 97588,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "20de483382f6fcfe10cf441ea7425db5e4d26f5d55af396f6559b11de3951cde",
+      "bytes": 104523,
+      "review": "Individually inspected old/new 1440x900-workspace-light.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
-    "1920x1080-workspace-dark.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+    "1440x900-workspace-dark.png": {
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "ab0b20f819ac9e4aca3964c9b3d1f9680b6d4e384499938e1e777057464c3fd5",
-      "bytes": 108309,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "3b6c95e5711faee39b52ea3c5d0cc1dce5ec4022607111b8612c4a95fa86a3a3",
+      "bytes": 103318,
+      "review": "Individually inspected old/new 1440x900-workspace-dark.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
     "1920x1080-workspace-light.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "6f223311ec5b790771adfbd3302961ccdbd8ef347b1035bf3526dfb2b195ebb0",
-      "bytes": 110054,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "81297dc7ffb0c9c7272dab4787981259334366fcd930edc14bac1022dc91d859",
+      "bytes": 119972,
+      "review": "Individually inspected old/new 1920x1080-workspace-light.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
-    "3440x1440-workspace-dark.png": {
-      "reviewedAt": "2026-10-03",
-      "sourceRevision": "ffe9fb9e1b13e5a77234ec5275da8016a31aded4",
+    "1920x1080-workspace-dark.png": {
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/37142461666",
-      "sourceArtifactId": 11281480609,
-      "sha256": "926abb0fde7229e35c9534299dff97d000ef6d936199c7185159d8dbfde09d68",
-      "bytes": 121878,
-      "review": "Individually inspected packaged CI capture, highlighted diff and full-scale footer. Recently deleted appears below Add screenshot without clipping; the footer and shorter rail scrollbar account for all changed pixels. Outside the collection rail is pixel-identical. Strict tolerance unchanged. Proposed for independent Grok review with PR 205."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "b2627047bab341cefe99d64e2483f00e361ba05ecc1670664d899771c960148a",
+      "bytes": 118758,
+      "review": "Individually inspected old/new 1920x1080-workspace-dark.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
     "3440x1440-workspace-light.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "1c40a536f5a08b27037feb6521c50487b2f157a61bf3e6cf4a3a6e006903338c",
-      "bytes": 127283,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "52f9ca5f59826d262fee38ffa995aef647023d1629ad44c66afccbe8bf399cd2",
+      "bytes": 137465,
+      "review": "Individually inspected old/new 3440x1440-workspace-light.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
+    },
+    "3440x1440-workspace-dark.png": {
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "8a615ecfb1611e25970c723ce23eb1b9d93cd302e76ab813d7f3823f1208ca51",
+      "bytes": 134867,
+      "review": "Individually inspected old/new 3440x1440-workspace-dark.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     },
     "backdrop-workspace.png": {
-      "reviewedAt": "2026-10-14",
-      "sourceRevision": "57a945f346118a748e0287889e71847e5bb87cff",
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
       "electron": "44.2.0",
       "platform": "win32",
       "devicePixelRatio": 1,
-      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/38626583732",
-      "sourceArtifactId": 11923694655,
-      "sha256": "7eb02a664e5f3d51f7a45be5327a6c5556c316357d48c96db4352cdb3a1f73f3",
-      "bytes": 368311,
-      "review": "Individually inspected packaged CI capture against the previous baseline. All changed pixels are inside the side navigation (bounding box (12, 161, 219, 367)): the new Pinned section with its empty hint moves Recent down. Outside the sidebar is pixel-identical. Strict tolerance unchanged."
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "d1505b1bc695ddb0ada9726d6bc2e843e155d223e40826b0f02c0a86cd0da3cb",
+      "bytes": 374830,
+      "review": "Individually inspected old/new backdrop-workspace.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
+    },
+    "backdrop-collapsed.png": {
+      "reviewedAt": "2026-11-13",
+      "sourceRevision": "7e86e0f440a7f25ce5bc3241f4a4842baa4c4f4a",
+      "electron": "44.2.0",
+      "platform": "win32",
+      "devicePixelRatio": 1,
+      "sourceRun": "https://github.com/Dytschgo/imnota/actions/runs/43434277985",
+      "sourceArtifactId": 14043946214,
+      "sha256": "855a563a57b397a72c25fb78e0b1fc5abd9d48de4cb420684d0fc3fac6071c88",
+      "bytes": 311894,
+      "review": "Individually inspected old/new backdrop-collapsed.png and difference image where above tolerance. Accept the new Source-off guidance and downward Actions/Duplicate placement. Independent visual review accepted all ten updates: changed pixels confined to inspector Source/Actions region y557-741, width272px; navigation/canvas/rail/toolbar/other fields unchanged. Duplicate remains visible at1280x800; both glass backdrops preserved. Native Windows36 groups and clipboard5 passed before strict comparison failed on intended Source UI changes. Product renderer is unchanged in the current integration. Existing tolerance unchanged."
     }
   }
 }

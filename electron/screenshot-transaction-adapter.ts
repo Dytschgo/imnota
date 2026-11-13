@@ -7,6 +7,7 @@ import {
   discardScreenshotTransaction,
   screenshotTransactionBaseline,
   stageScreenshotTransaction,
+  ScreenshotTransactionError,
   type ScreenshotTransactionCommitResult,
   type ScreenshotTransactionKind,
   type ScreenshotTransactionOperations,
@@ -44,6 +45,9 @@ export interface CommitScreenshotFileTransactionInput {
   writes: ScreenshotTransactionWrite[];
   assertBaseline(): Promise<void>;
   operations: ScreenshotTransactionOperations;
+  /** Runs after durable staging and baseline validation, before any live candidate write. */
+  beforeCommit?(): Promise<void>;
+  onStaged?(staged: ScreenshotTransactionSummary): Promise<void>;
 }
 
 export interface ScreenshotTransactionAdapterDependencies {
@@ -204,6 +208,7 @@ export async function commitScreenshotFileTransaction(
   );
   try {
     await input.assertBaseline();
+    await input.onStaged?.(staged);
   } catch (error) {
     try {
       await dependencies.discard(projectPath, staged.token, input.operations);
@@ -214,6 +219,19 @@ export async function commitScreenshotFileTransaction(
       );
     }
     throw error;
+  }
+  try {
+    await input.beforeCommit?.();
+  } catch (error) {
+    // The durable replacement remains available when an older recovery journal
+    // cannot be transferred safely. No live candidate write has started.
+    throw new ScreenshotTransactionError(
+      'cleanup-failed',
+      'The replacement save is staged, but previous recovery files could not be preserved safely.',
+      staged.token,
+      true,
+      { cause: error },
+    );
   }
   return dependencies.commit(projectPath, staged.token, input.operations);
 }

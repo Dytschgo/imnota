@@ -130,7 +130,33 @@ describe('profile-aware preference settings', () => {
     expect(withoutPromptExport.settings.promptExport.includeRecognisedText).toBe(false);
     expect(
       mergePreferenceSettings(current, { promptExport: { includeRecognisedText: false } }).promptExport,
-    ).toEqual({ includeRecognisedText: false });
+    ).toEqual({ includeRecognisedText: false, includeSourceContext: false });
+    expect(withoutPromptExport.settings.promptExport.includeSourceContext).toBe(false);
+    expect(resolvePreferenceSettings(undefined, false).settings.promptExport.includeSourceContext).toBe(
+      false,
+    );
+    // A profile saved before source info existed stays off; a patch never changes it implicitly.
+    const olderPromptExport = resolvePreferenceSettings(
+      { preferences: { ...current, promptExport: { includeRecognisedText: true } } },
+      true,
+    );
+    expect(olderPromptExport.settings.promptExport).toEqual({
+      includeRecognisedText: true,
+      includeSourceContext: false,
+    });
+    expect(
+      mergePreferenceSettings(
+        current,
+        preferenceSettingsUpdateSchema.parse({ promptExport: { includeRecognisedText: true } }),
+      ).promptExport,
+    ).toEqual({ includeRecognisedText: true, includeSourceContext: false });
+    const on = mergePreferenceSettings(current, { promptExport: { includeSourceContext: true } });
+    expect(
+      mergePreferenceSettings(
+        on,
+        preferenceSettingsUpdateSchema.parse({ promptExport: { includeRecognisedText: true } }),
+      ).promptExport,
+    ).toEqual({ includeRecognisedText: true, includeSourceContext: true });
     expect(mergePreferenceSettings(current, { workbench: { screenshotFirstAdd: false } }).workbench).toEqual({
       screenshotFirstAdd: false,
     });

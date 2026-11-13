@@ -25,6 +25,56 @@ afterEach(async (context) => {
   }
 });
 
+it('suppresses a native drawing Restore event before parent sync completes', async () => {
+  const held: { target?: string } = {};
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture('drawing', {
+    beforeParentSync: async (file) => {
+      if (file === held.target) {
+        enter();
+        await barrier;
+      }
+    },
+  });
+  held.target = path.join(
+    f.projectPath,
+    f.members.find((member) => member.endsWith('.png'))!,
+  );
+  const restoring = f.restore();
+  void restoring.catch(() => undefined);
+  let foreign: Buffer | undefined;
+  try {
+    await entered;
+    const relative = path.relative(f.projectPath, held.target).replaceAll('\\', '/');
+    await waitFor(() => expect(f.completedFlushPaths.some((paths) => paths.includes(relative))).toBe(true));
+    expect(f.events).toEqual([]);
+    foreign = Buffer.from('External drawing PNG bytes');
+    await fs.writeFile(held.target, foreign);
+    await waitFor(() =>
+      expect(f.events).toContainEqual(
+        expect.objectContaining({
+          kind: 'external-change',
+          changedPaths: expect.arrayContaining([relative]),
+        }),
+      ),
+    );
+    expect(await fs.readFile(held.target)).toEqual(foreign);
+  } finally {
+    release();
+    if (foreign) {
+      await expect(restoring).rejects.toThrow('did not restore byte-exactly');
+      expect(await fs.readFile(held.target)).toEqual(foreign);
+    } else await restoring;
+  }
+});
+
 it.each(cases)(
   'repairs a per-member $kind $code failure without reporting whole Restore success',
   async ({ kind, code }) => {
