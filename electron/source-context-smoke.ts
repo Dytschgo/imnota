@@ -113,7 +113,7 @@ export async function exerciseSourceContext(
   if (
     !included.includes('Source:') ||
     !included.includes('Synthetic source app') ||
-    !included.includes('https://example.com/source')
+    !included.split(/\r?\n/).some((line) => line === '- URL: <https://example.com/source>')
   )
     throw new Error('Enabled Markdown export omitted edited source.');
   await setEnabled(false);
