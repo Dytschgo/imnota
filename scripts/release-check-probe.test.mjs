@@ -16,7 +16,7 @@ test('failed discovery retains status and rate metadata without retrying or copy
     {
       request: async () => {
         calls += 1;
-        return new Response(null, {
+        return new globalThis.Response(null, {
           status: 403,
           headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1234', 'x-other': 'not-retained' },
         });
@@ -67,7 +67,7 @@ test('probe rejects unexpected endpoints before I/O and honors an aborted deadli
   const request = async (_target, options) => {
     calls += 1;
     options.signal.throwIfAborted();
-    return new Response(null);
+    return new globalThis.Response(null);
   };
   const blocked = await probeReleaseCheck(
     async (_channel, _platform, fetchRelease) => fetchRelease('https://example.invalid/private'),
@@ -79,7 +79,7 @@ test('probe rejects unexpected endpoints before I/O and honors an aborted deadli
   const aborted = await probeReleaseCheck(
     async (_channel, _platform, fetchRelease) => fetchRelease(endpoint),
     () => {},
-    { request, signal: AbortSignal.abort() },
+    { request, signal: globalThis.AbortSignal.abort() },
   );
   assert.equal(aborted.status, 'failed');
   assert.equal(calls, 1);
