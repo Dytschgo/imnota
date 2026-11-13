@@ -8,6 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import zlib from 'node:zlib';
 import request from 'supertest';
+import { fromBuffer } from 'yauzl';
+import { ZipArchive } from 'archiver';
 import { createService } from '../src/app.js';
 import { cleanupExpired, reconcileArtifacts } from '../src/maintenance.js';
 import { backupMetadata } from '../src/metadata-backup.js';
@@ -15,6 +17,39 @@ import { randomToken, tokenHash } from '../src/security.js';
 import { writeShareClipboard } from '../public/share-copy.js';
 
 const origin = 'https://app.imnota.xyz';
+
+async function archiveEntries(bytes) {
+  const zip = await new Promise((resolve, reject) => {
+    fromBuffer(bytes, { lazyEntries: true, strictFileNames: true }, (error, archive) =>
+      error ? reject(error) : resolve(archive),
+    );
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const entries = new Map();
+      zip.once('error', reject);
+      zip.once('end', () => resolve(entries));
+      zip.on('entry', async (entry) => {
+        try {
+          assert.equal(entries.has(entry.fileName), false, 'duplicate archive entry');
+          const stream = await new Promise((resolve, reject) => {
+            zip.openReadStream(entry, (error, stream) => (error ? reject(error) : resolve(stream)));
+          });
+          const chunks = [];
+          for await (const chunk of stream) chunks.push(chunk);
+          entries.set(entry.fileName, Buffer.concat(chunks));
+          zip.readEntry();
+        } catch (error) {
+          reject(error);
+        }
+      });
+      zip.readEntry();
+    });
+  } finally {
+    zip.close();
+  }
+}
+
 const receiptSecret = Buffer.alloc(32, 7).toString('base64url');
 const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -249,6 +284,33 @@ test('creates, renders and downloads only controlled finalized artifacts', async
     .expect(200);
   assert.match(zip.headers['content-type'], /^application\/zip/);
   assert.equal(zip.body.subarray(0, 2).toString(), 'PK');
+  const entries = await archiveEntries(zip.body);
+  assert.deepEqual([...entries.keys()].sort(), ['prompt-001.png', 'prompt.md']);
+  assert.equal(entries.get('prompt.md').toString('utf8'), markdown.text);
+  assert.deepEqual(entries.get('prompt-001.png'), image.body);
+});
+
+test('keeps archive directory traversal compatible with the patched matcher dependency', async (t) => {
+  const instance = await fixture();
+  t.after(() => instance.destroy());
+  const directory = path.join(instance.config.dataDir, 'archive-source');
+  await fsp.mkdir(path.join(directory, 'nested'), { recursive: true });
+  await fsp.writeFile(path.join(directory, 'nested', 'note.txt'), 'synthetic note');
+  await fsp.writeFile(path.join(directory, 'image.png'), onePixelPng);
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  const bytes = (async () => {
+    const chunks = [];
+    for await (const chunk of archive) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  })();
+  archive.directory(directory, 'bundle');
+  archive.glob('**/*.txt', { cwd: directory }, { prefix: 'filtered' });
+  await archive.finalize();
+  const entries = await archiveEntries(await bytes);
+  assert.equal(entries.get('bundle/nested/note.txt').toString(), 'synthetic note');
+  assert.deepEqual(entries.get('bundle/image.png'), onePixelPng);
+  assert.equal(entries.get('filtered/nested/note.txt').toString(), 'synthetic note');
+  assert.equal(entries.has('filtered/image.png'), false);
 });
 
 test('renders no PNG copy controls for an image-free share and keeps mixed image copies per artifact', async (t) => {

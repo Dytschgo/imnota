@@ -1,6 +1,6 @@
 import { versionStaticHead } from './static-assets.js';
 import { sharePage } from './share-page.js';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import fs from 'node:fs';
@@ -338,7 +338,7 @@ async function writeArchive(directory, images) {
   const archivePath = path.join(directory, 'archive.zip');
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(archivePath, { mode: 0o600 });
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new ZipArchive({ zlib: { level: 9 } });
     output.once('close', () => resolve(undefined));
     output.once('error', reject);
     archive.once('warning', reject);
