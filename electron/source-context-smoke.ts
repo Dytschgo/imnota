@@ -100,6 +100,7 @@ export async function exerciseSourceContext(
   await driver.fill({ selector: '[data-testid="source-url"]' }, 'https://example.com/source');
   await waitForSource(`source?.url === 'https://example.com/source'`);
   driver.setWindow(await host.reopenWindow());
+  await driver.click({ selector: `[data-testid="screenshot-${recorded.id}"]` });
   await driver.waitFor({ selector: '[data-testid="source-app"]' });
   if (
     (await driver.evaluate(`document.querySelector('[data-testid="source-app"]').value`)) !==
@@ -116,6 +117,7 @@ export async function exerciseSourceContext(
   )
     throw new Error('Enabled Markdown export omitted edited source.');
   await setEnabled(false);
+  await driver.click({ selector: `[data-testid="screenshot-${recorded.id}"]` });
   const excluded = await markdown();
   if (excluded.includes('Source:') || excluded.includes('Synthetic source app'))
     throw new Error('Disabled Markdown export leaked retained source.');
@@ -124,6 +126,7 @@ export async function exerciseSourceContext(
   await driver.click({ selector: '.source-section button', text: 'Remove source info', exact: true });
   await waitForSource('source === undefined');
   driver.setWindow(await host.reopenWindow());
+  await driver.click({ selector: `[data-testid="screenshot-${recorded.id}"]` });
   await driver.waitFor({ selector: '.source-section', text: 'Source info is off.' });
   if ((await host.readProject(projectPath)).screenshots.at(-1)?.source !== undefined)
     throw new Error('Removed source reappeared after reopening.');

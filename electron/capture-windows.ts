@@ -1,4 +1,5 @@
 import type { CaptureDisplay, CaptureRectangle } from '../src/shared/capture.js';
+import { appFromWindowTitle } from '../src/shared/source-context.js';
 
 export interface CaptureWindowCandidate {
   id: string;
@@ -102,7 +103,7 @@ export function identifiableCaptureWindows(
       continue;
     const bounds = clipRectangleToDisplays(native.bounds, displays);
     if (!bounds) continue;
-    const app = native.app?.trim().slice(0, 120);
+    const app = native.app?.trim().slice(0, 120) || appFromWindowTitle(title);
     identified.push({ id: native.id, title: title.slice(0, 120), bounds, ...(app ? { app } : {}) });
   }
   return identified;
