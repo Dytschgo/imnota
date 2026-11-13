@@ -43,7 +43,7 @@ it('suppresses a native drawing Restore event before parent sync completes', asy
       }
     },
   });
-  target = path.join(
+  held.target = path.join(
     f.projectPath,
     f.members.find((member) => member.endsWith('.png'))!,
   );
@@ -51,8 +51,8 @@ it('suppresses a native drawing Restore event before parent sync completes', asy
   void restoring.catch(() => undefined);
   try {
     await entered;
-    await waitFor(() => expect(f.flushed).toHaveBeenCalled());
-    await Promise.all(f.flushed.mock.results.map((result) => result.value));
+    const relative = path.relative(f.projectPath, held.target).replaceAll('\\', '/');
+    await waitFor(() => expect(f.completedFlushPaths.some((paths) => paths.includes(relative))).toBe(true));
     expect(f.events).toEqual([]);
   } finally {
     release();

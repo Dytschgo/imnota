@@ -202,7 +202,14 @@ async function buildFixture(
   });
   const watch = manager;
   trackWatch(ledger, watch);
-  const flushed = vi.spyOn(watch as unknown as { flush: (...args: unknown[]) => Promise<void> }, 'flush');
+  const completedFlushPaths: string[][] = [];
+  const flushing = watch as unknown as { flush: (state: { changedPaths: Set<string> }) => Promise<void> };
+  const flush = flushing.flush.bind(watch);
+  vi.spyOn(flushing, 'flush').mockImplementation(async (state) => {
+    const paths = [...state.changedPaths];
+    await flush(state);
+    completedFlushPaths.push(paths);
+  });
   ledger.stop(() => watch.stopAll());
   const bridge = {
     startProjectWatch: async () =>
@@ -254,7 +261,7 @@ async function buildFixture(
     search,
     root,
     watchedReads,
-    flushed,
+    completedFlushPaths,
     projectPath,
     projectFile,
     readProject,
