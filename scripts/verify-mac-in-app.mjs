@@ -11,6 +11,7 @@ import { Buffer } from 'node:buffer';
 import { URL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { setTimeout as schedule, clearTimeout as cancel } from 'node:timers';
+import { createRequire } from 'node:module';
 
 assert.equal(process.platform, 'darwin', 'Requires macOS');
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Requires disposable GitHub Actions');
@@ -22,6 +23,12 @@ const executable = `${appPath}/Contents/MacOS/Imnota`;
 const plist = `${appPath}/Contents/Info.plist`;
 const version = JSON.parse(await fs.readFile('package.json', 'utf8')).version;
 const archive = path.resolve(`release/Imnota-${version}-universal-mac.zip`);
+assert.ok(
+  process.env.IMNOTA_MAC_UPDATE_FIXTURE_ARCHIVE,
+  'Requires a separately packaged older-version fixture',
+);
+const fixtureArchive = path.resolve(process.env.IMNOTA_MAC_UPDATE_FIXTURE_ARCHIVE);
+assert.ok(fixtureArchive.startsWith(`${path.resolve(process.env.RUNNER_TEMP)}${path.sep}`));
 const evidence = path.resolve(
   process.env.IMNOTA_MAC_IN_APP_EVIDENCE ??
     `${process.env.RUNNER_TEMP}/imnota-verification-artifacts-live-update`,
@@ -57,8 +64,11 @@ const receipt = {
     .update(await fs.readFile(archive))
     .digest('hex'),
   fixtureVersion: '0.0.0',
+  fixtureArchiveSha256: createHash('sha256')
+    .update(await fs.readFile(fixtureArchive))
+    .digest('hex'),
   declaration:
-    'Candidate application code and unchanged app.asar; bundle version metadata is lowered and ad-hoc re-signed to make a newer public release eligible. This is a declared older-version fixture, not the published distributable.',
+    'Same compiled candidate application code, separately packaged with extraMetadata.version=0.0.0. Package and bundle versions agree. Every extracted application file is compared with the normal candidate except root package.json version. This is a declared older-version fixture, not the published distributable.',
   passed: false,
 };
 let failure;
@@ -120,31 +130,93 @@ async function appPids() {
     return row && row[2].startsWith(`${appPath}/`) ? [{ pid: Number(row[1]), command: row[2] }] : [];
   });
 }
+async function removeOwnedInstallation() {
+  for (const { pid } of await appPids()) {
+    const current = await run('/bin/ps', ['-ww', '-o', 'comm=', '-p', String(pid)]).catch((error) => {
+      if (error.code === 1) return { stdout: '' };
+      throw error;
+    });
+    if (!current.stdout.trim()) continue;
+    assert.ok(current.stdout.trim().startsWith(`${appPath}/`), 'Refuse a reused process ID');
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  }
+  await waitFor('owned app shutdown', async () => (await appPids()).length === 0, 10_000);
+  if (await exists(appPath)) {
+    assert.equal(await fs.realpath(appPath), appPath, 'Refuse cleanup after a path substitution');
+    await fs.rm(appPath, { recursive: true });
+  }
+}
+async function verifyFixtureCode(normalAsar, fixtureAsar) {
+  // Reuse electron-builder's pinned ASAR dependency rather than adding another packager.
+  const require = createRequire(import.meta.url);
+  const builder = createRequire(require.resolve('electron-builder'));
+  const asar = createRequire(builder.resolve('app-builder-lib'))('@electron/asar');
+  const scratch = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP, 'imnota-update-compare-'));
+  const original = path.join(scratch, 'original'),
+    fixture = path.join(scratch, 'fixture');
+  const manifest = async (directory, relative = '') => {
+    const result = {};
+    for (const entry of await fs.readdir(path.join(directory, relative), { withFileTypes: true })) {
+      const name = path.join(relative, entry.name),
+        target = path.join(directory, name);
+      if (entry.isSymbolicLink()) result[name] = `link:${await fs.readlink(target)}`;
+      else if (entry.isDirectory()) Object.assign(result, await manifest(directory, name));
+      else if (name !== 'package.json')
+        result[name] = createHash('sha256')
+          .update(await fs.readFile(target))
+          .digest('hex');
+    }
+    return result;
+  };
+  try {
+    asar.extractAll(normalAsar, original);
+    asar.extractAll(fixtureAsar, fixture);
+    receipt.sourceAsarSha256 = createHash('sha256')
+      .update(await fs.readFile(normalAsar))
+      .digest('hex');
+    const files = await manifest(original);
+    assert.deepEqual(await manifest(fixture), files, 'Fixture must preserve all candidate application bytes');
+    const originalPackage = JSON.parse(await fs.readFile(path.join(original, 'package.json'), 'utf8'));
+    const fixturePackage = JSON.parse(await fs.readFile(path.join(fixture, 'package.json'), 'utf8'));
+    assert.equal(originalPackage.version, version);
+    assert.equal(fixturePackage.version, '0.0.0');
+    assert.deepEqual(
+      { ...fixturePackage, version },
+      originalPackage,
+      'Only fixture version metadata may differ',
+    );
+    receipt.identicalApplicationFiles = Object.keys(files).length;
+    await fs.writeFile(path.join(evidence, 'candidate-code-manifest.json'), JSON.stringify(files, null, 2));
+  } finally {
+    assert.ok(
+      (await fs.realpath(scratch)).startsWith(`${await fs.realpath(process.env.RUNNER_TEMP)}${path.sep}`),
+    );
+    await fs.rm(scratch, { recursive: true });
+  }
+}
 try {
+  const sourceBundle = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP, 'imnota-update-source-'));
+  await run('/usr/bin/ditto', ['-x', '-k', archive, sourceBundle]);
   // The hosted runner starts without Imnota; this run owns the destination from here.
   owned = true;
-  await run('/usr/bin/ditto', ['-x', '-k', archive, '/Applications']);
+  await run('/usr/bin/ditto', ['-x', '-k', fixtureArchive, '/Applications']);
   assert.equal(await fs.realpath(appPath), appPath);
   receipt.asarSha256 = createHash('sha256')
     .update(await fs.readFile(`${appPath}/Contents/Resources/app.asar`))
     .digest('hex');
-  await run('/usr/libexec/PlistBuddy', ['-c', 'Set :CFBundleShortVersionString 0.0.0', plist]);
-  await run('/usr/libexec/PlistBuddy', ['-c', 'Set :CFBundleVersion 0.0.0', plist]);
-  await run('/usr/bin/codesign', [
-    '--force',
-    '--deep',
-    '--sign',
-    '-',
-    '--preserve-metadata=identifier,entitlements,flags,runtime',
-    appPath,
-  ]);
-  await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', appPath]);
-  assert.equal(
-    createHash('sha256')
-      .update(await fs.readFile(`${appPath}/Contents/Resources/app.asar`))
-      .digest('hex'),
-    receipt.asarSha256,
+  await verifyFixtureCode(
+    `${sourceBundle}/Imnota.app/Contents/Resources/app.asar`,
+    `${appPath}/Contents/Resources/app.asar`,
   );
+  assert.equal(
+    (await run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', plist])).stdout.trim(),
+    '0.0.0',
+  );
+  await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', appPath]);
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('IMNOTA_')) delete env[key];
   child = spawn(executable, ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'], {
@@ -271,24 +343,7 @@ try {
     // On failure preserve the transaction and its processes for evidence. The hosted runner
     // is disposable; never remove files while a detached helper could still be repairing them.
     if (owned && receipt.passed) {
-      for (const { pid } of await appPids()) {
-        const current = await run('/bin/ps', ['-ww', '-o', 'comm=', '-p', String(pid)]).catch((error) => {
-          if (error.code === 1) return { stdout: '' };
-          throw error;
-        });
-        if (!current.stdout.trim()) continue;
-        assert.ok(current.stdout.trim().startsWith(`${appPath}/`), 'Refuse a reused process ID');
-        try {
-          process.kill(pid, 'SIGTERM');
-        } catch (error) {
-          if (error.code !== 'ESRCH') throw error;
-        }
-      }
-      await waitFor('owned app shutdown', async () => (await appPids()).length === 0, 10_000);
-      if (await exists(appPath)) {
-        assert.equal(await fs.realpath(appPath), appPath, 'Refuse cleanup after a path substitution');
-        await fs.rm(appPath, { recursive: true });
-      }
+      await removeOwnedInstallation();
       receipt.cleanup = 'Owned installation removed; disposable hosted profile is left to runner disposal.';
     } else {
       receipt.cleanup = 'Failed transaction preserved for inspection and disposable hosted runner disposal.';
