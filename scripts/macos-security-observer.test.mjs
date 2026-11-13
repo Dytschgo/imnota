@@ -25,15 +25,17 @@ test(
     fs.writeFileSync(
       shim,
       `#include <sys/attr.h>
-static int test_read(int, struct attrlist *, void *, size_t, unsigned long);
+#include <unistd.h>
+static int test_read(int, void *, void *, size_t, unsigned int);
 #define fgetattrlist test_read
 #define main observer_main
 #include ${JSON.stringify(source)}
 #undef main
 #undef fgetattrlist
 static const char *scenario;
-static int test_read(int fd, struct attrlist *request, void *buffer, size_t size, unsigned long flags) {
+static int test_read(int fd, void *attributes, void *buffer, size_t size, unsigned int flags) {
   (void)fd;
+  struct attrlist *request=attributes;
   if(request->commonattr != ATTR_CMN_EXTENDED_SECURITY || flags != FSOPT_REPORT_FULLSIZE || size != sizeof(struct security_reply)) { errno=EINVAL; return -1; }
   if(strcmp(scenario,"denied")==0 || strcmp(scenario,"unsupported")==0) { errno=strcmp(scenario,"denied")==0 ? EACCES : EINVAL; return -1; }
   struct security_reply *reply=buffer;
@@ -113,6 +115,17 @@ test(
     }
     fs.mkdirSync(deniedFixture);
     deniedCreated = true;
+    check(command('/bin/chmod', ['-N', deniedFixture]));
+    // Establish that the other principal can traverse the fixture and execute the
+    // real observer before changing only the target's security-read permission.
+    fs.chmodSync(root, 0o755);
+    fs.chmodSync(helper, 0o755);
+    fs.chmodSync(deniedFixture, 0o755);
+    const observeAsOtherUser = () =>
+      command('/usr/bin/sudo', ['-n', '-u', 'nobody', helper, 'acl', deniedFixture]);
+    const foreignAllowed = observeAsOtherUser();
+    check(foreignAllowed);
+    assert.equal(foreignAllowed.stdout, 'no-acl\n');
     check(command('/bin/chmod', ['+a', 'everyone deny readsecurity', deniedFixture]));
     const denied = observe(deniedFixture);
     for (const [executable, args] of [
@@ -133,14 +146,16 @@ test(
     // A successful owner observation must still report the ACL, never its absence.
     if (denied.status === 0) assert.equal(denied.stdout, 'acl\n');
     else assert.equal(denied.stdout, '');
-    // Owner privileges must not stand in for another principal's security-read denial.
-    // Only this synthetic fixture/helper become traversable/executable by that account.
-    fs.chmodSync(root, 0o755);
-    fs.chmodSync(helper, 0o755);
-    const foreignDenied = command('/usr/bin/sudo', ['-n', '-u', 'nobody', helper, 'acl', deniedFixture]);
+    // A security-read deny can also make the initial lstat fail on macOS. Either
+    // refusal must emit no observation; the successful control rules out a
+    // pre-existing traversal or executable-permission failure.
+    const foreignDenied = observeAsOtherUser();
     assert.notEqual(foreignDenied.status, 0);
     assert.equal(foreignDenied.stdout, '');
-    assert.match(foreignDenied.stderr, /Could not completely observe the directory ACL/);
+    assert.match(
+      foreignDenied.stderr,
+      /^(?:Security observation target is not a physical directory\.\n|Could not completely observe the directory ACL: Permission denied\n)$/,
+    );
     fs.rmdirSync(deniedFixture);
     deniedCreated = false;
 
