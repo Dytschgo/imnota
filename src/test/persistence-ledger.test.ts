@@ -415,21 +415,19 @@ it.each(['finite', 'runner-window', 'unresolved'] as const)(
     beforeEach(session.start);
     afterEach(async (context) => {
       try {
-        if (${mode === 'finite'}) {
+        if (${mode !== 'unresolved'}) {
           // Virtualize only helper timers; Vitest keeps its own real hook deadline.
+          // Real filesystem cleanup must not race a 50 ms wall-clock window on busy runners.
           vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
           let finished = false;
           const outcome = session.cleanup(context).finally(() => { finished = true; });
-          setTimeout(() => release(), 29_950);
-          await vi.advanceTimersByTimeAsync(29_900);
+          const releaseAt = ${mode === 'finite' ? 29_950 : 450};
+          setTimeout(() => release(), releaseAt);
+          await vi.advanceTimersByTimeAsync(releaseAt - 50);
           expect(finished).toBe(false);
           await vi.advanceTimersByTimeAsync(50);
           vi.useRealTimers();
           await outcome;
-        } else if (${mode === 'runner-window'}) {
-          // Real finite work settles in the last 50 ms of the runner's 500 ms hook allowance.
-          setTimeout(() => release(), 450);
-          await session.cleanup(context);
         } else {
           // No helper timer: the real runner must fail and abort its public context signal.
           await session.cleanup(context);
@@ -473,7 +471,7 @@ it.each(['finite', 'runner-window', 'unresolved'] as const)(
       const result = JSON.parse(stdout.trim());
       expect(result.results).toHaveLength(1);
       if (mode !== 'unresolved') {
-        expect(result.results[0]).toMatchObject({ state: 'passed' });
+        expect(result.results[0], JSON.stringify(result.results[0])).toMatchObject({ state: 'passed' });
         expect(result.logs.join('\n')).not.toContain('[persistence-ledger]');
         await expect(fs.stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
       } else {
