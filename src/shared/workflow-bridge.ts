@@ -100,6 +100,15 @@ export interface PromptExportBundleContent extends PromptExportBundleGrant {
   imageDataUrl?: string;
 }
 
+export interface PromptExportAgentHandoff {
+  bundleId: string;
+  setName: string;
+  collectionName: string;
+  bundleNumber: number;
+  instruction: string;
+  agentAccessEnabled: boolean;
+}
+
 /** Deliberately contains only rendered prompt artifacts, never project paths or sources. */
 export interface HostedSharePlan {
   planId: string;
@@ -156,7 +165,15 @@ export interface PromptExportSourceAsset {
 export const WINDOWS_COPY_VARIANT_IDS = ['files', 'files-rich', 'rich'] as const;
 export type WindowsCopyVariantId = NativeCopyFunction;
 
-export type PromptExportCopyTarget = WindowsCopyVariantId | 'markdown' | 'image' | 'paths';
+export type PromptExportCopyTarget =
+  | WindowsCopyVariantId
+  | 'markdown'
+  | 'image'
+  | 'paths'
+  /** Plain-text hand-off for an agent CLI: summary plus quoted Markdown and PNG paths. */
+  | 'terminal'
+  /** Windows only: the same hand-off with paths translated for a WSL shell (/mnt/c/...). */
+  | 'terminal-wsl';
 
 /**
  * What the operating-system clipboard reports after a combined write. Read
@@ -276,6 +293,10 @@ export interface WorkflowBridge {
     sessionId: string;
     bundleNumber: number;
   }): Promise<WorkflowResult<PromptExportBundleContent>>;
+  getPromptExportAgentHandoff(input: {
+    sessionId: string;
+    bundleNumber: number;
+  }): Promise<WorkflowResult<PromptExportAgentHandoff>>;
   copyPromptExportBundle(input: {
     sessionId: string;
     bundleNumber: number;

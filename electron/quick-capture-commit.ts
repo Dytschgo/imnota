@@ -1,6 +1,7 @@
 import type { Annotation, ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import type { QuickCaptureDestination } from '../src/shared/quick-capture.js';
 import type { PendingQuickCapture } from './quick-capture-store.js';
+import type { ScreenshotSource } from '../src/shared/source-context.js';
 
 export interface QuickCaptureCommitHost {
   authorize(projectPath: string): Promise<string>;
@@ -11,7 +12,7 @@ export interface QuickCaptureCommitHost {
     collectionId: string,
     png: Buffer,
     assertAdmission: () => void,
-    content: { id: string; annotations: Annotation[] },
+    content: { id: string; annotations: Annotation[]; source?: ScreenshotSource },
   ): Promise<unknown>;
   assertAdmission(): void;
 }
@@ -44,5 +45,6 @@ export async function commitQuickCapture(
   await host.insert(projectPath, destination.collectionId, item.originalPng, host.assertAdmission, {
     id: item.id,
     annotations: item.annotations,
+    ...(item.source ? { source: item.source } : {}),
   });
 }

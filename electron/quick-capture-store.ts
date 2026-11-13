@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Annotation } from '../src/shared/types.js';
+import type { ScreenshotSource } from '../src/shared/source-context.js';
 import type { QuickCaptureCard, QuickCaptureDestination } from '../src/shared/quick-capture.js';
 import { NativeWorkflowError } from './workflow-errors.js';
 
@@ -12,6 +13,7 @@ export interface PendingQuickCapture {
   originalPng: Buffer;
   renderedPng: Buffer;
   annotations: Annotation[];
+  source?: ScreenshotSource;
   previewDataUrl: string;
   width: number;
   height: number;
@@ -49,7 +51,7 @@ export class QuickCaptureStore {
       );
   }
 
-  add(input: { png: Buffer; previewDataUrl: string; width: number; height: number }): string {
+  add(input: { png: Buffer; previewDataUrl: string; width: number; height: number; source?: ScreenshotSource }): string {
     this.assertCanCapture();
     if (
       !input.png.length ||
@@ -68,6 +70,7 @@ export class QuickCaptureStore {
       originalPng: ownedPng,
       renderedPng: ownedPng,
       annotations: [],
+      ...(input.source ? { source: { ...input.source } } : {}),
       previewDataUrl: input.previewDataUrl,
       width: input.width,
       height: input.height,

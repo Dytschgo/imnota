@@ -44,6 +44,17 @@ export function Library({
     if (view === 'archived') return project.status === 'archived';
     return project.status !== 'archived' && (view !== 'favourites' || project.favourite);
   });
+  // Archived collections inside active projects; an archived project already lists as a whole.
+  const archivedCollections =
+    view === 'archived'
+      ? projects.flatMap((project) =>
+          project.status === 'archived'
+            ? []
+            : project.collections
+                .filter((collection) => collection.archived)
+                .map((collection) => ({ project, collection })),
+        )
+      : [];
   return (
     <section className="library">
       <div className="library-heading">
@@ -54,7 +65,7 @@ export function Library({
               : view === 'recent'
                 ? 'Recent collections'
                 : view === 'archived'
-                  ? 'Archived projects'
+                  ? 'Archived'
                   : 'Projects'}
           </h1>
           <p>
@@ -108,16 +119,9 @@ export function Library({
           )}
         </div>
       ) : (
-        <>
-          <button
-            className="search-line library-search-trigger"
-            type="button"
-            data-testid="library-full-search"
-            onClick={() => void onSearch()}
-          >
-            <Search size={16} aria-hidden="true" />
-            <span>Search workspace</span>
-          </button>
+        // One row: the inline filter is the field; the full workspace search opens a dialog,
+        // so it reads as a button instead of a second, identical-looking search box.
+        <div className="library-search-row">
           <div className="search-line">
             <Search size={16} aria-hidden="true" />
             <input
@@ -133,7 +137,17 @@ export function Library({
               </button>
             )}
           </div>
-        </>
+          <button
+            className="library-search-trigger"
+            type="button"
+            data-testid="library-full-search"
+            aria-haspopup="dialog"
+            onClick={() => void onSearch()}
+          >
+            <Search size={15} aria-hidden="true" />
+            Search workspace…
+          </button>
+        </div>
       )}
       {view === 'recent' ? (
         recent.length ? (
@@ -181,63 +195,103 @@ export function Library({
           scope={view === 'archived' ? 'archived' : 'active'}
           onSelect={onSelectContentResult}
         />
-      ) : filtered.length ? (
-        <div className="project-list">
-          {filtered.map((project) => (
-            <div className="project-row" key={project.id}>
-              <button className="project-row-main" onClick={() => onSelect(project.projectPath)}>
-                <div className="project-symbol">
-                  <ProjectIcon icon={project.icon} />
+      ) : filtered.length || archivedCollections.length ? (
+        <>
+          {view === 'archived' && filtered.length > 0 && (
+            <h2 id="archived-projects-heading">Archived projects</h2>
+          )}
+          {filtered.length > 0 && (
+            <div
+              className="project-list"
+              role={view === 'archived' ? 'group' : undefined}
+              aria-labelledby={view === 'archived' ? 'archived-projects-heading' : undefined}
+            >
+              {filtered.map((project) => (
+                <div className="project-row" key={project.id}>
+                  <button className="project-row-main" onClick={() => onSelect(project.projectPath)}>
+                    <div className="project-symbol">
+                      <ProjectIcon icon={project.icon} />
+                    </div>
+                    <div className="project-row-copy">
+                      <strong>{project.name}</strong>
+                      <span className={project.description ? undefined : 'project-row-placeholder'}>
+                        {project.description || 'No description yet'}
+                      </span>
+                      <small>
+                        {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
+                        edited {new Date(project.updatedAt).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <div className="project-row-meta">
+                      {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
+                    </div>
+                  </button>
+                  <div className="project-row-actions">
+                    <IconButton
+                      data-testid={`project-edit-${project.id}`}
+                      label={`Edit ${project.name}`}
+                      onClick={() => onEdit(project.projectPath)}
+                    >
+                      <Pencil size={15} aria-hidden="true" />
+                    </IconButton>
+                    {project.status === 'archived' ? (
+                      <IconButton
+                        data-testid={`project-restore-${project.id}`}
+                        label={`Restore ${project.name}`}
+                        onClick={() => onRestore(project.projectPath)}
+                      >
+                        <ArchiveRestore size={15} aria-hidden="true" />
+                      </IconButton>
+                    ) : (
+                      <IconButton
+                        data-testid={`project-archive-${project.id}`}
+                        label={`Archive ${project.name}`}
+                        onClick={() => onArchive(project.projectPath)}
+                      >
+                        <Archive size={15} aria-hidden="true" />
+                      </IconButton>
+                    )}
+                    <IconButton
+                      data-testid={`project-delete-${project.id}`}
+                      className="project-row-delete"
+                      label={`Delete ${project.name}`}
+                      onClick={() => onDelete(project.projectPath)}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                    </IconButton>
+                  </div>
                 </div>
-                <div className="project-row-copy">
-                  <strong>{project.name}</strong>
-                  <span>{project.description || 'No description yet'}</span>
-                  <small>
-                    {project.screenshots.length} screenshot{project.screenshots.length === 1 ? '' : 's'} ·
-                    edited {new Date(project.updatedAt).toLocaleDateString()}
-                  </small>
-                </div>
-                <div className="project-row-meta">
-                  {project.favourite && <Heart size={15} fill="currentColor" aria-hidden="true" />}
-                </div>
-              </button>
-              <div className="project-row-actions">
-                <IconButton
-                  data-testid={`project-edit-${project.id}`}
-                  label={`Edit ${project.name}`}
-                  onClick={() => onEdit(project.projectPath)}
-                >
-                  <Pencil size={15} aria-hidden="true" />
-                </IconButton>
-                {project.status === 'archived' ? (
-                  <IconButton
-                    data-testid={`project-restore-${project.id}`}
-                    label={`Restore ${project.name}`}
-                    onClick={() => onRestore(project.projectPath)}
-                  >
-                    <ArchiveRestore size={15} aria-hidden="true" />
-                  </IconButton>
-                ) : (
-                  <IconButton
-                    data-testid={`project-archive-${project.id}`}
-                    label={`Archive ${project.name}`}
-                    onClick={() => onArchive(project.projectPath)}
-                  >
-                    <Archive size={15} aria-hidden="true" />
-                  </IconButton>
-                )}
-                <IconButton
-                  data-testid={`project-delete-${project.id}`}
-                  className="project-row-delete"
-                  label={`Delete ${project.name}`}
-                  onClick={() => onDelete(project.projectPath)}
-                >
-                  <Trash2 size={15} aria-hidden="true" />
-                </IconButton>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+          {archivedCollections.length > 0 && (
+            <>
+              <h2 id="archived-collections-heading">Archived collections</h2>
+              <div className="project-list" role="group" aria-labelledby="archived-collections-heading">
+                {archivedCollections.map(({ project, collection }) => (
+                  <button
+                    type="button"
+                    className="project-row"
+                    key={`${project.projectPath}:${collection.id}`}
+                    data-testid={`archived-collection-${project.id}-${collection.id}`}
+                    onClick={() => void onOpenCollection(project.projectPath, collection.id)}
+                  >
+                    <div className="project-symbol">
+                      <ProjectIcon icon={project.icon} />
+                    </div>
+                    <div className="project-row-copy">
+                      <strong>{collection.name}</strong>
+                      <span>{project.name}</span>
+                      <small>
+                        archived collection · edited {new Date(collection.updatedAt).toLocaleDateString()}
+                      </small>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </>
       ) : (
         <EmptyState
           icon={<FolderOpen size={22} aria-hidden="true" />}
@@ -245,14 +299,14 @@ export function Library({
             view === 'favourites'
               ? 'No favourite projects yet'
               : view === 'archived'
-                ? 'No archived projects'
+                ? 'No archived projects or collections'
                 : 'Your project library is empty'
           }
           description={
             view === 'favourites'
               ? 'Open a project and use the heart button to keep it here.'
               : view === 'archived'
-                ? 'Archived projects stay here until you restore them.'
+                ? 'Archived projects and collections stay here until you restore them.'
                 : 'Create a local project, then add the screenshots that explain the work.'
           }
           action={
