@@ -155,6 +155,54 @@ it('forwards descriptor evidence through the application write wrapper without c
   expect(invalidated).toHaveBeenCalledExactlyOnceWith(target);
 });
 
+it.each(['observer', 'directory'] as const)(
+  'preserves the committed file when %s fails after ownership publication',
+  async (stage) => {
+    const target = path.join(root(), 'commit-boundary.txt');
+    await fs.writeFile(target, 'before');
+    const published = vi.fn(() => {
+      if (stage === 'observer') throw new Error('Observer failure');
+    });
+    await expect(
+      atomicWrite(
+        target,
+        'after',
+        undefined,
+        {
+          beforeParentSync: async () => {
+            throw new Error('Directory sync failure');
+          },
+        },
+        published,
+      ),
+    ).rejects.toBeInstanceOf(CommittedWriteError);
+    expect(published).toHaveBeenCalledOnce();
+    expect(await fs.readFile(target, 'utf8')).toBe('after');
+    expect((await fs.readdir(root())).some((name) => name.includes('.tmp-'))).toBe(false);
+  },
+);
+
+it('does not publish ownership when the candidate fails before rename', async () => {
+  const target = path.join(root(), 'precommit.txt');
+  await fs.writeFile(target, 'before');
+  const published = vi.fn();
+  await expect(
+    atomicWrite(
+      target,
+      'after',
+      undefined,
+      {
+        beforeCandidateSync: async () => {
+          throw new Error('Candidate failure');
+        },
+      },
+      published,
+    ),
+  ).rejects.not.toBeInstanceOf(CommittedWriteError);
+  expect(published).not.toHaveBeenCalled();
+  expect(await fs.readFile(target, 'utf8')).toBe('before');
+});
+
 // POSIX uses real directory handles and fsync except the single injected failure.
 // Windows exercises the POSIX branch with synthetic directory handles; file bytes/rename remain real.
 function failWrite(target: string, stage: 'directory' | 'candidate' | 'rename', code = 'EIO') {

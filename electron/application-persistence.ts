@@ -38,13 +38,10 @@ export async function writeApplicationFile(
   captureIdentity?: CaptureWrittenFileIdentity,
 ): Promise<void> {
   await host.diagnostics.filesystem('write', filePath, () =>
-    afterFileCommit(
-      () => atomicWrite(filePath, content, captureIdentity, host.verification),
-      () => {
-        host.recordSelfWrite(filePath, content);
-        host.invalidate(filePath);
-      },
-    ),
+    atomicWrite(filePath, content, captureIdentity, host.verification, () => {
+      host.recordSelfWrite(filePath, content);
+      host.invalidate(filePath);
+    }),
   );
 }
 

@@ -201,11 +201,14 @@ export async function atomicWrite(
   content: string | Uint8Array,
   captureIdentity?: CaptureWrittenFileIdentity,
   verification?: AtomicWriteVerification,
+  // Synchronous notification after rename, before any cleanup or durability await.
+  // A notification failure is a committed-write warning; it cannot undo the rename.
+  committed?: () => void,
 ): Promise<void> {
   const key = path.resolve(filePath);
   const operation = (writes.get(key) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => writeFileAtomically(key, content, !!captureIdentity, verification));
+    .then(() => writeFileAtomically(key, content, !!captureIdentity, verification, committed));
   writes.set(key, operation);
   try {
     const identity = await operation;
@@ -220,6 +223,7 @@ async function writeFileAtomically(
   content: string | Uint8Array,
   captureIdentity: boolean,
   verification?: AtomicWriteVerification,
+  committed?: () => void,
 ): Promise<WrittenFileEvidence | undefined> {
   await assertNoLinks(filePath);
   await verification?.beforeWrite?.(filePath, content);
@@ -283,6 +287,12 @@ async function writeFileAtomically(
         await assertNoLinks(filePath);
         await assertNoLinks(temporary);
       }
+    }
+    // The destination is visible now; publish ownership before yielding to cleanup or durability sync.
+    try {
+      committed?.();
+    } catch (error) {
+      throw new CommittedWriteError(filePath, error);
     }
   } finally {
     await fs.unlink(temporary).catch(() => undefined);

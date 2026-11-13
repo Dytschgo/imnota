@@ -304,15 +304,16 @@ it.each(
       // Explicit fixture precondition; cleanup must cover either real flush read path.
       if (readPath === 'self-marker') manager.recordSelfWrite(file, nextSource);
       write = ledger.span('write', () =>
-        writeApplicationFile(file, nextSource, {
-          diagnostics,
-          recordSelfWrite: (target, bytes) => manager.recordSelfWrite(target, bytes),
-          invalidate: () => {},
-          // Hold post-rename publication until the native unmarked read has started.
-          ...(readPath === 'unmarked'
-            ? { verification: { beforeParentSync: () => vi.waitFor(() => expect(reading).toBe(true)) } }
-            : {}),
-        }),
+        readPath === 'unmarked'
+          ? // An external producer has no application ownership marker. Keep this native read path covered.
+            atomicWrite(file, nextSource, undefined, {
+              beforeParentSync: () => vi.waitFor(() => expect(reading).toBe(true)),
+            })
+          : writeApplicationFile(file, nextSource, {
+              diagnostics,
+              recordSelfWrite: (target, bytes) => manager.recordSelfWrite(target, bytes),
+              invalidate: () => {},
+            }),
       );
       void write.catch(() => undefined);
       await write;
