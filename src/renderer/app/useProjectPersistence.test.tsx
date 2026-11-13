@@ -1682,5 +1682,4 @@ describe('useProjectPersistence', () => {
       }
     },
   );
-
 });
