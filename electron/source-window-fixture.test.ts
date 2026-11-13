@@ -1,11 +1,15 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { Script } from 'node:vm';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, expect, it, vi } from 'vitest';
 import { sourceWindowFixtureTitle, withSourceWindowFixture } from './source-window-fixture.js';
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 it.each([
   ['0', 'synthetic'],
@@ -20,11 +24,12 @@ it.each([
   expect(sourceWindowFixtureTitle()).toBeNull();
 });
 
-it.skipIf(!['win32', 'darwin'].includes(process.platform))(
-  'revokes the marker and confirms closure of only its own child when the walkthrough fails',
-  async () => {
+it.each(['win32', 'darwin'])(
+  'revokes the marker and confirms closure of only its own child when the %s walkthrough fails',
+  async (platform) => {
     vi.stubEnv('IMNOTA_SMOKE', '1');
     vi.stubEnv('IMNOTA_SMOKE_CAPTURE_SOURCE', 'synthetic');
+    vi.stubGlobal('process', Object.create(process, { platform: { value: platform } }));
     const events = new EventEmitter();
     const kill = vi.fn(() => {
       events.emit('close', null, 'SIGTERM');
@@ -38,7 +43,9 @@ it.skipIf(!['win32', 'darwin'].includes(process.platform))(
       stderr: new PassThrough(),
       kill,
     }) as unknown as ChildProcess;
-    const launch = vi.fn(() => {
+    const launch = vi.fn((_command: string, args: string[]) => {
+      // Syntax coverage only; the hosted Mac walkthrough must still execute AppKit and WindowServer.
+      if (platform === 'darwin') new Script(args[3]);
       queueMicrotask(() => events.emit('spawn'));
       return child;
     });
@@ -57,3 +64,40 @@ it.skipIf(!['win32', 'darwin'].includes(process.platform))(
     expect(sourceWindowFixtureTitle()).toBeNull();
   },
 );
+
+it('retains the failed postcondition with bounded owned-child diagnostics and confirms cleanup', async () => {
+  vi.stubEnv('IMNOTA_SMOKE', '1');
+  vi.stubEnv('IMNOTA_SMOKE_CAPTURE_SOURCE', 'synthetic');
+  vi.stubGlobal('process', Object.create(process, { platform: { value: 'darwin' } }));
+  const events = new EventEmitter();
+  const stderr = new PassThrough();
+  const kill = vi.fn(() => {
+    events.emit('close', null, 'SIGTERM');
+    return true;
+  });
+  const child = Object.assign(events, {
+    pid: 12345,
+    exitCode: null,
+    signalCode: null,
+    stdout: new PassThrough(),
+    stderr,
+    kill,
+  }) as unknown as ChildProcess;
+  const original = new Error('The OS did not identify the owned native source fixture.');
+  const result = withSourceWindowFixture(
+    async () => {
+      stderr.write('discarded prefix' + 'x'.repeat(2500) + 'owned-window-visible');
+      throw original;
+    },
+    () => {
+      queueMicrotask(() => events.emit('spawn'));
+      return child;
+    },
+  );
+  await expect(result).rejects.toMatchObject({ cause: original });
+  await expect(result).rejects.toThrow(original.message);
+  await expect(result).rejects.toThrow('owned-window-visible');
+  await expect(result).rejects.not.toThrow('discarded prefix');
+  expect(kill).toHaveBeenCalledExactlyOnceWith();
+  expect(sourceWindowFixtureTitle()).toBeNull();
+});

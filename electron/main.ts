@@ -1266,7 +1266,13 @@ async function listIdentifiableCaptureWindows(
   // leaves Area and Display available and Window mode explains it cannot identify windows.
   const windows =
     process.platform === 'darwin'
-      ? await listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(() => [])
+      ? await listMacCaptureWindows(macCaptureHelperLocation(), process.pid, displays).catch(
+          (error: unknown) => {
+            // A synthetic fixture must expose provider failures instead of looking like an absent window.
+            if (fixtureTitle) throw error;
+            return [];
+          },
+        )
       : identifiableCaptureWindows(
           tryListWindowsCaptureWindows((rect) => screen.screenToDipRect(null, rect)),
           displays,

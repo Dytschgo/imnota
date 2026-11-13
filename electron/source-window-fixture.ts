@@ -50,8 +50,36 @@ export async function withSourceWindowFixture<T>(
     `,
         ]
       : [
+          '-l',
+          'JavaScript',
           '-e',
-          `display dialog "Synthetic source fixture" with title "${title}" buttons {"Close"} giving up after 120`,
+          `
+      ObjC.import('AppKit');
+      function run(argv) {
+        const app = $.NSApplication.sharedApplication;
+        app.setActivationPolicy($.NSApplicationActivationPolicyRegular);
+        const window = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer(
+          $.NSMakeRect(0, 0, 360, 220),
+          $.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable,
+          $.NSBackingStoreBuffered, false);
+        window.releasedWhenClosed = false;
+        window.title = argv[0];
+        window.level = $.NSNormalWindowLevel;
+        window.center;
+        window.makeKeyAndOrderFront(null);
+        app.activateIgnoringOtherApps(true);
+        console.log(JSON.stringify({
+          fixture: argv[0], windowId: Number(window.windowNumber),
+          level: Number(window.level), visible: Boolean(window.isVisible),
+          pid: Number($.NSProcessInfo.processInfo.processIdentifier)
+        }));
+        const deadline = Date.now() + 120000;
+        while (window.isVisible && Date.now() < deadline)
+          $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.05));
+        window.close;
+      }
+    `,
+          title,
         ];
   const child = launch(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let failure: Error | undefined;
@@ -75,7 +103,11 @@ export async function withSourceWindowFixture<T>(
   } catch (error) {
     if (failure)
       throw new Error(`Native source fixture could not start: ${failure.message}`, { cause: error });
-    if (output) throw new Error(`Native source fixture failed: ${output}`, { cause: error });
+    if (output)
+      throw new Error(
+        `Native source fixture failed: ${error instanceof Error ? error.message : String(error)}; owned fixture output: ${output}`,
+        { cause: error },
+      );
     throw error;
   } finally {
     try {
