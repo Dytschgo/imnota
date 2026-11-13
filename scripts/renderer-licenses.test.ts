@@ -67,13 +67,24 @@ it('does not accept an empty license file as retained attribution', async () => 
 
 it('retains a complete MIT grant from README without unrelated sections', async () => {
   const drawing = await fixture();
+  await writeFile(path.join(drawing.directory, 'AUTHORS'), 'Additional author attribution');
   await writeFile(
     path.join(drawing.directory, 'README.md'),
     '# Drawing\n\n## License\nCopyright drawing authors\nPermission is hereby granted\nTHE SOFTWARE IS PROVIDED\n\n## Usage\nNot a license',
   );
   const text = await rendererNotices([drawing.module]);
   expect(text).toContain('Copyright drawing authors');
+  expect(text).toContain('Additional author attribution');
+  expect(text).toContain('Permission is hereby granted');
   expect(text).not.toContain('Not a license');
+});
+
+it.each(['AUTHORS', 'NOTICE'])('rejects ancillary %s without license text', async (name) => {
+  const drawing = await fixture();
+  await writeFile(path.join(drawing.directory, name), 'Additional attribution only');
+  await expect(rendererNotices([drawing.module])).rejects.toThrow(
+    'Missing renderer license text for drawing@1.0.0',
+  );
 });
 
 it('does not treat a README license identifier as the full license text', async () => {

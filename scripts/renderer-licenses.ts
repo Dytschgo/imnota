@@ -75,26 +75,42 @@ export async function rendererNotices(
     const files = await licenseFiles(root);
     const texts = new Set<string>();
     const sections: string[] = [];
+    let hasLicenseText = false;
     for (const file of files) {
       const text = (await fs.readFile(file, 'utf8')).trim();
-      if (!text || texts.has(text)) continue;
+      if (!text) continue;
+      if (
+        /^(?:(?:licen[cs]e|copying|ofl)(?:[._-].*)?|.*[._-]licen[cs]e(?:[._-].*)?)$/i.test(
+          path.basename(file),
+        )
+      )
+        hasLicenseText = true;
+      if (texts.has(text)) continue;
       texts.add(text);
       sections.push(`${path.relative(root, file).replaceAll('\\', '/')}\n\n${text}`);
     }
-    if (!sections.length && manifest.license === 'MIT') {
+    if (!hasLicenseText && manifest.license === 'MIT') {
       // FastDom/StrictDom distribute the complete grant in README, not LICENSE.
       const readme = (await fs.readdir(root)).find((name) => /^readme\.md$/i.test(name));
       if (readme) {
         const text = await fs.readFile(path.join(root, readme), 'utf8');
         const license = text.match(/^#{1,6}\s+licen[cs]e[ \t]*\r?\n([\s\S]*)/im)?.[1]?.split(/^#{1,6}\s/m)[0];
-        if (license?.includes('Permission is hereby granted') && license.includes('THE SOFTWARE IS PROVIDED'))
+        if (
+          license?.includes('Permission is hereby granted') &&
+          license.includes('THE SOFTWARE IS PROVIDED')
+        ) {
           sections.push(`${readme} (license section)\n\n${license.trim()}`);
+          hasLicenseText = true;
+        }
       }
     }
     for (const { source, text } of supplements[identity] ?? []) {
-      if (text.trim()) sections.push(`Source: ${source}\n\n${text.trim()}`);
+      if (text.trim()) {
+        sections.push(`Source: ${source}\n\n${text.trim()}`);
+        hasLicenseText = true;
+      }
     }
-    if (!sections.length) missing.push(identity);
+    if (!hasLicenseText) missing.push(identity);
     notices.set(identity, `${identity}\n${sections.join('\n\n')}\n`);
   }
   if (missing.length) throw new Error(`Missing renderer license text for ${missing.sort().join(', ')}`);
