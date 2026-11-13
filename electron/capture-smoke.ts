@@ -37,7 +37,7 @@ export interface CaptureSmokeResult {
     app: string;
     capturedAt: string;
     screenshotId: string;
-    pixels: 'synthetic';
+    pixels: 'owned-window-or-synthetic-fallback';
   };
   crossDisplay: null | {
     input: 'native-pointer' | 'overlay-ipc';
@@ -578,8 +578,8 @@ async function waitForScreenshotCount(
 
 /**
  * Native-only region-capture exercise. It refuses to run unless main injects its
- * synthetic display source, so screenshots produced by this helper cannot contain
- * a real desktop image.
+ * synthetic display source. The owned Window fixture may use its native window
+ * pixels; no unrelated desktop image is retained.
  */
 export async function exerciseRegionCapture(
   initialDriver: NativeUiDriver,
@@ -989,7 +989,7 @@ export async function exerciseRegionCapture(
       app: expectedApp,
       capturedAt: saved.source.capturedAt,
       screenshotId: saved.id,
-      pixels: 'synthetic' as const,
+      pixels: 'owned-window-or-synthetic-fallback' as const,
     };
   });
   await new NativeUiDriver(reopenedFromTray).evaluate(`(async () => {
