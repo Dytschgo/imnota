@@ -633,6 +633,8 @@ output=$( ( run_main ) 2>&1 ) || status=$?
 [[ "$status" -ne 0 ]]
 preserved_path=$(cat "$root/preserved-path")
 [[ "$output" == *"Recovery files were preserved at: $preserved_path"* ]]
+failure_line=$(printf '%s\\n' "$output" | /usr/bin/grep '^Update failed:')
+[[ "$failure_line" == *"Preserved at: $preserved_path"* ]]
 [[ "$(cat "$preserved_path/.unexpected")" == untouched ]]
 [[ "$(cat "$root/Imnota.app/marker")" == old ]]
 `);

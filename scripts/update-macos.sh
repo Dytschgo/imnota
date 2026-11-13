@@ -944,7 +944,7 @@ main() {
   stage_dir="$(umask 077; /usr/bin/mktemp -d "${app_parent}/.imnota-update.XXXXXX")" ||
     die "A same-folder update staging area could not be created."
   keep_staging=1
-  secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you."
+  secure_private_directory "$stage_dir" || die "The staging area is not a private physical directory owned by you. Preserved at: $stage_dir"
   require_empty_created_directory "$stage_dir" "staging area"
   keep_staging=0
 
