@@ -2,13 +2,13 @@
 export async function probeReleaseCheck(
   discover,
   prepare,
-  { request = fetch, signal = AbortSignal.timeout(15_000) } = {},
+  { request = globalThis.fetch, signal = globalThis.AbortSignal.timeout(15_000) } = {},
 ) {
   const report = { kind: 'secondary-release-check', requests: [] };
   let stage = 'discovery';
   try {
     const release = await discover('nightly', 'darwin', async (target, options = {}) => {
-      const url = new URL(target);
+      const url = new globalThis.URL(target);
       const listing = url.pathname === '/repos/Dytschgo/imnota/releases';
       if (
         url.origin !== 'https://api.github.com' ||
@@ -24,7 +24,7 @@ export async function probeReleaseCheck(
       report.requests.push(observation);
       const response = await request(target, {
         ...options,
-        signal: options.signal ? AbortSignal.any([signal, options.signal]) : signal,
+        signal: options.signal ? globalThis.AbortSignal.any([signal, options.signal]) : signal,
       });
       observation.status = response.status;
       observation.rateLimit = {};
