@@ -67,36 +67,39 @@ export function ignoredProjectWatchPath(relativePath: string): boolean {
   );
 }
 
+/** Production watcher factory, shared with the owned verification wrapper. */
+export const createRealProjectWatch: ProjectWatchDependencies['createWatch'] = (projectPath, listener) => {
+  const recursive = fs.watch(projectPath, { recursive: true }, listener) as FSWatcher;
+  if (process.platform !== 'linux') return recursive;
+  // Linux recursive watches can retain a file's old inode after atomic replacement.
+  // Watch the stable parent too, so later project.json writes still reach revision checks.
+  let metadata: FSWatcher;
+  try {
+    metadata = fs.watch(projectPath, { recursive: false }, (eventType, filename) => {
+      if (normalizedRelativePath(filename) === 'project.json') listener(eventType, filename);
+    });
+  } catch (error) {
+    recursive.close();
+    throw error;
+  }
+  return {
+    close: () => {
+      recursive.close();
+      metadata.close();
+    },
+    on: (event, handler) => {
+      recursive.on(event, handler);
+      metadata.on(event, handler);
+    },
+  };
+};
+
 function defaultDependencies(
   dependencies: Pick<ProjectWatchDependencies, 'loadSnapshot' | 'saveProject' | 'emit'>,
 ): ProjectWatchDependencies {
   return {
     ...dependencies,
-    createWatch: (projectPath, listener) => {
-      const recursive = fs.watch(projectPath, { recursive: true }, listener) as FSWatcher;
-      if (process.platform !== 'linux') return recursive;
-      // Linux recursive watches can retain a file's old inode after atomic replacement.
-      // Watch the stable parent too, so later project.json writes still reach revision checks.
-      let metadata: FSWatcher;
-      try {
-        metadata = fs.watch(projectPath, { recursive: false }, (eventType, filename) => {
-          if (normalizedRelativePath(filename) === 'project.json') listener(eventType, filename);
-        });
-      } catch (error) {
-        recursive.close();
-        throw error;
-      }
-      return {
-        close: () => {
-          recursive.close();
-          metadata.close();
-        },
-        on: (event, handler) => {
-          recursive.on(event, handler);
-          metadata.on(event, handler);
-        },
-      };
-    },
+    createWatch: createRealProjectWatch,
     readProjectSource: (projectPath) => fsPromises.readFile(path.join(projectPath, 'project.json'), 'utf8'),
     readWatchedFile: (filePath) => fsPromises.readFile(filePath).catch(() => null),
     randomId: () => randomUUID(),
@@ -155,6 +158,27 @@ export class ProjectWatchManager {
 
   stopAll(): void {
     for (const watchId of [...this.watches.keys()]) this.stop(watchId);
+  }
+
+  /** A separate native surface committed files without updating the watching renderer. */
+  async notifyProjectChanged(projectPath: string, message: string): Promise<void> {
+    const resolved = path.resolve(projectPath);
+    const watchers = [...this.watches.values()].filter(
+      (state) => path.resolve(state.projectPath) === resolved,
+    );
+    if (!watchers.length) return;
+    const projectRevision = projectRevisionForSource(await this.dependencies.readProjectSource(projectPath));
+    for (const state of watchers) {
+      if (this.watches.get(state.watchId) !== state) continue;
+      this.dependencies.emit({
+        watchId: state.watchId,
+        projectPath: state.projectPath,
+        kind: 'external-change',
+        projectRevision,
+        changedPaths: ['project.json'],
+        message,
+      });
+    }
   }
 
   stopProject(projectPath: string): void {

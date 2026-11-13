@@ -1,6 +1,7 @@
 // @vitest-environment node
 import type { IpcMainInvokeEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { z } from 'zod';
 import { IpcRouter, type IpcRouterOptions } from './ipc-router.js';
 
@@ -110,11 +111,18 @@ describe('IpcRouter', () => {
   it('drains every operation queued before an install starts', async () => {
     const { router } = setup();
     let finished = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     void router.enqueue(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await gate;
       finished = true;
     });
-    await router.drain();
+    let drained = false;
+    const drain = router.drain().then(() => (drained = true));
+    await nextTurn();
+    expect(drained).toBe(false);
+    release();
+    await drain;
     expect(finished).toBe(true);
   });
 
@@ -134,7 +142,7 @@ describe('IpcRouter', () => {
     expect(order).toEqual(['request started', 'save']);
     let drained = false;
     const drain = router.drain().then(() => (drained = true));
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await nextTurn();
     expect(drained).toBe(false);
     releaseRequest();
     await drain;
@@ -164,7 +172,7 @@ describe('IpcRouter', () => {
       queuedSettled = true;
       return result;
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await nextTurn();
     expect(queuedSettled).toBe(false);
     releaseSlow();
     await slow;

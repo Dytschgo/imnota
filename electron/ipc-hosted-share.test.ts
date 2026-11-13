@@ -5,6 +5,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import type { IpcHost } from './main.js';
 import { IpcRouter } from './ipc-router.js';
 import { registerHostedShareIpc } from './ipc-hosted-share.js';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 
 vi.mock('electron', () => ({ nativeImage: {} }));
 
@@ -179,7 +180,7 @@ it('reads committed artifacts inside the filesystem queue before uploading', asy
   const save = call('projects:save');
   await vi.waitFor(() => expect(finishSave).toBeDefined());
   const upload = call('workflow:hosted-share:create', request('123e4567-e89b-42d3-a456-426614174011'));
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await nextTurn();
   expect(read).not.toHaveBeenCalled();
   finishSave!();
   await save;
@@ -196,7 +197,7 @@ it('runs a repeated upload only after the earlier attempt settles, and drains ac
   const repeated = call('workflow:hosted-share:create', input);
   const revocation = call('workflow:hosted-share:revoke', { id: 'share' });
   await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await nextTurn();
   expect(create).toHaveBeenCalledOnce();
   expect(revoke).not.toHaveBeenCalled();
 

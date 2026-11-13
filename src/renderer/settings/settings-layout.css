@@ -209,6 +209,12 @@
   background: color-mix(in srgb, var(--surface) 92%, var(--bg));
 }
 
+/* The card border already separates the first row; its own divider drew a second line. */
+.settings-view > .settings-grid .imnota-preference-section > .imnota-preference-row:first-child {
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
 .settings-view > .settings-grid .settings-section > h2 {
   margin: 0 0 10px;
   font-size: 14px;

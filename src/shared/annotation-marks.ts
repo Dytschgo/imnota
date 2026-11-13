@@ -69,8 +69,15 @@ export function annotationMarkListItems(
   image: { originalWidth: number; originalHeight: number },
 ): string[] {
   const noteNumbers = textAnnotationNoteNumbers(annotations);
-  return annotations.flatMap((annotation) => {
+  const items = annotations.flatMap((annotation) => {
     const line = formatMarkLine(annotation, image, noteNumbers.get(annotation.id));
     return line ? [`- ${line}`] : [];
   });
+  // Tell the agent pixels were hidden on purpose, by count only: ids, kinds, positions and
+  // sizes of redactions are never written.
+  const redacted = annotations.filter(
+    (annotation) => annotation.kind === 'blur' || annotation.kind === 'pixelate',
+  ).length;
+  if (redacted) items.push(`- ${redacted} redacted ${redacted === 1 ? 'region' : 'regions'}`);
+  return items;
 }
