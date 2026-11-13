@@ -84,7 +84,6 @@ it('still offers a genuinely newer stable fallback while Nightly stays selected'
         sourceChannel: 'stable',
         version: '0.5.0',
         manualDownload: true,
-        terminalCommand: 'update-command',
       }}
       onCheck={vi.fn()}
       onDownload={onDownload}
@@ -94,7 +93,7 @@ it('still offers a genuinely newer stable fallback while Nightly stays selected'
   );
   fireEvent.pointerEnter(screen.getByTestId('update-indicator'));
   expect(screen.getByRole('dialog')).toHaveTextContent('Update 0.5.0 · stable');
-  fireEvent.click(screen.getByRole('button', { name: 'Run update in Terminal' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Open download' }));
   expect(onDownload).toHaveBeenCalledOnce();
 });
 

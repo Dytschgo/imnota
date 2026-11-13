@@ -48,17 +48,15 @@ export function FloatingUpdateControl({
         ? 'Checking for updates'
         : downloading
           ? `Downloading update, ${percent}% complete`
-          : available && current.terminalCommand
-            ? 'Run update in Terminal'
-            : available
-              ? current.manualDownload
-                ? 'Open download'
-                : 'Download update'
-              : olderRelease
-                ? 'No newer update. Check again.'
-                : noNewerUpdate
-                  ? 'You’re on the latest version. Check again.'
-                  : 'Check for updates';
+          : available
+            ? current.manualDownload
+              ? 'Open download'
+              : 'Download update'
+            : olderRelease
+              ? 'No newer update. Check again.'
+              : noNewerUpdate
+                ? 'You’re on the latest version. Check again.'
+                : 'Check for updates';
 
   const cancelClose = () => {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);

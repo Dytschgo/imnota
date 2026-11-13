@@ -13,6 +13,8 @@ Until the toggle is on, Imnota starts no listener and a `--mcp` process exits im
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server. The existing interface has no authentication token: enabling it allows local processes to read the selected workspace. Requests with a foreign Host or a browser Origin are rejected; no CORS permission is granted. Hosted-share tokens do not authorize MCP access.
 
+HTTP responses disable caching. Accepted notifications return an empty `202`; unsupported methods return `405` with `Allow: POST`, and oversized bodies return `413`. The server closes refused connections; a client still uploading after an early size refusal can observe a connection reset instead of exposing that response. Malformed JSON or UTF-8 returns a JSON-RPC parse error. Stdio also rejects malformed UTF-8, bounds unfinished request lines, recovers after an oversized line, and waits for response writes before consuming another request. Tool discovery marks tools as read-only, idempotent and local; annotations are hints, not additional access rights. Client `_meta` on tool calls is accepted separately from tool arguments.
+
 Enabling access first checks that the listener can bind. If the port is occupied, Settings reports the failure and leaves access off. A failed settings write closes a newly started listener. If a later app launch cannot bind, Imnota disables access and explains how to retry. Disabling access stops the listener and rejects further requests.
 
 ## What agents can read
@@ -43,6 +45,8 @@ The first MCP content block is JSON text with bundle metadata and ordered `bundl
 Per call, bundle reads return at most **10 PNGs**, **5,000,000 raw bytes per PNG**, **20,000,000 raw image bytes in total**, and **4,000,000 raw Markdown bytes**. Oversized content is omitted with its saved path, status, counts and explanatory `notes`; invalid images are also reported. JSON text responses are capped at **5,000,000 UTF-8 bytes**. A response exceeding that cap returns a tool error instead of a partial JSON document. Requests are capped at **1,000,000 bytes** (stdio checks each received line). Directory scans stop at **5,000 entries** per directory; narrow large workspace requests to a project. These limits do not write or regenerate files.
 
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Linked project or export paths are rejected, and reads recheck file identity and size. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed. MCP performs no migrations, recovery, capture, export generation or file writes. Access remains controlled by the explicit local opt-in. HTTP uses the running UI's settings. Before each stdio tool call, the existing session reads `settings.json` once and validates it using the shared settings schemas: access off refuses the call, and a changed workspace takes effect for that call. Missing, unreadable or malformed settings fail closed rather than retaining enabled access. Invalid workspace values cannot authorize a root. This does not cancel a read already in progress; initialization and tool discovery do not read workspace content.
+
+`search_saved_text` includes saved drawing descriptions as well as titles, screenshot descriptions and Markdown text. A whitespace-only query is rejected before scanning; use at least one non-whitespace search term.
 
 ## Selective saved bundle reads
 

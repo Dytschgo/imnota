@@ -13,6 +13,7 @@ interface Draft {
 interface Options {
   snapshot: ProjectSnapshot | null;
   itemId: string | null;
+  nativeFaultVerification?: boolean;
   beforeSave(): Promise<boolean>;
   beginMutation(): number;
   acceptSnapshot(
@@ -207,6 +208,15 @@ export function useContentPersistence(options: Options) {
 
   return {
     content,
+    ...(options.nativeFaultVerification
+      ? {
+          verificationPending: () =>
+            Boolean(
+              draft.current &&
+              (draft.current.pendingAdoption || draft.current.version !== draft.current.savedVersion),
+            ),
+        }
+      : {}),
     loading,
     saveState,
     error,
