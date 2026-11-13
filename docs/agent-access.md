@@ -19,17 +19,17 @@ Enabling access first checks that the listener can bind. If the port is occupied
 
 ## What agents can read
 
-| Tool                    | Arguments                               | Result                                                                           |
-| ----------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
-| `list_projects`         | Optional `scope`: active, archived, all | Projects in the chosen scope; active by default (path, name, updated time)       |
-| `list_collections`      | `projectPath`                           | Collections, including archived ones, and up to ten recent saved bundle ids each |
-| `list_collection_items` | `projectPath`, `collectionId`           | Ordered items (id, kind, title, includeInExport, priority)                       |
-| `get_latest_bundle`     | Optional `projectPath`, `collectionId`  | Latest readable saved export: Markdown text and PNG image blocks                 |
-| `list_new_since` | Optional `since`, `projectPath`, `limit` | Active saved exports newer than `since`, newest first: ids, paths and times only |
-| `get_bundle`            | `id`                                    | One saved export identified by a discovered bundle id                            |
-| `inspect_bundle`        | `id`                                    | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
-| `get_item`              | `projectPath`, `itemId`                 | One item's Markdown plus image path for screenshots and drawings                 |
-| `search_saved_text`     | `query`, optional search filters        | Existing saved-text search results                                               |
+| Tool                    | Arguments                                          | Result                                                                           |
+| ----------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `list_projects`         | Optional `scope`: active, archived, all            | Projects in the chosen scope; active by default (path, name, updated time)       |
+| `list_collections`      | `projectPath`                                      | Collections, including archived ones, and up to ten recent saved bundle ids each |
+| `list_collection_items` | `projectPath`, `collectionId`                      | Ordered items (id, kind, title, includeInExport, priority)                       |
+| `get_latest_bundle`     | Optional `projectPath`, `collectionId`             | Latest readable saved export: Markdown text and PNG image blocks                 |
+| `list_new_since`        | Optional `since`, `projectPath`, `limit`, `cursor` | Active saved exports newer than `since`, newest first: ids, paths and times only |
+| `get_bundle`            | `id`                                               | One saved export identified by a discovered bundle id                            |
+| `inspect_bundle`        | `id`                                               | Ordered saved file sizes and read limits, without reading Markdown or PNG bodies |
+| `get_item`              | `projectPath`, `itemId`                            | One item's Markdown plus image path for screenshots and drawings                 |
+| `search_saved_text`     | `query`, optional search filters                   | Existing saved-text search results                                               |
 
 `get_latest_bundle` without arguments searches active projects and active collections. Supplying only `projectPath` narrows it to that project's active collections; supplying both `projectPath` and `collectionId` selects that collection, including an archived one. `collectionId` alone is invalid. Timestamp ties use a stable project-path, collection-id and folder-name order.
 
@@ -37,7 +37,7 @@ Bundle tools read folders matching the export layout used by **Copy Bundle**; th
 
 "Latest" is derived from export folder names, not an independent publication record. Anyone able to write into the workspace can influence which bundle is reported as latest; they could equally edit the bundle contents. Copy Bundle removes its temporary ownership record when publishing and leaves no reliable ordering record. Names more than **five minutes** ahead of the current clock are ignored. This small allowance covers clock corrections and ordinary one-second timestamp reservations, without accepting tomorrow's fabricated export. Parsing uses the machine's current local timezone, matching Copy Bundle's local-time name generation, rather than treating the name as UTC. After a timezone change, a clock correction larger than five minutes, or an unusually long run of occupied timestamp reservations, a genuine set may be temporarily omitted. Timezone/DST ambiguity cannot be recovered from these names.
 
-`list_new_since` is the inbox check: pass the `preparedAt` of the last bundle you handled as `since` (local time, `YYYY-MM-DDTHH:MM:SS`) and it lists newer exports from active projects and collections, newest first. Without `since` it lists the most recent ones. `limit` defaults to 10 (maximum 50) and `more` says whether more matched. It returns no Markdown or images; read one with `get_bundle`. The same folder rules, workspace path checks and access switch apply as for `get_latest_bundle`, and it writes nothing.
+`list_new_since` is the inbox check: pass the `preparedAt` of the last bundle you handled as `since` (local time, `YYYY-MM-DDTHH:MM:SS`) and it lists newer exports from active projects and collections, newest first. Without `since` it lists the most recent ones. `limit` defaults to 10 (maximum 50) and `more` says whether more matched. When true, repeat the same query with `nextCursor` as `cursor` until all pages have been read, then advance `since`; this preserves exports with tied timestamps. A removed or out-of-scope cursor returns an error: restart and deduplicate the returned ids. This is a filename-time query, not a durable event stream; use overlapping timestamps and deduplicate ids when polling across concurrent writes or clock changes. It returns no Markdown or images; read one with `get_bundle`. The same folder rules, workspace path checks and access switch apply as for `get_latest_bundle`, and it writes nothing.
 
 Use the opaque `id` returned by `list_collections` or `get_latest_bundle` for `get_bundle`. IDs remain stable while the workspace-relative project folder, collection id and export folder name stay the same. Moving or removing a set, changing the selected workspace, or making it inaccessible can return `bundle not found`. An id is never treated as a filesystem path.
 

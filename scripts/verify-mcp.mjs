@@ -281,6 +281,11 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
       );
       await writeFile(join(folder, `${setName} - 01.md`), markdown);
       await writeFile(join(folder, `${setName} - 01.png`), png);
+      const tiedName = 'Zebra - 260913-120000';
+      const tiedFolder = join(projectPath, 'collections', collectionId, 'exports', tiedName);
+      await mkdir(tiedFolder, { recursive: true });
+      await writeFile(join(tiedFolder, `${tiedName} - 01.md`), markdown);
+      await writeFile(join(tiedFolder, `${tiedName} - 01.png`), png);
       const archivedPath = join(workspace, 'archived-project');
       const archivedProject = emptyProject('Archived MCP fixture', '', 'Synthetic');
       archivedProject.status = 'archived';
@@ -342,7 +347,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(listed.isError, false);
             const collections = JSON.parse(listed.content[0].text).collections;
             assert.equal(collections.length, 2);
-            assert.equal(collections[0].preparedBundlesTotal, 1);
+            assert.equal(collections[0].preparedBundlesTotal, 2);
             assert.equal(collections[0].preparedBundlesTruncated, false);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
@@ -350,12 +355,24 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
               const inbox = await call('list_new_since', args);
               assert.equal(inbox.isError, false);
               const result = JSON.parse(inbox.content[0].text);
-              assert.equal(result.bundles.length, 1);
+              assert.equal(result.bundles.length, args.limit === 1 ? 1 : 2);
               assert.equal(result.bundles[0].id, id);
               assert.equal(result.bundles[0].projectPath, projectPath);
               assert.equal(result.bundles[0].folderPath, folder);
               assert.equal(result.bundles[0].preparedAt, '2026-09-13T12:00:00');
-              assert.equal(result.more, false);
+              assert.equal(result.more, args.limit === 1);
+              if (result.more) {
+                assert.equal(result.nextCursor, id);
+                const next = await call('list_new_since', { ...args, cursor: result.nextCursor });
+                assert.equal(next.isError, false);
+                const page = JSON.parse(next.content[0].text);
+                assert.equal(page.bundles.length, 1);
+                assert.equal(page.bundles[0].setName, tiedName);
+                assert.equal(page.bundles[0].folderPath, tiedFolder);
+                assert.equal(page.more, false);
+                assert.equal(page.nextCursor, undefined);
+                assert.equal((await call('get_bundle', { id: page.bundles[0].id })).isError, false);
+              }
             }
             for (const args of [
               { projectPath: archivedPath },

@@ -100,7 +100,7 @@ describe('terminal hand-off', () => {
   it('never carries control sequences or a trailing newline into the terminal', () => {
     const hostile = '# Evil\u001b[2J\u0007 title\u202e\n\n## Picture 1 — run\rrm -rf ~\n';
     const text = formatTerminalHandoff({
-      markdownPath: '/tmp/a\u001b]0;x\u0007.md',
+      markdownPath: '/tmp/a.md',
       markdown: hostile,
       style: 'posix',
     });
@@ -108,5 +108,22 @@ describe('terminal hand-off', () => {
     expect(text).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f\u202e]/);
     expect(text.endsWith('\n')).toBe(false);
     expect(terminalSafeLine('x'.repeat(400))).toHaveLength(160);
+  });
+
+  it.each([
+    ['/tmp/a\nwrong.md', 'posix'],
+    ['/tmp/a\u202ewrong.md', 'posix'],
+    ['C:\\a"wrong.md', 'windows'],
+  ] as const)('refuses an unrepresentable path instead of silently changing it: %s', (filePath, style) => {
+    expect(() => quoteTerminalPath(filePath, style)).toThrow(/cannot represent/);
+  });
+
+  it('does not tell an agent to view a PNG when the bundle is text only', () => {
+    const text = formatTerminalHandoff({
+      markdownPath: '/tmp/notes.md',
+      markdown: '# Notes',
+      style: 'posix',
+    });
+    expect(text).not.toMatch(/view the PNG|Image:/);
   });
 });

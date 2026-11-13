@@ -5,9 +5,9 @@
  *
  * Every path is quoted, because export set names contain spaces. Windows paths use double
  * quotes (a Windows file name cannot contain `"`, and backslashes stay literal); POSIX and WSL
- * paths use single quotes, which keep every character literal. Control characters are removed so
- * a crafted title cannot inject terminal escape sequences, and the text has no trailing newline,
- * so pasting into a shell prompt never runs anything by itself.
+ * paths use single quotes. Titles are stripped of terminal controls; paths containing controls
+ * are refused rather than changed. The hand-off is data for an agent's input, not a shell command.
+ * Omitting a trailing newline does not make multiline text safe to paste at a shell prompt.
  */
 
 export type TerminalPathStyle = 'windows' | 'posix';
@@ -54,13 +54,17 @@ export function toWslPath(windowsPath: string): string | null {
 }
 
 export function quoteTerminalPath(filePath: string, style: TerminalPathStyle): string {
-  const clean = filePath.replace(CONTROL_CHARACTERS, '');
-  if (style === 'windows') return `"${clean.replace(/"/g, '')}"`;
-  return `'${clean.replace(/'/g, `'\\''`)}'`;
+  if (
+    filePath.replace(CONTROL_CHARACTERS, '') !== filePath ||
+    (style === 'windows' && filePath.includes('"'))
+  )
+    throw new TerminalPathError('Copy for terminal cannot represent this path without changing it.');
+  if (style === 'windows') return `"${filePath}"`;
+  return `'${filePath.replace(/'/g, `'\\''`)}'`;
 }
 
 /** Two or three summary lines from the saved Markdown: collection and bundle, then picture titles. */
-export function terminalHandoffSummary(markdown: string): string[] {
+export function terminalHandoffSummary(markdown: string, hasImage = true): string[] {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   const title = lines.find((line) => /^# /.test(line))?.slice(2) ?? 'Imnota bundle';
   const position = lines.find((line) => /^Bundle \d+ of \d+$/.test(line.trim()))?.trim();
@@ -77,7 +81,11 @@ export function terminalHandoffSummary(markdown: string): string[] {
       ),
     );
   } else summary.push('Text only, no pictures.');
-  summary.push('Read the Markdown for the annotated feedback; view the PNG for the marked-up screenshots.');
+  summary.push(
+    hasImage
+      ? 'Read the Markdown for the annotated feedback; view the PNG for the marked-up screenshots.'
+      : 'Read the Markdown for the feedback.',
+  );
   return summary;
 }
 
@@ -95,7 +103,10 @@ export function formatTerminalHandoff(input: TerminalHandoffInput): string {
       );
     return quoteTerminalPath(translated, 'posix');
   };
-  const lines = [...terminalHandoffSummary(input.markdown), `Markdown: ${translate(input.markdownPath)}`];
+  const lines = [
+    ...terminalHandoffSummary(input.markdown, Boolean(input.pngPath)),
+    `Markdown: ${translate(input.markdownPath)}`,
+  ];
   if (input.pngPath) lines.push(`Image: ${translate(input.pngPath)}`);
   return lines.join('\n');
 }

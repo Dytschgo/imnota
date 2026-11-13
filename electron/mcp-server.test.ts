@@ -405,6 +405,32 @@ describe('local MCP tools', () => {
     expect(await savedFiles(root)).toEqual(before);
   });
 
+  it('pages through timestamp ties without losing exports or writing workspace files', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    for (const name of ['Alpha', 'Beta', 'Gamma']) await writeBundle(projectPath, `${name} - 260902-120000`);
+    const before = await savedFiles(root);
+    type Page = { bundles: Array<{ id: string; setName: string }>; more: boolean; nextCursor?: string };
+    const query = { since: '2026-09-02T11:00:00', projectPath, limit: 1 };
+    const first = (await callTool(root, 'list_new_since', query)) as Page;
+    expect(first.more).toBe(true);
+    expect(first.nextCursor).toBe(first.bundles[0]!.id);
+    const second = (await callTool(root, 'list_new_since', { ...query, cursor: first.nextCursor })) as Page;
+    const third = (await callTool(root, 'list_new_since', { ...query, cursor: second.nextCursor })) as Page;
+    expect([...first.bundles, ...second.bundles, ...third.bundles].map((bundle) => bundle.setName)).toEqual([
+      'Alpha - 260902-120000',
+      'Beta - 260902-120000',
+      'Gamma - 260902-120000',
+    ]);
+    expect(third.more).toBe(false);
+    expect(third.nextCursor).toBeUndefined();
+    await expect(
+      callTool(root, 'list_new_since', { ...query, cursor: 'b_' + '0'.repeat(32) }),
+    ).rejects.toThrow(/cursor.*restart/i);
+    await expect(callTool(root, 'list_new_since', { since: '2026-02-30T12:00:00' })).rejects.toThrow();
+    expect(await savedFiles(root)).toEqual(before);
+  });
+
   it('keeps list_new_since inside the workspace and behind the access switch', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());

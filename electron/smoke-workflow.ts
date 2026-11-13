@@ -3580,7 +3580,7 @@ export async function runSmokeWorkflow(
   );
   artifacts.push(...(await exerciseNextFeatures(driver, host, artifactDirectory, checkpoint)));
   assertions.push(
-    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths and read-only focused search',
+    'template creation, editable Markdown and reopen, independent clipboard fallbacks, generated paths, terminal handoff native plain-text paste and read-only focused search',
   );
   await checkpoint('templates, clipboard fallbacks and library search complete; starting local history');
   artifacts.push(...(await exerciseLocalHistory(driver, host, artifactDirectory, checkpoint)));

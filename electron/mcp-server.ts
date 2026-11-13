@@ -159,12 +159,13 @@ const getLatestBundleInput = z
   })
   .strict();
 /** Local wall-clock time in the same shape as `preparedAt`, so the comparison is a fixed-width string order. */
-const preparedAtSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+const preparedAtSchema = z.iso.datetime({ local: true }).regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
 const listNewSinceInput = z
   .object({
     since: preparedAtSchema.optional(),
     projectPath: projectPathSchema.optional(),
     limit: z.number().int().min(1).max(MAX_LISTED_NEW_BUNDLES).optional(),
+    cursor: z.string().regex(BUNDLE_ID).optional(),
   })
   .strict();
 /** Opaque identifier: a fixed-shape digest that cannot carry separators, dots or drive letters. */
@@ -852,13 +853,14 @@ export function createMcpTools(
     {
       name: 'list_new_since',
       description:
-        'List already-prepared bundles newer than `since` (local time YYYY-MM-DDTHH:MM:SS, the preparedAt format), newest first. Without `since` it lists the most recent ones. Active projects and collections only; projectPath narrows to one project. Returns ids, paths and times only: read one with get_bundle. Does not generate an export.',
+        'List already-prepared bundles newer than `since` (local time YYYY-MM-DDTHH:MM:SS), newest first. Without `since` it lists the most recent ones. Active projects and collections only; projectPath narrows to one project. Returns ids, paths and times only: read one with get_bundle. When more is true, repeat the same query with nextCursor as cursor before advancing since. A removed or out-of-scope cursor errors: restart and deduplicate ids. Does not generate an export.',
       inputSchema: {
         type: 'object',
         properties: {
           since: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$' },
           projectPath: { type: 'string', minLength: 1, maxLength: 2000 },
           limit: { type: 'integer', minimum: 1, maximum: MAX_LISTED_NEW_BUNDLES },
+          cursor: { type: 'string', pattern: '^b_[a-f0-9]{32}$' },
         },
         additionalProperties: false,
       },
@@ -876,9 +878,17 @@ export function createMcpTools(
         const { since } = input;
         const newer = sets.filter((set) => !since || set.preparedAt > since).sort(compareLatest);
         const limit = input.limit ?? DEFAULT_LISTED_NEW_BUNDLES;
+        const cursorIndex = input.cursor ? newer.findIndex((set) => set.id === input.cursor) : -1;
+        if (input.cursor && cursorIndex < 0)
+          throw new Error(
+            'The inbox cursor is unavailable in this query; restart and deduplicate bundle ids.',
+          );
+        const remaining = newer.slice(cursorIndex + 1);
+        const page = remaining.slice(0, limit);
+        const more = remaining.length > limit;
         return {
           ...(since ? { since } : {}),
-          bundles: newer.slice(0, limit).map((set) => ({
+          bundles: page.map((set) => ({
             id: set.id,
             setName: set.setName,
             projectPath: set.projectPath,
@@ -886,7 +896,8 @@ export function createMcpTools(
             preparedAt: set.preparedAt,
             folderPath: set.folder,
           })),
-          more: newer.length > limit,
+          more,
+          ...(more ? { nextCursor: page.at(-1)!.id } : {}),
         };
       },
     },

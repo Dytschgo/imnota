@@ -1,4 +1,13 @@
-import { AlertTriangle, Check, ChevronDown, Copy, FileImage, FileText, FolderOpen, SquareTerminal } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Copy,
+  FileImage,
+  FileText,
+  FolderOpen,
+  SquareTerminal,
+} from 'lucide-react';
 import {
   useEffect,
   useId,

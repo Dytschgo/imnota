@@ -580,6 +580,7 @@ it.each([false, true])(
       copyImage: success,
       openFiles: success,
       copyPaths: success,
+      copyForTerminal: success,
       openFolder: success,
       cancel: success,
       loadPreview: success,
