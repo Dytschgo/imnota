@@ -21,6 +21,7 @@ import { findWhatsNewRelease } from '../src/shared/whats-new.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { planHostedShares, hostedShareSummary } from './hosted-share-plan.js';
 import { exerciseRegionCapture } from './capture-smoke.js';
+import type { CaptureDisplay } from '../src/shared/capture.js';
 import { exerciseSourceContext } from './source-context-smoke.js';
 import { exerciseNextFeatures, captureNextFeatureLightViews } from './next-features-smoke.js';
 import { exerciseLocalHistory } from './backup-smoke.js';
@@ -54,6 +55,9 @@ export interface SmokeWorkflowHost {
   globalCaptureShortcutRegistered(): boolean;
   /** Read through the production migration, validation, and description hydration path. */
   readProject(projectPath: string): Promise<ProjectData>;
+  listCaptureWindows(
+    displays: readonly CaptureDisplay[],
+  ): Promise<import('./capture-windows.js').CaptureWindowCandidate[]>;
   /** Run the production recovery path with "Restore edits" selected for this test fixture. */
   restoreRecovery(projectPath: string): Promise<ProjectSnapshot>;
   /** Read the persisted legacy update/workspace settings through production code. */

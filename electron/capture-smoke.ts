@@ -10,6 +10,8 @@ import {
   type CrossDisplaySmokeSelection,
 } from './capture-smoke-contract.js';
 import { screenshotPath } from './collections.js';
+import type { CaptureWindowCandidate } from './capture-windows.js';
+import { withSourceWindowFixture } from './source-window-fixture.js';
 import { NativeUiDriver, type SmokeCapture } from './smoke-native-driver.js';
 import {
   createWindowsSmokePointer,
@@ -23,12 +25,20 @@ export interface CaptureSmokeHost {
   trayAvailable(): boolean;
   globalCaptureShortcutRegistered(): boolean;
   readProject(projectPath: string): Promise<ProjectData>;
+  listCaptureWindows(displays: readonly CaptureDisplay[]): Promise<CaptureWindowCandidate[]>;
 }
 
 export interface CaptureSmokeResult {
   artifacts: SmokeCapture[];
   skipped: boolean;
   displays: CaptureDisplay[];
+  windowSource?: {
+    title: string;
+    app: string;
+    capturedAt: string;
+    screenshotId: string;
+    pixels: 'synthetic';
+  };
   crossDisplay: null | {
     input: 'native-pointer' | 'overlay-ipc';
     selection: CaptureRectangle;
@@ -926,9 +936,66 @@ export async function exerciseRegionCapture(
   await waitForClosed(trayOverlay, 'Queued tray capture overlay');
   await waitForAllCaptureOverlaysClosed(reopenedFromTray, 'Queued tray capture');
 
+  const driver = new NativeUiDriver(reopenedFromTray);
+  const windowSource = await withSourceWindowFixture(async (title) => {
+    const driver = new NativeUiDriver(reopenedFromTray);
+    let candidate: CaptureWindowCandidate | undefined;
+    const deadline = Date.now() + 15000;
+    do {
+      candidate = (await host.listCaptureWindows(screen.getAllDisplays())).find(
+        (window) => window.title === title,
+      );
+      if (candidate) break;
+      await delay(50);
+    } while (Date.now() < deadline);
+    if (!candidate) throw new Error('The OS did not identify the owned native source fixture.');
+    if (process.platform === 'darwin' && (!candidate.app || candidate.app === 'Notepad'))
+      throw new Error('WindowServer did not report the native fixture owner app.');
+    const before = await host.readProject(projectPath);
+    await waitForPaint(driver);
+    await startCapture(driver);
+    const fixtureDisplay = screen.getDisplayMatching(candidate.bounds).id;
+    const fixtureOverlay = captureOverlayWindows(driver.browserWindow).find(
+      (window) => screen.getDisplayMatching(window.getBounds()).id === fixtureDisplay,
+    );
+    if (!fixtureOverlay) throw new Error('The native fixture display has no capture overlay.');
+    const windowOverlay = new NativeUiDriver(fixtureOverlay);
+    await windowOverlay.click({ selector: '[data-mode="window"]' });
+    const display = screen.getDisplayMatching(windowOverlay.browserWindow.getBounds());
+    await windowOverlay.clickPoint({
+      x: Math.round(candidate.bounds.x + candidate.bounds.width / 2 - display.bounds.x),
+      y: Math.round(candidate.bounds.y + candidate.bounds.height / 2 - display.bounds.y),
+    });
+    await windowOverlay.waitFor({ selector: '.capture-instruction', text: title, exact: true });
+    await windowOverlay.click({ selector: '[data-action="save"]' });
+    await waitForClosed(windowOverlay.browserWindow, 'Window source capture');
+    const after = await waitForScreenshotCount(host, projectPath, before.screenshots.length + 1);
+    const saved = after.screenshots.find((shot) => !before.screenshots.some((old) => old.id === shot.id));
+    const expectedApp = process.platform === 'win32' ? 'Notepad' : candidate.app;
+    if (
+      !saved?.source ||
+      saved.source.via !== 'capture' ||
+      saved.source.windowTitle !== title ||
+      !expectedApp ||
+      saved.source.app !== expectedApp ||
+      saved.source.url ||
+      Number.isNaN(Date.parse(saved.source.capturedAt))
+    )
+      throw new Error('Native Window selection did not persist its actual OS title/app source.');
+    await driver.waitFor({ selector: `[data-testid="screenshot-${saved.id}"]` });
+    if (artifactDirectory)
+      artifacts.push(await driver.capture(artifactDirectory, 'source-context-native-window.png', saved));
+    return {
+      title,
+      app: expectedApp,
+      capturedAt: saved.source.capturedAt,
+      screenshotId: saved.id,
+      pixels: 'synthetic' as const,
+    };
+  });
   await new NativeUiDriver(reopenedFromTray).evaluate(`(async () => {
     const result=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:false}});
     if(!result.ok) throw new Error(result.error.message);
   })()`);
-  return { artifacts, skipped: false, displays, crossDisplay };
+  return { artifacts, skipped: false, displays, crossDisplay, windowSource };
 }
