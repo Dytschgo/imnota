@@ -16,12 +16,27 @@ import {
 const PRIOR_TEXT = 'Imnota synthetic OLE clipboard prior text';
 
 // Keep the STA clipboard owner alive while Win32 requests its delayed formats.
-const OLE_SOURCE = `
+function oleSource(kind: 'text' | 'bitmap'): string {
+  return `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 try {
   $data = New-Object System.Windows.Forms.DataObject
+  ${
+    kind === 'bitmap'
+      ? `
+  $bitmap = New-Object System.Drawing.Bitmap 24,16
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.Clear([System.Drawing.Color]::CornflowerBlue)
+  $graphics.Dispose()
+  $data.SetData([System.Windows.Forms.DataFormats]::Bitmap, $false, $bitmap)
+  $data.SetData('System.Drawing.Bitmap', $false, $bitmap)
+  `
+      : `
   $data.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, '${PRIOR_TEXT}')
+  `
+  }
   [System.Windows.Forms.Clipboard]::SetDataObject($data, $false)
   [Console]::WriteLine('READY')
   [System.Windows.Forms.Application]::Run((New-Object System.Windows.Forms.ApplicationContext))
@@ -29,9 +44,10 @@ try {
   [Console]::WriteLine('ERROR: ' + $_.Exception.Message)
 }
 `;
+}
 
-async function liveOleSource(): Promise<{ stop(): Promise<void> }> {
-  const encoded = Buffer.from(OLE_SOURCE, 'utf16le').toString('base64');
+async function liveOleSource(kind: 'text' | 'bitmap' = 'text'): Promise<{ stop(): Promise<void> }> {
+  const encoded = Buffer.from(oleSource(kind), 'utf16le').toString('base64');
   const child: ChildProcessWithoutNullStreams = spawn(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', encoded],
@@ -86,6 +102,116 @@ async function liveOleSource(): Promise<{ stop(): Promise<void> }> {
       lines.close();
     },
   };
+}
+
+/** Reads only the tiny bitmap serialized by our owned 24x16 WinForms source. */
+async function serializedBitmap(owner: Buffer, api: WindowsClipboardApi): Promise<Buffer> {
+  return withWindowsClipboardLock(
+    owner,
+    (locked) => {
+      const format = locked.registerClipboardFormat('System.Drawing.Bitmap');
+      if (!locked.isClipboardFormatAvailable(format)) throw new Error('WinForms bitmap format missing.');
+      const handle = locked.getClipboardData(format);
+      const bytes = locked.globalSize(handle);
+      if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 65536)
+        throw new Error('Synthetic WinForms bitmap has an unexpected global-memory size.');
+      const bitmapInfo = Buffer.alloc(process.arch === 'x64' || process.arch === 'arm64' ? 32 : 24);
+      if (locked.getObject(handle, bitmapInfo.length, bitmapInfo) !== 0)
+        throw new Error('Registered WinForms bitmap unexpectedly identifies as a GDI object.');
+      const pointer = locked.globalLock(handle);
+      if (!pointer) throw new Error('Synthetic WinForms global block could not be locked.');
+      try {
+        const result = Buffer.alloc(bytes);
+        locked.copyMemory(result, pointer, bytes);
+        return result;
+      } finally {
+        locked.globalUnlock(handle);
+      }
+    },
+    { context: 'Synthetic WinForms bitmap verification' },
+    api,
+  );
+}
+
+/** Real .NET producer, both copy modes and an actual late Win32 write failure. */
+export async function exerciseDotNetBitmapClipboardSmoke(
+  owner: Buffer,
+  filePaths: readonly [string, string],
+  stage: (message: string) => void = () => undefined,
+): Promise<{
+  passed: true;
+  globalBytes: number;
+  variants: string[];
+  rollbackBytes: true;
+  rollbackImage: true;
+}> {
+  const api = loadWindowsClipboardApi();
+  const image = nativeImage.createFromBuffer(await fs.readFile(filePaths[1]));
+  if (image.isEmpty()) throw new Error('WinForms smoke output PNG could not be decoded.');
+  const size = image.getSize();
+  const rich = {
+    filePaths,
+    markdown: '# Synthetic WinForms bitmap copy',
+    html: '<p>Synthetic WinForms bitmap copy</p>',
+    png: image.toPNG(),
+    dibV5: windowsDibV5Buffer(image.toBitmap(), size.width, size.height),
+  };
+  let globalBytes = 0;
+  for (const variant of ['files', 'rich', 'rollback'] as const) {
+    const source = await liveOleSource('bitmap');
+    try {
+      const prior = await serializedBitmap(owner, api);
+      globalBytes = prior.length;
+      stage(`${variant}: real System.Drawing.Bitmap is ${prior.length} HGLOBAL bytes, not HBITMAP`);
+      const priorImage = await nativeClipboard.readImage();
+      if (priorImage.isEmpty() || priorImage.getSize().width !== 24 || priorImage.getSize().height !== 16)
+        throw new Error('Synthetic WinForms image dimensions differ.');
+      if (variant !== 'rollback') {
+        await writeWindowsClipboard(owner, variant === 'files' ? { filePaths } : rich, api);
+        const copied = await readWindowsClipboardFilesWhenAvailable(owner);
+        if (
+          copied.length !== 2 ||
+          copied.some((file, index) => path.resolve(file) !== path.resolve(filePaths[index]))
+        )
+          throw new Error('Copy over the WinForms bitmap omitted the generated file pair.');
+        if (
+          variant === 'rich' &&
+          ((await nativeClipboard.readText()) !== rich.markdown ||
+            (await nativeClipboard.readHTML()) !== rich.html ||
+            !(await nativeClipboard.readImage()).toBitmap().equals(image.toBitmap()))
+        )
+          throw new Error('Rich copy over the WinForms bitmap omitted the text, HTML or image.');
+      } else {
+        let injected = false;
+        const failingApi = {
+          ...api,
+          setClipboardData: (format: number, handle: unknown) => {
+            if (format === 17 && !injected) {
+              injected = true;
+              return null;
+            }
+            return api.setClipboardData(format, handle);
+          },
+        };
+        try {
+          await writeWindowsClipboard(owner, rich, failingApi);
+          throw new Error('Injected WinForms rich-copy failure unexpectedly succeeded.');
+        } catch (error) {
+          if (!injected || !(error instanceof Error) || !/rejected clipboard format/i.test(error.message))
+            throw error;
+        }
+        if (
+          !(await serializedBitmap(owner, api)).equals(prior) ||
+          !(await nativeClipboard.readImage()).toBitmap().equals(priorImage.toBitmap())
+        )
+          throw new Error('WinForms rollback did not restore the exact serialized bytes and image.');
+      }
+      stage(`${variant}: verified`);
+    } finally {
+      await source.stop();
+    }
+  }
+  return { passed: true, globalBytes, variants: ['files', 'rich'], rollbackBytes: true, rollbackImage: true };
 }
 
 async function assertOlePrior(owner: Buffer, api: WindowsClipboardApi): Promise<void> {

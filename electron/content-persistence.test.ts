@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { inflateSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectData, ProjectSnapshot } from '../src/shared/types.js';
 import { orderedCollectionItems } from '../src/shared/content-items.js';
 import { validateProject } from '../src/shared/schema.js';
@@ -32,6 +32,7 @@ const changedDrawingImage = {
 const changedDrawingSource = EMPTY_EXCALIDRAW_SOURCE.replace('#ffffff', '#2050a0');
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporary.splice(0).map((entry) => fs.rm(entry, { recursive: true, force: true })));
 });
 
@@ -60,6 +61,88 @@ async function fixture(beforeSchemaMigration?: (projectPath: string, project: Pr
     },
   });
   return { projectPath, project, service, snapshot };
+}
+
+async function journalFiles(directory: string) {
+  return Promise.all(
+    (await fs.readdir(directory))
+      .sort()
+      .map(async (name) => [name, await fs.readFile(path.join(directory, name))] as const),
+  );
+}
+
+async function failedSaveFixture(rollbackFailure = false) {
+  const f = await fixture();
+  const created = await f.service.create({
+    projectPath: f.projectPath,
+    collectionId: '001-collection',
+    kind: 'text',
+  });
+  const item = created.project.contentItems![0];
+  const other = await f.service.create({
+    projectPath: f.projectPath,
+    collectionId: '001-collection',
+    kind: 'text',
+  });
+  const otherItem = other.project.contentItems!.find((entry) => entry.id !== item.id)!;
+  const loaded = await f.service.load({ projectPath: f.projectPath, itemId: item.id });
+  const metadata = path.join(f.projectPath, 'project.json');
+  const textFile = path.join(f.projectPath, contentItemRelativePaths(item).markdown!);
+  const original = await fs.readFile(textFile);
+  let injected = false;
+  let rollbackBlocked = false;
+  const retrying = new ContentPersistenceService({
+    snapshot: f.snapshot,
+    trashItem: (target) => fs.unlink(target),
+    transactionOperations: {
+      write: async (target, bytes) => {
+        if (
+          injected &&
+          rollbackFailure &&
+          !rollbackBlocked &&
+          target === textFile &&
+          Buffer.from(bytes).equals(original)
+        ) {
+          rollbackBlocked = true;
+          throw new Error('controlled repair failure');
+        }
+        if (target === metadata && !injected) {
+          injected = true;
+          throw new Error('controlled precommit metadata failure');
+        }
+        await atomicWrite(target, bytes);
+      },
+      unlink: (target) => fs.unlink(target),
+      removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+    },
+  });
+  const request = {
+    projectPath: f.projectPath,
+    itemId: item.id,
+    contentRevision: loaded.contentRevision,
+    markdown: 'Retained retry draft',
+  };
+  await expect(retrying.save(request)).rejects.toThrow();
+  expect(rollbackBlocked).toBe(rollbackFailure);
+  const journalRoot = path.join(f.projectPath, '.imnota-transactions');
+  const [token] = (await fs.readdir(journalRoot)).filter((name) => name.startsWith('txn-'));
+  const failedDirectory = path.join(journalRoot, token);
+  const failedFiles = await journalFiles(failedDirectory);
+  const renamed = JSON.parse(await fs.readFile(metadata, 'utf8'));
+  renamed.name = 'Independent saved metadata';
+  await atomicWrite(metadata, JSON.stringify(renamed, null, 2));
+  return {
+    ...f,
+    retrying,
+    item,
+    otherItem,
+    request,
+    metadata,
+    textFile,
+    journalRoot,
+    failedDirectory,
+    failedFiles,
+  };
 }
 
 describe('native mixed content persistence', () => {
@@ -338,6 +421,107 @@ describe('native mixed content persistence', () => {
         if (!Object.values(paths).includes(allFiles[i])) expect(after[i]).toEqual(baseline[i]);
     },
   );
+  it.each([false, true])(
+    'reopens after same-item Retry and independent metadata (repair failure: %s)',
+    async (rollbackFailure) => {
+      const f = await failedSaveFixture(rollbackFailure);
+      const saved = await f.retrying.save(f.request);
+      expect(saved.conflictCreated).toBe(false);
+      expect(await fs.readFile(f.textFile, 'utf8')).toBe(f.request.markdown);
+      const beforeOpen = await Promise.all([fs.readFile(f.metadata), fs.readFile(f.textFile)]);
+      await expect(recoverScreenshotTransactions(f.projectPath)).resolves.toBeDefined();
+      expect(await Promise.all([fs.readFile(f.metadata), fs.readFile(f.textFile)])).toEqual(beforeOpen);
+      expect((await f.snapshot(f.projectPath)).project.name).toBe('Independent saved metadata');
+      const preserved = (await fs.readdir(f.journalRoot)).filter((name) => name.startsWith('superseded-'));
+      expect(preserved).toHaveLength(1);
+      expect(await journalFiles(path.join(f.journalRoot, preserved[0]))).toEqual(f.failedFiles);
+    },
+  );
+
+  it('does not transfer a failed journal when an unrelated item saves', async () => {
+    const f = await failedSaveFixture();
+    const other = await f.retrying.load({ projectPath: f.projectPath, itemId: f.otherItem.id });
+    await f.retrying.save({
+      projectPath: f.projectPath,
+      itemId: f.otherItem.id,
+      contentRevision: other.contentRevision,
+      markdown: 'Independent item draft',
+    });
+    expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
+    expect((await fs.readdir(f.journalRoot)).some((name) => name.startsWith('superseded-'))).toBe(false);
+    await expect(recoverScreenshotTransactions(f.projectPath)).rejects.toMatchObject({
+      code: 'baseline-changed',
+    });
+  });
+
+  it('fails closed after restart without the original failed-operation witness', async () => {
+    const f = await failedSaveFixture(true);
+    const restarted = new ContentPersistenceService({
+      snapshot: f.snapshot,
+      trashItem: (target) => fs.unlink(target),
+    });
+    expect((await restarted.save(f.request)).conflictCreated).toBe(true);
+    expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
+    await expect(recoverScreenshotTransactions(f.projectPath)).rejects.toMatchObject({
+      code: 'baseline-changed',
+    });
+  });
+
+  it('does not infer the same operation after a logical project replacement at the same path', async () => {
+    const f = await failedSaveFixture(true);
+    const replaced = JSON.parse(await fs.readFile(f.metadata, 'utf8'));
+    replaced.id = 'project_replaced';
+    await atomicWrite(f.metadata, JSON.stringify(replaced, null, 2));
+    expect((await f.retrying.save(f.request)).conflictCreated).toBe(true);
+    expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
+    await expect(recoverScreenshotTransactions(f.projectPath)).rejects.toMatchObject({
+      code: 'baseline-changed',
+    });
+  });
+
+  it.each(['changed draft', 'foreign bytes'] as const)(
+    'keeps conflict-copy protection for an owned retry with %s',
+    async (change) => {
+      const f = await failedSaveFixture(true);
+      const request =
+        change === 'changed draft' ? { ...f.request, markdown: 'Newer retry draft' } : f.request;
+      if (change === 'foreign bytes') await fs.writeFile(f.textFile, 'Foreign newer content');
+      const original = await fs.readFile(f.textFile);
+      const saved = await f.retrying.save(request);
+      expect(saved.conflictCreated).toBe(true);
+      expect(saved.itemId).not.toBe(f.item.id);
+      expect(await fs.readFile(f.textFile)).toEqual(original);
+      const copy = saved.snapshot.project.contentItems!.find((entry) => entry.id === saved.itemId)!;
+      expect(
+        await fs.readFile(path.join(f.projectPath, contentItemRelativePaths(copy).markdown!), 'utf8'),
+      ).toBe(request.markdown);
+      await expect(recoverScreenshotTransactions(f.projectPath)).resolves.toBeDefined();
+      const [preserved] = (await fs.readdir(f.journalRoot)).filter((name) => name.startsWith('superseded-'));
+      expect(await journalFiles(path.join(f.journalRoot, preserved))).toEqual(f.failedFiles);
+    },
+  );
+
+  it('does not touch live files when transferring the prior journal is refused', async () => {
+    const f = await failedSaveFixture();
+    const before = await Promise.all([fs.readFile(f.metadata), fs.readFile(f.textFile)]);
+    const rename = fs.rename.bind(fs);
+    const refusal = vi.spyOn(fs, 'rename').mockImplementation(async (source, destination) => {
+      if (source === f.failedDirectory)
+        throw Object.assign(new Error('controlled archive refusal'), { code: 'EACCES' });
+      return rename(source, destination);
+    });
+    await expect(f.retrying.save(f.request)).rejects.toThrow(/replacement save is staged/);
+    expect(await Promise.all([fs.readFile(f.metadata), fs.readFile(f.textFile)])).toEqual(before);
+    expect(await journalFiles(f.failedDirectory)).toEqual(f.failedFiles);
+    expect((await fs.readdir(f.journalRoot)).filter((name) => name.startsWith('txn-'))).toHaveLength(2);
+    refusal.mockRestore();
+    await f.retrying.save(f.request);
+    await expect(recoverScreenshotTransactions(f.projectPath)).resolves.toBeDefined();
+    expect((await fs.readdir(f.journalRoot)).filter((name) => name.startsWith('superseded-'))).toHaveLength(
+      2,
+    );
+  });
+
   it('rejects deletion of an unknown item without changing project metadata or content', async () => {
     const { projectPath, service } = await fixture();
     const created = await service.create({ projectPath, collectionId: '001-collection', kind: 'text' });
@@ -583,7 +767,7 @@ describe('native mixed content persistence', () => {
     expect((await service.load({ projectPath, itemId: duplicate.id })).markdown).toBe('Durable body');
   });
 
-  it('restores both drawing files and metadata when system trash fails partway', async () => {
+  it('keeps a drawing restorable locally when system trash fails partway', async () => {
     const { projectPath, service, snapshot } = await fixture();
     const created = await service.create({
       projectPath,
@@ -603,9 +787,12 @@ describe('native mixed content persistence', () => {
         await fs.unlink(target);
       },
     });
-    await expect(failing.delete({ projectPath, itemId: item.id })).rejects.toThrow(
-      /baseline files were restored/,
-    );
+    const deleted = await failing.delete({ projectPath, itemId: item.id });
+    expect(deleted.snapshot.warnings?.join(' ')).toContain('Recently deleted');
+    expect(deleted.snapshot.project.contentItems).toHaveLength(0);
+    await expect(fs.stat(path.join(projectPath, paths.source!))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(path.join(projectPath, paths.image!))).rejects.toMatchObject({ code: 'ENOENT' });
+    await failing.undoDelete({ projectPath, undoToken: deleted.undoToken });
     expect(await fs.readFile(path.join(projectPath, paths.source!))).toEqual(beforeSource);
     expect(await fs.readFile(path.join(projectPath, paths.image!))).toEqual(beforeImage);
     expect((await snapshot(projectPath)).project.contentItems).toHaveLength(1);

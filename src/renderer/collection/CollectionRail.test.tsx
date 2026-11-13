@@ -815,7 +815,7 @@ describe('CollectionRail', () => {
     const onSaveProject = vi.fn<CollectionRailProps['onSaveProject']>(async () => true);
     render(<CollectionRail {...props({ onSelectScreenshot, onSaveProject })} />);
 
-    expect(row('beta')).toHaveClass('excluded');
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByTestId('screenshot-beta'));
     expect(onSelectScreenshot).toHaveBeenCalledWith('beta');
 
@@ -824,13 +824,19 @@ describe('CollectionRail', () => {
     expect(
       useAppStore.getState().snapshot?.project.screenshots.find((item) => item.id === 'beta'),
     ).toMatchObject({ id: 'beta', includeInExport: true, position: 1 });
-    expect(row('beta')).not.toHaveClass('excluded');
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAccessibleName(
+      'Exclude beta title from prompt',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Exclude beta title from prompt' }));
     await waitFor(() => expect(onSaveProject).toHaveBeenCalledTimes(2));
     expect(
       useAppStore.getState().snapshot?.project.screenshots.find((item) => item.id === 'beta'),
     ).toMatchObject({ id: 'beta', includeInExport: false, position: 1 });
-    expect(row('beta')).toHaveClass('excluded');
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('screenshot-export-toggle-beta')).toHaveAccessibleName(
+      'Include beta title in prompt',
+    );
   });
 });

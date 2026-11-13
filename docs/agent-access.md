@@ -13,6 +13,8 @@ Until the toggle is on, Imnota starts no listener and a `--mcp` process exits im
 
 The HTTP listener binds only to `http://127.0.0.1:17384/mcp`. It is not a public server. The existing interface has no authentication token: enabling it allows local processes to read the selected workspace. Requests with a foreign Host or a browser Origin are rejected; no CORS permission is granted. Hosted-share tokens do not authorize MCP access.
 
+HTTP responses disable caching. Accepted notifications return an empty `202`; unsupported methods return `405` with `Allow: POST`, and oversized bodies return `413`. The server closes refused connections; a client still uploading after an early size refusal can observe a connection reset instead of exposing that response. Malformed JSON or UTF-8 returns a JSON-RPC parse error. Stdio also rejects malformed UTF-8, bounds unfinished request lines, recovers after an oversized line, and waits for response writes before consuming another request. Tool discovery marks tools as read-only, idempotent and local; annotations are hints, not additional access rights. Client `_meta` on tool calls is accepted separately from tool arguments.
+
 Enabling access first checks that the listener can bind. If the port is occupied, Settings reports the failure and leaves access off. A failed settings write closes a newly started listener. If a later app launch cannot bind, Imnota disables access and explains how to retry. Disabling access stops the listener and rejects further requests.
 
 ## What agents can read
