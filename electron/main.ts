@@ -85,6 +85,7 @@ import { normalizeRecoveredProject } from './recovery.js';
 import { clipboardContextHtml } from '../src/shared/clipboard-context.js';
 import { UpdateController, UpdateFailure } from './update-controller.js';
 import { discoverRelease, type ReleaseCandidate } from './releases.js';
+import { createCiReleaseMetadataRequest } from './release-metadata-request.js';
 import { prepareNativeUpdate } from './native-update.js';
 import { terminalUpdateArguments } from './terminal-update.js';
 import { startMacUpdate, type MacUpdateSession } from './macos-update.js';
@@ -176,6 +177,8 @@ import { requiresSingleInstanceLock } from './single-instance.js';
 import { AGENT_ACCESS_OFF_MESSAGE, AGENT_ACCESS_PORT_IN_USE_MESSAGE } from './agent-access-messages.js';
 import type { DamagedJournalReport } from './journal-quarantine.js';
 import type { IpcMainInvokeEvent } from 'electron';
+
+const releaseMetadataRequest = createCiReleaseMetadataRequest();
 
 let mcpProfile: string | undefined;
 let mcpVerificationWindows = 0;
@@ -2079,7 +2082,7 @@ function configureAutoUpdates(): void {
     manual:
       Boolean(process.env.PORTABLE_EXECUTABLE_FILE) ||
       (process.platform === 'linux' && !process.env.APPIMAGE),
-    discover: (channel) => discoverRelease(channel, process.platform),
+    discover: (channel) => discoverRelease(channel, process.platform, releaseMetadataRequest),
     prepare: macHelper
       ? async (release) => {
           macRelease = null;
