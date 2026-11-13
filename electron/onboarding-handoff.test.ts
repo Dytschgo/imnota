@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { workflowOutcome } from './workflow-errors.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -112,6 +113,16 @@ describe('onboarding handoff grants', () => {
         pngFilename: 'component-search.png',
       }),
     ).rejects.toThrow(/regular directory/);
+    await expect(
+      workflowOutcome(() =>
+        workflow.prepare({
+          markdown: '# Linked root',
+          imageDataUrl,
+          markdownFilename: 'component-search.md',
+          pngFilename: 'component-search.png',
+        }),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: 'linked-path', retryable: false } });
   });
 
   it('materializes a matching Markdown/PNG pair and uses it for the production combined copy', async () => {
@@ -156,6 +167,10 @@ describe('onboarding handoff grants', () => {
     const directory = path.join(root, (await fs.readdir(root))[0]);
     await fs.unlink(path.join(directory, 'component-search.png'));
     await expect(workflow.copy(grant.sessionId, 'files-rich')).rejects.toThrow(/unavailable/);
+    await expect(workflowOutcome(() => workflow.copy(grant.sessionId, 'files-rich'))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'io-failure', retryable: false, details: { errno: 'ENOENT' } },
+    });
     expect(copyContext).not.toHaveBeenCalled();
     expect(copyText).not.toHaveBeenCalled();
     expect(copyImage).not.toHaveBeenCalled();
@@ -226,4 +241,55 @@ describe('onboarding handoff grants', () => {
     await expect(fs.stat(recentDirectory)).resolves.toBeDefined();
     await expect(fs.stat(unrelatedDirectory)).resolves.toBeDefined();
   });
+});
+
+it('reports linked handoff files explicitly before touching the clipboard', async () => {
+  const { root, workflow, grant, copyText } = await fixture();
+  const [directory] = await fs.readdir(root);
+  const filename = path.join(root, directory, 'component-search.md');
+  const stat = await fs.lstat(filename);
+  stat.isSymbolicLink = () => true;
+  const spy = vi.spyOn(fs, 'lstat').mockResolvedValueOnce(stat);
+  try {
+    await expect(workflowOutcome(() => workflow.copy(grant.sessionId, 'markdown'))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'linked-path', retryable: false },
+    });
+    expect(copyText).not.toHaveBeenCalled();
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+it('attaches errno when temporary handoff writes fail and cleanup runs', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'imnota-handoff-failure-'));
+  roots.push(root);
+  const workflow = new OnboardingHandoffWorkflow({
+    root,
+    copyContext: vi.fn(),
+    copyText: vi.fn(),
+    copyImage: vi.fn(),
+    openPath: vi.fn(),
+  });
+  const spy = vi
+    .spyOn(fs, 'open')
+    .mockRejectedValueOnce(Object.assign(new Error('ENOSPC: Cancelled ideas'), { code: 'ENOSPC' }));
+  try {
+    await expect(
+      workflowOutcome(() =>
+        workflow.prepare({
+          markdown: '# Context',
+          imageDataUrl,
+          markdownFilename: 'context.md',
+          pngFilename: 'context.png',
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'io-failure', retryable: false, details: { errno: 'ENOSPC' } },
+    });
+    expect(await fs.readdir(root)).toEqual([]);
+  } finally {
+    spy.mockRestore();
+  }
 });

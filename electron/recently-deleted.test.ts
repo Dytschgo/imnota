@@ -133,6 +133,121 @@ async function exists(target: string): Promise<boolean> {
 const expired = () => Date.now() + DELETED_ITEM_RETENTION_MS + 60_000;
 
 describe('recently deleted', () => {
+  it.each(['screenshot', 'text'] as const)(
+    'keeps a %s restorable when the system trash rejects every file',
+    async (kind) => {
+      const { projectPath, project } = await fixture();
+      const trash = vi.fn(async () => {
+        throw new Error('System trash is unavailable');
+      });
+      const deleted =
+        kind === 'screenshot'
+          ? await deleteScreenshotToTrash(projectPath, project, 'shot_a', trash)
+          : await deleteContentItemToTrash(projectPath, project, 'text_a', trash);
+
+      expect(trash).toHaveBeenCalled();
+      expect(deleted.warning).toContain('Recently deleted');
+      expect(await listRecentlyDeleted(projectPath)).toMatchObject([
+        { kind, undoToken: deleted.undoToken, itemId: kind === 'screenshot' ? 'shot_a' : 'text_a' },
+      ]);
+      const target = path.join(
+        projectPath,
+        `collections/${COLLECTION}/${kind === 'screenshot' ? 'screenshots/a.png' : 'text/text_a.md'}`,
+      );
+      expect(await exists(target)).toBe(false);
+      if (kind === 'screenshot') {
+        await recoverScreenshotTrashTransactions(projectPath);
+        await undoScreenshotDelete(projectPath, await readProject(projectPath), deleted.undoToken);
+      } else {
+        await recoverContentTrashTransactions(projectPath);
+        await undoContentItemDelete(projectPath, await readProject(projectPath), deleted.undoToken);
+      }
+      expect(await fs.readFile(target, 'utf8')).toBe(kind === 'screenshot' ? 'png-shot_a' : '# Context note');
+      expect((await readProject(projectPath)).screenshots).toHaveLength(project.screenshots.length);
+      expect((await readProject(projectPath)).screenshots).toEqual(
+        expect.arrayContaining(project.screenshots),
+      );
+      expect((await readProject(projectPath)).contentItems).toEqual(project.contentItems);
+      expect(await listRecentlyDeleted(projectPath)).toEqual([]);
+    },
+  );
+
+  it('rolls back earlier local removals when the next fallback unlink fails', async () => {
+    const { projectPath, project } = await fixture();
+    const baseline = await fs.readFile(path.join(projectPath, 'project.json'));
+    const image = path.join(projectPath, `collections/${COLLECTION}/screenshots/a.png`);
+    await expect(
+      deleteScreenshotToTrash(
+        projectPath,
+        project,
+        'shot_a',
+        async () => {
+          throw new Error('No system trash');
+        },
+        {
+          write: atomicWrite,
+          removeDirectory: (target) => fs.rm(target, { recursive: true, force: true }),
+          unlink: async (target) => {
+            if (target.endsWith('.json')) throw new Error('Local unlink denied');
+            await fs.unlink(target);
+          },
+        },
+      ),
+    ).rejects.toThrow('Local unlink denied');
+    expect(await fs.readFile(image, 'utf8')).toBe('png-shot_a');
+    expect(await fs.readFile(path.join(projectPath, project.screenshots[0].annotationFile), 'utf8')).toBe(
+      '[]',
+    );
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(baseline);
+    expect(await listRecentlyDeleted(projectPath)).toEqual([]);
+  });
+
+  it('preserves an external edit and the journal when trash rejection finds changed source bytes', async () => {
+    const { projectPath, project } = await fixture();
+    const image = path.join(projectPath, `collections/${COLLECTION}/screenshots/a.png`);
+    const baseline = await fs.readFile(path.join(projectPath, 'project.json'));
+    await expect(
+      deleteScreenshotToTrash(projectPath, project, 'shot_a', async (target) => {
+        await fs.writeFile(target, 'external-change');
+        throw new Error('No system trash');
+      }),
+    ).rejects.toThrow(/recovery is incomplete/);
+    expect(await fs.readFile(image, 'utf8')).toBe('external-change');
+    expect(await fs.readFile(path.join(projectPath, 'project.json'))).toEqual(baseline);
+    expect(await fs.readdir(path.join(projectPath, '.imnota-undo'))).toHaveLength(1);
+  });
+
+  it('replays an interrupted local delete through the existing screenshot journal', async () => {
+    const { projectPath, project } = await fixture();
+    const deleted = await deleteScreenshotToTrash(projectPath, project, 'shot_a', async () => {
+      throw new Error('No system trash');
+    });
+    const directory = journal(projectPath, deleted.undoToken);
+    await patchManifest(projectPath, deleted.undoToken, { phase: 'trashing' });
+    await fs.writeFile(
+      path.join(projectPath, 'project.json'),
+      await fs.readFile(path.join(directory, 'metadata-before.bin')),
+    );
+    expect(await recoverScreenshotTrashTransactions(projectPath)).toMatchObject([
+      { status: 'baseline-restored' },
+    ]);
+    expect((await readProject(projectPath)).screenshots).toEqual(project.screenshots);
+    expect(
+      await fs.readFile(path.join(projectPath, `collections/${COLLECTION}/screenshots/a.png`), 'utf8'),
+    ).toBe('png-shot_a');
+  });
+
+  it('expires fallback recovery with the existing 30-day retention policy', async () => {
+    const { projectPath, project } = await fixture();
+    const deleted = await deleteScreenshotToTrash(projectPath, project, 'shot_a', async () => {
+      throw new Error('No system trash');
+    });
+    expect(await pruneExpiredDeletes(projectPath, {}, expired())).toEqual({ pruned: 1, failures: [] });
+    expect(await listRecentlyDeleted(projectPath)).toEqual([]);
+    expect(await exists(journal(projectPath, deleted.undoToken))).toBe(false);
+    expect((await readProject(projectPath)).screenshots.map((item) => item.id)).toEqual(['shot_b']);
+  });
+
   it('lists committed deletes of every kind, newest first, with their Undo tokens', async () => {
     const { projectPath } = await fixture();
     const shotToken = await deleteScreenshot(projectPath, 'shot_a');
@@ -232,26 +347,14 @@ describe('recently deleted', () => {
 describe('delete journal retention', () => {
   it('expires at the exact 30-day boundary, never one millisecond before it', async () => {
     const { projectPath } = await fixture();
-    const token = await deleteScreenshot(projectPath, 'shot_a');
+    const tokens = [await deleteScreenshot(projectPath, 'shot_a'), await deleteText(projectPath)];
     const deletedAt = '2026-01-01T00:00:00.000Z';
-    await patchManifest(projectPath, token, { deletedAt });
+    for (const token of tokens) await patchManifest(projectPath, token, { deletedAt });
     const deadline = Date.parse(deletedAt) + DELETED_ITEM_RETENTION_MS;
     expect(await pruneExpiredDeletes(projectPath, {}, deadline - 1)).toEqual({ pruned: 0, failures: [] });
-    expect(await exists(journal(projectPath, token))).toBe(true);
-    expect(await pruneExpiredDeletes(projectPath, {}, deadline)).toEqual({ pruned: 1, failures: [] });
-    expect(await exists(journal(projectPath, token))).toBe(false);
-  });
-
-  it('keeps journals inside the retention window', async () => {
-    const { projectPath } = await fixture();
-    const shotToken = await deleteScreenshot(projectPath, 'shot_a');
-    const textToken = await deleteText(projectPath);
-
-    expect(
-      await pruneExpiredDeletes(projectPath, {}, Date.now() + DELETED_ITEM_RETENTION_MS - 60_000),
-    ).toEqual({ pruned: 0, failures: [] });
-    expect(await exists(journal(projectPath, shotToken))).toBe(true);
-    expect(await exists(journal(projectPath, textToken))).toBe(true);
+    for (const token of tokens) expect(await exists(journal(projectPath, token))).toBe(true);
+    expect(await pruneExpiredDeletes(projectPath, {}, deadline)).toEqual({ pruned: 2, failures: [] });
+    for (const token of tokens) expect(await exists(journal(projectPath, token))).toBe(false);
   });
 
   it('prunes committed deletes older than the retention window and leaves the project openable', async () => {

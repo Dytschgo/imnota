@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, FolderOpen, Heart, PanelLeft, Plus, Search, Sparkles } from 'lucide-react';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Button, IconButton } from '../components/ui';
 import { collectionDisplayName } from '../collection/collection-display-name';
 import { useAppStore, type AppView } from '../store';
@@ -21,6 +22,8 @@ export interface AppShellProps {
   canGoForward?: boolean;
   onOpenPromptBundles(): void | Promise<void>;
   onToggleFavourite(): void | Promise<void>;
+  onSelectProject?(projectPath: string): void | Promise<void>;
+  onSetProjectPinned?(projectPath: string, pinned: boolean): void | Promise<void>;
   onAbout(): void;
   onDropFiles?(files: FileList): void | Promise<void>;
   navigationShortcuts?: Partial<
@@ -46,12 +49,25 @@ export function AppShell({
   canGoForward = false,
   onOpenPromptBundles,
   onToggleFavourite,
+  onSelectProject,
+  onSetProjectPinned,
   onAbout,
   onDropFiles,
   navigationShortcuts,
   renderUpdateControl,
 }: AppShellProps) {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      settings: state.settings,
+      projects: state.projects,
+      recentCollections: state.recentCollections,
+      snapshot: state.snapshot,
+      activeCollectionId: state.activeCollectionId,
+      navigationOpen: state.navigationOpen,
+      view: state.view,
+      set: state.set,
+    })),
+  );
   const shellRef = useRef<HTMLDivElement>(null);
   const previousNavigationOpen = useRef(store.navigationOpen);
   const previousView = useRef(store.view);
@@ -107,6 +123,8 @@ export function AppShell({
         onNavigate={onNavigate}
         onNewProject={onNewProject}
         onOpenCollection={onOpenCollection}
+        onSelectProject={onSelectProject}
+        onSetProjectPinned={onSetProjectPinned}
         onSetNavigationOpen={(navigationOpen) => store.set({ navigationOpen })}
         updateControl={store.navigationOpen ? renderUpdateControl?.('nav') : undefined}
       />
