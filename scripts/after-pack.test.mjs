@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { finished } from 'node:stream/promises';
 import { verifyPackageContents } from './after-pack.mjs';
 
 async function fixture(t, change = () => {}) {
@@ -37,7 +38,8 @@ async function fixture(t, change = () => {}) {
     await writeFile(target, bytes);
   }
   const archive = path.join(root, 'app.asar');
-  await createPackage(path.join(root, 'app'), archive);
+  // ASAR 3 resolves with its output stream before the final writes have completed.
+  await finished(await createPackage(path.join(root, 'app'), archive));
   return (platform = 'win32', architecture = 1) =>
     verifyPackageContents(archive, path.join(root, 'expected'), platform, architecture);
 }
