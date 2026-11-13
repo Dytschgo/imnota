@@ -168,6 +168,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
     new Set([
       'next-template-picker.png', // New-project dialog over the library.
       'next-clipboard-fallbacks.png', // Sharing dialog over a Markdown template.
+      'next-terminal-handoff.png', // Copy options over the text-only template dialog.
       'next-template-project.png', // Markdown template editor.
       'next-content-search.png', // Project library search.
       'next-history-light.png', // Backups & history settings.
