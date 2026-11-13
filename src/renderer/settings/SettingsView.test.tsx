@@ -35,6 +35,8 @@ describe('SettingsView category navigation', () => {
     const onAgentAccessChange = vi.fn();
     render(<SettingsView activeCategory="Features" onAgentAccessChange={onAgentAccessChange} />);
     const toggle = screen.getByTestId('agent-access-toggle');
+    expect(screen.getByRole('region', { name: 'MCP access Beta' })).toBeVisible();
+    expect(toggle).toBeVisible();
     expect(toggle).not.toBeChecked();
     expect(screen.getByText('Allow local agent access')).toBeInTheDocument();
     expect(screen.getAllByText(/127\.0\.0\.1:17384\/mcp/).length).toBeGreaterThan(0);
@@ -60,6 +62,7 @@ describe('SettingsView category navigation', () => {
       'list_collection_items',
       'get_latest_bundle',
       'get_bundle',
+      'inspect_bundle',
       'get_item',
       'search_saved_text',
     ])
