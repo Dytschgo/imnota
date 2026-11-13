@@ -1,71 +1,70 @@
-#include <sys/acl.h>
+#include <sys/attr.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <uuid/uuid.h>
 
-/* Only positive, complete observations may authorize shared-parent updates.
- * acl_get_file alone conflates an absent ACL with an observation failure.
- * See Apple's Libc sys/statx_np.c and gen/filesec.c for the property contract.
+/* Strict single-attribute mode: unsupported va_acl is EINVAL, not a missing
+ * returned bit. Supported NULL ACL is an explicit zero-length reference.
+ * XNU vfs_attrlist.c checks READ_SECURITY before obtaining the attribute.
  */
+struct security_reply {
+    uint32_t length;
+    attrreference_t acl;
+};
+_Static_assert(sizeof(struct security_reply) == 12, "Unexpected attribute layout");
+
 int main(int argc, char **argv) {
     if (argc != 3 || strcmp(argv[1], "acl") != 0 || argv[2][0] != '/') {
         fputs("Usage: imnota-security-observer acl <absolute-directory>\n", stderr);
         return 2;
     }
-    filesec_t security = filesec_init();
-    if (security == NULL) {
-        fputs("Could not allocate security observation.\n", stderr);
+    struct stat before = {0}, after = {0};
+    if (lstat(argv[2], &before) != 0 || !S_ISDIR(before.st_mode)) {
+        fputs("Security observation target is not a physical directory.\n", stderr);
         return 2;
     }
-    struct stat metadata = {0};
-    uid_t owner;
-    mode_t mode;
-    uuid_t owner_uuid;
+    int descriptor = open(argv[2], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (descriptor < 0) {
+        perror("Could not open directory for security observation");
+        return 2;
+    }
     int result = 2;
     const char *observation = NULL;
-    if (lstatx_np(argv[2], &metadata, security) != 0) {
-        perror("Could not read extended directory security");
+    struct stat opened = {0};
+    if (fstat(descriptor, &opened) != 0 || before.st_dev != opened.st_dev ||
+        before.st_ino != opened.st_ino || !S_ISDIR(opened.st_mode)) {
+        fputs("Directory changed while opening it.\n", stderr);
         goto done;
     }
-    if (!S_ISDIR(metadata.st_mode)) {
-        fputs("Security observation target is not a physical directory.\n", stderr);
+    struct attrlist request = {0};
+    request.bitmapcount = ATTR_BIT_MAP_COUNT;
+    request.commonattr = ATTR_CMN_EXTENDED_SECURITY;
+    struct security_reply reply = {0};
+    if (fgetattrlist(descriptor, &request, &reply, sizeof(reply), FSOPT_REPORT_FULLSIZE) != 0) {
+        perror("Could not completely observe the directory ACL");
         goto done;
     }
-    if (filesec_get_property(security, FILESEC_OWNER, &owner) != 0) {
-        perror("Directory security result has no owner");
+    if (reply.length < sizeof(reply) || reply.acl.attr_dataoffset != (int32_t)sizeof(attrreference_t) ||
+        (uint64_t)reply.length != sizeof(reply) + (uint64_t)reply.acl.attr_length) {
+        fputs("Incomplete or invalid directory security result.\n", stderr);
         goto done;
     }
-    if (filesec_get_property(security, FILESEC_MODE, &mode) != 0) {
-        perror("Directory security result has no mode");
+    if (lstat(argv[2], &after) != 0 || opened.st_dev != after.st_dev ||
+        opened.st_ino != after.st_ino || opened.st_uid != after.st_uid ||
+        opened.st_gid != after.st_gid || opened.st_mode != after.st_mode ||
+        opened.st_ctimespec.tv_sec != after.st_ctimespec.tv_sec ||
+        opened.st_ctimespec.tv_nsec != after.st_ctimespec.tv_nsec) {
+        fputs("Directory security changed during observation.\n", stderr);
         goto done;
     }
-    if (owner != metadata.st_uid || mode != metadata.st_mode) {
-        fputs("Directory security and stat metadata disagree.\n", stderr);
-        goto done;
-    }
-    if (filesec_get_property(security, FILESEC_UUID, &owner_uuid) != 0) {
-        perror("Directory security result has no owner UUID; ACL absence is unconfirmed");
-        goto done;
-    }
-    /* Query presence without allocating/copying an ACL. Even an empty ACL is
-     * refused: the caller needs absence, not a policy interpretation of entries.
-     */
-    errno = 0;
-    if (filesec_get_property(security, FILESEC_ACL, NULL) == 0) {
-        observation = "acl";
-    } else if (errno == ENOENT) {
-        observation = "no-acl";
-    } else {
-        fputs("Could not observe the directory ACL.\n", stderr);
-        goto done;
-    }
+    observation = reply.acl.attr_length == 0 ? "no-acl" : "acl";
     result = 0;
 done:
-    filesec_free(security);
+    if (close(descriptor) != 0) result = 2;
     if (result == 0 && (puts(observation) == EOF || fflush(stdout) != 0 || ferror(stdout))) return 2;
     return result;
 }

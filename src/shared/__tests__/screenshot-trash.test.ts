@@ -135,7 +135,7 @@ describe('screenshot trash and Undo transactions', () => {
   });
 
   it.each(['image', 'annotations', 'description'] as const)(
-    'restores the byte-exact baseline when trashing %s fails',
+    'restores the byte-exact baseline when trash and local removal of %s both fail',
     async (failed) => {
       const { dir, project, targets } = await fixture();
       let injected = false;
@@ -146,7 +146,16 @@ describe('screenshot trash and Undo transactions', () => {
         }
         await fs.unlink(target);
       };
-      await expect(deleteScreenshotToTrash(dir, project, 'shot', trashItem)).rejects.toMatchObject({
+      await expect(
+        deleteScreenshotToTrash(dir, project, 'shot', trashItem, {
+          write: atomicWrite,
+          removeDirectory: defaultRemove,
+          unlink: async (target) => {
+            if (target === targets[failed]) throw new Error('injected local removal failure');
+            await fs.unlink(target);
+          },
+        }),
+      ).rejects.toMatchObject({
         code: 'delete-failed',
       });
       await expectPresent(targets);
@@ -175,6 +184,9 @@ describe('screenshot trash and Undo transactions', () => {
     const { dir, project, targets } = await fixture();
     const operations: ScreenshotTrashOperations = {
       write: atomicWrite,
+      unlink: async () => {
+        throw new Error('injected local removal failure');
+      },
       removeDirectory: async () => {
         throw new Error('injected cleanup failure');
       },
@@ -234,6 +246,9 @@ describe('screenshot trash and Undo transactions', () => {
       await fs.unlink(target);
     };
     const operations: ScreenshotTrashOperations = {
+      unlink: async () => {
+        throw new Error('injected local removal failure');
+      },
       write: async (target, content) => {
         if (trashFailed && !rollbackFailed && target === targets.image) {
           rollbackFailed = true;
