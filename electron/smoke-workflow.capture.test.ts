@@ -104,6 +104,20 @@ const fixtureFunctions = program.getSourceFile(fixturesPath)!.statements.filter(
 // generic parameter name (for example, `filename`).
 const canvasFreeByModule = new Map<string, Set<string>>([
   [
+    'native-fault-smoke.ts',
+    new Set([
+      // Restore warnings cover three item kinds; recovery fallbacks replace the editor.
+      'restore-warning-1280x800.png',
+      'restore-warning-requested-1064x655.png',
+      'restore-warning-requested-1440x920.png',
+      'recovery-refused-1280x800.png',
+      'panel-fallback.png',
+      // The selected screenshot has been deleted while Undo remains available.
+      'undo-hover-past-original-deadline.png',
+      'undo-focus-past-original-deadline.png',
+    ]),
+  ],
+  [
     'smoke-workflow.ts',
     new Set([
       // Settings replace the canvas; intro/copy/What's new never display one.

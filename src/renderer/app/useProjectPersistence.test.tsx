@@ -112,6 +112,49 @@ beforeEach(() => {
 });
 
 describe('useProjectPersistence', () => {
+  it.each([
+    ['screenshot description', ['collections/001/descriptions/one.md'], true],
+    ['drawing source', ['collections/001/drawings/one.json'], true],
+    ['Markdown source', ['collections/001/text/one.md'], true],
+    ['mixed metadata and member', ['project.json', 'collections/001/text/one.md'], true],
+    ['unknown changed paths', [], true],
+    ['confirmed metadata only', ['project.json'], false],
+  ] as const)(
+    'handles %s changes at the accepted metadata revision without losing queued work',
+    async (_label, changedPaths, external) => {
+      const source = snapshot();
+      const mock = bridge();
+      window.imnota = mock.value as never;
+      const hook = renderHook(() =>
+        useProjectPersistence({
+          snapshot: source,
+          activeScreenshot: null,
+          onProject: vi.fn(),
+          onSnapshot: vi.fn(),
+          onSelectScreenshot: vi.fn(),
+        }),
+      );
+      await waitFor(() => expect(hook.result.current.projectRevision).toBe('project-1'));
+      act(() =>
+        mock.emit({
+          watchId: 'watch',
+          projectPath: source.projectPath,
+          kind: 'external-change',
+          projectRevision: 'project-1',
+          changedPaths,
+        }),
+      );
+      expect(Boolean(hook.result.current.externalChange)).toBe(external);
+      await act(async () =>
+        expect(
+          await hook.result.current.saveProjectMetadata({ ...source.project, name: 'Pending name' }),
+        ).toBe(!external),
+      );
+      expect(mock.value.saveProjectCompareAndSwap).toHaveBeenCalledTimes(external ? 0 : 1);
+      expect(hook.result.current.hasPendingProjectMetadata()).toBe(external);
+    },
+  );
+
   it.each(
     (['mutation', 'reload', 'reopen'] as const).flatMap((operation) =>
       (['project', 'session'] as const).flatMap((switchKind) =>

@@ -51,7 +51,7 @@ async function regularFileWithin(root, candidate) {
   return path;
 }
 
-async function smokeLinuxAppImage(target) {
+async function smokeLinuxAppImage(target, faults) {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'imnota-appimage-'));
   const root = ownedTemporaryDirectory(temporaryDirectory);
   try {
@@ -64,11 +64,22 @@ async function smokeLinuxAppImage(target) {
     // Match the existing CI Electron helper policy without disabling the sandbox or changing host AppArmor.
     await run('sudo', ['chown', 'root:root', sandboxHelper]);
     await run('sudo', ['chmod', '4755', sandboxHelper]);
-    if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
-      await run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
-    await run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
+    if (faults)
+      await run(
+        process.execPath,
+        ['scripts/smoke.mjs', executable, target, executable, join(extractedRoot, 'resources', 'app.asar')],
+        {
+          env: { ...process.env, IMNOTA_SMOKE_MODE: 'faults' },
+        },
+      );
+    else {
+      if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
+        await run(process.execPath, ['scripts/verify-mcp.mjs', executable, target], { env: process.env });
+      await run(process.execPath, ['scripts/smoke.mjs', executable], { env: process.env });
+    }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    if (!faults) await rm(root, { recursive: true, force: true });
+    else console.error('Retained owned fault extraction:', root);
   }
 }
 
@@ -127,13 +138,25 @@ export function packagedSmokePreflight({
 }
 
 async function main() {
-  const platform = process.argv[2];
+  const args = process.argv.slice(2);
+  const faults = args.includes('--faults');
+  const positional = args.filter((value) => value !== '--faults');
+  if (
+    positional.length > 2 ||
+    args.filter((value) => value === '--faults').length > 1 ||
+    positional.some((value) => value.startsWith('--'))
+  )
+    throw new Error('Unknown packaged verification arguments.');
+  const platform = positional[0];
+  if (!faults && process.env.IMNOTA_SMOKE_MODE === 'faults')
+    throw new Error('Use explicit --faults packaged mode.');
+  if (!faults) delete process.env.IMNOTA_FAULT_CASE_SET;
   const version =
     process.env.IMNOTA_EXPECT_VERSION ?? JSON.parse(await readFile('package.json', 'utf8')).version;
   const { target, problems } = packagedSmokePreflight({
     platform,
     version,
-    releaseDirectory: process.argv[3],
+    releaseDirectory: positional[1],
   });
   if (problems.length) {
     process.stderr.write(
@@ -144,14 +167,25 @@ async function main() {
   }
   await access(target);
   if (!(await lstat(target)).isFile()) throw new Error(`Expected a regular packaged file: ${target}`);
-  if (platform === 'linux') return smokeLinuxAppImage(target);
+  if (platform === 'linux') return smokeLinuxAppImage(target, faults);
+  if (platform === 'windows' && faults)
+    return run(
+      process.execPath,
+      [
+        'scripts/smoke.mjs',
+        target,
+        target,
+        resolve(positional[1] ?? 'release', 'win-unpacked', 'Imnota.exe'),
+        resolve(positional[1] ?? 'release', 'win-unpacked', 'resources', 'app.asar'),
+      ],
+      { env: { ...process.env, IMNOTA_SMOKE_MODE: 'faults' } },
+    );
   if (platform === 'windows') {
-    // The portable launcher extracts a child; use the same build's direct packaged exe for owned stdio.
-    // The portable distributable still receives the existing full UI/clipboard walkthroughs.
+    // Preserve main's owned MCP stdio check and portable UI walkthrough.
     if (process.env.IMNOTA_SMOKE_MODE !== 'clipboard')
       await run(
         process.execPath,
-        ['scripts/verify-mcp.mjs', resolve(process.argv[3] ?? 'release', 'win-unpacked/Imnota.exe'), target],
+        ['scripts/verify-mcp.mjs', resolve(positional[1] ?? 'release', 'win-unpacked/Imnota.exe'), target],
         { env: process.env },
       );
     return run(process.execPath, ['scripts/smoke.mjs', target], { env: process.env });
