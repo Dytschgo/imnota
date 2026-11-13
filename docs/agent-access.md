@@ -21,7 +21,7 @@ Enabling access first checks that the listener can bind. If the port is occupied
 
 ### Send an exact saved bundle
 
-In **Copy Bundle**, copy a bundle or choose **Copy options → Prepare fresh files** to create its saved export. The saved card then offers **Send saved bundle to agent**. Review its collection, picture numbers, text count and export name, then choose **Copy agent instruction** and paste it into your configured agent. The instruction addresses the specific export set through `get_bundle`; it does not ask for the latest set. MCP may return several bundles from that set and reports omitted or unavailable content using its existing limits.
+In **Copy Bundle**, copy a bundle or choose **Copy options → Prepare fresh files** to create its saved export. The saved card then offers **Send saved bundle to agent**. Review its collection, picture numbers, text count and export name, then choose **Copy agent instruction** and paste it into your configured agent. The instruction addresses the specific export set through `get_bundle`; it does not ask for the latest set. The instruction includes `bundleNumbers:[N]`, so MCP returns only the reviewed card from that saved set and reports omitted or unavailable content using its existing limits.
 
 The review compares the current saved collection with the input used for that export. It distinguishes matching content, changed content and an unavailable comparison. **Last saved handoff** reopens the latest saved receipt in this app session after further edits. **Open saved files** opens that receipt's original PNG/Markdown files without preparing a replacement. Ordinary **Open files** and **Prepare fresh files** retain their existing current-content behavior.
 

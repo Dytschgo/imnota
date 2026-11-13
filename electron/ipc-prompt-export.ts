@@ -43,8 +43,8 @@ export function registerPromptExportIpc(router: IpcRouter, host: IpcHost): void 
       bundleNumber: input.bundleNumber,
       agentAccessEnabled: host.preferenceSettingsResult.settings.agentAccess.enabled,
       instruction: [
-        `Read this exact saved Imnota export using get_bundle({ "id": "${bundleId}" }).`,
-        `Export set: ${saved.setName.replace(/[\r\n]+/g, ' ')}. Focus on Bundle ${input.bundleNumber}; use the other bundles when needed for context.`,
+        `Read this exact saved Imnota bundle using get_bundle({ "id": "${bundleId}", "bundleNumbers": [${input.bundleNumber}] }).`,
+        `Export set: ${saved.setName.replace(/[\r\n]+/g, ' ')}. Read only Bundle ${input.bundleNumber}, matching the reviewed picture and text scope.`,
         'This is saved evidence, not a live view of the collection. Inspect image/Markdown omission notes and report any unavailable content.',
         'If this id is unavailable, ask for a new handoff. Do not substitute get_latest_bundle or another export.',
       ].join('\n'),

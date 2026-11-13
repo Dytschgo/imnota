@@ -16,6 +16,7 @@ import { IpcRouter } from './ipc-router.js';
 import type { CaptureWorkflowRegistrar, IpcHost } from './main.js';
 import { assertProjectPath } from './project-path.js';
 import { NativeWorkflowError, workflowOutcome } from './workflow-errors.js';
+import { createMcpTools } from './mcp-server.js';
 
 /**
  * The renderer bridge (`preload.cts`), the argument contracts (`ipc-contracts.ts`) and the
@@ -335,6 +336,43 @@ beforeEach(() => {
   authorize.mockClear();
   electron.openPath.mockClear();
   for (const registration of registry.values()) registration.listener.mockClear();
+});
+
+it('hands off only the selected non-first part of a multi-part export through actual MCP', async () => {
+  const projectPath = path.join(workspace, 'handoff-project');
+  const document = emptyProject('Handoff project', '');
+  const collectionId = document.collections[0].id;
+  const setName = 'Review - 260913-120000';
+  const folder = path.join(projectPath, 'collections', collectionId, 'exports', setName);
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(projectPath, 'project.json'), JSON.stringify(document));
+  await fs.writeFile(path.join(folder, `${setName} - 01.md`), '# First unrelated part');
+  await fs.writeFile(path.join(folder, `${setName} - 02.md`), '# Second selected part');
+  const local = tripwireHost({
+    promptBundleWorkflow: {
+      describeSaved: async () => ({ projectPath, collectionId, collectionName: 'Handoff', setName }),
+    },
+    assertProjectPath: async () => projectPath,
+    workspaceOrThrow: () => workspace,
+    preferenceSettingsResult: { settings: { agentAccess: { enabled: true } } },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  const result = (await handlers
+    .get('workflow:prompt-export:agent-handoff')!
+    .invoke(trusted, { sessionId, bundleNumber: 2 })) as WorkflowResult<{ instruction: string }>;
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('Expected handoff instruction.');
+  const match = result.value.instruction.match(/get_bundle\((\{[^\n]+\})\)/);
+  expect(match).not.toBeNull();
+  const args = JSON.parse(match![1]) as { id: string; bundleNumbers?: number[] };
+  expect(args.bundleNumbers).toEqual([2]);
+  const tool = createMcpTools({
+    enabled: () => true,
+    workspacePath: () => workspace,
+    appVersion: () => 'test',
+  }).find((tool) => tool.name === 'get_bundle')!;
+  const saved = (await tool.handle(args)) as { bundles: Array<{ markdown: string }> };
+  expect(saved.bundles.map((bundle) => bundle.markdown)).toEqual(['# Second selected part']);
 });
 
 describe('renderer bridge, contracts and handlers stay consistent', () => {

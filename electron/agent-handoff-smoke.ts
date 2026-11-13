@@ -37,6 +37,10 @@ export async function exerciseAgentHandoff(
     const id = instruction.match(/b_[a-f0-9]{32}/)?.[0];
     if (!id || !instruction.includes('Do not substitute get_latest_bundle'))
       throw new Error('Native agent copy did not identify one exact saved export.');
+    const call = instruction.match(/get_bundle\((\{[^\n]+\})\)/);
+    const arguments_ = call ? (JSON.parse(call[1]) as Record<string, unknown>) : null;
+    if (!arguments_ || arguments_.id !== id || JSON.stringify(arguments_.bundleNumbers) !== '[1]')
+      throw new Error('Native agent instruction did not restrict retrieval to the reviewed bundle.');
     const result = await fetch('http://127.0.0.1:17384/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -44,7 +48,7 @@ export async function exerciseAgentHandoff(
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
-        params: { name: 'get_bundle', arguments: { id } },
+        params: { name: 'get_bundle', arguments: arguments_ },
       }),
       signal: AbortSignal.timeout(10000),
     });
@@ -62,6 +66,7 @@ export async function exerciseAgentHandoff(
     if (
       metadata.id !== id ||
       metadata.setName !== setName ||
+      metadata.bundles.length !== 1 ||
       metadata.bundles[0]?.markdown !== originalMarkdown ||
       response.result.content[1]?.data !== (await fs.readFile(pngPath)).toString('base64')
     )
