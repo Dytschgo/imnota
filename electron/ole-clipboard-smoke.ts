@@ -177,9 +177,10 @@ export async function exerciseDotNetBitmapClipboardSmoke(
         if (
           variant === 'rich' &&
           ((await nativeClipboard.readText()) !== rich.markdown ||
+            (await nativeClipboard.readHTML()) !== rich.html ||
             !(await nativeClipboard.readImage()).toBitmap().equals(image.toBitmap()))
         )
-          throw new Error('Rich copy over the WinForms bitmap omitted the text or image.');
+          throw new Error('Rich copy over the WinForms bitmap omitted the text, HTML or image.');
       } else {
         let injected = false;
         const failingApi = {
