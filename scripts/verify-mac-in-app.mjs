@@ -12,6 +12,7 @@ import { URL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { setTimeout as schedule, clearTimeout as cancel } from 'node:timers';
 import { createRequire } from 'node:module';
+import { probeReleaseCheck } from './release-check-probe.mjs';
 
 assert.equal(process.platform, 'darwin', 'Requires macOS');
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Requires disposable GitHub Actions');
@@ -373,10 +374,19 @@ try {
   receipt.passed = true;
 } catch (error) {
   receipt.error = String(error);
+  failure = error;
   await run('/usr/sbin/screencapture', ['-x', path.join(evidence, 'failure-desktop.png')]).catch(
     () => undefined,
   );
-  failure = error;
+  try {
+    const [{ discoverRelease }, { terminalUpdateArguments }] = await Promise.all([
+      import('../dist-electron/electron/releases.js'),
+      import('../dist-electron/electron/terminal-update.js'),
+    ]);
+    receipt.releaseCheckProbe = await probeReleaseCheck(discoverRelease, terminalUpdateArguments);
+  } catch {
+    receipt.releaseCheckProbe = { status: 'unavailable' };
+  }
 } finally {
   socket?.close();
   try {
