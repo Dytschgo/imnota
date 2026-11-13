@@ -187,7 +187,7 @@ for(const name of ['appData','userData','sessionData','logs','crashDumps'])app.s
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
-        params: { name: 'get_bundle', arguments: { id } },
+        params: { name: 'get_bundle', arguments: { id, bundleNumbers: [1] } },
       }),
       signal: globalThis.AbortSignal.timeout(10000),
     });

@@ -62,7 +62,7 @@ export function AgentHandoffDialog({
         </p>
         {!handoff.agentAccessEnabled && (
           <p role="status">
-            Local agent access is off. Enable it in Settings → Features and use Copy prompt to configure your
+            Local agent access is off. Enable it in Settings → Features. Use Copy prompt to configure your
             agent, then reopen this handoff. No settings have been changed.
           </p>
         )}
