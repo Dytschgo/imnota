@@ -1,6 +1,6 @@
 import { isCommittedWriteWarning } from '../../shared/write-outcome';
 import { refreshCommittedSettings } from './sharing-preferences';
-import { ArrowLeft, Copy, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Grid2X2, History, Info, Keyboard, Monitor, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { EffectiveAppearance } from '../app/useAppearance';
 import { Button } from '../components/ui';
@@ -10,13 +10,8 @@ import { useAppStore } from '../store';
 import { AppearanceSettings } from './AppearanceSettings';
 import { OnboardingSettings } from './OnboardingSettings';
 import type { PreferenceSettings } from './preferences';
-import {
-  agentAccessSetupPrompt,
-  DEFAULT_PREFERENCE_SETTINGS,
-  localAgentAccessHttpSnippet,
-  localAgentAccessStdioSnippet,
-  localAgentAccessUrl,
-} from './preferences';
+import { DEFAULT_PREFERENCE_SETTINGS } from './preferences';
+import { AgentAccessSettings } from './AgentAccessSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 import {
   describeCommonShortcut,
@@ -190,9 +185,8 @@ export function SettingsView({
             </p>
           )}
           {group === 'Backups & history' && (
-            <p>
-              Keep validated project snapshots on this device. Exports and recovery caches are not duplicated.
-            </p>
+            // The Local history card below explains what a snapshot contains; this line says why to be here.
+            <p>Snapshot projects on this device and restore an earlier version when you need it.</p>
           )}
           {group === 'Updates & about' && (
             <p>Keep Imnota up to date, learn what’s new, and find helpful resources.</p>
@@ -410,7 +404,33 @@ export function SettingsView({
                 onChange={(event) => {
                   const includeRecognisedText = event.target.checked;
                   void Promise.resolve()
-                    .then(() => onPromptExportChange?.({ includeRecognisedText }))
+                    .then(() =>
+                      onPromptExportChange?.({ ...preferences.promptExport, includeRecognisedText }),
+                    )
+                    .catch(() => undefined);
+                }}
+              />
+            </label>
+            <label className="settings-switch">
+              <span>
+                <strong>Record source info</strong>
+                <small>
+                  Saves the app, window title and time with each new capture or import, and writes them under
+                  the picture in Copy Bundle Markdown. Window titles can contain private details; edit or
+                  remove them per screenshot in the inspector. Stored only in your project; Imnota sends it
+                  nowhere. A browser URL is never read automatically; type one in the inspector if you want it
+                  exported. Off by default.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                aria-label="Record source info"
+                checked={preferences.promptExport.includeSourceContext}
+                disabled={savingPreferences || !onPromptExportChange}
+                onChange={(event) => {
+                  const includeSourceContext = event.target.checked;
+                  void Promise.resolve()
+                    .then(() => onPromptExportChange?.({ ...preferences.promptExport, includeSourceContext }))
                     .catch(() => undefined);
                 }}
               />
@@ -424,94 +444,6 @@ export function SettingsView({
         </div>
         {group === 'Sharing' && <SharingSettings />}
       </div>
-    </section>
-  );
-}
-
-function AgentAccessSettings({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: PreferenceSettings['agentAccess'];
-  disabled: boolean;
-  onChange(value: PreferenceSettings['agentAccess']): void | Promise<void>;
-}) {
-  const [copied, setCopied] = useState('');
-  const copySnippet = async (label: string, snippet: string) => {
-    try {
-      await window.imnota.copyText(snippet);
-      setCopied(label);
-    } catch {
-      setCopied('');
-    }
-  };
-  return (
-    <section className="settings-section" aria-labelledby="agent-access-title">
-      <h2 id="agent-access-title">
-        MCP access <span className="feature-status beta">Beta</span>
-      </h2>
-      <label className="settings-switch">
-        <span>
-          <strong>Allow local agent access</strong>
-          <small>
-            Lets a coding agent read prepared prompt bundles from this workspace over MCP. Off by default. The
-            listener binds only to {localAgentAccessUrl()} or a spawned <kbd>--mcp</kbd> stdio process. Imnota
-            does not write any editor or agent configuration.
-          </small>
-        </span>
-        <input
-          type="checkbox"
-          checked={value.enabled}
-          disabled={disabled}
-          data-testid="agent-access-toggle"
-          onChange={(event) => void onChange({ enabled: event.target.checked })}
-        />
-      </label>
-      <div className="settings-snippet">
-        <div className="settings-snippet-heading">
-          <strong>Setup prompt for any agent</strong>
-          <Button variant="ghost" onClick={() => void copySnippet('prompt', agentAccessSetupPrompt())}>
-            <Copy size={14} aria-hidden="true" />
-            {copied === 'prompt' ? 'Copied' : 'Copy prompt'}
-          </Button>
-        </div>
-        <p className="settings-snippet-note">
-          Paste this into whichever agent you use. It contains the transport, the tool list, and the
-          instruction to write its own MCP configuration.
-        </p>
-        <pre data-testid="agent-access-prompt">{agentAccessSetupPrompt()}</pre>
-      </div>
-      <details className="settings-disclosure">
-        <summary>Configuration reference</summary>
-        <p className="settings-snippet-note">
-          Generic <code>mcpServers</code> entries, if you prefer to edit the configuration yourself.
-        </p>
-        <div className="settings-snippet">
-          <div className="settings-snippet-heading">
-            <strong>HTTP</strong>
-            <Button variant="ghost" onClick={() => void copySnippet('http', localAgentAccessHttpSnippet())}>
-              <Copy size={14} aria-hidden="true" />
-              {copied === 'http' ? 'Copied' : 'Copy'}
-            </Button>
-          </div>
-          <pre>{localAgentAccessHttpSnippet()}</pre>
-        </div>
-        <div className="settings-snippet">
-          <div className="settings-snippet-heading">
-            <strong>Stdio</strong>
-            <Button variant="ghost" onClick={() => void copySnippet('stdio', localAgentAccessStdioSnippet())}>
-              <Copy size={14} aria-hidden="true" />
-              {copied === 'stdio' ? 'Copied' : 'Copy'}
-            </Button>
-          </div>
-          <pre>{localAgentAccessStdioSnippet()}</pre>
-        </div>
-        <p className="settings-snippet-note">
-          Optional skill and rule files are in the documentation. Imnota never writes agent configuration for
-          you.
-        </p>
-      </details>
     </section>
   );
 }

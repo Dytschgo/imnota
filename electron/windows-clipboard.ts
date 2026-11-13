@@ -31,6 +31,8 @@ const SAFE_REGISTERED_GLOBAL_FORMATS = new Set([
   'text/html',
   'text/plain',
   'image/png',
+  // WinForms serializes this registered format in HGLOBAL, unlike CF_BITMAP's HBITMAP.
+  'System.Drawing.Bitmap',
   'Preferred DropEffect',
   'FileName',
   'FileNameW',
@@ -125,6 +127,9 @@ export class WindowsClipboardOpenError extends Error {
     this.name = 'WindowsClipboardOpenError';
   }
 }
+
+/** The prior clipboard could not be captured safely; the write has not started. */
+export class WindowsClipboardPriorContentError extends Error {}
 
 export interface WindowsClipboardLockOptions {
   timeoutMs?: number;
@@ -419,7 +424,7 @@ function captureClipboard(api: WindowsClipboardApi): ClipboardMemory[] {
     return snapshot;
   } catch (error) {
     for (const memory of snapshot) freeMemory(api, memory);
-    throw error;
+    throw new WindowsClipboardPriorContentError(error instanceof Error ? error.message : String(error));
   }
 }
 

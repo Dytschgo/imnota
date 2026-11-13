@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { portableFilename } from '../src/shared/utils.js';
 import { assertNoLinks, atomicWrite, isWithin } from './files.js';
+import { filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
 
 export const MAX_PROMPT_BUNDLE_PNG_BYTES = 100_000_000;
 export const MAX_PROMPT_BUNDLE_PNG_EDGE = 16_384;
@@ -15,7 +17,6 @@ const MAX_RECOVERY_ENTRIES = 10_000;
 const OWNERSHIP_RECORD_FILENAME = '.imnota-prompt-export.json';
 const OWNERSHIP_RECORD_KIND = 'imnota-prompt-export-session';
 const WINDOWS_FRIENDLY_PATH_UNITS = 240;
-const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 export interface StartPromptBundleSessionInput {
   /** Main integration must first authorize project membership and collection ownership. */
@@ -130,7 +131,7 @@ function validatePathSegment(value: string, label: string): string {
     Array.from(value).some((character) => character.charCodeAt(0) < 32) ||
     /[. ]$/.test(value)
   )
-    throw new Error(`${label} is not a safe path segment.`);
+    throw new NativeWorkflowError('invalid-input', `${label} is not a safe path segment.`);
   return value;
 }
 
@@ -143,12 +144,11 @@ export function sanitizePromptCollectionName(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/^[. ]+|[. ]+$/g, '');
   if (!clean) clean = 'Untitled collection';
-  if (WINDOWS_RESERVED_NAME.test(clean)) clean = `_${clean}`;
   clean = Array.from(clean)
     .slice(0, 120)
     .join('')
     .replace(/[. ]+$/g, '');
-  return clean || 'Untitled collection';
+  return portableFilename(clean || 'Untitled collection');
 }
 
 function maximumPublishedPath(exportsDirectory: string, setName: string): string {
@@ -163,9 +163,10 @@ export function budgetPromptCollectionName(
   timestamp: string,
   maximumPathUnits = WINDOWS_FRIENDLY_PATH_UNITS,
 ): string {
-  if (!path.isAbsolute(exportsDirectory)) throw new Error('Collection exports path must be absolute.');
+  if (!path.isAbsolute(exportsDirectory))
+    throw new NativeWorkflowError('invalid-input', 'Collection exports path must be absolute.');
   if (!Number.isSafeInteger(maximumPathUnits) || maximumPathUnits < 1)
-    throw new Error('Maximum export path length must be a positive integer.');
+    throw new NativeWorkflowError('invalid-input', 'Maximum export path length must be a positive integer.');
   const characters = Array.from(sanitizePromptCollectionName(value));
   while (characters.length) {
     const candidate = characters.join('').replace(/[. ]+$/g, '');
@@ -175,7 +176,8 @@ export function budgetPromptCollectionName(
     }
     characters.pop();
   }
-  throw new Error(
+  throw new NativeWorkflowError(
+    'path-too-long',
     'The workspace path is too long for safe Windows-compatible prompt filenames. Move the workspace closer to the drive root and try again.',
   );
 }
@@ -185,13 +187,14 @@ function two(value: number): string {
 }
 
 export function formatPromptTimestamp(date: Date): string {
-  if (Number.isNaN(date.getTime())) throw new Error('Export timestamp is invalid.');
+  if (Number.isNaN(date.getTime()))
+    throw new NativeWorkflowError('invalid-input', 'Export timestamp is invalid.');
   return `${two(date.getFullYear() % 100)}${two(date.getMonth() + 1)}${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
 }
 
 function bundleSuffix(bundleNumber: number): string {
   if (!Number.isSafeInteger(bundleNumber) || bundleNumber < 1 || bundleNumber > 999)
-    throw new Error('Bundle number must be between 1 and 999.');
+    throw new NativeWorkflowError('invalid-input', 'Bundle number must be between 1 and 999.');
   return String(bundleNumber).padStart(2, '0');
 }
 
@@ -216,10 +219,10 @@ export function validatePromptBundlePng(
   expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
 ): void {
   if (!(png instanceof Uint8Array) || png.length < 57 || png.length > MAX_PROMPT_BUNDLE_PNG_BYTES)
-    throw new Error('Prompt PNG is empty, damaged, or too large to store.');
+    throw new NativeWorkflowError('invalid-input', 'Prompt PNG is empty, damaged, or too large to store.');
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (signature.some((byte, index) => png[index] !== byte))
-    throw new Error('Prompt PNG has an invalid header.');
+    throw new NativeWorkflowError('invalid-input', 'Prompt PNG has an invalid header.');
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   let offset = 8;
   let chunkIndex = 0;
@@ -228,19 +231,21 @@ export function validatePromptBundlePng(
   let sawData = false;
   let sawEnd = false;
   while (offset < png.length) {
-    if (offset + 12 > png.length) throw new Error('Prompt PNG is truncated.');
+    if (offset + 12 > png.length) throw new NativeWorkflowError('invalid-input', 'Prompt PNG is truncated.');
     const length = view.getUint32(offset);
-    if (length > png.length - offset - 12) throw new Error('Prompt PNG contains a truncated chunk.');
+    if (length > png.length - offset - 12)
+      throw new NativeWorkflowError('invalid-input', 'Prompt PNG contains a truncated chunk.');
     const typeOffset = offset + 4;
     const type = chunkType(png, typeOffset);
     const dataOffset = typeOffset + 4;
     const crcOffset = dataOffset + length;
     if (view.getUint32(crcOffset) !== crc32(png.subarray(typeOffset, crcOffset)))
-      throw new Error('Prompt PNG failed its integrity check.');
+      throw new NativeWorkflowError('invalid-input', 'Prompt PNG failed its integrity check.');
     if (chunkIndex === 0 && (type !== 'IHDR' || length !== 13))
-      throw new Error('Prompt PNG is missing its required header.');
+      throw new NativeWorkflowError('invalid-input', 'Prompt PNG is missing its required header.');
     if (type === 'IHDR') {
-      if (chunkIndex !== 0 || width || height) throw new Error('Prompt PNG contains duplicate headers.');
+      if (chunkIndex !== 0 || width || height)
+        throw new NativeWorkflowError('invalid-input', 'Prompt PNG contains duplicate headers.');
       width = view.getUint32(dataOffset);
       height = view.getUint32(dataOffset + 4);
       if (
@@ -250,12 +255,19 @@ export function validatePromptBundlePng(
         height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
         width * height > MAX_PROMPT_BUNDLE_PNG_PIXELS
       )
-        throw new Error('Prompt PNG dimensions exceed safe full-resolution storage limits.');
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'Prompt PNG dimensions exceed safe full-resolution storage limits.',
+        );
       if (width !== expected.width || height !== expected.height)
-        throw new Error('Prompt PNG dimensions do not match the reserved bundle manifest.');
+        throw new NativeWorkflowError(
+          'invalid-input',
+          'Prompt PNG dimensions do not match the reserved bundle manifest.',
+        );
     } else if (type === 'IDAT') sawData = true;
     else if (type === 'IEND') {
-      if (length !== 0 || !sawData) throw new Error('Prompt PNG has an invalid ending.');
+      if (length !== 0 || !sawData)
+        throw new NativeWorkflowError('invalid-input', 'Prompt PNG has an invalid ending.');
       sawEnd = true;
       offset = crcOffset + 4;
       break;
@@ -263,16 +275,23 @@ export function validatePromptBundlePng(
     offset = crcOffset + 4;
     chunkIndex++;
   }
-  if (!sawEnd || offset !== png.length) throw new Error('Prompt PNG is incomplete or has trailing data.');
+  if (!sawEnd || offset !== png.length)
+    throw new NativeWorkflowError('invalid-input', 'Prompt PNG is incomplete or has trailing data.');
 }
 
 function validateManifest(items: readonly PromptBundleManifestItem[]): Map<number, PromptBundleManifestItem> {
   if (!Array.isArray(items) || !items.length || items.length > 999)
-    throw new Error('Prompt export manifest must contain between 1 and 999 bundles.');
+    throw new NativeWorkflowError(
+      'invalid-input',
+      'Prompt export manifest must contain between 1 and 999 bundles.',
+    );
   const manifest = new Map<number, PromptBundleManifestItem>();
   for (const [index, item] of items.entries()) {
     if (item.bundleNumber !== index + 1)
-      throw new Error('Prompt export manifest bundle numbers must be contiguous from 1.');
+      throw new NativeWorkflowError(
+        'invalid-input',
+        'Prompt export manifest bundle numbers must be contiguous from 1.',
+      );
     const hasImage = item.hasImage !== false;
     if (
       !Number.isSafeInteger(item.width) ||
@@ -283,9 +302,15 @@ function validateManifest(items: readonly PromptBundleManifestItem[]): Map<numbe
       item.height > MAX_PROMPT_BUNDLE_PNG_EDGE ||
       item.width * item.height > MAX_PROMPT_BUNDLE_PNG_PIXELS
     )
-      throw new Error(`Prompt ${item.bundleNumber} dimensions exceed safe storage limits.`);
+      throw new NativeWorkflowError(
+        'invalid-input',
+        `Prompt ${item.bundleNumber} dimensions exceed safe storage limits.`,
+      );
     if (!hasImage && (item.width !== 0 || item.height !== 0))
-      throw new Error(`Text-only Prompt ${item.bundleNumber} must not reserve image dimensions.`);
+      throw new NativeWorkflowError(
+        'invalid-input',
+        `Text-only Prompt ${item.bundleNumber} must not reserve image dimensions.`,
+      );
     manifest.set(item.bundleNumber, { ...item, hasImage });
   }
   return manifest;
@@ -338,7 +363,7 @@ async function readOwnershipRecord(filePath: string): Promise<PromptBundleOwners
   await assertNoLinks(filePath);
   const handle = await fs.open(filePath, 'r').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined;
-    throw error;
+    throw filesystemFailure(error);
   });
   if (!handle) return undefined;
   try {
@@ -373,7 +398,7 @@ function sameOwnershipRecord(left: PromptBundleOwnershipRecord, right: PromptBun
 async function lstatIfExists(filePath: string) {
   return await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null;
-    throw error;
+    throw filesystemFailure(error);
   });
 }
 
@@ -427,28 +452,61 @@ export class PromptBundleStore {
     expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
   ): Promise<void> {
     validatePromptBundlePng(png, expected);
-    await this.dependencies.validateDecodedPng(png, expected);
+    await this.validateDecodedPng(png, expected);
+  }
+
+  private async validateDecodedPng(
+    png: Uint8Array,
+    expected: Pick<PromptBundleManifestItem, 'width' | 'height'>,
+  ): Promise<void> {
+    try {
+      await this.dependencies.validateDecodedPng(png, expected);
+    } catch (error) {
+      if (error instanceof NativeWorkflowError) throw error;
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        typeof error.code === 'string' &&
+        /^E[A-Z0-9]+$/.test(error.code)
+      )
+        throw filesystemFailure(error);
+      throw new NativeWorkflowError(
+        'invalid-input',
+        'Prompt PNG could not be fully decoded at its reserved dimensions.',
+      );
+    }
   }
 
   async startSession(input: StartPromptBundleSessionInput): Promise<PromptBundleSessionInfo> {
     const manifest = validateManifest(input.bundles);
-    if (!path.isAbsolute(input.projectPath)) throw new Error('Project path must be absolute.');
+    if (!path.isAbsolute(input.projectPath))
+      throw new NativeWorkflowError('invalid-input', 'Project path must be absolute.');
     const projectPath = path.resolve(input.projectPath);
     const collectionId = validatePathSegment(input.collectionId, 'Collection ID');
     const collectionDirectory = path.join(projectPath, 'collections', collectionId);
     const exportsDirectory = path.join(collectionDirectory, 'exports');
     if (!isWithin(projectPath, exportsDirectory))
-      throw new Error('Collection exports path is outside the project.');
+      throw new NativeWorkflowError('permission-denied', 'Collection exports path is outside the project.');
     await assertNoLinks(projectPath);
     await assertNoLinks(collectionDirectory);
-    const collectionStat = await fs.stat(collectionDirectory).catch(() => null);
-    if (!collectionStat?.isDirectory()) throw new Error('Collection folder is unavailable.');
+    const collectionStat = await fs.stat(collectionDirectory).catch((error) => {
+      const failure = filesystemFailure(error);
+      throw new NativeWorkflowError(
+        failure.details?.errno === 'ENOENT' ? 'collection-not-found' : failure.code,
+        'Collection folder is unavailable.',
+        false,
+        failure.details,
+      );
+    });
+    if (!collectionStat?.isDirectory())
+      throw new NativeWorkflowError('collection-not-found', 'Collection folder is unavailable.');
     await assertNoLinks(exportsDirectory);
     await fs.mkdir(exportsDirectory, { recursive: true });
     await this.recoverOwnedSessions(exportsDirectory, collectionId);
     const sessionId = this.dependencies.randomId();
     if (!/^[a-zA-Z0-9_-]+$/.test(sessionId) || this.sessions.has(sessionId))
-      throw new Error('Could not create a unique export session.');
+      throw new NativeWorkflowError('io-failure', 'Could not create a unique export session.');
     const baseTime = this.dependencies.now();
     let timestamp = '';
     let setName = '';
@@ -486,10 +544,11 @@ export class PromptBundleStore {
         reserved = true;
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw filesystemFailure(error);
       }
     }
-    if (!reserved) throw new Error('Could not reserve a unique prompt export timestamp.');
+    if (!reserved)
+      throw new NativeWorkflowError('io-failure', 'Could not reserve a unique prompt export timestamp.');
 
     const stagingDirectory = path.join(exportsDirectory, `.prompt-staging-${sessionId}`);
     const ownershipJournalPath = path.join(stagingDirectory, OWNERSHIP_RECORD_FILENAME);
@@ -503,9 +562,13 @@ export class PromptBundleStore {
         fs.realpath(stagingDirectory),
       ]);
       if (!isWithin(realExports, realStaging) || realExports === realStaging)
-        throw new Error('Prompt staging directory escaped its collection exports folder.');
+        throw new NativeWorkflowError(
+          'linked-path',
+          'Prompt staging directory escaped its collection exports folder.',
+        );
       const reservationRecord = await readOwnershipRecord(reservationPath);
-      if (!reservationRecord) throw new Error('Prompt export ownership reservation is invalid.');
+      if (!reservationRecord)
+        throw new NativeWorkflowError('io-failure', 'Prompt export ownership reservation is invalid.');
       await fs.writeFile(ownershipJournalPath, JSON.stringify(reservationRecord), {
         encoding: 'utf8',
         flag: 'wx',
@@ -514,7 +577,7 @@ export class PromptBundleStore {
       if (createdStaging)
         await fs.rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined);
       await fs.unlink(reservationPath).catch(() => undefined);
-      throw error;
+      throw filesystemFailure(error);
     }
 
     this.sessions.set(sessionId, {
@@ -604,11 +667,19 @@ export class PromptBundleStore {
   async commitBundle(input: CommitPromptBundleInput): Promise<StoredPromptBundle> {
     const session = this.session(input.sessionId);
     const expected = session.manifest.get(input.bundleNumber);
-    if (!expected) throw new Error(`Prompt ${input.bundleNumber} is not in the reserved bundle manifest.`);
+    if (!expected)
+      throw new NativeWorkflowError(
+        'invalid-input',
+        `Prompt ${input.bundleNumber} is not in the reserved bundle manifest.`,
+      );
     const hasImage = expected.hasImage !== false;
-    if (hasImage && !input.png) throw new Error(`Prompt ${input.bundleNumber} requires a PNG.`);
+    if (hasImage && !input.png)
+      throw new NativeWorkflowError('invalid-input', `Prompt ${input.bundleNumber} requires a PNG.`);
     if (!hasImage && input.png)
-      throw new Error(`Text-only Prompt ${input.bundleNumber} must not include a PNG.`);
+      throw new NativeWorkflowError(
+        'invalid-input',
+        `Text-only Prompt ${input.bundleNumber} must not include a PNG.`,
+      );
     if (input.png) validatePromptBundlePng(input.png, expected);
     if (
       typeof input.markdown !== 'string' ||
@@ -616,15 +687,18 @@ export class PromptBundleStore {
       input.markdown.length > MAX_PROMPT_BUNDLE_MARKDOWN_CHARACTERS ||
       Buffer.byteLength(input.markdown, 'utf8') > MAX_PROMPT_BUNDLE_MARKDOWN_BYTES
     )
-      throw new Error('Prompt Markdown is empty or too large to store.');
+      throw new NativeWorkflowError('invalid-input', 'Prompt Markdown is empty or too large to store.');
     const suffix = bundleSuffix(input.bundleNumber);
     return await this.enqueue(session, async () => {
-      if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
-      if (session.finalizing) throw new Error('Prompt export is already finishing.');
-      if (input.png) await this.dependencies.validateDecodedPng(input.png, expected);
-      if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
+      if (session.cancelRequested)
+        throw new NativeWorkflowError('session-cancelled', 'Prompt export was cancelled.');
+      if (session.finalizing)
+        throw new NativeWorkflowError('session-not-found', 'Prompt export is already finishing.');
+      if (input.png) await this.validateDecodedPng(input.png, expected);
+      if (session.cancelRequested)
+        throw new NativeWorkflowError('session-cancelled', 'Prompt export was cancelled.');
       if (session.completed.has(input.bundleNumber))
-        throw new Error(`Prompt ${input.bundleNumber} is already stored.`);
+        throw new NativeWorkflowError('invalid-input', `Prompt ${input.bundleNumber} is already stored.`);
       const base = `${session.setName} - ${suffix}`;
       const pngFilename = hasImage ? `${base}.png` : '';
       const markdownFilename = `${base}.md`;
@@ -635,7 +709,10 @@ export class PromptBundleStore {
         fs.realpath(session.stagingDirectory),
       ]);
       if (!isWithin(realExports, realStaging) || realExports === realStaging)
-        throw new Error('Prompt staging directory escaped its collection exports folder.');
+        throw new NativeWorkflowError(
+          'linked-path',
+          'Prompt staging directory escaped its collection exports folder.',
+        );
       await assertNoLinks(session.stagingDirectory);
       if (pngPath) await assertNoLinks(pngPath);
       await assertNoLinks(markdownPath);
@@ -643,15 +720,20 @@ export class PromptBundleStore {
         (pngPath && (await fs.stat(pngPath).catch(() => null))) ||
         (await fs.stat(markdownPath).catch(() => null))
       )
-        throw new Error(`Prompt ${input.bundleNumber} would overwrite an existing staged file.`);
+        throw new NativeWorkflowError(
+          'invalid-input',
+          `Prompt ${input.bundleNumber} would overwrite an existing staged file.`,
+        );
       const ownedPaths = [...(pngPath ? [pngPath] : []), markdownPath];
       const addedSources = new Map<string, string>();
       ownedPaths.forEach((target) => session.incompleteFiles.add(target));
       try {
         if (pngPath && input.png) await this.dependencies.writeAtomically(pngPath, input.png);
-        if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
+        if (session.cancelRequested)
+          throw new NativeWorkflowError('session-cancelled', 'Prompt export was cancelled.');
         await this.dependencies.writeAtomically(markdownPath, input.markdown);
-        if (session.cancelRequested) throw new Error('Prompt export was cancelled.');
+        if (session.cancelRequested)
+          throw new NativeWorkflowError('session-cancelled', 'Prompt export was cancelled.');
         await this.writeSourceAssets(session, input.sourceAssets ?? [], ownedPaths, addedSources);
         const stored = {
           bundleNumber: input.bundleNumber,
@@ -669,12 +751,17 @@ export class PromptBundleStore {
       } catch (error) {
         const cleanupErrors = await removeFiles(ownedPaths);
         if (cleanupErrors.length)
-          throw new AggregateError(
-            [error, ...cleanupErrors.map((message) => new Error(message))],
-            `Prompt ${input.bundleNumber} failed and incomplete files could not all be removed.`,
+          throw Object.assign(
+            new NativeWorkflowError(
+              'io-failure',
+              `Prompt ${input.bundleNumber} failed and incomplete files could not all be removed.`,
+              false,
+              filesystemFailure(error).details,
+            ),
+            { cause: new AggregateError([error, ...cleanupErrors.map((message) => new Error(message))]) },
           );
         ownedPaths.forEach((target) => session.incompleteFiles.delete(target));
-        throw error;
+        throw filesystemFailure(error);
       }
     });
   }
@@ -717,7 +804,11 @@ export class PromptBundleStore {
 
   private session(sessionId: string): StoredSession {
     const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Prompt export session was not found or has already closed.');
+    if (!session)
+      throw new NativeWorkflowError(
+        'session-not-found',
+        'Prompt export session was not found or has already closed.',
+      );
     return session;
   }
 
@@ -739,16 +830,18 @@ export class PromptBundleStore {
   ): Promise<void> {
     for (const asset of assets) {
       const filename = validatePathSegment(asset.filename, 'Source filename');
-      if (!filename.endsWith('.json')) throw new Error('Drawing source filename must end in .json.');
+      if (!filename.endsWith('.json'))
+        throw new NativeWorkflowError('invalid-input', 'Drawing source filename must end in .json.');
       if (
         typeof asset.source !== 'string' ||
         !asset.source.trim() ||
         Buffer.byteLength(asset.source, 'utf8') > MAX_PROMPT_BUNDLE_SOURCE_BYTES
       )
-        throw new Error('Drawing source is empty or too large to store.');
+        throw new NativeWorkflowError('invalid-input', 'Drawing source is empty or too large to store.');
       const prior = session.sourceAssets.get(filename) ?? addedSources.get(filename);
       if (prior !== undefined) {
-        if (prior !== asset.source) throw new Error(`Drawing source ${filename} changed during export.`);
+        if (prior !== asset.source)
+          throw new NativeWorkflowError('invalid-input', `Drawing source ${filename} changed during export.`);
         continue;
       }
       const sourceDirectory = path.join(session.stagingDirectory, 'sources');
@@ -757,7 +850,7 @@ export class PromptBundleStore {
       await fs.mkdir(sourceDirectory, { recursive: true });
       await assertNoLinks(sourcePath);
       if (await fs.stat(sourcePath).catch(() => null))
-        throw new Error(`Drawing source ${filename} already exists.`);
+        throw new NativeWorkflowError('invalid-input', `Drawing source ${filename} already exists.`);
       ownedPaths.push(sourcePath);
       session.incompleteFiles.add(sourcePath);
       await this.dependencies.writeAtomically(sourcePath, asset.source);
@@ -770,7 +863,8 @@ export class PromptBundleStore {
     status: FinalizedPromptBundleSession['status'],
     options: FinishPromptBundleSessionOptions = {},
   ): Promise<FinalizedPromptBundleSession> {
-    if (session.finalizing) throw new Error('Prompt export is already finishing.');
+    if (session.finalizing)
+      throw new NativeWorkflowError('session-not-found', 'Prompt export is already finishing.');
     session.finalizing = true;
     const completed = [...session.completed.values()].sort(
       (left, right) => left.bundleNumber - right.bundleNumber,
@@ -780,7 +874,8 @@ export class PromptBundleStore {
     try {
       const cleanupErrors = await removeFiles([...session.incompleteFiles]);
       if (cleanupErrors.length)
-        throw new Error(
+        throw new NativeWorkflowError(
+          'io-failure',
           `Incomplete export files need cleanup before publication: ${cleanupErrors.join('; ')}`,
         );
       session.incompleteFiles.clear();
@@ -789,8 +884,9 @@ export class PromptBundleStore {
         (completed.length !== session.manifest.size ||
           completed.some((bundle, index) => bundle.bundleNumber !== index + 1))
       )
-        throw new Error(
-          `Prompt export is incomplete: ${completed.length} of ${session.manifest.size} bundle pairs are stored. Write every reserved bundle before finishing, or cancel to retain the completed subset.`,
+        throw new NativeWorkflowError(
+          'invalid-input',
+          `Prompt export is incomplete: ${completed.length} of ${session.manifest.size} bundles are stored.`,
         );
       if (!completed.length) {
         await fs.rm(session.stagingDirectory, { recursive: true, force: true });
@@ -828,7 +924,10 @@ export class PromptBundleStore {
         fs.realpath(session.stagingDirectory),
       ]);
       if (!isWithin(realExports, realStaging) || realExports === realStaging)
-        throw new Error('Prompt staging directory escaped its collection exports folder.');
+        throw new NativeWorkflowError(
+          'linked-path',
+          'Prompt staging directory escaped its collection exports folder.',
+        );
       if (await fs.stat(session.finalDirectory).catch(() => null)) {
         warnings.push(
           'The reserved destination appeared before publication. Complete bundle pairs remain in the reported recovery folder; nothing was overwritten.',
@@ -877,7 +976,7 @@ export class PromptBundleStore {
       };
     } catch (error) {
       session.finalizing = false;
-      throw error;
+      throw filesystemFailure(error);
     }
   }
 }

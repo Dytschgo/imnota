@@ -157,6 +157,83 @@
   color: var(--ink);
 }
 
+/* A destination row with a trailing pin control revealed on hover or focus. */
+.side-nav-row {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.side-nav-row:hover > .side-nav-collection,
+.side-nav-row:focus-within > .side-nav-collection,
+.side-nav-row > .side-nav-project {
+  padding-right: 40px;
+}
+
+.side-nav .side-nav-row-action {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 32px;
+  height: 32px;
+  color: var(--ink-3);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition:
+    opacity 160ms ease,
+    color 160ms ease;
+}
+
+.side-nav-row:hover .side-nav-row-action,
+.side-nav-row:focus-within .side-nav-row-action {
+  opacity: 1;
+}
+
+.side-nav .side-nav-row-action:hover,
+.side-nav .side-nav-row-action.pinned {
+  color: var(--imnota-accent-hover);
+}
+
+@media (hover: none) {
+  .side-nav .side-nav-row-action {
+    opacity: 1;
+  }
+
+  .side-nav-row > .side-nav-collection {
+    padding-right: 40px;
+  }
+}
+
+.side-nav-project {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.side-nav-project-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.side-nav-project.active .side-nav-project-icon {
+  color: var(--imnota-accent-hover);
+}
+
+.side-nav-project-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .side-nav-empty {
   margin: 0;
   padding: 7px 10px 7px 12px;

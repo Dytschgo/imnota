@@ -1,4 +1,5 @@
 import { annotationMarkListItems } from './annotation-marks';
+import { sourceMarkdownLines, type ScreenshotSource } from './source-context';
 import { pictureSourceSizeLine } from './markdown';
 import { textAnnotationReferences } from './annotation-order';
 import { screenshotHasRedaction, visibleTextMarkdownLines } from './screenshot-ocr';
@@ -20,6 +21,8 @@ export interface PromptScreenshotInput {
   contentRevision: string;
   annotations: readonly PromptAnnotationInput[];
   visibleText?: string;
+  /** Recorded capture/import source, written under the picture heading. */
+  source?: ScreenshotSource;
   kind?: 'screenshot';
 }
 export interface PromptDrawingInput {
@@ -75,6 +78,7 @@ export interface PromptBundlePicture {
   notes: PromptTextNote[];
   marks: string[];
   visibleText?: string;
+  source?: ScreenshotSource;
   sourceFilename?: string;
   estimatedPngCharacters?: number;
   dataUrl?: string;
@@ -294,6 +298,8 @@ function markdownForBundle(
     if (picture.kind === 'screenshot') {
       lines.push(`Priority for agent: ${picture.priority[0].toUpperCase()}${picture.priority.slice(1)}`, '');
       lines.push(pictureSourceSizeLine(picture.nativeWidth, picture.nativeHeight), '');
+      const source = sourceMarkdownLines(picture.source);
+      if (source.length) lines.push(...source, '');
       if (normalized(picture.description).trim()) lines.push(normalized(picture.description), '');
       for (const note of picture.notes)
         lines.push(`### Picture ${picture.pictureNumber} / Note ${note.number}`, '', note.text, '');
@@ -368,6 +374,7 @@ function resolveRendered(
           originalHeight: item.nativeHeight,
         }),
     visibleText: screenshotVisibleText(item),
+    ...(item.kind !== 'drawing' && item.source ? { source: item.source } : {}),
     sourceFilename: drawing ? item.sourceFilename : undefined,
     estimatedPngCharacters: rendered.estimatedPngCharacters,
     dataUrl: rendered.dataUrl,

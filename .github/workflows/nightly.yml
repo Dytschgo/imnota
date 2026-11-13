@@ -99,6 +99,9 @@ jobs:
       - run: bash -n scripts/install.sh
 
   package:
+    permissions:
+      contents: read
+      actions: read
     # Build alongside quality; publish still requires both to pass.
     needs: guard
     if: needs.guard.outputs.skip != 'true'
@@ -149,6 +152,15 @@ jobs:
         env:
           IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-mac-${{ github.run_id }}-${{ github.run_attempt }}
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify native Mac installer transactions
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          export IMNOTA_NATIVE_MAC_ARCHIVE="$PWD/release/Imnota-${IMNOTA_EXPECT_VERSION}-universal-mac.zip"
+          test -f "$IMNOTA_NATIVE_MAC_ARCHIVE"
+          node --test scripts/install.native-mac.test.mjs
       - name: Retain Mac walkthrough evidence
         if: always() && matrix.platform == 'macos'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -178,7 +190,17 @@ jobs:
         if: matrix.platform == 'linux'
         run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux
         env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-nightly-linux
           IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      # Diagnostic artifacts must never match the publication asset pattern.
+      - name: Retain packaged smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-failure-evidence-nightly-${{ matrix.platform }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-*/
+          if-no-files-found: ignore
+          retention-days: 7
       # Evidence must remain outside the publish job's nightly-* artifact pattern.
       - name: Retain packaged MCP evidence
         if: always()
@@ -187,6 +209,44 @@ jobs:
           name: mcp-evidence-${{ matrix.platform }}
           path: release/imnota-verification-artifacts-mcp/
           if-no-files-found: ignore
+      - name: Verify packaged native faults on macos
+        if: matrix.platform == 'macos'
+        run: bash scripts/verify-mac.sh --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify packaged native faults on windows
+        if: matrix.platform == 'windows'
+        run: node scripts/verify-packaged.mjs windows --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Verify packaged native faults on linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum node scripts/verify-packaged.mjs linux --faults
+        env:
+          IMNOTA_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/imnota-verification-artifacts-native-faults
+          IMNOTA_EXPECT_VERSION: ${{ needs.guard.outputs.version }}
+      - name: Retain native fault evidence
+        id: native_fault_upload
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-fault-evidence-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/imnota-verification-artifacts-native-faults/
+          if-no-files-found: error
+          include-hidden-files: true
+      - name: Download native fault evidence for manifest verification
+        id: native_fault_download
+        if: always() && steps.native_fault_upload.outcome == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.native_fault_upload.outputs.artifact-id }}
+          # Same-job downloads use the current-run service; REST publication can lag upload completion.
+          path: ${{ runner.temp }}/imnota-verification-artifacts-native-faults-downloaded/
+      - name: Verify downloaded native fault evidence manifest
+        if: always() && steps.native_fault_download.outcome == 'success'
+        run: node scripts/smoke.mjs --verify-fault-evidence "${{ runner.temp }}/imnota-verification-artifacts-native-faults-downloaded"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-${{ matrix.platform }}

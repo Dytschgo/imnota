@@ -13,6 +13,7 @@ Start here when you need to understand the repository. `AGENTS.md` is the bindin
 - [Release readiness](release-readiness.md), [nightly builds](nightly-builds.md) and [stable release CI](stable-release-ci.md) — release and publication gates.
 - [Nightly verification audit](nightly-verification-audit.md), [visual regression](visual-regression.md) and [verification timing](verification-timing.md) — evidence, visuals and test-loop history.
 - [Clipboard receiver matrix](clipboard-receiver-matrix.md) and [clipboard compatibility plan](clipboard-images-plan.md) — receiver acceptance and fallback results.
+- [Export failures](export-failures.md) — how bundle export can fail, what users see, and how failures are reduced and tested.
 - [User-feedback protocol](user-feedback-protocol.md) — consented manual sessions and evidence boundaries.
 - [Test coverage map](pr-test-coverage.md), [CI routing](ci-routing.md) and [CI artifacts](ci-artifacts.md) — automated check ownership and classification.
 - [Property tests](property-testing.md) — reproducible generated cases, known findings and diagnostic application coverage.

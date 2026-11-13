@@ -17,7 +17,18 @@ const workbenchPreferencesSchema = z.object({ screenshotFirstAdd: z.boolean() })
 const nativeCopyPreferencesSchema = z
   .object({ defaultFunction: z.enum(['files', 'files-rich', 'rich']) })
   .strict();
-const promptExportPreferencesSchema = z.object({ includeRecognisedText: z.boolean() }).strict();
+const promptExportPreferencesSchema = z
+  .object({
+    includeRecognisedText: z.boolean(),
+    // Profiles saved before source info existed keep validating and stay off.
+    includeSourceContext: z.boolean().default(false),
+  })
+  .strict();
+// Patches carry only supplied keys: Zod 4 would otherwise fill the default into a partial patch.
+const promptExportPreferencesUpdateSchema = z
+  .object({ includeRecognisedText: z.boolean(), includeSourceContext: z.boolean() })
+  .partial()
+  .strict();
 const exportPresetsSchema = z
   .array(
     z
@@ -96,7 +107,10 @@ export const preferenceSettingsSchema = z
       .strict(),
     workbench: workbenchPreferencesSchema.default({ screenshotFirstAdd: true }),
     nativeCopy: nativeCopyPreferencesSchema.default({ defaultFunction: 'files' }),
-    promptExport: promptExportPreferencesSchema.default({ includeRecognisedText: false }),
+    promptExport: promptExportPreferencesSchema.default({
+      includeRecognisedText: false,
+      includeSourceContext: false,
+    }),
     exportPresets: exportPresetsSchema.default([]),
     updates: updatePreferencesSchema.default({}),
     agentAccess: agentAccessPreferencesSchema.default({ enabled: false }),
@@ -129,7 +143,7 @@ export const preferenceSettingsUpdateSchema = z
     onboarding: preferenceSettingsSchema.shape.onboarding.partial().strict().optional(),
     workbench: workbenchPreferencesSchema.partial().strict().optional(),
     nativeCopy: nativeCopyPreferencesSchema.partial().strict().optional(),
-    promptExport: promptExportPreferencesSchema.partial().strict().optional(),
+    promptExport: promptExportPreferencesUpdateSchema.optional(),
     exportPresets: exportPresetsSchema.optional(),
     updates: updatePreferencesSchema.partial().strict().optional(),
     agentAccess: agentAccessPreferencesSchema.partial().strict().optional(),

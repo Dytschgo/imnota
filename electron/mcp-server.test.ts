@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { crc32 } from 'node:zlib';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
@@ -220,6 +221,7 @@ describe('local MCP server lifecycle', () => {
       'get_latest_bundle',
       'list_new_since',
       'get_bundle',
+      'inspect_bundle',
       'get_item',
       'search_saved_text',
     ]);
@@ -233,6 +235,95 @@ describe('local MCP server lifecycle', () => {
 });
 
 describe('local MCP tools', () => {
+  it('discovers archived projects only when requested and preserves default active discovery', async () => {
+    const root = await workspace();
+    const active = await writeProject(root, projectData('active-project'));
+    const archivedData = projectData('archived-project');
+    archivedData.status = 'archived';
+    const archived = await writeProject(root, archivedData);
+    const before = await savedFiles(root);
+    const paths = (result: unknown) =>
+      (result as { projects: Array<{ path: string }> }).projects.map((project) => project.path);
+    expect(paths(await callTool(root, 'list_projects'))).toEqual([active]);
+    expect(paths(await callTool(root, 'list_projects', { scope: 'archived' }))).toEqual([archived]);
+    const archiveCollections = (await callTool(root, 'list_collections', {
+      projectPath: archived,
+    })) as CollectionResult;
+    const archiveItems = (await callTool(root, 'list_collection_items', {
+      projectPath: archived,
+      collectionId: archiveCollections.collections[0]!.id,
+    })) as { items: Array<{ id: string; next: { tool: string; arguments: Record<string, unknown> } }> };
+    const readAction = archiveItems.items.find((item) => item.id === 'text-1')!.next;
+    const archivedRead = await protocolCall(toolsFor(root), readAction.tool, readAction.arguments);
+    expect(JSON.parse(archivedRead.result!.content[0]!.text!).markdown).toBe('Full notes markdown');
+    expect(new Set(paths(await callTool(root, 'list_projects', { scope: 'all' })))).toEqual(
+      new Set([active, archived]),
+    );
+    expect(
+      (await protocolCall(toolsFor(root, false), 'list_projects', { scope: 'all' })).result?.isError,
+    ).toBe(true);
+    const directories = vi.spyOn(fs, 'opendir');
+    expect((await protocolCall(toolsFor(root), 'list_projects', { scope: 'deleted' })).result?.isError).toBe(
+      true,
+    );
+    expect(directories).not.toHaveBeenCalled();
+    directories.mockRestore();
+    expect(await savedFiles(root)).toEqual(before);
+  });
+
+  it('provides item read actions that remain subject to current workspace authorization', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const result = (await callTool(root, 'list_collection_items', {
+      projectPath,
+      collectionId: '001-collection',
+    })) as { items: Array<{ id: string; next: { tool: string; arguments: Record<string, unknown> } }> };
+    const action = result.items.find((item) => item.id === 'text-1')!.next;
+    expect(action).toEqual({ tool: 'get_item', arguments: { projectPath, itemId: 'text-1' } });
+    const read = await protocolCall(toolsFor(root), action.tool, action.arguments);
+    expect(JSON.parse(read.result!.content[0]!.text!).markdown).toBe('Full notes markdown');
+    const other = await workspace();
+    expect((await protocolCall(toolsFor(other), action.tool, action.arguments)).result?.isError).toBe(true);
+  });
+
+  it('rejects whitespace-only search before scanning while preserving valid queries', async () => {
+    const root = await workspace();
+    const search = vi.fn(async () => ({ results: [], warnings: [], totalMatches: 0 }));
+    const tools = createMcpTools({
+      enabled: () => true,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+      search,
+    });
+    for (const query of [' ', '\t\n', '\u2003']) {
+      const result = await handleMcpJsonRpc(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'search_saved_text', arguments: { query } },
+        },
+        tools,
+        'test',
+      );
+      expect(result).toMatchObject({
+        result: { isError: true, content: [{ text: 'Invalid tool arguments: query.' }] },
+      });
+    }
+    expect(search).not.toHaveBeenCalled();
+    await handleMcpJsonRpc(
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'search_saved_text', arguments: { query: ' queue ' } },
+      },
+      tools,
+      'test',
+    );
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: ' queue ' }));
+  });
+
   it('rejects path traversal and reserved backup folders', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());
@@ -478,6 +569,489 @@ async function savedFiles(root: string) {
 }
 
 describe('prepared MCP bundle discovery and read boundaries', () => {
+  it('resolves project identity once when browsing many collections', async () => {
+    const root = await workspace();
+    const project = projectData();
+    project.screenshots = [];
+    project.contentItems = [];
+    project.collections = Array.from({ length: 40 }, (_, index) => ({
+      ...project.collections[0]!,
+      id: `collection-${index}`,
+      name: `Collection ${index}`,
+    }));
+    const projectPath = await writeProject(root, project);
+    const canonical = vi.spyOn(fs, 'realpath');
+    const response = (await callTool(root, 'list_collections', { projectPath })) as {
+      collections: unknown[];
+    };
+    expect(response.collections).toHaveLength(40);
+    expect(canonical.mock.calls.filter(([target]) => String(target) === root)).toHaveLength(1);
+    expect(canonical.mock.calls.filter(([target]) => String(target) === projectPath)).toHaveLength(1);
+    console.log(
+      JSON.stringify({
+        workload: '40-collection-discovery',
+        canonicalPathCalls: canonical.mock.calls.length,
+      }),
+    );
+  });
+
+  it('measures full, selected and text-only reads on a six-part synthetic export', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const marker = Buffer.from('tEXtfixture\0' + 'x'.repeat(65_536));
+    const chunk = Buffer.alloc(marker.length + 8);
+    chunk.writeUInt32BE(marker.length - 4, 0);
+    marker.copy(chunk, 4);
+    chunk.writeUInt32BE(crc32(marker), chunk.length - 4);
+    const png = Buffer.concat([TEST_PNG.subarray(0, -12), chunk, TEST_PNG.subarray(-12)]);
+    const folder = await writeBundle(projectPath, undefined, '# Part 1', png);
+    for (let number = 2; number <= 6; number++) {
+      const prefix = path.join(folder, `${path.basename(folder)} - ${String(number).padStart(2, '0')}`);
+      await fs.writeFile(prefix + '.md', `# Part ${number}`);
+      await fs.writeFile(prefix + '.png', png);
+    }
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const tools = toolsFor(root);
+    const metrics: Array<{ mode: string; imageBytes: number; pngOpens: number; milliseconds: number }> = [];
+    // Rotate order to avoid assigning all first-call overhead to the full-read mode.
+    const modes = [
+      { mode: 'full', args: {}, images: 6 },
+      { mode: 'selected', args: { bundleNumbers: [3] }, images: 1 },
+      { mode: 'text-only', args: { includeImages: false }, images: 0 },
+    ];
+    for (let sample = 0; sample < 3; sample++)
+      for (let offset = 0; offset < modes.length; offset++) {
+        const mode = modes[(sample + offset) % modes.length]!;
+        const opens = vi.spyOn(fs, 'open');
+        const started = performance.now();
+        const response = await protocolCall(tools, 'get_bundle', { id, ...mode.args });
+        const milliseconds = performance.now() - started;
+        expect(response.result?.isError).toBe(false);
+        const imageBytes = response
+          .result!.content.slice(1)
+          .reduce((total, block) => total + Buffer.from(block.data!, 'base64').length, 0);
+        const pngOpens = opens.mock.calls.filter(([target]) => String(target).endsWith('.png')).length;
+        opens.mockRestore();
+        expect(imageBytes).toBe(mode.images * png.length);
+        expect(pngOpens).toBe(mode.images);
+        metrics.push({ mode: mode.mode, imageBytes, pngOpens, milliseconds });
+      }
+    console.log(
+      JSON.stringify({ workload: 'six-part-export-with-64KiB-synthetic-PNG-ancillary-data', metrics }),
+    );
+  });
+
+  it('reports discovery totals and truncation without claiming filename timestamps are freshness', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const empty = (await callTool(root, 'list_collections', { projectPath })) as {
+      collections: Array<{ preparedBundlesTotal: number; preparedBundlesTruncated: boolean }>;
+    };
+    expect(empty.collections[0]).toMatchObject({ preparedBundlesTotal: 0, preparedBundlesTruncated: false });
+    for (let minute = 0; minute < 11; minute++)
+      await writeBundle(projectPath, `Review - 260913-12${String(minute).padStart(2, '0')}00`);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as {
+      collections: Array<{
+        preparedBundles: Array<{ setName: string }>;
+        preparedBundlesTotal: number;
+        preparedBundlesTruncated: boolean;
+      }>;
+    };
+    const collection = listed.collections[0]!;
+    expect(collection).toMatchObject({ preparedBundlesTotal: 11, preparedBundlesTruncated: true });
+    expect(collection.preparedBundles).toHaveLength(10);
+    expect(collection.preparedBundles[0]).toMatchObject({
+      setName: 'Review - 260913-121000',
+      sourceKind: 'saved-export',
+      preparedAtBasis: 'filename-local-time',
+      freshness: 'unknown',
+    });
+    expect(collection.preparedBundles.at(-1)!.setName).toBe('Review - 260913-120100');
+  });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s reads text-only without opening PNG payloads',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      await writeBundle(projectPath, undefined, '# ünicode');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles[0]!.id;
+      const before = await savedFiles(root);
+      const opens = vi.spyOn(fs, 'open');
+      const reads = vi.spyOn(fs, 'readFile');
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id } : { projectPath }),
+        includeImages: false,
+      });
+      expect(response.result?.isError).toBe(false);
+      expect(response.result?.content).toHaveLength(1);
+      expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+        sourceKind: 'saved-export',
+        freshness: 'unknown',
+        preparedAtBasis: 'filename-local-time',
+        imagesIncluded: 0,
+        imagesOmitted: 0,
+        bundles: [
+          { markdown: '# ünicode', markdownBytes: Buffer.byteLength('# ünicode'), image: 'not-requested' },
+        ],
+      });
+      for (const [file] of [...opens.mock.calls, ...reads.mock.calls])
+        expect(String(file).endsWith('.png')).toBe(false);
+      opens.mockRestore();
+      reads.mockRestore();
+      expect(await savedFiles(root)).toEqual(before);
+    },
+  );
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s reads selected parts in saved order with correct image block indices',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      const folder = await writeBundle(projectPath);
+      const setName = path.basename(folder);
+      // A valid ancillary chunk makes part 3's bytes distinct, so swapped payloads fail.
+      const marker = Buffer.from('tEXtfixture\0part-three');
+      const chunk = Buffer.alloc(marker.length + 8);
+      chunk.writeUInt32BE(marker.length - 4, 0);
+      marker.copy(chunk, 4);
+      chunk.writeUInt32BE(crc32(marker), chunk.length - 4);
+      const thirdPng = Buffer.concat([TEST_PNG.subarray(0, -12), chunk, TEST_PNG.subarray(-12)]);
+      for (const number of ['02', '03']) {
+        await fs.writeFile(
+          path.join(folder, `${setName} - ${number}.md`),
+          number === '02' ? MANAGEMENT_SECRET : '# Third',
+        );
+        await fs.writeFile(
+          path.join(folder, `${setName} - ${number}.png`),
+          number === '03' ? thirdPng : TEST_PNG,
+        );
+      }
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles[0]!.id;
+      const opens = vi.spyOn(fs, 'open');
+      const reads = vi.spyOn(fs, 'readFile');
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id } : { projectPath }),
+        bundleNumbers: [3, 1],
+      });
+      expect(response.result?.isError).toBe(false);
+      const result = JSON.parse(response.result!.content[0]!.text!);
+      expect(result.bundles).toMatchObject([
+        { bundleNumber: 1, imageContentIndex: 1 },
+        { bundleNumber: 3, imageContentIndex: 2 },
+      ]);
+      expect(response.result?.content).toHaveLength(3);
+      for (const row of result.bundles)
+        expect(response.result!.content[row.imageContentIndex]!.data).toBe(
+          (row.bundleNumber === 1 ? TEST_PNG : thirdPng).toString('base64'),
+        );
+      expect(JSON.stringify(response)).not.toContain(MANAGEMENT_SECRET);
+      for (const [file] of [...opens.mock.calls, ...reads.mock.calls])
+        expect(String(file)).not.toMatch(/ - 02\.(md|png)$/);
+    },
+  );
+
+  it('refuses missing selected parts instead of returning a matching part from an older export', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const older = await writeBundle(projectPath, 'Review - 260913-110000');
+    await fs.writeFile(path.join(older, `${path.basename(older)} - 03.md`), '# Old third part');
+    await writeBundle(projectPath);
+    const response = await protocolCall(toolsFor(root), 'get_latest_bundle', {
+      projectPath,
+      bundleNumbers: [3],
+    });
+    expect(response.result?.isError).toBe(true);
+    expect(response.result?.content[0]?.text).toContain('not present in this saved export');
+    expect(JSON.stringify(response)).not.toContain('Old third part');
+  });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s refuses a selected Markdown part that disappears before its payload read',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+      const newest = await writeBundle(projectPath, undefined, '# Selected newest text');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles.find(
+        (set) => set.setName === path.basename(newest),
+      )!.id;
+      const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id } : { projectPath }),
+        bundleNumbers: [1],
+        includeImages: false,
+      });
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(true);
+      expect(JSON.stringify(response)).not.toContain('Stale older text');
+    },
+  );
+
+  it('refuses a selected export whose Markdown disappears after discovery', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+    const newest = await writeBundle(projectPath);
+    const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+    const opendir = fs.opendir;
+    let visits = 0;
+    vi.spyOn(fs, 'opendir').mockImplementation(async (...args) => {
+      // Discovery has already confirmed Markdown on the first visit. Remove it
+      // before the selected export's payload inventory, using the real directory.
+      if (String(args[0]) === newest && ++visits === 2) await fs.unlink(target);
+      return opendir(...args);
+    });
+    const response = await protocolCall(toolsFor(root), 'get_latest_bundle', {
+      projectPath,
+      bundleNumbers: [1],
+    });
+    expect(visits).toBe(2);
+    expect(response.result?.isError).toBe(true);
+    expect(JSON.stringify(response)).not.toContain('Stale older text');
+  });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s reports an image disappearing before its payload read as unavailable',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      const folder = await writeBundle(projectPath, undefined, '# Retained Markdown');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles[0]!.id;
+      const target = path.join(folder, `${path.basename(folder)} - 01.png`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(
+        toolsFor(root),
+        name,
+        name === 'get_bundle' ? { id } : { projectPath },
+      );
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(false);
+      expect(response.result?.content).toHaveLength(1);
+      const result = JSON.parse(response.result!.content[0]!.text!);
+      expect(result).toMatchObject({
+        imagesIncluded: 0,
+        imagesOmitted: 0,
+        imagesUnavailable: 1,
+        bundles: [{ markdown: '# Retained Markdown', image: 'unavailable' }],
+      });
+      expect(result.bundles[0]).not.toHaveProperty('imageOmissionReason');
+      expect(result.notes.join(' ')).toContain('no longer available');
+    },
+  );
+
+  it.each(
+    [[], [1, 1], [0], [1000], [1.5], ['1'], '1', Array.from({ length: 101 }, (_, i) => i + 1)].map(
+      (bundleNumbers) => ({ bundleNumbers }),
+    ),
+  )('rejects invalid selection %j before any directory scan', async ({ bundleNumbers }) => {
+    const root = await workspace();
+    const directories = vi.spyOn(fs, 'opendir');
+    for (const name of ['get_bundle', 'get_latest_bundle']) {
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id: `b_${'1'.repeat(32)}` } : {}),
+        bundleNumbers,
+      });
+      expect(response.result?.isError).toBe(true);
+    }
+    expect(directories).not.toHaveBeenCalled();
+  });
+
+  it('provides a metadata-only part action and a targeted retry for Markdown omitted by the shared budget', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath, undefined, 'abcdef');
+    await fs.writeFile(path.join(folder, `${path.basename(folder)} - 02.md`), 'ghijkl');
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const tools = createMcpTools(
+      { enabled: () => true, workspacePath: () => root, appVersion: () => 'test' },
+      { maxMarkdownBytes: 8, maxImages: 0 },
+    );
+    const inspection = await protocolCall(tools, 'inspect_bundle', { id });
+    const row = JSON.parse(inspection.result!.content[0]!.text!).bundles[1];
+    expect(row.next).toEqual({
+      tool: 'get_bundle',
+      arguments: { id, bundleNumbers: [2], includeImages: false },
+    });
+    const full = await protocolCall(tools, 'get_bundle', { id });
+    const result = JSON.parse(full.result!.content[0]!.text!);
+    expect(result.bundles[0]).toMatchObject({
+      image: 'omitted-too-large',
+      imageOmissionReason: 'count-limit',
+    });
+    expect(result.bundles[1]).toMatchObject({ markdownOmitted: true, markdownBytes: 0, next: row.next });
+    const retry = await protocolCall(tools, row.next.tool, row.next.arguments);
+    expect(JSON.parse(retry.result!.content[0]!.text!).bundles).toMatchObject([
+      { bundleNumber: 2, markdown: 'ghijkl', markdownBytes: 6 },
+    ]);
+    const byteTools = createMcpTools(
+      { enabled: () => true, workspacePath: () => root, appVersion: () => 'test' },
+      { maxImageBytes: 1 },
+    );
+    const byteLimited = await protocolCall(byteTools, 'get_bundle', { id, bundleNumbers: [1] });
+    expect(JSON.parse(byteLimited.result!.content[0]!.text!).bundles[0].imageOmissionReason).toBe(
+      'byte-limit',
+    );
+  });
+
+  it('inspects ordered saved file sizes without opening payloads, changing files or claiming freshness', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const markdown = '# Saved ünicode';
+    const folder = await writeBundle(projectPath, undefined, markdown);
+    const setName = path.basename(folder);
+    await fs.writeFile(path.join(folder, `${setName} - 02.md`), '# Text only');
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const before = await savedFiles(root);
+    const opens = vi.spyOn(fs, 'open');
+    const reads = vi.spyOn(fs, 'readFile');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(false);
+    expect(response.result?.content).toHaveLength(1);
+    const result = JSON.parse(response.result!.content[0]!.text!);
+    expect(result).toMatchObject({
+      id,
+      sourceKind: 'saved-export',
+      preparedAtBasis: 'filename-local-time',
+      freshness: 'unknown',
+      contentVerified: false,
+      summary: {
+        bundleCount: 2,
+        imageCount: 1,
+        markdownBytes: Buffer.byteLength(markdown) + Buffer.byteLength('# Text only'),
+        imageBytes: TEST_PNG.length,
+        sizeMetadataComplete: true,
+      },
+      bundles: [
+        {
+          bundleNumber: 1,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength(markdown) },
+          image: { status: 'not-read', bytes: TEST_PNG.length },
+        },
+        {
+          bundleNumber: 2,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength('# Text only') },
+          image: null,
+        },
+      ],
+      readLimits: { maxImages: 10, maxImageBytes: 5_000_000, maxTotalImageBytes: 20_000_000 },
+      next: { tool: 'get_bundle', arguments: { id } },
+    });
+    expect(JSON.stringify(result)).not.toContain(markdown);
+    for (const [target] of [...opens.mock.calls, ...reads.mock.calls])
+      expect(String(target).startsWith(folder + path.sep)).toBe(false);
+    opens.mockRestore();
+    reads.mockRestore();
+    expect(await savedFiles(root)).toEqual(before);
+    const full = await protocolCall(toolsFor(root), 'get_bundle', { id });
+    expect(full.result?.content[1]?.data).toBe(TEST_PNG.toString('base64'));
+  });
+
+  it('reports unavailable file metadata without hiding readable siblings or opening payloads', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const deniedPath = path.join(folder, `${path.basename(folder)} - 01.png`);
+    const lstat = fs.lstat.bind(fs);
+    vi.spyOn(fs, 'lstat').mockImplementation((candidate, options) => {
+      if (String(candidate) === deniedPath)
+        return Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }));
+      return lstat(candidate, options);
+    });
+    const opens = vi.spyOn(fs, 'open');
+    const reads = vi.spyOn(fs, 'readFile');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(false);
+    expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+      summary: {
+        bundleCount: 1,
+        imageCount: 1,
+        markdownBytes: Buffer.byteLength('# Saved bundle'),
+        imageBytes: null,
+        sizeMetadataComplete: false,
+      },
+      bundles: [
+        {
+          bundleNumber: 1,
+          markdown: { status: 'not-read', bytes: Buffer.byteLength('# Saved bundle') },
+          image: { status: 'unavailable', bytes: null },
+        },
+      ],
+    });
+    for (const [target] of [...opens.mock.calls, ...reads.mock.calls])
+      expect(String(target).startsWith(folder + path.sep)).toBe(false);
+  });
+
+  it('does not certify invalid image bytes and rejects stale or disabled inspection', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath, undefined, '# Saved', Buffer.from('not PNG'));
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    let enabled = true;
+    const tools = createMcpTools({
+      enabled: () => enabled,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+    });
+    const response = await protocolCall(tools, 'inspect_bundle', { id });
+    expect(JSON.parse(response.result!.content[0]!.text!)).toMatchObject({
+      contentVerified: false,
+      bundles: [{ image: { status: 'not-read', bytes: 7 } }],
+    });
+    enabled = false;
+    expect((await protocolCall(tools, 'inspect_bundle', { id })).result?.isError).toBe(true);
+    enabled = true;
+    await fs.rename(folder, folder + '-removed');
+    expect((await protocolCall(tools, 'inspect_bundle', { id })).result?.content[0]?.text).toBe(
+      'bundle not found',
+    );
+    expect((await protocolCall(tools, 'inspect_bundle', { id: '../outside' })).result?.isError).toBe(true);
+  });
+
+  it('does not inspect a saved export replaced by a link outside the workspace', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    const folder = await writeBundle(projectPath);
+    const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+    const id = listed.collections[0]!.preparedBundles[0]!.id;
+    const foreign = await workspace();
+    await fs.writeFile(path.join(foreign, `${path.basename(folder)} - 01.md`), MANAGEMENT_SECRET);
+    await fs.rename(folder, folder + '-old');
+    await fs.symlink(foreign, folder, process.platform === 'win32' ? 'junction' : 'dir');
+    const response = await protocolCall(toolsFor(root), 'inspect_bundle', { id });
+    expect(response.result?.isError).toBe(true);
+    expect(response.result?.content[0]?.text).toBe('bundle not found');
+    expect(JSON.stringify(response)).not.toContain(MANAGEMENT_SECRET);
+    expect(JSON.stringify(response)).not.toContain(foreign);
+  });
+
   it('lists active projects and all collection states, with stable discoverable bundle ids and no writes', async () => {
     const root = await workspace();
     const project = projectData();
@@ -895,11 +1469,28 @@ describe('MCP wire protocol for prepared data', () => {
     const malformed = await fetch(url, { method: 'POST', body: '{' + PAIRING_SECRET });
     expect(malformed.status).toBe(400);
     expect(await malformed.text()).not.toContain(PAIRING_SECRET);
-    const huge = await fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ padding: 'x'.repeat(1_000_001) }),
+    // Observe the declared-size refusal before uploading. A fetch that continues
+    // writing after the server's early response/close can expose ECONNRESET
+    // instead of the 413. Streamed-body limits have separate real HTTP coverage
+    // in mcp-transport.test.ts; do not retry or accept a reset as this result.
+    const huge = await new Promise<{ status: number | undefined; text: string }>((resolve, reject) => {
+      const request = httpRequest(
+        url,
+        { method: 'POST', headers: { 'Content-Length': '1000001' } },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('error', reject);
+          response.on('end', () =>
+            resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') }),
+          );
+        },
+      );
+      request.on('error', reject);
+      request.end();
     });
-    expect(huge.status).toBe(400);
+    expect(huge.status).toBe(413);
+    expect(JSON.parse(huge.text)).toEqual({ error: 'JSON-RPC request exceeds the read limit.' });
     // Undici may replace Host; send the wire header explicitly to exercise DNS-rebinding protection.
     const foreignHostStatus = await new Promise<number | undefined>((resolve, reject) => {
       const request = httpRequest(

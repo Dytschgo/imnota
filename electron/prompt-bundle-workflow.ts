@@ -22,7 +22,7 @@ import {
   type FinalizedPromptBundleSession,
   type StoredPromptBundle,
 } from './prompt-bundle-store.js';
-import { NativeWorkflowError } from './workflow-errors.js';
+import { clipboardFailure, filesystemFailure, NativeWorkflowError } from './workflow-errors.js';
 import { formatTerminalHandoff, TerminalPathError } from '../src/shared/terminal-handoff.js';
 
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
@@ -35,6 +35,17 @@ export interface AuthorizedPromptCollection {
   projectPath: string;
   collectionId: string;
   collectionName: string;
+}
+
+export function promptCollectionGrant(
+  projectPath: string,
+  collectionId: string,
+  collections: readonly { id: string; name: string }[],
+): AuthorizedPromptCollection {
+  const collection = collections.find((candidate) => candidate.id === collectionId);
+  if (!collection)
+    throw new NativeWorkflowError('collection-not-found', 'Collection does not belong to this project.');
+  return { projectPath, collectionId: collection.id, collectionName: collection.name };
 }
 
 export interface PromptBundleWorkflowDependencies {
@@ -244,13 +255,8 @@ export class PromptBundleWorkflow {
       return { target };
     }
     if (!bundle.pngFilename) {
-      if (target === 'image')
-        throw new NativeWorkflowError('bundle-not-found', 'This text-only prompt has no image to copy.');
-      if (target === 'files' || target === 'files-rich')
-        throw new NativeWorkflowError(
-          'bundle-not-found',
-          'The Windows file comparison requires a bundle with a PNG.',
-        );
+      if (target === 'image' || target === 'files' || target === 'files-rich')
+        throw clipboardFailure('rejected', 'This prompt has no image to copy. Use Copy Markdown only.');
       await this.dependencies.copyText(await this.readMarkdown(grant, bundle));
       return { target: 'markdown' };
     }
@@ -370,7 +376,7 @@ export class PromptBundleWorkflow {
       (result) => this.finalizeGrant(sessionId, existing, result),
       (error) => {
         existing.finalization = undefined;
-        throw error;
+        throw filesystemFailure(error);
       },
     );
     existing.finalization = finalization;
@@ -386,7 +392,10 @@ export class PromptBundleWorkflow {
       fs.realpath(targetPath),
     ]);
     if (!isWithin(realFolder, realTarget))
-      throw new NativeWorkflowError('permission-denied', 'Stored prompt path escaped its granted folder.');
+      throw new NativeWorkflowError(
+        'linked-path',
+        'Stored prompt path escaped its granted folder. Choose a folder without links.',
+      );
   }
 
   private async readMarkdown(grant: FinalGrant, bundle: StoredPromptBundle): Promise<string> {
@@ -420,6 +429,8 @@ export class PromptBundleWorkflow {
       throw new NativeWorkflowError(
         'io-failure',
         `Stored prompt PNG is damaged or no longer matches its grant: ${error instanceof Error ? error.message : String(error)}`,
+        false,
+        filesystemFailure(error).details,
       );
     }
     return `${PNG_DATA_URL_PREFIX}${png.toString('base64')}`;

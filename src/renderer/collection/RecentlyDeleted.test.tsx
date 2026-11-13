@@ -29,7 +29,8 @@ const text: RecentlyDeletedItem = {
   kind: 'text',
   undoToken: 'content-delete-1',
   itemId: 'text-1',
-  title: 'Context note',
+  // Text titles are the raw first Markdown line.
+  title: '# Context note',
   collectionId: 'collection-a',
   deletedAt: '2026-01-04T10:00:00.000Z',
 };
@@ -68,6 +69,9 @@ describe('RecentlyDeleted', () => {
     expect(rows[0]).toHaveTextContent('Payment form');
     expect(rows[0]).toHaveTextContent('Screenshot · Checkout · Deleted');
     expect(rows[0].querySelector('time')).toHaveAttribute('dateTime', shot.deletedAt);
+    // Minutes identify a deletion; seconds only lengthen every row.
+    expect(rows[0].querySelector('time')?.textContent).not.toMatch(/\d:\d\d:\d\d/);
+    expect(rows[1]).toHaveTextContent(/^Context note/);
     expect(rows[1]).toHaveTextContent('Text block · Checkout · Deleted');
     expect(within(dialog).getByRole('button', { name: 'Restore screenshot: Payment form' })).toBeEnabled();
     expect(within(dialog).getByRole('button', { name: 'Restore text block: Context note' })).toBeEnabled();
@@ -200,11 +204,16 @@ describe('RecentlyDeleted', () => {
 
     window.imnota = {
       listRecentlyDeleted: vi.fn(async () => {
-        throw new Error('The project directory is unavailable.');
+        throw new Error(
+          "Error invoking remote method 'projects:recently-deleted': Error: The project directory is unavailable.",
+        );
       }),
     } as unknown as ImnotaBridge;
     open(vi.fn());
-    expect(await screen.findByRole('alert')).toHaveTextContent('The project directory is unavailable.');
+    // The IPC channel name is not a recovery step; only the main-process message is shown.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/^The project directory is unavailable\.$/);
+    expect(screen.getByRole('button', { name: 'Refresh list' })).toBeEnabled();
   });
 
   it('closes on Escape and returns focus to the rail button', async () => {

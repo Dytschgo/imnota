@@ -5,6 +5,16 @@ import {
   type PromptBundleDelivery,
 } from '../shared/prompt-bundles';
 
+export class PromptBundleRenderError extends Error {
+  constructor(
+    readonly code: 'composition-unavailable' | 'encode-failed' | 'content-changed' | 'render-limit',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'PromptBundleRenderError';
+  }
+}
+
 export interface DecodedPromptPng {
   source: unknown;
   width: number;
@@ -89,7 +99,11 @@ function browserEnvironment(): PromptBundleRenderEnvironment {
       canvas.width = width;
       canvas.height = height;
       const nativeContext = canvas.getContext('2d');
-      if (!nativeContext) throw new Error('Prompt bundle composition is unavailable on this device.');
+      if (!nativeContext)
+        throw new PromptBundleRenderError(
+          'composition-unavailable',
+          'Prompt bundle composition is unavailable on this device.',
+        );
       const context: PromptCanvasContext = {
         get fillStyle() {
           return String(nativeContext.fillStyle);
@@ -178,7 +192,8 @@ export async function composePromptBundle(
     bundle.layout.height > maxCanvasEdge ||
     bundle.layout.width * bundle.layout.height > maxCanvasPixels
   )
-    throw new Error(
+    throw new PromptBundleRenderError(
+      'render-limit',
       'The full-resolution prompt exceeds local canvas safety limits. Save the expanded screenshot and Markdown separately.',
     );
   const environment = options.environment ?? browserEnvironment();
@@ -186,7 +201,10 @@ export async function composePromptBundle(
     options.resolvePicturePng ??
     (async (picture: PromptBundle['pictures'][number]): Promise<ResolvedPromptPicturePng> => {
       if (!picture.dataUrl)
-        throw new Error(`Rendered PNG is not available for Picture ${picture.pictureNumber}.`);
+        throw new PromptBundleRenderError(
+          'content-changed',
+          `Rendered PNG is not available for Picture ${picture.pictureNumber}.`,
+        );
       return {
         dataUrl: picture.dataUrl,
         width: picture.width,
@@ -195,7 +213,16 @@ export async function composePromptBundle(
       };
     });
   throwIfAborted(options.signal);
-  const surface = environment.createSurface(bundle.layout.width, bundle.layout.height);
+  let surface: PromptCanvasSurface;
+  try {
+    surface = environment.createSurface(bundle.layout.width, bundle.layout.height);
+  } catch (error) {
+    if (error instanceof PromptBundleRenderError) throw error;
+    throw new PromptBundleRenderError(
+      'composition-unavailable',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   try {
     const context = surface.context;
     context.fillStyle = '#ffffff';
@@ -208,7 +235,10 @@ export async function composePromptBundle(
       throwIfAborted(options.signal);
       const item = bundle.layout.items[index];
       if (!item || item.screenshotId !== picture.screenshotId)
-        throw new Error('Prompt bundle layout does not match its screenshot order.');
+        throw new PromptBundleRenderError(
+          'content-changed',
+          'Prompt bundle layout does not match its screenshot order.',
+        );
       context.fillText(
         labelFor(picture.pictureNumber, picture.title, picture.originalFilename, picture.kind),
         item.x,
@@ -224,14 +254,16 @@ export async function composePromptBundle(
           resolved.contentRevision !== picture.contentRevision ||
           !resolved.dataUrl.startsWith('data:image/png;base64,')
         )
-          throw new Error(
+          throw new PromptBundleRenderError(
+            'content-changed',
             `Rendered content or dimensions changed for Picture ${picture.pictureNumber}. Export it again.`,
           );
         const decoded = await environment.decodePng(resolved.dataUrl);
         try {
           throwIfAborted(options.signal);
           if (decoded.width !== picture.width || decoded.height !== picture.height)
-            throw new Error(
+            throw new PromptBundleRenderError(
+              'content-changed',
               `Rendered dimensions changed for Picture ${picture.pictureNumber}. Export it again.`,
             );
           context.drawImage(decoded.source, item.x, item.imageY, picture.width, picture.height);
@@ -247,9 +279,17 @@ export async function composePromptBundle(
     }
 
     throwIfAborted(options.signal);
-    const dataUrl = surface.toPngDataUrl();
+    let dataUrl: string;
+    try {
+      dataUrl = surface.toPngDataUrl();
+    } catch (error) {
+      throw new PromptBundleRenderError(
+        'encode-failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     if (!dataUrl.startsWith('data:image/png;base64,'))
-      throw new Error('The composed prompt could not be encoded as PNG.');
+      throw new PromptBundleRenderError('encode-failed', 'The composed prompt could not be encoded as PNG.');
     if (dataUrl.length > maxCharacters) {
       const breakBeforeScreenshotId = encodedOverflowBreak(bundle);
       if (breakBeforeScreenshotId)

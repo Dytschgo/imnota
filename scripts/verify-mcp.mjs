@@ -327,6 +327,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
               'get_bundle',
               'get_latest_bundle',
               'list_new_since',
+              'inspect_bundle',
             ])
               assert.ok(
                 tools.result.tools.some((tool) => tool.name === name),
@@ -341,6 +342,8 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
             assert.equal(listed.isError, false);
             const collections = JSON.parse(listed.content[0].text).collections;
             assert.equal(collections.length, 2);
+            assert.equal(collections[0].preparedBundlesTotal, 1);
+            assert.equal(collections[0].preparedBundlesTruncated, false);
             const id = collections.find((collection) => collection.id === collectionId).preparedBundles[0].id;
             assert.match(id, /^b_[a-f0-9]{32}$/);
             for (const args of [{}, { projectPath, limit: 1 }]) {
@@ -363,6 +366,33 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
               assert.deepEqual(JSON.parse(inbox.content[0].text).bundles, []);
               assert.equal(JSON.parse(inbox.content[0].text).more, false);
             }
+            const inspected = await call('inspect_bundle', { id });
+            assert.equal(inspected.isError, false);
+            assert.equal(inspected.content.length, 1);
+            const inspection = JSON.parse(inspected.content[0].text);
+            assert.equal(inspection.sourceKind, 'saved-export');
+            assert.equal(inspection.freshness, 'unknown');
+            assert.equal(inspection.contentVerified, false);
+            assert.deepEqual(inspection.summary, {
+              bundleCount: 1,
+              imageCount: 1,
+              markdownBytes: Buffer.byteLength(markdown),
+              imageBytes: png.length,
+              sizeMetadataComplete: true,
+            });
+            assert.equal(inspection.bundles[0].markdown.bytes, Buffer.byteLength(markdown));
+            assert.equal(inspection.bundles[0].image.bytes, png.length);
+            assert.deepEqual(inspection.next, { tool: 'get_bundle', arguments: { id } });
+            assert.deepEqual(inspection.bundles[0].next, {
+              tool: 'get_bundle',
+              arguments: { id, bundleNumbers: [1], includeImages: false },
+            });
+            const itemList = await call('list_collection_items', { projectPath, collectionId });
+            // This synthetic export fixture has no source items; no action may invent one.
+            assert.deepEqual(JSON.parse(itemList.content[0].text).items, []);
+            const archivedProjects = await call('list_projects', { scope: 'archived' });
+            assert.equal(archivedProjects.isError, false);
+            assert.deepEqual(JSON.parse(archivedProjects.content[0].text).projects, []);
             for (const [name, args] of [
               ['get_bundle', { id }],
               ['get_latest_bundle', {}],
@@ -375,9 +405,23 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
                 mimeType: 'image/png',
                 data: png.toString('base64'),
               });
+              assert.equal(JSON.parse(bundle.content[0].text).bundles[0].imageContentIndex, 1);
+              const textOnly = await call(name, { ...args, includeImages: false, bundleNumbers: [1] });
+              assert.equal(textOnly.isError, false);
+              assert.equal(textOnly.content.length, 1);
+              const textResult = JSON.parse(textOnly.content[0].text);
+              assert.equal(textResult.sourceKind, 'saved-export');
+              assert.equal(textResult.freshness, 'unknown');
+              assert.equal(textResult.bundles[0].markdown, markdown);
+              assert.equal(textResult.bundles[0].markdownBytes, Buffer.byteLength(markdown));
+              assert.equal(textResult.bundles[0].image, 'not-requested');
+              const missing = await call(name, { ...args, bundleNumbers: [2] });
+              assert.equal(missing.isError, true);
+              assert.match(missing.content[0].text, /not present in this saved export/);
             }
             for (const [name, args, error] of [
               ['get_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
+              ['inspect_bundle', { id: `b_${'0'.repeat(32)}` }, 'bundle not found'],
               ['get_latest_bundle', { projectPath, collectionId: '002-empty' }, 'bundle not prepared'],
             ]) {
               const result = await call(name, args);
@@ -407,7 +451,7 @@ export async function verifyPackagedMcp(executable, packagedArtifact = executabl
         assert.equal(result.code, enabled ? 0 : 1);
         if (!enabled) {
           assert.equal(result.stdoutBytes, 0);
-          assert.match(result.stderr, /Local agent access is off/);
+          assert.match(result.stderr, /Local agent access is off\. Enable it in Settings → Features\./);
         }
         assert.doesNotMatch(result.stderr, /UnhandledPromiseRejection|Uncaught Exception|JavaScript error/i);
         const lifecycle = JSON.parse(await readFile(join(profile, 'mcp-lifecycle.json'), 'utf8'));

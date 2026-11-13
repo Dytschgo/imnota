@@ -3,6 +3,7 @@ import { refreshCommittedSettings } from './settings/sharing-preferences';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type Konva from 'konva';
 import { CircleAlert, Check, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { shouldShowOnboarding } from '../shared/preferences';
 import {
   formatShortcut,
@@ -33,6 +34,7 @@ import { Workspace } from './app/Workspace';
 import { liveTextColor, semanticAnnotationColor } from './canvas/annotation-layout';
 import { dispatchCanvasCommand } from './canvas/commands';
 import { continuesUndoStep, type AnnotationChangeOptions } from './canvas/undo-coalescing';
+import { ANNOTATION_UNDO_LIMIT, pushBounded } from './canvas/undo-history';
 import { Logo } from './components/Logo';
 import type { ToolChoice } from './components/Toolbar';
 import { Button, IconButton, Modal } from './components/ui';
@@ -51,6 +53,13 @@ import {
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 import { setReloadProtection } from './app/reload-guard';
+import {
+  nativeFaultReceiverPresent,
+  registerNativeFaultAdapter,
+  reportNativeFaultTransition,
+  observeNativeFaultSave,
+} from './app/native-fault-probe';
+import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-faults';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -66,6 +75,7 @@ import {
 } from './capture/capture-destination';
 import { WhatsNewDialog, type WhatsNewAction } from './components/WhatsNew';
 import { findWhatsNewRelease, shouldShowWhatsNew } from '../shared/whats-new';
+import { splitDiagnosticReference, userFacingErrorMessage } from './user-facing-error';
 
 export { CollectionControls } from './collection/CollectionRail';
 export { SettingsView } from './settings/SettingsView';
@@ -99,13 +109,23 @@ type ToastNotification = {
   projectPath: string | null;
 };
 
-export function userFacingErrorMessage(message: string): string {
-  const withoutIpcWrapper = message.replace(/^Error invoking remote method '[^']+':\s*/i, '');
-  return withoutIpcWrapper.replace(/^(?:Error(?:[.:]\s*|\s+))+/i, '') || 'Something went wrong. Try again.';
-}
+export { userFacingErrorMessage };
 
 export default function App() {
-  const store = useAppStore();
+  const store = useAppStore(
+    useShallow((state) => ({
+      settings: state.settings,
+      projects: state.projects,
+      snapshot: state.snapshot,
+      activeScreenshotId: state.activeScreenshotId,
+      activeCollectionId: state.activeCollectionId,
+      view: state.view,
+      leftPanelOpen: state.leftPanelOpen,
+      rightPanelOpen: state.rightPanelOpen,
+      set: state.set,
+      activeScreenshot: state.activeScreenshot,
+    })),
+  );
   const preferences = usePreferences();
   const appearance = useAppearance(preferences.settings.appearance, {
     performanceConstrained: preferences.performance.reducedEffectsRecommended,
@@ -160,6 +180,7 @@ export default function App() {
   const copiedAnnotation = useRef<Annotation | null>(null);
   const dismissedWhatsNewVersion = useRef<string | null>(null);
   const navigationIdentity = useRef(0);
+  const pendingProjectPin = useRef<Promise<void> | null>(null);
   const [searchTarget, setSearchTarget] = useState<{
     result: ContentSearchResult;
     identity: number;
@@ -194,11 +215,14 @@ export default function App() {
     snapshot: store.snapshot,
     activeScreenshot: activeShot,
     sessionGeneration: projectSessionGeneration,
+    verificationObserver: nativeFaultReceiverPresent ? reportNativeFaultTransition : undefined,
+    nativeFaultVerification: nativeFaultReceiverPresent,
     onProject: useCallback((project) => useAppStore.getState().updateProject(project), []),
     onSnapshot: adoptSnapshot,
     onSelectScreenshot: useCallback((id) => useAppStore.getState().set({ activeScreenshotId: id }), []),
   });
   const contentPersistence = useContentPersistence({
+    nativeFaultVerification: nativeFaultReceiverPresent,
     snapshot: store.snapshot,
     itemId: store.activeScreenshotId,
     beforeSave: persistence.prepareContentSave,
@@ -261,11 +285,12 @@ export default function App() {
   const promptBundles = usePromptBundleController({
     getSavedContext: getSavedPromptContext,
     getIncludeRecognisedText: () => preferences.settings.promptExport.includeRecognisedText,
+    getIncludeSourceContext: () => preferences.settings.promptExport.includeSourceContext,
   });
   const handlePromptAction = useCallback(
     async (action: ReturnType<typeof promptBundles.open>) => {
       const result = await action;
-      if (!result.ok) setError(result.error.message);
+      if (!result.ok && !promptBundles.isErrorShowing(result.error)) setError(result.error.message);
     },
     [promptBundles],
   );
@@ -559,7 +584,7 @@ export default function App() {
   // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
   useEffect(() => {
     setReloadProtection({
-      flush: () => persistence.withReloadWatch(flushAll),
+      flush: () => observeNativeFaultSave(() => persistence.withReloadWatch(flushAll)),
       allowUnload: () => {
         allowClose.current = true;
       },
@@ -567,10 +592,10 @@ export default function App() {
   }, [flushAll, persistence]);
 
   const queueProjectSave = useCallback(
-    (project: ProjectData, changedShot?: ScreenshotRecord) => {
+    (project: ProjectData, changedShot?: ScreenshotRecord, retainedFixtureDraft = false) => {
       if (changedShot) {
         useAppStore.getState().updateProject(project);
-        persistence.markScreenshotDirty(changedShot);
+        persistence.markScreenshotDirty(changedShot, retainedFixtureDraft);
         return;
       }
       // Queue the concrete edit before any asynchronous save can publish an older snapshot.
@@ -584,6 +609,45 @@ export default function App() {
     },
     [persistence],
   );
+
+  useEffect(() => {
+    if (!nativeFaultReceiverPresent) return;
+    registerNativeFaultAdapter({
+      read() {
+        const current = useAppStore.getState();
+        const state = persistence.verificationState!();
+        return {
+          ...state,
+          projectPath: current.snapshot?.projectPath ?? '',
+          projectId: current.snapshot?.project.id ?? '',
+          snapshotRevision: current.snapshot?.projectRevision ?? null,
+          pendingContent: contentPersistence.verificationPending!(),
+          selectedItemId: current.activeScreenshotId,
+        };
+      },
+      queueMetadata(name) {
+        const snapshot = useAppStore.getState().snapshot;
+        if (!snapshot) throw new Error('No fixture project.');
+        queueProjectSave({ ...snapshot.project, name });
+      },
+      stageDrafts() {
+        const snapshot = useAppStore.getState().snapshot;
+        const shot = snapshot?.project.screenshots[0];
+        if (!snapshot || !shot || contentPersistence.content?.item.kind !== 'text')
+          throw new Error('Recovery fixture must have a loaded text and previously loaded screenshot.');
+        contentPersistence.change({ markdown: FAULT_MARKDOWN });
+        const next = { ...shot, description: FAULT_DESCRIPTION };
+        queueProjectSave(
+          {
+            ...snapshot.project,
+            screenshots: snapshot.project.screenshots.map((item) => (item.id === shot.id ? next : item)),
+          },
+          next,
+          true,
+        );
+      },
+    });
+  }, [persistence, contentPersistence, queueProjectSave]);
 
   const updateShot = useCallback(
     (patch: Partial<ScreenshotRecord>) => {
@@ -608,7 +672,7 @@ export default function App() {
   const changeAnnotations = useCallback(
     (next: Annotation[], options?: AnnotationChangeOptions) => {
       if (!continuesUndoStep(annotationUndoKey.current, options))
-        setHistory((items) => [...items, persistence.annotations]);
+        setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
       annotationUndoKey.current = options?.coalesce ?? null;
       setRedo([]);
       persistence.changeAnnotations(next);
@@ -627,7 +691,7 @@ export default function App() {
     annotationUndoKey.current = null;
     const next = redo.at(-1);
     if (!next) return;
-    setHistory((items) => [...items, persistence.annotations]);
+    setHistory((items) => pushBounded(items, persistence.annotations, ANNOTATION_UNDO_LIMIT));
     persistence.changeAnnotations(next);
     setRedo((items) => items.slice(0, -1));
   }, [persistence, redo]);
@@ -1348,8 +1412,11 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const token = await beginCurrentProjectMutation();
@@ -1574,8 +1641,11 @@ export default function App() {
     onWarning?: (message: string) => void,
   ): Promise<boolean> {
     if (useAppStore.getState().snapshot?.projectPath !== projectPath) return false;
-    if (persistence.externalChange) {
-      onError(persistence.externalChange.message ?? 'Reload and compare the project before restoring again.');
+    if (persistence.hasUnresolvedExternalChange()) {
+      persistence.revealExternalChange();
+      onError(
+        persistence.externalChange?.message ?? 'Reload and compare the project before restoring again.',
+      );
       return false;
     }
     const nativeMutationToken = await beginCurrentProjectMutation();
@@ -1742,6 +1812,72 @@ export default function App() {
       setDialogBusy(false);
     }
   }
+  async function setProjectPinned(projectPath: string, pinned: boolean) {
+    const previous = pendingProjectPin.current;
+    const operation = (async () => {
+      // Resolve the destination after earlier pin mutations have reconciled their snapshot.
+      if (previous) await previous;
+      const open = useAppStore.getState().snapshot;
+      if (open?.projectPath === projectPath) {
+        if (open.project.favourite !== pinned)
+          queueProjectSave({ ...open.project, favourite: pinned, updatedAt: nowIso() });
+        return;
+      }
+      const identity = ++navigationIdentity.current;
+      let nativeMutationToken: number | null = null;
+      try {
+        if (!(await flushAll())) {
+          if (identity === navigationIdentity.current)
+            setError('The project pin change was cancelled so your unsaved work stays open.');
+          return;
+        }
+        if (identity !== navigationIdentity.current) return;
+        nativeMutationToken = persistence.beginNativeMutation();
+        const loaded = await window.imnota.loadProject(projectPath);
+        if (identity !== navigationIdentity.current) return;
+        if (!loaded.projectRevision) throw new Error('Project revision is unavailable.');
+        const result = await window.imnota.updateProjectMetadata({
+          projectPath,
+          expectedRevision: loaded.projectRevision,
+          patch: { favourite: pinned },
+        });
+        // Opening this project can supersede the original navigation identity while IPC is pending.
+        // Reconcile before releasing queued editor saves, even when that navigation won.
+        if (useAppStore.getState().snapshot?.projectPath === projectPath) {
+          const completionIdentity = navigationIdentity.current;
+          const adopted = await persistence.adoptAuthoritativeSnapshot(
+            result,
+            nativeMutationToken,
+            () =>
+              completionIdentity === navigationIdentity.current &&
+              useAppStore.getState().snapshot?.projectPath === projectPath,
+          );
+          nativeMutationToken = null;
+          if (!adopted) return;
+        } else {
+          await persistence.cancelNativeMutation(nativeMutationToken);
+          nativeMutationToken = null;
+        }
+        await refreshProjects();
+      } catch (reason) {
+        const message = projectPinErrorMessage(reason, pinned);
+        setError(message);
+        try {
+          await refreshProjects();
+        } catch {
+          setError(`${message} The project list could not be refreshed.`);
+        }
+      } finally {
+        if (nativeMutationToken !== null) await persistence.cancelNativeMutation(nativeMutationToken);
+      }
+    })();
+    pendingProjectPin.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (pendingProjectPin.current === operation) pendingProjectPin.current = null;
+    }
+  }
   async function setProjectArchived(projectPath: string, archived: boolean, expectedRevision?: string) {
     const identity = ++navigationIdentity.current;
     if (!(await flushAll())) {
@@ -1846,12 +1982,12 @@ export default function App() {
     void navigate('settings');
   }
   async function toggleFavourite() {
-    if (!store.snapshot) return;
-    queueProjectSave({
-      ...store.snapshot.project,
-      favourite: !store.snapshot.project.favourite,
-      updatedAt: nowIso(),
-    });
+    const projectPath = useAppStore.getState().snapshot?.projectPath;
+    if (!projectPath) return;
+    if (pendingProjectPin.current) await pendingProjectPin.current;
+    const open = useAppStore.getState().snapshot;
+    if (open?.projectPath !== projectPath) return;
+    await setProjectPinned(projectPath, !open.project.favourite);
   }
   async function openProjectSearch() {
     if (!store.settings.workspacePath) {
@@ -1939,7 +2075,7 @@ export default function App() {
     'navigation.recent': () => void navigate('recent'),
     'navigation.favourites': () => void navigate('favourites'),
     'navigation.settings': () => void navigate('settings'),
-    'edit.save': () => void flushAll(),
+    'edit.save': () => void observeNativeFaultSave(flushAll),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
     'edit.copyAnnotation': () => {
@@ -2096,6 +2232,8 @@ export default function App() {
         onSearch={openProjectSearch}
         onOpenPromptBundles={() => handlePromptAction(promptBundles.open())}
         onToggleFavourite={toggleFavourite}
+        onSelectProject={openProject}
+        onSetProjectPinned={setProjectPinned}
         onAbout={() => setDialog('about')}
         onOpenCollection={openCollection}
         onDropFiles={(files) =>
@@ -2273,6 +2411,7 @@ export default function App() {
           />
         ) : (
           <Workspace
+            sourceContextEnabled={preferences.settings.promptExport.includeSourceContext}
             content={contentPersistence.content}
             contentLoading={contentPersistence.loading}
             contentSaveState={contentPersistence.saveState}
@@ -2419,9 +2558,24 @@ export default function App() {
       {toast && !visibleError && (
         <div
           className="toast"
+          {...(nativeFaultReceiverPresent
+            ? {
+                'data-fault-generation': toast.generation,
+                'data-fault-duration': toast.durationMs,
+                'data-fault-holds': toastHold.current,
+              }
+            : {})}
           role="status"
-          onMouseEnter={holdToast}
-          onMouseLeave={releaseToast}
+          onMouseOver={(event) => {
+            // A native mouseover can arrive without the paired mouseout that
+            // React's synthesized enter expects. Ignore moves within the toast.
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              holdToast();
+          }}
+          onMouseOut={(event) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              releaseToast();
+          }}
           onFocus={holdToast}
           onBlur={releaseToast}
         >
@@ -2445,7 +2599,7 @@ export default function App() {
       {visibleError && (
         <div className="toast error-toast" role="alert" data-testid="error-toast">
           <CircleAlert size={16} aria-hidden="true" />
-          <span>{userFacingErrorMessage(visibleError)}</span>
+          <ErrorToastMessage message={userFacingErrorMessage(visibleError)} />
           {permissionHelp && visibleError === permissionHelp.message && (
             <button
               type="button"
@@ -2594,6 +2748,46 @@ export default function App() {
       )}
     </>
   );
+}
+
+/** Keeps the message one text run (`message [Diagnostic reference: …]`) for copying and checks. */
+function ErrorToastMessage({ message }: { message: string }) {
+  const { text, reference } = splitDiagnosticReference(message);
+  return (
+    <span>
+      {text}
+      {reference && (
+        <>
+          {' '}
+          <span className="toast-reference">[Diagnostic reference: {reference}]</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function projectPinErrorMessage(reason: unknown, pinned: boolean): string {
+  const message =
+    reason instanceof Error
+      ? reason.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+      : '';
+  const code =
+    reason instanceof Error && 'code' in reason && typeof reason.code === 'string'
+      ? reason.code.toUpperCase()
+      : /^([A-Z][A-Z0-9_]*):/i.exec(message)?.[1].toUpperCase();
+  // Classify IPC-wrapped failures, but never display their paths or system details.
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS')
+    return "The project folder can't be written. Check its permissions.";
+  if (code === 'ENOSPC') return 'The disk is full. Free up space and try again.';
+  if (
+    /^(?:revision[- ]conflict\b|(?:the )?project changed (?:before this update|while the save was prepared)\.)/i.test(
+      message,
+    )
+  )
+    return 'The project changed. Try again.';
+  if (code === 'ENOENT' || /^The selected project folder is unavailable\./i.test(message))
+    return 'The project is no longer available.';
+  return `The project could not be ${pinned ? 'pinned' : 'unpinned'}. Try again.`;
 }
 
 function isMissingNavigationTargetError(reason: unknown): boolean {
