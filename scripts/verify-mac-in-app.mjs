@@ -108,12 +108,14 @@ const status = () => evaluate('window.imnota.getUpdateStatus()');
 async function click(selector, text) {
   const point = await waitFor(`visible ${text ?? selector}`, () =>
     evaluate(`(() => {
-    const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node =>
-      ${text === undefined ? 'true' : `node.textContent.trim() === ${JSON.stringify(text)}`} &&
-      !node.disabled && node.getBoundingClientRect().width > 0);
-    if (!node) return null;
-    node.scrollIntoView({block:'center'});
-    const r = node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};
+    for (const node of document.querySelectorAll(${JSON.stringify(selector)})) {
+      if (!(${text === undefined ? 'true' : `node.textContent.trim() === ${JSON.stringify(text)}`}) || node.disabled) continue;
+      node.scrollIntoView({block:'center'});
+      const r = node.getBoundingClientRect(), x = r.x+r.width/2, y = r.y+r.height/2;
+      if (r.width > 0 && r.height > 0 && x >= 0 && y >= 0 && x < innerWidth && y < innerHeight &&
+        node.contains(document.elementFromPoint(x,y))) return {x,y};
+    }
+    return null;
   })()`),
   );
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
@@ -129,6 +131,34 @@ async function appPids() {
     const row = /^\s*(\d+)\s+(.+)$/.exec(line);
     return row && row[2].startsWith(`${appPath}/`) ? [{ pid: Number(row[1]), command: row[2] }] : [];
   });
+}
+async function prepareFixtureWorkspace(profileDirectories) {
+  const workspace = await fs.realpath(
+    await fs.mkdtemp(path.join(process.env.RUNNER_TEMP, 'imnota-live-update-workspace-')),
+  );
+  const ownedProfiles = new Set();
+  for (const directory of profileDirectories) {
+    try {
+      await fs.mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      // On a case-insensitive Mac, Imnota and imnota name the same newly owned directory.
+      if (error.code !== 'EEXIST') throw error;
+      const stat = await fs.lstat(directory);
+      assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), 'Profile fixture must be a physical directory');
+      assert.ok(ownedProfiles.has(await fs.realpath(directory)), 'Never seed a pre-existing profile');
+      continue;
+    }
+    const stat = await fs.lstat(directory);
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), 'Profile fixture must be a physical directory');
+    ownedProfiles.add(await fs.realpath(directory));
+    // Existing legacy fixture shape, also used by verify-mcp; normal startup migrates it.
+    await fs.writeFile(path.join(directory, 'settings.json'), JSON.stringify({ workspacePath: workspace }), {
+      flag: 'wx',
+      mode: 0o600,
+    });
+  }
+  receipt.workspace = workspace;
+  return workspace;
 }
 async function removeOwnedInstallation() {
   for (const { pid } of await appPids()) {
@@ -217,6 +247,9 @@ try {
     '0.0.0',
   );
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', appPath]);
+  await prepareFixtureWorkspace(
+    ['Imnota', 'imnota'].map((name) => path.join(os.homedir(), 'Library/Application Support', name)),
+  );
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('IMNOTA_')) delete env[key];
   child = spawn(executable, ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'], {
@@ -263,9 +296,16 @@ try {
     pending.clear();
   });
   await waitFor('production preload', () => evaluate('Boolean(window.imnota)'));
-  await click('.imnota-onboarding-dismiss');
-  await waitFor('onboarding dismissal', () =>
-    evaluate('!document.querySelector(".imnota-onboarding-dismiss")'),
+  // The seeded legacy profile represents an existing installation, not first-run onboarding.
+  assert.equal(
+    await evaluate('window.imnota.getSettings().then(value => value.workspacePath)'),
+    receipt.workspace,
+    'The running app must load the owned workspace fixture',
+  );
+  await waitFor('workspace renderer', () =>
+    evaluate(
+      'Boolean(document.querySelector("[data-testid=settings-button]")) && !document.querySelector(".welcome")',
+    ),
   );
   await click('[data-testid="settings-button"]');
   await click('.settings-navigation button', 'Updates & about');
