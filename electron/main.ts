@@ -2097,6 +2097,7 @@ function configureAutoUpdates(): void {
               appPath: macAppPath(),
               appPid: process.pid,
               helperPath: path.join(app.getAppPath(), 'scripts/update-macos.sh'),
+              observerPath: path.join(process.resourcesPath, 'imnota-security-observer'),
               cachePath: app.getPath('temp'),
               currentVersion: app.getVersion(),
             },
