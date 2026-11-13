@@ -1,7 +1,7 @@
 import { app, nativeImage, type BrowserWindow } from 'electron';
 import { nativeClipboard, platformClipboardHtml } from './native-clipboard.js';
 import { readWindowsClipboardFilesForSmoke } from './smoke-clipboard.js';
-import { exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
+import { exerciseDotNetBitmapClipboardSmoke, exerciseOleClipboardSmoke } from './ole-clipboard-smoke.js';
 import { exerciseChromiumClipboardSmoke } from './chromium-clipboard-smoke.js';
 import { waitForStableCanvasSample } from './stable-canvas.js';
 import { withRestoredCanvasSmokeState } from './canvas-basics-smoke-state.js';
@@ -2598,6 +2598,17 @@ async function exercisePromptWorkflow(
   if (rejectedClipboard.text !== text || !rejectedClipboard.png.equals(clipboardPng))
     throw new Error('Rejected prompt copy changed the native clipboard.');
   if (process.platform === 'win32' && options.verifyWindowsCopyVariants) {
+    const dotNetBitmap = await exerciseDotNetBitmapClipboardSmoke(
+      driver.browserWindow.getNativeWindowHandle(),
+      await promptBundlePaths(latestSet, copiedIndex),
+      (stage) => console.info(`Windows .NET bitmap clipboard smoke: ${stage}.`),
+    );
+    if (options.artifactDirectory)
+      await fs.writeFile(
+        path.join(options.artifactDirectory, 'windows-dotnet-bitmap-clipboard.json'),
+        JSON.stringify(dotNetBitmap, null, 2),
+        { flag: 'wx' },
+      );
     await exerciseOleClipboardSmoke(
       driver.browserWindow.getNativeWindowHandle(),
       await promptBundlePaths(latestSet, copiedIndex),
