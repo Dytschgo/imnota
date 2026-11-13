@@ -1,9 +1,23 @@
 [CmdletBinding()]
-param()
+param([switch]$CheckSourceOnly)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-# Guest-only orchestration. The application and existing verifiers stay at b80ef9f.
-if (-not $env:AGENTLAB_EVIDENCE_DIR) { throw 'Run only through the managed Windows guest.' }
+# Historical October 31 reproducer, not the current nightly verifier.
+# CheckSourceOnly performs read-only validation on any host; installation remains guest-only.
+if (-not $CheckSourceOnly -and -not $env:AGENTLAB_EVIDENCE_DIR) { throw 'Run only through the managed Windows guest.' }
+$candidateSha = 'b80ef9f2901acae6569eb056aa63d57cc114e5e4'
+$repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ((Get-Location).Path -ine $repository) { throw 'Run from the historical checkout root.' }
+# Compare both index and worktree, including the transitive verifier/fixture sources.
+# Only this orchestration file may differ from the pinned application/verifier snapshot.
+& git -C $repository diff --cached --quiet $candidateSha -- . ':(exclude)scripts/verify-nightly-vm.ps1'
+if ($LASTEXITCODE -ne 0) { throw 'Pinned verifier source mismatch. Use the October 31 checkout; current main is not supported by this historical reproducer.' }
+& git -C $repository diff --quiet -- . ':(exclude)scripts/verify-nightly-vm.ps1'
+if ($LASTEXITCODE -ne 0) { throw 'Pinned verifier source mismatch. Use the October 31 checkout; current main is not supported by this historical reproducer.' }
+if ($CheckSourceOnly) {
+    Write-Output 'Pinned verifier source confirmed. No downloads or installation were performed.'
+    exit 0
+}
 $version = '0.4.1-nightly.20261031.41222265922'
 $tag = "v$version"
 $asset = "Imnota-Setup-$version.exe"
@@ -11,7 +25,9 @@ $expectedHash = 'b55d0db053b2d489226349a55240bb606566ed2386fe21b6236115607019539
 $evidence = Join-Path $env:AGENTLAB_EVIDENCE_DIR 'imnota-verification-artifacts-nightly-vm'
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 $report = [ordered]@{
-    candidateSha = 'b80ef9f2901acae6569eb056aa63d57cc114e5e4'
+    candidateSha = $candidateSha
+    verifierSourceSha = $candidateSha
+    harnessSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
     version = $version
     status = 'running'
     steps = @()
