@@ -53,6 +53,13 @@ import {
 import { FloatingUpdateControl } from './components/FloatingUpdateControl';
 import { clearSessionCheckpoint, readSessionCheckpoint, saveSessionCheckpoint } from './app/session';
 import { setReloadProtection } from './app/reload-guard';
+import {
+  nativeFaultReceiverPresent,
+  registerNativeFaultAdapter,
+  reportNativeFaultTransition,
+  observeNativeFaultSave,
+} from './app/native-fault-probe';
+import { FAULT_DESCRIPTION, FAULT_MARKDOWN } from '../shared/native-faults';
 import { SearchDialog, type ProjectSearchScope, type ProjectSearchTarget } from './search';
 import './app/project-management.css';
 import { Library } from './app/Library';
@@ -210,11 +217,14 @@ export default function App() {
     snapshot: store.snapshot,
     activeScreenshot: activeShot,
     sessionGeneration: projectSessionGeneration,
+    verificationObserver: nativeFaultReceiverPresent ? reportNativeFaultTransition : undefined,
+    nativeFaultVerification: nativeFaultReceiverPresent,
     onProject: useCallback((project) => useAppStore.getState().updateProject(project), []),
     onSnapshot: adoptSnapshot,
     onSelectScreenshot: useCallback((id) => useAppStore.getState().set({ activeScreenshotId: id }), []),
   });
   const contentPersistence = useContentPersistence({
+    nativeFaultVerification: nativeFaultReceiverPresent,
     snapshot: store.snapshot,
     itemId: store.activeScreenshotId,
     beforeSave: persistence.prepareContentSave,
@@ -575,7 +585,7 @@ export default function App() {
   // cleanup on purpose: after a render crash unmounts the app, this is the only path to its drafts.
   useEffect(() => {
     setReloadProtection({
-      flush: () => persistence.withReloadWatch(flushAll),
+      flush: () => observeNativeFaultSave(() => persistence.withReloadWatch(flushAll)),
       allowUnload: () => {
         allowClose.current = true;
       },
@@ -583,10 +593,10 @@ export default function App() {
   }, [flushAll, persistence]);
 
   const queueProjectSave = useCallback(
-    (project: ProjectData, changedShot?: ScreenshotRecord) => {
+    (project: ProjectData, changedShot?: ScreenshotRecord, retainedFixtureDraft = false) => {
       if (changedShot) {
         useAppStore.getState().updateProject(project);
-        persistence.markScreenshotDirty(changedShot);
+        persistence.markScreenshotDirty(changedShot, retainedFixtureDraft);
         return;
       }
       // Queue the concrete edit before any asynchronous save can publish an older snapshot.
@@ -600,6 +610,45 @@ export default function App() {
     },
     [persistence],
   );
+
+  useEffect(() => {
+    if (!nativeFaultReceiverPresent) return;
+    registerNativeFaultAdapter({
+      read() {
+        const current = useAppStore.getState();
+        const state = persistence.verificationState!();
+        return {
+          ...state,
+          projectPath: current.snapshot?.projectPath ?? '',
+          projectId: current.snapshot?.project.id ?? '',
+          snapshotRevision: current.snapshot?.projectRevision ?? null,
+          pendingContent: contentPersistence.verificationPending!(),
+          selectedItemId: current.activeScreenshotId,
+        };
+      },
+      queueMetadata(name) {
+        const snapshot = useAppStore.getState().snapshot;
+        if (!snapshot) throw new Error('No fixture project.');
+        queueProjectSave({ ...snapshot.project, name });
+      },
+      stageDrafts() {
+        const snapshot = useAppStore.getState().snapshot;
+        const shot = snapshot?.project.screenshots[0];
+        if (!snapshot || !shot || contentPersistence.content?.item.kind !== 'text')
+          throw new Error('Recovery fixture must have a loaded text and previously loaded screenshot.');
+        contentPersistence.change({ markdown: FAULT_MARKDOWN });
+        const next = { ...shot, description: FAULT_DESCRIPTION };
+        queueProjectSave(
+          {
+            ...snapshot.project,
+            screenshots: snapshot.project.screenshots.map((item) => (item.id === shot.id ? next : item)),
+          },
+          next,
+          true,
+        );
+      },
+    });
+  }, [persistence, contentPersistence, queueProjectSave]);
 
   const updateShot = useCallback(
     (patch: Partial<ScreenshotRecord>) => {
@@ -2027,7 +2076,7 @@ export default function App() {
     'navigation.recent': () => void navigate('recent'),
     'navigation.favourites': () => void navigate('favourites'),
     'navigation.settings': () => void navigate('settings'),
-    'edit.save': () => void flushAll(),
+    'edit.save': () => void observeNativeFaultSave(flushAll),
     'edit.undo': undoAnnotations,
     'edit.redo': redoAnnotations,
     'edit.copyAnnotation': () => {
@@ -2509,9 +2558,24 @@ export default function App() {
       {toast && !visibleError && (
         <div
           className="toast"
+          {...(nativeFaultReceiverPresent
+            ? {
+                'data-fault-generation': toast.generation,
+                'data-fault-duration': toast.durationMs,
+                'data-fault-holds': toastHold.current,
+              }
+            : {})}
           role="status"
-          onMouseEnter={holdToast}
-          onMouseLeave={releaseToast}
+          onMouseOver={(event) => {
+            // A native mouseover can arrive without the paired mouseout that
+            // React's synthesized enter expects. Ignore moves within the toast.
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              holdToast();
+          }}
+          onMouseOut={(event) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
+              releaseToast();
+          }}
           onFocus={holdToast}
           onBlur={releaseToast}
         >

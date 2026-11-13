@@ -285,6 +285,44 @@ describe('local MCP tools', () => {
     expect((await protocolCall(toolsFor(other), action.tool, action.arguments)).result?.isError).toBe(true);
   });
 
+  it('rejects whitespace-only search before scanning while preserving valid queries', async () => {
+    const root = await workspace();
+    const search = vi.fn(async () => ({ results: [], warnings: [], totalMatches: 0 }));
+    const tools = createMcpTools({
+      enabled: () => true,
+      workspacePath: () => root,
+      appVersion: () => 'test',
+      search,
+    });
+    for (const query of [' ', '\t\n', '\u2003']) {
+      const result = await handleMcpJsonRpc(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'search_saved_text', arguments: { query } },
+        },
+        tools,
+        'test',
+      );
+      expect(result).toMatchObject({
+        result: { isError: true, content: [{ text: 'Invalid tool arguments: query.' }] },
+      });
+    }
+    expect(search).not.toHaveBeenCalled();
+    await handleMcpJsonRpc(
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'search_saved_text', arguments: { query: ' queue ' } },
+      },
+      tools,
+      'test',
+    );
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: ' queue ' }));
+  });
+
   it('rejects path traversal and reserved backup folders', async () => {
     const root = await workspace();
     const projectPath = await writeProject(root, projectData());
@@ -662,6 +700,99 @@ describe('prepared MCP bundle discovery and read boundaries', () => {
     expect(response.result?.content[0]?.text).toContain('not present in this saved export');
     expect(JSON.stringify(response)).not.toContain('Old third part');
   });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s refuses a selected Markdown part that disappears before its payload read',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+      const newest = await writeBundle(projectPath, undefined, '# Selected newest text');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles.find(
+        (set) => set.setName === path.basename(newest),
+      )!.id;
+      const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(toolsFor(root), name, {
+        ...(name === 'get_bundle' ? { id } : { projectPath }),
+        bundleNumbers: [1],
+        includeImages: false,
+      });
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(true);
+      expect(JSON.stringify(response)).not.toContain('Stale older text');
+    },
+  );
+
+  it('refuses a selected export whose Markdown disappears after discovery', async () => {
+    const root = await workspace();
+    const projectPath = await writeProject(root, projectData());
+    await writeBundle(projectPath, 'Review - 260913-110000', '# Stale older text');
+    const newest = await writeBundle(projectPath);
+    const target = path.join(newest, `${path.basename(newest)} - 01.md`);
+    const opendir = fs.opendir;
+    let visits = 0;
+    vi.spyOn(fs, 'opendir').mockImplementation(async (...args) => {
+      // Discovery has already confirmed Markdown on the first visit. Remove it
+      // before the selected export's payload inventory, using the real directory.
+      if (String(args[0]) === newest && ++visits === 2) await fs.unlink(target);
+      return opendir(...args);
+    });
+    const response = await protocolCall(toolsFor(root), 'get_latest_bundle', {
+      projectPath,
+      bundleNumbers: [1],
+    });
+    expect(visits).toBe(2);
+    expect(response.result?.isError).toBe(true);
+    expect(JSON.stringify(response)).not.toContain('Stale older text');
+  });
+
+  it.each(['get_bundle', 'get_latest_bundle'])(
+    '%s reports an image disappearing before its payload read as unavailable',
+    async (name) => {
+      const root = await workspace();
+      const projectPath = await writeProject(root, projectData());
+      const folder = await writeBundle(projectPath, undefined, '# Retained Markdown');
+      const listed = (await callTool(root, 'list_collections', { projectPath })) as CollectionResult;
+      const id = listed.collections[0]!.preparedBundles[0]!.id;
+      const target = path.join(folder, `${path.basename(folder)} - 01.png`);
+      const open = fs.open;
+      let removed = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (String(args[0]) === target && !removed) {
+          await fs.unlink(target);
+          removed = true;
+        }
+        return open(...args);
+      });
+      const response = await protocolCall(
+        toolsFor(root),
+        name,
+        name === 'get_bundle' ? { id } : { projectPath },
+      );
+      expect(removed).toBe(true);
+      expect(response.result?.isError).toBe(false);
+      expect(response.result?.content).toHaveLength(1);
+      const result = JSON.parse(response.result!.content[0]!.text!);
+      expect(result).toMatchObject({
+        imagesIncluded: 0,
+        imagesOmitted: 0,
+        imagesUnavailable: 1,
+        bundles: [{ markdown: '# Retained Markdown', image: 'unavailable' }],
+      });
+      expect(result.bundles[0]).not.toHaveProperty('imageOmissionReason');
+      expect(result.notes.join(' ')).toContain('no longer available');
+    },
+  );
 
   it.each(
     [[], [1, 1], [0], [1000], [1.5], ['1'], '1', Array.from({ length: 101 }, (_, i) => i + 1)].map(
@@ -1270,11 +1401,28 @@ describe('MCP wire protocol for prepared data', () => {
     const malformed = await fetch(url, { method: 'POST', body: '{' + PAIRING_SECRET });
     expect(malformed.status).toBe(400);
     expect(await malformed.text()).not.toContain(PAIRING_SECRET);
-    const huge = await fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ padding: 'x'.repeat(1_000_001) }),
+    // Observe the declared-size refusal before uploading. A fetch that continues
+    // writing after the server's early response/close can expose ECONNRESET
+    // instead of the 413. Streamed-body limits have separate real HTTP coverage
+    // in mcp-transport.test.ts; do not retry or accept a reset as this result.
+    const huge = await new Promise<{ status: number | undefined; text: string }>((resolve, reject) => {
+      const request = httpRequest(
+        url,
+        { method: 'POST', headers: { 'Content-Length': '1000001' } },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('error', reject);
+          response.on('end', () =>
+            resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') }),
+          );
+        },
+      );
+      request.on('error', reject);
+      request.end();
     });
-    expect(huge.status).toBe(400);
+    expect(huge.status).toBe(413);
+    expect(JSON.parse(huge.text)).toEqual({ error: 'JSON-RPC request exceeds the read limit.' });
     // Undici may replace Host; send the wire header explicitly to exercise DNS-rebinding protection.
     const foreignHostStatus = await new Promise<number | undefined>((resolve, reject) => {
       const request = httpRequest(

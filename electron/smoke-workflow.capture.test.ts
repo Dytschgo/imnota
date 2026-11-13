@@ -104,6 +104,20 @@ const fixtureFunctions = program.getSourceFile(fixturesPath)!.statements.filter(
 // generic parameter name (for example, `filename`).
 const canvasFreeByModule = new Map<string, Set<string>>([
   [
+    'native-fault-smoke.ts',
+    new Set([
+      // Restore warnings cover three item kinds; recovery fallbacks replace the editor.
+      'restore-warning-1280x800.png',
+      'restore-warning-requested-1064x655.png',
+      'restore-warning-requested-1440x920.png',
+      'recovery-refused-1280x800.png',
+      'panel-fallback.png',
+      // The selected screenshot has been deleted while Undo remains available.
+      'undo-hover-past-original-deadline.png',
+      'undo-focus-past-original-deadline.png',
+    ]),
+  ],
+  [
     'smoke-workflow.ts',
     new Set([
       // Settings replace the canvas; intro/copy/What's new never display one.
@@ -117,6 +131,9 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '`backdrop-${preset}-settings.png`',
       'backdrop-settings.png',
       'sharing-settings.png',
+      'feedback-macos-update-available.png',
+      'feedback-macos-update-downloading.png',
+      'feedback-macos-update-downloaded.png',
     ]),
   ],
   [
@@ -167,6 +184,7 @@ const canvasFreeByModule = new Map<string, Set<string>>([
       '1080x800-feedback-paste-error.png', // Clipboard error over a Markdown template.
       'feedback-search.png', // Search dialog over a Markdown template.
       'feedback-projects.png', // Project library.
+      'feedback-archived-collections.png', // Archived collection rows in the project library.
       'feedback-project-delete-confirm.png', // Confirmation dialog over the library.
       'workspace-local-diagnostics.png', // Workspace settings.
       'agent-access-setup-prompt.png', // Features settings.
