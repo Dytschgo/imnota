@@ -498,41 +498,44 @@ describe('Windows clipboard payloads', () => {
     expect(native.emptyClipboard).not.toHaveBeenCalled();
   });
 
-  it('copies over and restores a prior System.Drawing.Bitmap handle', async () => {
-    // .NET and Paint put an HBITMAP, not an HGLOBAL, under this registered format.
-    const bitmapNative = (failSetFormat?: number) => {
-      const native = nativeMock([[0xc00b, Buffer.from('prior HBITMAP')]]);
-      const source = native.clipboard.get(0xc00b);
-      native.failSetFormat = failSetFormat;
-      native.api.globalSize = vi.fn(native.api.globalSize);
-      native.api.getObject = vi.fn((handle, bytes, output: Buffer) => {
-        if (Number(handle) !== source) return 0;
-        output.writeInt32LE(640, 4);
-        output.writeInt32LE(480, 8);
-        output.writeInt32LE(640 * 4, 12);
-        return bytes;
-      });
-      native.api.copyImage = vi.fn(() => 900);
-      native.api.deleteObject = vi.fn(() => true);
-      return native;
-    };
-
-    const copied = bitmapNative();
-    const source = copied.clipboard.get(0xc00b);
+  it('copies over serialized System.Drawing.Bitmap bytes and restores them after a late rich write failure', async () => {
+    const prior = Buffer.from([0, 1, 0, 255, 83, 68, 66, 0, 127]);
+    const copied = nativeMock([[0xc00b, prior]]);
+    copied.api.getObject = vi.fn(copied.api.getObject);
+    copied.api.copyImage = vi.fn(copied.api.copyImage);
     await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, copied.api)).resolves.toBeUndefined();
-    expect(copied.api.copyImage).toHaveBeenCalledWith(source, 0, 0, 0, 0x2000);
-    expect(copied.api.globalSize).not.toHaveBeenCalledWith(source);
     expect([...copied.clipboard.keys()]).toEqual([15]);
-    expect(copied.api.deleteObject).toHaveBeenCalledWith(900);
+    expect(copied.api.getObject).not.toHaveBeenCalled();
+    expect(copied.api.copyImage).not.toHaveBeenCalled();
 
-    const failed = bitmapNative(15);
-    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, failed.api)).rejects.toThrow(
-      /rejected clipboard format 15/i,
-    );
+    const failed = nativeMock([[0xc00b, prior]]);
+    failed.failSetFormat = 17;
+    await expect(
+      writeWindowsClipboard(
+        hwnd(),
+        {
+          filePaths: pair,
+          markdown: '# Synthetic',
+          html: '<p>Synthetic</p>',
+          png: Buffer.from('PNG'),
+          dibV5: windowsDibV5Buffer(Buffer.alloc(16), 2, 2),
+        },
+        failed.api,
+      ),
+    ).rejects.toThrow(/rejected clipboard format 17/i);
     expect(failed.emptyClipboard).toHaveBeenCalledTimes(2);
-    expect(failed.setClipboardData).toHaveBeenLastCalledWith(0xc00b, 900);
-    expect([...failed.clipboard]).toEqual([[0xc00b, 900]]);
-    expect(failed.api.deleteObject).not.toHaveBeenCalled();
+    expect([...failed.clipboard.keys()]).toEqual([0xc00b]);
+    expect(failed.memory.get(failed.clipboard.get(0xc00b)!)).toEqual(prior);
+  });
+
+  it('rejects oversized serialized System.Drawing.Bitmap before clearing the clipboard', async () => {
+    const native = nativeMock([[0xc00b, Buffer.from('retained')]]);
+    native.api.globalSize = () => WINDOWS_CLIPBOARD_SNAPSHOT_MAX_FORMAT_BYTES + 1;
+    await expect(writeWindowsClipboard(hwnd(), { filePaths: pair }, native.api)).rejects.toThrow(
+      /too large/i,
+    );
+    expect(native.emptyClipboard).not.toHaveBeenCalled();
+    expect(native.memory.get(native.clipboard.get(0xc00b)!)).toEqual(Buffer.from('retained'));
   });
 
   it('leaves an unsupported registered content format untouched', async () => {
