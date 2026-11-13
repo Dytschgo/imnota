@@ -19,6 +19,18 @@ Enabling access first checks that the listener can bind. If the port is occupied
 
 ## What agents can read
 
+### Send an exact saved bundle
+
+In **Copy Bundle**, copy a bundle or choose **Copy options → Prepare fresh files** to create its saved export. The saved card then offers **Send saved bundle to agent**. Review its collection, picture numbers, text count and export name, then choose **Copy agent instruction** and paste it into your configured agent. The instruction addresses the specific export set through `get_bundle`; it does not ask for the latest set. The instruction includes `bundleNumbers:[N]`, so MCP returns only the reviewed card from that saved set and reports omitted or unavailable content using its existing limits.
+
+The review compares the current saved collection with the input used for that export. It distinguishes matching content, changed content and an unavailable comparison. **Last saved handoff** reopens the latest saved receipt in this app session after further edits. **Open saved files** opens that receipt's original PNG/Markdown files without preparing a replacement. Ordinary **Open files** and **Prepare fresh files** retain their existing current-content behavior.
+
+Agent access stays off until explicitly enabled in Settings. The handoff review explains setup and disables its copy button while access is off; it does not enable access or edit agent configuration. A failed copy keeps the instruction available for an explicit retry or saved-file access. Copy success records clipboard delivery, not acceptance by the receiving agent.
+
+Saved receipts use the existing in-memory export grants and are unavailable after app restart or grant eviction. Already copied IDs can still be read by MCP while the corresponding export remains accessible in the selected workspace. A missing grant or file reports an error instead of substituting another export. IDs address export folders; they are not content hashes or an immutable publication manifest, and external edits to saved artifacts remain possible. Freshness describes the collection comparison when checked.
+
+### Tool reference
+
 | Tool                    | Arguments                                          | Result                                                                           |
 | ----------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `list_projects`         | Optional `scope`: active, archived, all            | Projects in the chosen scope; active by default (path, name, updated time)       |

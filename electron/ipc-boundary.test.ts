@@ -16,6 +16,7 @@ import { IpcRouter } from './ipc-router.js';
 import type { CaptureWorkflowRegistrar, IpcHost } from './main.js';
 import { assertProjectPath } from './project-path.js';
 import { NativeWorkflowError, workflowOutcome } from './workflow-errors.js';
+import { createMcpTools } from './mcp-server.js';
 
 /**
  * The renderer bridge (`preload.cts`), the argument contracts (`ipc-contracts.ts`) and the
@@ -337,6 +338,43 @@ beforeEach(() => {
   for (const registration of registry.values()) registration.listener.mockClear();
 });
 
+it('hands off only the selected non-first part of a multi-part export through actual MCP', async () => {
+  const projectPath = path.join(workspace, 'handoff-project');
+  const document = emptyProject('Handoff project', '');
+  const collectionId = document.collections[0].id;
+  const setName = 'Review - 260913-120000';
+  const folder = path.join(projectPath, 'collections', collectionId, 'exports', setName);
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(projectPath, 'project.json'), JSON.stringify(document));
+  await fs.writeFile(path.join(folder, `${setName} - 01.md`), '# First unrelated part');
+  await fs.writeFile(path.join(folder, `${setName} - 02.md`), '# Second selected part');
+  const local = tripwireHost({
+    promptBundleWorkflow: {
+      describeSaved: async () => ({ projectPath, collectionId, collectionName: 'Handoff', setName }),
+    },
+    assertProjectPath: async () => projectPath,
+    workspaceOrThrow: () => workspace,
+    preferenceSettingsResult: { settings: { agentAccess: { enabled: true } } },
+  });
+  const { registry: handlers } = await registerHandlerModules(local.host);
+  const result = (await handlers
+    .get('workflow:prompt-export:agent-handoff')!
+    .invoke(trusted, { sessionId, bundleNumber: 2 })) as WorkflowResult<{ instruction: string }>;
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('Expected handoff instruction.');
+  const match = result.value.instruction.match(/get_bundle\((\{[^\n]+\})\)/);
+  expect(match).not.toBeNull();
+  const args = JSON.parse(match![1]) as { id: string; bundleNumbers?: number[] };
+  expect(args.bundleNumbers).toEqual([2]);
+  const tool = createMcpTools({
+    enabled: () => true,
+    workspacePath: () => workspace,
+    appVersion: () => 'test',
+  }).find((tool) => tool.name === 'get_bundle')!;
+  const saved = (await tool.handle(args)) as { bundles: Array<{ markdown: string }> };
+  expect(saved.bundles.map((bundle) => bundle.markdown)).toEqual(['# Second selected part']);
+});
+
 describe('renderer bridge, contracts and handlers stay consistent', () => {
   let invoked: string[];
   let listened: string[];
@@ -607,6 +645,8 @@ const projectPathCalls: Record<string, (projectPath: string) => unknown[]> = {
 
 /** Channels that mention a project path but whose authorization this file cannot observe. */
 const authorizedElsewhere: Record<string, string> = {
+  'workflow:prompt-export:agent-handoff':
+    'Finalized prompt grant authorizes its project; current workspace is rechecked before deriving the exact MCP id',
   'projects:open-dialog': 'authorizes the folder chosen in a native dialog, not a renderer argument',
   'projects:update-metadata': 'main.ts mutateProjectMetadata authorizes the path',
   'projects:set-archived': 'main.ts mutateProjectMetadata authorizes the path',
@@ -1013,6 +1053,16 @@ const invalidCases: Record<string, InvalidCase[]> = {
     ['workflow:prompt-export:finish', 'an unknown field', [{ sessionId, target: anyPath }]],
     ['workflow:prompt-export:cancel', 'a session id with separators', [{ sessionId: 'a/b' }]],
     ['workflow:prompt-export:read', 'a fractional bundle number', [{ sessionId, bundleNumber: 1.5 }]],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'a renderer-supplied path',
+      [{ sessionId, bundleNumber: 1, projectPath: '../outside' }],
+    ],
+    [
+      'workflow:prompt-export:agent-handoff',
+      'an invalid session',
+      [{ sessionId: '../outside', bundleNumber: 1 }],
+    ],
     ['workflow:prompt-export:copy', 'an unknown target', [{ sessionId, bundleNumber: 1, target: 'shell' }]],
     ['workflow:prompt-export:copy-markdown', 'non-text Markdown', [{ markdown: 'a' }]],
     ['workflow:prompt-export:copy-markdown', 'an extra argument', ['a', 'b']],

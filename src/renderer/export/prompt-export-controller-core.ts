@@ -10,6 +10,7 @@ import {
 import type { Annotation, ImagePayload, ProjectSnapshot, ScreenshotRecord } from '../../shared/types';
 import type {
   PromptExportBundleContent,
+  PromptExportAgentHandoff,
   PromptExportBundleGrant,
   PromptExportCopyResult,
   PromptExportCopyTarget,
@@ -79,6 +80,10 @@ export interface PromptExportBundleManifestInput {
 }
 
 export interface PromptBundleControllerBridge {
+  getPromptExportAgentHandoff?(input: {
+    sessionId: string;
+    bundleNumber: number;
+  }): Promise<WorkflowResult<PromptExportAgentHandoff>>;
   copyPromptExportMarkdown?(text: string): Promise<WorkflowResult<void>>;
   loadScreenshotContent(input: { projectPath: string; screenshot: ScreenshotRecord }): Promise<{
     image: ImagePayload;
@@ -210,10 +215,26 @@ export interface PromptBundleControllerState {
   progress?: PromptBundleProgress;
   error?: PromptBundleControllerError;
   isOpen: boolean;
+  savedHandoff?: SavedHandoffReceipt;
   cleanupPending: boolean;
   noContentMessage?: string;
   preview?: PromptBundleLargePreview;
 }
+
+export interface SavedHandoffReceipt {
+  selection: PromptBundleActionRequest;
+  collectionName: string;
+  setName: string;
+}
+
+export interface AgentHandoffReview extends PromptExportAgentHandoff {
+  freshness: 'current' | 'changed' | 'unknown';
+  pictureNumbers: readonly number[];
+  textCount: number;
+}
+
+export type AgentHandoffReviewResult =
+  { ok: true; value: AgentHandoffReview } | { ok: false; error: PromptBundleControllerError };
 
 export type PromptBundleSelection =
   number | Pick<PromptBundleActionRequest, 'bundleNumber' | 'planId' | 'artifactSessionId'>;
@@ -609,10 +630,30 @@ export class PromptBundleControllerEngine {
       projectId: prepared.context.snapshot.project.id,
       collectionId: prepared.context.collectionId,
       snapshotFingerprint: prepared.snapshotFingerprint,
+      collectionName: prepared.input.collectionName,
+      setName: session.setName,
+      handoffItems: new Map(
+        prepared.plan.bundles.map((bundle) => [
+          bundle.number,
+          { pictureNumbers: bundle.pictureNumbers, textCount: bundle.textItems.length },
+        ]),
+      ),
       grants: new Map(finalized.bundles.map((grant) => [grant.bundleNumber, grant])),
     };
     this.latestArtifact = artifact;
-    this.emit({ cards: cardsForPlan(prepared, encoded, artifact) });
+    const firstBundle = finalized.bundles[0].bundleNumber;
+    this.emit({
+      cards: cardsForPlan(prepared, encoded, artifact),
+      savedHandoff: {
+        selection: {
+          planId: artifact.planId,
+          artifactSessionId: artifact.sessionId,
+          bundleNumber: firstBundle,
+        },
+        collectionName: artifact.collectionName,
+        setName: artifact.setName,
+      },
+    });
   }
 
   private async createFreshExport(run: ActiveRun): Promise<{
@@ -730,6 +771,14 @@ export class PromptBundleControllerEngine {
       run = this.beginRun();
       let metadata = await this.prepareMetadata(run, undefined, hasReusablePlan);
       this.assertActive(run);
+      if (
+        artifact &&
+        ('kind' in metadata ||
+          artifact.projectPath !== metadata.context.snapshot.projectPath ||
+          artifact.projectId !== metadata.context.snapshot.project.id ||
+          artifact.collectionId !== metadata.context.collectionId)
+      )
+        this.emit({ savedHandoff: undefined });
       if (
         hasReusablePlan &&
         ('kind' in metadata ||
@@ -1248,6 +1297,80 @@ export class PromptBundleControllerEngine {
       const number = selectionNumber(selection);
       if (run && this.activeRun === run && number !== undefined)
         this.setCardState(number, 'error', publicError(error).message, outcome === 'opened');
+      return this.resultError(error, run, selection);
+    }
+  }
+
+  /** Requires an explicit saved grant. Inspecting a handoff never prepares or replaces exports. */
+  async inspectAgentHandoff(selection: PromptBundleActionRequest): Promise<AgentHandoffReviewResult> {
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt action to finish.', true).detail,
+      };
+    let run: ActiveRun | undefined;
+    try {
+      if (!selection.artifactSessionId || !this.bridge.getPromptExportAgentHandoff)
+        throw failure('invalid-bundle', 'Prepare files before handing this bundle to an agent.', true);
+      const { artifact, bundleNumber } = this.artifactSelection(selection);
+      run = this.beginRun();
+      this.emit({ error: undefined, progress: { phase: 'checking', message: 'Checking saved handoff' } });
+      const handoff = unwrap(
+        await this.bridge.getPromptExportAgentHandoff({ sessionId: artifact.sessionId, bundleNumber }),
+      );
+      this.assertActive(run);
+      let freshness: AgentHandoffReview['freshness'] = 'unknown';
+      try {
+        const metadata = await this.prepareMetadata(run, artifact, true);
+        freshness =
+          'kind' in metadata || metadata.snapshotFingerprint !== artifact.snapshotFingerprint
+            ? 'changed'
+            : 'current';
+      } catch (error) {
+        this.assertActive(run);
+        freshness = publicError(error).code === 'content-changed' ? 'changed' : 'unknown';
+      }
+      this.assertActive(run);
+      this.activeRun = undefined;
+      this.emit({ progress: undefined });
+      const summary = artifact.handoffItems.get(bundleNumber)!;
+      return {
+        ok: true,
+        value: { ...handoff, collectionName: artifact.collectionName, ...summary, freshness },
+      };
+    } catch (error) {
+      return this.resultError(error, run, selection) as { ok: false; error: PromptBundleControllerError };
+    }
+  }
+
+  /** Explicitly opens the selected saved files even when the collection has newer edits. */
+  async openSavedFiles(selection: PromptBundleActionRequest): Promise<PromptBundleControllerActionResult> {
+    if (this.activeRun)
+      return {
+        ok: false,
+        error: failure('busy', 'Wait for the active prompt action to finish.', true).detail,
+      };
+    let run: ActiveRun | undefined;
+    try {
+      if (!selection.artifactSessionId || !this.bridge.getPromptExportAgentHandoff)
+        throw failure('invalid-bundle', 'This saved handoff is unavailable. Prepare files again.', true);
+      const { artifact, bundleNumber } = this.artifactSelection(selection);
+      run = this.beginRun();
+      unwrap(await this.bridge.getPromptExportAgentHandoff({ sessionId: artifact.sessionId, bundleNumber }));
+      this.assertActive(run);
+      for (const target of [
+        ...(artifact.grants.get(bundleNumber)?.pngFilename ? ['png' as const] : []),
+        'markdown' as const,
+      ]) {
+        unwrap(
+          await this.bridge.openPromptExportBundle({ sessionId: artifact.sessionId, bundleNumber, target }),
+        );
+        this.assertActive(run);
+      }
+      this.activeRun = undefined;
+      this.emit({ progress: undefined });
+      return { ok: true, sessionId: artifact.sessionId, bundleNumber };
+    } catch (error) {
       return this.resultError(error, run, selection);
     }
   }

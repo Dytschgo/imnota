@@ -9,12 +9,21 @@ import type { HostedShareArtifacts, PromptBundleRetryResult } from './prompt-exp
 import type { PromptBundleControllerError } from './prompt-export-controller-core';
 import type { WindowsCopyVariantId } from '../../shared/workflow-bridge';
 import type { ShortcutPlatform } from '../../shared/shortcuts';
+import { AgentHandoffDialog } from './AgentHandoffDialog';
+import type {
+  AgentHandoffReview,
+  AgentHandoffReviewResult,
+  SavedHandoffReceipt,
+} from './prompt-export-controller-core';
 
 type PromptActionError = PromptBundleControllerError;
 
 type PromptActionResult = { ok: true } | { ok: false; error: PromptActionError };
 
 export interface PromptBundleUiController {
+  savedHandoff?: SavedHandoffReceipt;
+  inspectAgentHandoff?(selection: PromptBundleActionRequest): Promise<AgentHandoffReviewResult>;
+  openSavedFiles?(selection: PromptBundleActionRequest): Promise<PromptActionResult>;
   cards: readonly PromptBundleCardModel[];
   progress?: PromptBundleProgress;
   error?: PromptActionError;
@@ -62,6 +71,14 @@ export function PromptBundleDialogHost({
   onDefaultCopyVariantChange?(variant: WindowsCopyVariantId): Promise<void>;
 }) {
   const [hostedArtifacts, setHostedArtifacts] = useState<HostedShareArtifacts>();
+  const [agentReview, setAgentReview] = useState<{
+    handoff: AgentHandoffReview;
+    selection: PromptBundleActionRequest;
+  }>();
+  const inspectHandoff = async (selection: PromptBundleActionRequest) => {
+    const result = await controller.inspectAgentHandoff?.(selection);
+    if (result?.ok) setAgentReview({ handoff: result.value, selection });
+  };
   const [preferenceError, setPreferenceError] = useState<string>();
   // Bundle failures are shown once, inside the dialog, with the appropriate recovery action.
   const run = async (action: Promise<PromptActionResult>) => {
@@ -71,7 +88,12 @@ export function PromptBundleDialogHost({
   return (
     <>
       <PromptSharingDialog
-        hidden={Boolean(controller.preview || hostedArtifacts)}
+        hidden={Boolean(controller.preview || hostedArtifacts || agentReview)}
+        savedHandoffLabel={controller.savedHandoff?.collectionName}
+        onSavedAgentHandoff={
+          controller.savedHandoff ? () => inspectHandoff(controller.savedHandoff!.selection) : undefined
+        }
+        onAgentHandoff={controller.inspectAgentHandoff ? inspectHandoff : undefined}
         bundles={controller.cards}
         fileClipboardAvailable={fileClipboardAvailable}
         platform={platform}
@@ -125,6 +147,13 @@ export function PromptBundleDialogHost({
         }}
         onLoadPreview={(selection) => run(controller.loadPreview(selection))}
       />
+      {agentReview && (
+        <AgentHandoffDialog
+          handoff={agentReview.handoff}
+          onClose={() => setAgentReview(undefined)}
+          onOpenSavedFiles={() => controller.openSavedFiles!(agentReview.selection)}
+        />
+      )}
       {hostedArtifacts && (
         <HostedShareDialog
           artifacts={hostedArtifacts}
