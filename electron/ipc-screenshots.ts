@@ -16,6 +16,7 @@ import { deleteScreenshotToTrash, undoScreenshotDelete } from './screenshot-tras
 import { app, shell } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { trashApplicationFile } from './application-persistence.js';
 import { z } from 'zod';
 import type { IpcRouter } from './ipc-router.js';
 import type { IpcHost } from './main.js';
@@ -260,10 +261,12 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
       safePath,
       project,
       input.screenshotId,
-      async (target) => {
-        await diagnostics.filesystem('trash', target, () => shell.trashItem(target));
-        host.projectWatchManager?.recordSelfDelete(target);
-      },
+      (target) =>
+        trashApplicationFile(target, {
+          diagnostics,
+          trash: (file) => shell.trashItem(file),
+          recordSelfDelete: (file) => host.projectWatchManager?.recordSelfDelete(file),
+        }),
       screenshotTrashOperations,
     );
     const projectFile = path.join(safePath, 'project.json');
@@ -284,6 +287,7 @@ export function registerScreenshotIpc(router: IpcRouter, host: IpcHost): void {
       host.projectWatchManager
         ? (projectPath, revision) => host.projectWatchManager!.hasSelfProjectRevision(projectPath, revision)
         : undefined,
+      host.restoreVerificationReadHooks?.(safePath),
     );
     const undo = await undoScreenshotDelete(
       safePath,

@@ -240,7 +240,7 @@ export async function composePromptBundle(
           'Prompt bundle layout does not match its screenshot order.',
         );
       context.fillText(
-        labelFor(picture.pictureNumber, picture.title, picture.originalFilename, picture.kind),
+        `${picture.comparisonRole ? `${picture.comparisonRole} · ` : ''}${labelFor(picture.pictureNumber, picture.title, picture.originalFilename, picture.kind)}`,
         item.x,
         item.labelY,
         item.width,

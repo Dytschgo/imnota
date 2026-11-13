@@ -25,6 +25,7 @@ The living implementation document was deliberately moved to [`docs/implementati
 
 Additional archived records:
 
+- [October 31 VM reproducer](nightly-vm-reproducer-20261031.md): pinned historical installer verification, its partial Node 22 result, and a source check that refuses current main.
 - [Feature verification](next-features-verification.md): September feature integration and 0.2.7 checks; its capture defaults and feature limits are historical.
 - [Electron cache experiment](build-cache-experiment.md): completed PR #42 measurements and the decision to remove the experimental caches.
 - [Recovery unification plan](recovery-unification-plan.md): early proposal superseded by the [September 26 design](../recovery-unification-design.md); saves already share a journal, while delete/Undo consolidation remains a proposal.
