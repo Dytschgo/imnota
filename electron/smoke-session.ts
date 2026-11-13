@@ -46,7 +46,10 @@ export async function runSmokeSession(host: SmokeSessionHost): Promise<number> {
   try {
     const requestedMode = process.env.IMNOTA_SMOKE_MODE;
     const mode =
-      requestedMode === 'stress' || requestedMode === 'clipboard' || requestedMode === 'faults' || requestedMode === 'quick-capture'
+      requestedMode === 'stress' ||
+      requestedMode === 'clipboard' ||
+      requestedMode === 'faults' ||
+      requestedMode === 'quick-capture'
         ? requestedMode
         : 'smoke';
     if (faults) {

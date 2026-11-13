@@ -1480,7 +1480,9 @@ async function insertCapturedPng(
     originalHeight: dimensions.height,
     includeInExport: true,
     ...withSource(
-      quickCapture ? quickCapture.source : recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...sourceDetails })),
+      quickCapture
+        ? quickCapture.source
+        : recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...sourceDetails })),
     ),
   };
   project.screenshots.push(screenshot);

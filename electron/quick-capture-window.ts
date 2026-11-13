@@ -208,7 +208,11 @@ export class QuickCaptureWindow {
     this.window!.setOpacity(1);
   }
 
-  async add(png: Buffer, annotate = false, source?: import('../src/shared/source-context.js').ScreenshotSource): Promise<string> {
+  async add(
+    png: Buffer,
+    annotate = false,
+    source?: import('../src/shared/source-context.js').ScreenshotSource,
+  ): Promise<string> {
     this.quitting = false;
     const decoded = decodePng(png);
     const id = this.store.add({ png, ...decoded, source });

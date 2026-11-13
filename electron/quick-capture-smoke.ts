@@ -50,8 +50,11 @@ export async function exerciseQuickCaptures(
   const projectPath = await openScreenshotProject(main);
   const before = await host.readProject(projectPath);
   const destination = { projectPath, collectionId: before.collections.find((item) => !item.archived)!.id };
+  const sourceWasEnabled = await main.evaluate<boolean>(
+    `(async()=>{const r=await window.imnota.getPreferenceSettings();if(!r.ok)throw new Error(r.error.message);return r.value.settings.promptExport.includeSourceContext;})()`,
+  );
   await main.evaluate(
-    `(async()=>{const result=await window.imnota.setPreferenceSettings({capture:{quickAccessCorner:'right'}});if(!result.ok)throw new Error(result.error.message);})()`,
+    `(async()=>{const result=await window.imnota.setPreferenceSettings({capture:{quickAccessCorner:'right'},promptExport:{includeSourceContext:true}});if(!result.ok)throw new Error(result.error.message);})()`,
   );
   try {
     // Exercise the real opt-in capture workflow on Windows/macOS. Linux retains its
@@ -194,6 +197,9 @@ export async function exerciseQuickCaptures(
       await driver.press('Home');
       for (let step = 0; step < destinationIndex; step++) await driver.press('Down');
     }
+    await main.evaluate(
+      `(async()=>{const r=await window.imnota.setPreferenceSettings({promptExport:{includeSourceContext:false}});if(!r.ok)throw new Error(r.error.message);})()`,
+    );
     await driver.click({
       selector: `[data-testid="quick-capture-${second.id}"] button`,
       text: 'Add',
@@ -216,6 +222,11 @@ export async function exerciseQuickCaptures(
     )
       throw new Error('Quick Add duplicated the capture or disturbed another pending image.');
     const savedScreenshot = added.screenshots.find((item) => item.id === second.id)!;
+    if (
+      process.platform !== 'linux' &&
+      (!edited.source || JSON.stringify(savedScreenshot.source) !== JSON.stringify(edited.source))
+    )
+      throw new Error('Quick Add changed capture-time source after recording was turned off.');
     if (
       JSON.stringify(
         JSON.parse(await fs.readFile(path.join(projectPath, savedScreenshot.annotationFile), 'utf8')),
@@ -328,7 +339,7 @@ export async function exerciseQuickCaptures(
     throw reason;
   } finally {
     await main.evaluate(
-      `(async()=>{const result=await window.imnota.setPreferenceSettings({capture:{quickAccessCorner:'off'}});if(!result.ok)throw new Error(result.error.message);})()`,
+      `(async()=>{const result=await window.imnota.setPreferenceSettings({capture:{quickAccessCorner:'off'},promptExport:{includeSourceContext:${sourceWasEnabled}}});if(!result.ok)throw new Error(result.error.message);})()`,
     );
   }
   return artifacts;

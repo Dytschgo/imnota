@@ -72,6 +72,18 @@ async function fixture() {
   return { store, id, destination, host, read, projectPath };
 }
 
+it.each([true, false])('passes only capture-time source to Add (recorded=%s)', async (recorded) => {
+  const { store, id, destination, host } = await fixture();
+  const item = store.item(id, 1);
+  if (recorded)
+    item.source = { via: 'capture', capturedAt: '2026-09-13T12:00:00.000Z', display: 'Display 1' };
+  const insert = vi.fn<QuickCaptureCommitHost['insert']>(async () => undefined);
+  await commitQuickCapture(item, destination, { ...host, insert });
+  const content = insert.mock.calls[0][4];
+  if (recorded) expect(content.source).toEqual(item.source);
+  else expect(content).not.toHaveProperty('source');
+});
+
 it('reopens one committed screenshot after a lost response without rewriting files or duplicating the item', async () => {
   const { store, id, destination, host, read, projectPath } = await fixture();
   const commit = () =>

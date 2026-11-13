@@ -88,7 +88,10 @@ export function registerCaptureIpc(
       .parse(args);
     assertLiveCaptureAdmission(event, admission);
     if (host.quickCaptureAccess?.enabled) host.quickCaptureAccess.store.assertCanCapture();
-    else { host.pendingCapturePng = null; pendingCaptureSource = null; }
+    else {
+      host.pendingCapturePng = null;
+      pendingCaptureSource = null;
+    }
     if (process.platform === 'linux')
       throw new NativeWorkflowError(
         'capture-unavailable',
@@ -284,7 +287,11 @@ export function registerCaptureIpc(
         displays: captured.map(({ display }) => display),
       });
       if (host.quickCaptureAccess?.enabled) {
-        const captureId = await host.quickCaptureAccess.add(png, host.lastOverlayCommit === 'annotate', host.recordedSource(() => createScreenshotSource({ via: 'capture', now: new Date(), ...details })));
+        const captureId = await host.quickCaptureAccess.add(
+          png,
+          host.lastOverlayCommit === 'annotate',
+          host.recordedSource(() => createScreenshotSource({ via: 'capture', now: capturedAt, ...details })),
+        );
         return { quickAccess: true as const, captureId };
       }
       if (!safeProjectPath || !input.collectionId) {
@@ -416,8 +423,16 @@ export function registerCaptureIpc(
         displays: captured.map(({ display }) => display),
       });
       if (host.quickCaptureAccess?.enabled)
-        return { quickAccess: true as const, captureId: await host.quickCaptureAccess.add(png, false,
-          host.recordedSource(() => createScreenshotSource({ via: 'capture', now: new Date(), ...details }))) };
+        return {
+          quickAccess: true as const,
+          captureId: await host.quickCaptureAccess.add(
+            png,
+            false,
+            host.recordedSource(() =>
+              createScreenshotSource({ via: 'capture', now: new Date(), ...details }),
+            ),
+          ),
+        };
       return insertCapturedPng(
         safeProjectPath,
         input.collectionId,

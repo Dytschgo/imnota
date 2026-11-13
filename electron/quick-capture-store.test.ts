@@ -11,6 +11,19 @@ const source = (value: string) => ({
 });
 
 describe('pending quick capture ownership', () => {
+  it('owns capture-time source metadata across edits without adding it to opt-out captures', () => {
+    const store = new QuickCaptureStore();
+    const metadata = {
+      via: 'capture' as const,
+      capturedAt: '2026-09-13T12:00:00.000Z',
+      windowTitle: 'Original',
+    };
+    const id = store.add({ ...source('image'), source: metadata });
+    metadata.windowTitle = 'Caller changed';
+    expect(store.item(id, 1).source).toEqual({ ...metadata, windowTitle: 'Original' });
+    const withoutSource = store.add(source('off'));
+    expect(store.item(withoutSource, 1)).not.toHaveProperty('source');
+  });
   it('owns its source bytes even when a caller reuses the capture buffer', () => {
     const store = new QuickCaptureStore();
     const input = source('original');

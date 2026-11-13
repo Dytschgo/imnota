@@ -51,7 +51,13 @@ export class QuickCaptureStore {
       );
   }
 
-  add(input: { png: Buffer; previewDataUrl: string; width: number; height: number; source?: ScreenshotSource }): string {
+  add(input: {
+    png: Buffer;
+    previewDataUrl: string;
+    width: number;
+    height: number;
+    source?: ScreenshotSource;
+  }): string {
     this.assertCanCapture();
     if (
       !input.png.length ||
