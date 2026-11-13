@@ -12,7 +12,7 @@ import { resolvePreferenceSettings } from '../src/shared/preference-settings.js'
 import { DEFAULT_WORKSPACE_SETTINGS } from '../src/shared/workspace-settings.js';
 import { DEFAULT_PREFERENCE_SETTINGS } from '../src/shared/preferences.js';
 import { emptyProject } from '../src/shared/utils.js';
-import { persistSettings, writeApplicationFile } from './application-persistence.js';
+import { persistSettings, trashApplicationFile, writeApplicationFile } from './application-persistence.js';
 import { CommittedWriteError, atomicWrite, writtenFileIdentity, type WrittenFileEvidence } from './files.js';
 import { PersistenceDiagnostics } from './persistence-diagnostics.js';
 import {
@@ -55,6 +55,71 @@ afterEach(async (context) => {
     Object.defineProperty(process, 'platform', { value: platform });
   }
 });
+
+it('publishes a successful trash before diagnostic completion can let its watch misclassify it', async () => {
+  const target = path.join(root(), 'own-delete.md');
+  await fs.writeFile(target, 'owned');
+  const diagnostics = new PersistenceDiagnostics(() => path.join(root(), 'diagnostics'), {
+    version: 'test',
+    platform,
+  });
+  ledger().diagnostics(diagnostics);
+  const record = diagnostics.record.bind(diagnostics);
+  let release!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reached!: () => void;
+  const atCompletion = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  vi.spyOn(diagnostics, 'record').mockImplementation(async (event) => {
+    if (event.category === 'filesystem' && event.action === 'trash' && event.phase === 'complete') {
+      reached();
+      await completion;
+    }
+    return record(event);
+  });
+  const published = vi.fn();
+  const operation = trashApplicationFile(target, {
+    diagnostics,
+    trash: (file) => fs.unlink(file),
+    recordSelfDelete: published,
+  });
+  await atCompletion;
+  try {
+    await expect(fs.readFile(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(published).toHaveBeenCalledExactlyOnceWith(target);
+  } finally {
+    release();
+    await operation;
+  }
+});
+
+it.each(['EIO', 'EACCES', 'EPERM'])(
+  'does not publish a failed trash as a self-delete after %s',
+  async (code) => {
+    const target = path.join(root(), 'kept.md');
+    await fs.writeFile(target, 'preserved');
+    const diagnostics = new PersistenceDiagnostics(() => path.join(root(), 'diagnostics'), {
+      version: 'test',
+      platform,
+    });
+    ledger().diagnostics(diagnostics);
+    const published = vi.fn();
+    await expect(
+      trashApplicationFile(target, {
+        diagnostics,
+        trash: async () => {
+          throw Object.assign(new Error('Trash refused'), { code });
+        },
+        recordSelfDelete: published,
+      }),
+    ).rejects.toMatchObject({ code });
+    expect(published).not.toHaveBeenCalled();
+    expect(await fs.readFile(target, 'utf8')).toBe('preserved');
+  },
+);
 
 it('forwards descriptor evidence through the application write wrapper without changing publication', async () => {
   const target = path.join(root(), 'created.png');

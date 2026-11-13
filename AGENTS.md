@@ -1,18 +1,5 @@
 # Working in Imnota
 
-## Dylan's Windows test lab
-
-When `%USERPROFILE%\agent-tools\windows-test-lab\README.md` exists on Dylan's
-Windows workstation, read it before installing project dependencies, building,
-testing, packaging, launching an app, or running UI/browser checks. Use its shared
-VM runner with this checkout and the repository's existing commands. Follow its
-platform selection, separate guest workspace per checkout, and serialized GUI and
-heavy-job rules. Preserve command exit codes and logs.
-
-If that installed lab's runner or required VM is unavailable, report the blocker
-instead of running the workload on the host. Explicit user instructions to run on
-the host take precedence. Other machines and CI retain their normal workflow.
-
 Keep changes easy to review, verify, release, and recover. [The improvement plan](docs/improvement-plan.md) tracks proposed engineering work. A backlog item is not authorization to execute it. For reported user-visible work, use the [feedback delivery contract](docs/feedback-delivery-contract.md).
 
 For repository orientation, start with the [documentation map](docs/README.md). Use the [current implementation status](docs/implementation-plan.md) for shipped behaviour and open verification work, [development](docs/development.md) for local checks, and [release readiness](docs/release-readiness.md) before publication. Documents under [docs/history](docs/history/README.md) are records, not current requirements.

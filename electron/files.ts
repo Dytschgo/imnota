@@ -148,6 +148,19 @@ export async function afterFileCommit(
   if (warning) throw warning;
 }
 
+/** Optional per-invocation verification observers; callers supply no observers ordinarily.
+ * No environment flags, path selection, or fault policy belongs in this module.
+ */
+export interface AtomicWriteVerification {
+  beforeWrite?(target: string, source: string | Uint8Array): Promise<void>;
+  beforeCandidateSync?(target: string): Promise<void>;
+  beforeParentSync?(
+    target: string,
+    directory: string,
+    boundary: 'posix-directory-handle' | 'windows-directory-sync-unsupported',
+  ): Promise<void>;
+}
+
 export interface WrittenFileIdentity {
   readonly dev: bigint;
   readonly ino: bigint;
@@ -187,11 +200,12 @@ export async function atomicWrite(
   filePath: string,
   content: string | Uint8Array,
   captureIdentity?: CaptureWrittenFileIdentity,
+  verification?: AtomicWriteVerification,
 ): Promise<void> {
   const key = path.resolve(filePath);
   const operation = (writes.get(key) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => writeFileAtomically(key, content, !!captureIdentity));
+    .then(() => writeFileAtomically(key, content, !!captureIdentity, verification));
   writes.set(key, operation);
   try {
     const identity = await operation;
@@ -205,8 +219,10 @@ async function writeFileAtomically(
   filePath: string,
   content: string | Uint8Array,
   captureIdentity: boolean,
+  verification?: AtomicWriteVerification,
 ): Promise<WrittenFileEvidence | undefined> {
   await assertNoLinks(filePath);
+  await verification?.beforeWrite?.(filePath, content);
   const firstCreated = await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.tmp-${randomUUID()}`;
   let identity: WrittenFileEvidence | undefined;
@@ -238,6 +254,7 @@ async function writeFileAtomically(
       } else {
         await handle.writeFile(content);
       }
+      await verification?.beforeCandidateSync?.(filePath);
       await handle.sync();
       if (sha256) {
         const stat = await handle
@@ -271,7 +288,12 @@ async function writeFileAtomically(
     await fs.unlink(temporary).catch(() => undefined);
   }
   try {
-    await syncDirectoryEntry(path.dirname(filePath));
+    await syncDirectoryEntry(
+      path.dirname(filePath),
+      verification?.beforeParentSync
+        ? (directory, boundary) => verification.beforeParentSync!(filePath, directory, boundary)
+        : undefined,
+    );
     // If mkdir created ancestors, also persist their names in each containing directory.
     if (firstCreated && process.platform !== 'win32') {
       let parent = path.dirname(filePath);
@@ -292,8 +314,17 @@ async function writeFileAtomically(
  * Unsupported POSIX directory sync is best-effort. Permission and I/O errors propagate
  * even though replacement has already happened, so recovery must inspect live bytes.
  */
-async function syncDirectoryEntry(directory: string): Promise<void> {
-  if (process.platform === 'win32') return;
+async function syncDirectoryEntry(
+  directory: string,
+  beforeSync?: (
+    directory: string,
+    boundary: 'posix-directory-handle' | 'windows-directory-sync-unsupported',
+  ) => Promise<void> | undefined,
+): Promise<void> {
+  if (process.platform === 'win32') {
+    await beforeSync?.(directory, 'windows-directory-sync-unsupported');
+    return;
+  }
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(directory, 'r');
@@ -302,6 +333,7 @@ async function syncDirectoryEntry(directory: string): Promise<void> {
     throw error;
   }
   try {
+    await beforeSync?.(directory, 'posix-directory-handle');
     await handle.sync();
   } catch (error) {
     if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes((error as NodeJS.ErrnoException).code ?? ''))
