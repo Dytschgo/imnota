@@ -46,6 +46,8 @@ Per call, bundle reads return at most **10 PNGs**, **5,000,000 raw bytes per PNG
 
 Paths outside the selected workspace are rejected with the same validators as the desktop IPC bridge. Linked project or export paths are rejected, and reads recheck file identity and size. Recovery journals, backup archives, and hosted-share pairing or management secrets are not exposed. MCP performs no migrations, recovery, capture, export generation or file writes. Access remains controlled by the explicit local opt-in. HTTP uses the running UI's settings. Before each stdio tool call, the existing session reads `settings.json` once and validates it using the shared settings schemas: access off refuses the call, and a changed workspace takes effect for that call. Missing, unreadable or malformed settings fail closed rather than retaining enabled access. Invalid workspace values cannot authorize a root. This does not cancel a read already in progress; initialization and tool discovery do not read workspace content.
 
+`search_saved_text` includes saved drawing descriptions as well as titles, screenshot descriptions and Markdown text. A whitespace-only query is rejected before scanning; use at least one non-whitespace search term.
+
 ## Install a skill or rule
 
 Imnota never writes agent or editor configuration. The setup prompt already tells the agent to prefer these tools over guessing from chat images; copy one of these files yourself if your agent supports installable skills or rules:
